@@ -486,6 +486,7 @@ export type StatusLineKind =
 	| 'clash'
 	| 'clash_kept'
 	| 'clash_emptied'
+	| 'clash_date_url_emptied'
 	| 'url_and_date_emptied'
 	| 'date_and_url_emptied'
 	| 'both_emptied'
@@ -529,9 +530,13 @@ export function statusLineKind(
 	const url = urlFilled && !edited.sourcePostUrl;
 	const date = dateFilled && !edited.commissionedAt;
 	if (options.clash) {
-		// The clash sentence already says the URL was left empty, which is what
-		// emptying it leaves behind, so only the date needs the extra kinds below.
-		if (date) return options.urlHeld ? 'clash_kept' : 'clash';
+		// The clash sentence says the URL was "left empty", which is true of a
+		// field that WAS empty and a false report of one this result just blanked
+		// — the operator watched it go, and only the emptied kind names it.
+		if (date) {
+			if (cleared.sourcePostUrl) return 'clash_date_url_emptied';
+			return options.urlHeld ? 'clash_kept' : 'clash';
+		}
 		// A clash with no date to report either. The plain url_emptied sentence
 		// gives "this lookup filled nothing in its place" as the reason, which
 		// reads as a lookup that found nothing under a body saying Sona found a
@@ -554,6 +559,65 @@ export function statusLineKind(
 	if (cleared.sourcePostUrl) return 'url_emptied';
 	if (cleared.commissionedAt) return 'date_emptied';
 	return 'none';
+}
+
+/**
+ * The sentence for a status kind. The panel renders it and the upload page
+ * announces it, off this one mapping: read separately, the announcement picked
+ * a sentence by hand and named a different reason for the same move than the
+ * panel did (SONA-220).
+ *
+ * `site` is the post the prefill match came from. The kinds that report only an
+ * emptied field name no site — they render over a no-match, which has no match
+ * to name — so a missing site answers with the empty string rather than an
+ * unfilled placeholder, and so does `none`.
+ */
+export function statusSentence(
+	kind: StatusLineKind,
+	site: LookupSite | null,
+	options: { title?: string; editMode?: boolean } = {}
+): string {
+	switch (kind) {
+		case 'both_emptied':
+			return m.admin_lookup_status_both_emptied();
+		case 'url_emptied':
+			return m.admin_lookup_status_url_emptied();
+		case 'date_emptied':
+			return m.admin_lookup_status_date_emptied();
+		case 'none':
+			return '';
+	}
+	if (!site) return '';
+	const label = siteLabel(site);
+	const title = options.title ?? '';
+	switch (kind) {
+		case 'both':
+			return m.admin_lookup_status_both({ site: label });
+		case 'url_only':
+			return m.admin_lookup_status_url_only({ site: label });
+		case 'url_kept':
+			return m.admin_lookup_status_url_kept({ site: label });
+		case 'date_kept':
+			return m.admin_lookup_status_date_kept({ site: label });
+		case 'url_and_date_emptied':
+			return m.admin_lookup_status_url_and_date_emptied({ site: label });
+		case 'date_and_url_emptied':
+			return m.admin_lookup_status_date_and_url_emptied({ site: label });
+		case 'clash':
+			return m.admin_lookup_status_clash({ site: label, title });
+		case 'clash_kept':
+			return m.admin_lookup_status_clash_kept({ site: label, title });
+		case 'clash_emptied':
+			return m.admin_lookup_status_clash_emptied({ site: label, title });
+		case 'clash_date_url_emptied':
+			return m.admin_lookup_status_clash_date_url_emptied({ site: label, title });
+		case 'date_only':
+			// The edit page's source URL belongs to the image rather than to this
+			// lookup, so the sentence there calls it the operator's own.
+			return options.editMode
+				? m.admin_lookup_status_kept({ site: label })
+				: m.admin_lookup_status_date_only({ site: label });
+	}
 }
 
 /**

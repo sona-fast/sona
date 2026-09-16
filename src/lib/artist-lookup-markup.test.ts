@@ -12,6 +12,9 @@ const read = (path: string) => readFileSync(path, 'utf8');
 const UPLOAD = read('src/routes/admin/upload/+page.svelte');
 const EDIT = read('src/routes/admin/images/[id]/edit/+page.svelte');
 const PANEL = read('src/lib/components/ArtistLookupPanel.svelte');
+// The status sentences moved off the panel's markup and into this module, so
+// the panel and the upload page's announcement read the same mapping (SONA-220).
+const LOOKUP = read('src/lib/artist-lookup.ts');
 const DIALOG = read('src/lib/components/NewArtistDialog.svelte');
 const ANNOUNCER = read('src/lib/components/LiveAnnouncer.svelte');
 // The row the two rating pills share is styled globally, beside the
@@ -558,10 +561,10 @@ describe('the "From lookup" tag', () => {
 	// mentioned at all, and the region is atomic so the change is heard once per
 	// edited field rather than once per keystroke.
 	it('has a sentence that claims only the field still attributable', () => {
-		expect(PANEL).toContain("statusKind === 'url_kept'");
-		expect(PANEL).toContain("statusKind === 'date_kept'");
-		expect(PANEL).toContain('m.admin_lookup_status_url_kept(');
-		expect(PANEL).toContain('m.admin_lookup_status_date_kept(');
+		expect(LOOKUP).toContain("case 'url_kept':");
+		expect(LOOKUP).toContain("case 'date_kept':");
+		expect(LOOKUP).toContain('m.admin_lookup_status_url_kept(');
+		expect(LOOKUP).toContain('m.admin_lookup_status_date_kept(');
 		expect(PANEL).toMatch(
 			/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared \}\)/
 		);
@@ -686,8 +689,8 @@ describe('round 11 wiring', () => {
 	it('feeds the current source URL into the clash sentence, from both pages', () => {
 		expect(PANEL).toContain('sourceUrlHeld');
 		expect(PANEL).toMatch(/statusLineKind\(filled, \{[\s\S]*?urlHeld: sourceUrlHeld[\s\S]*?\}\)/);
-		expect(PANEL).toContain("statusKind === 'clash_kept'");
-		expect(PANEL).toContain('m.admin_lookup_status_clash_kept');
+		expect(LOOKUP).toContain("case 'clash_kept':");
+		expect(LOOKUP).toContain('m.admin_lookup_status_clash_kept');
 		// A snapshot taken when the prefill ran, not a live read of the field: the
 		// sentence describes what the lookup did once, and clearing a pasted URL
 		// afterwards would otherwise flip it to "Sona left it empty".
@@ -705,10 +708,8 @@ describe('round 11 wiring', () => {
 	// the sentence goes away as soon as the operator edits the field the lookup
 	// filled — which says nothing about whether the artist is still unapplied.
 	it('renders the artist hint on its own condition, not the status line\'s', () => {
-		const status =
-			PANEL.match(/\{:else if statusKind !== 'none' && prefill\}[\s\S]*?\{\/if\}/)?.[0] ??
-			'';
-		expect(status).toContain('admin_lookup_status_both');
+		const status = PANEL.match(/\{:else if statusText\}[\s\S]*?\{\/if\}/)?.[0] ?? '';
+		expect(status).toContain('{statusText}');
 		expect(status).not.toContain('admin_lookup_status_artist_hint');
 		expect(PANEL).toMatch(
 			/const artistHintShown = \$derived\(\s*\n?\s*editMode && outcome === 'existing' && !appliedArtist && !!candidates\[0\]/
@@ -931,36 +932,74 @@ describe('what the lookup copy names', () => {
 		expect(UPLOAD).toMatch(
 			/function resetSharedPrefill\(\): LookupCleared \{[\s\S]{0,400}?emptied\.sourcePostUrl = true;[\s\S]{0,300}?emptied\.commissionedAt = true;[\s\S]{0,300}?return emptied;/
 		);
-		expect(UPLOAD).toMatch(/applyShared\(tiles\[parentIndex\]\?\.lookup \?\? \{ kind: 'idle' \}, emptied\)/);
-		const parentBody = UPLOAD.slice(UPLOAD.indexOf('function onParentChanged(')).split(
-			'\n\t}'
-		)[0];
+		expect(UPLOAD).toMatch(/applyShared\(tile\?\.lookup \?\? \{ kind: 'idle' \}, emptied\)/);
+		const parentBody = UPLOAD.match(/function onParentChanged\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(parentBody).not.toContain('sharedCleared =');
 		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,2000}?sharedCleared = \{ \.\.\.emptied \};/);
 		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,3000}?const cleared: LookupCleared = \{ \.\.\.emptied \};/);
 		// The move itself says nothing: one tick holds one line, so the caller
 		// picks it. Each of the three callers says at most one.
 		expect(UPLOAD).not.toMatch(/function onParentChanged\([\s\S]{0,800}?announcer\.say/);
-		for (const fn of ['function pickParent(', 'function returnToNewSet(']) {
-			const body = UPLOAD.slice(UPLOAD.indexOf(fn)).split('\n\t}')[0];
+		for (const name of ['pickParent', 'returnToNewSet']) {
+			const body = UPLOAD.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\t\\}`))?.[0] ?? '';
 			// One chain, so however many sentences it can choose between, a tick
 			// reaches exactly one of them: two say() calls in a tick leave the region
-			// holding the second, which is how the clearing went unspoken.
+			// holding the second, which is how the clearing went unspoken. pickParent
+			// ends on one line held in a variable, returnToNewSet on an else-if chain
+			// that ends the same way — either shape says at most one thing.
 			expect(body).toMatch(/announcer\.say/);
-			const parts = body.slice(body.indexOf('announcer.say')).split('announcer.say');
-			for (const between of parts.slice(1, -1)) {
-				expect(between).toMatch(/^[^;]*;\n\t\t\} else if \(/);
-			}
+			expect(body).toMatch(/const line = clearedLine\(cleared\);\s+if \(line\) announcer\.say\(line\);/);
 		}
-		// The mixed case borrows the panel's own sentence rather than saying a
-		// refill line and a cleared line in the same tick.
+		// One chain for what a move emptied, so the two callers cannot disagree
+		// about which field to name.
 		expect(UPLOAD).toMatch(
-			/function returnToNewSet\([\s\S]{0,1600}?m\.admin_lookup_status_url_and_date_emptied\(\{ site: siteLabel\(site\) \}\)/
+			/function clearedLine\(cleared: LookupCleared\): string \| null \{[\s\S]{0,600}?return null;/
+		);
+		// The mixed case — one field refilled, the other emptied — borrows the
+		// panel's own sentence rather than saying a refill line and a cleared line
+		// in the same tick. Off the same kind the panel renders, not picked by
+		// hand: chosen here, the announcement named a reason the panel did not.
+		expect(UPLOAD).toMatch(
+			/const mixed = statusSentence\(\s+statusLineKind\(sharedFilled, \{\s+clash: !!data\.sourceClash,\s+edited: sharedEdited,\s+urlHeld: sharedUrlHeld,\s+cleared\s+\}\),\s+site,\s+\{ title: data\.sourceClash\?\.title \?\? '' \}\s+\);/
+		);
+		expect(UPLOAD).toMatch(/if \(refilledOne && mixed\) \{\s+announcer\.say\(mixed\);/);
+		// And the panel reads that same mapping, so neither side can be changed
+		// alone.
+		expect(PANEL).toMatch(
+			/const statusText = \$derived\(\s+statusSentence\(statusKind, prefill\?\.site \?\? null, \{ title: clash\?\.title \?\? '', editMode \}\)\s+\);/
 		);
 		// And the radio path stays quiet where the panel carries the sentence.
 		expect(UPLOAD).toMatch(
 			/function pickParent\(index: number\) \{[\s\S]{0,500}?if \(kind !== 'idle' && kind !== 'searching'\) return;/
 		);
+	});
+
+	// A move onto a tile that is still searching empties the two fields, and the
+	// result on its way calls applyShared again knowing nothing about that move.
+	// It used to overwrite the record with one saying nothing was emptied, so a
+	// failure landing afterwards showed no cleared sentence at all (4.1.3).
+	it('holds what a move onto a searching tile emptied until its result lands', () => {
+		expect(UPLOAD).toMatch(
+			/pendingCleared = tile\?\.lookup\.kind === 'searching' \? \{ key: tile\.key, emptied \} : null;/
+		);
+		expect(UPLOAD).toMatch(
+			/function takePendingCleared\(key: number\): LookupCleared \{[\s\S]{0,400}?pendingCleared = null;\s+return emptied;/
+		);
+		// The result that lands merges it in.
+		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next, takePendingCleared\(key\)\);/);
+		// And so does the failure the catch synthesises, which calls nothing else:
+		// without this the record the LAST result left renders over fields that
+		// never changed.
+		expect(UPLOAD).toMatch(
+			/live\.lookup = \{ kind: 'failed', reason: 'unavailable', sent \};[\s\S]{0,600}?if \(isParent\(key\)\) sharedCleared = takePendingCleared\(key\);/
+		);
+	});
+
+	// On the no-match and failed arms the cleared sentence lands under the lead
+	// that explains the result, a point of size apart and margin-collapsed to the
+	// 10px every status line sits at — two subjects reading as one paragraph.
+	it('separates the cleared sentence from the lead above it', () => {
+		expect(PANEL).toMatch(/\.lookup-lead \+ \.lookup-emptied \{\s+margin-top: 18px;/);
 	});
 
 	// An unreadable file is a dead end on a variant tile: not retryable, no
@@ -1176,7 +1215,7 @@ describe('focus after the panel goes away', () => {
 		expect(UPLOAD).toMatch(
 			/function startLookup\(key: number\)[\s\S]{0,1400}?if \(isParent\(key\)\) resetSharedResult\(\);/
 		);
-		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next\);/);
+		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next, takePendingCleared\(key\)\);/);
 		expect(UPLOAD).not.toMatch(/wasParent/);
 		expect(UPLOAD).toMatch(/groupMode = 'new';\s+returnToNewSet\(\);/);
 		// Only re-derive from a parent that still HAS a result: with the panel
@@ -1196,7 +1235,7 @@ describe('focus after the panel goes away', () => {
 		// One field written is one field named: the plural sentence over a single
 		// refill told the operator both had changed.
 		expect(UPLOAD).toMatch(
-			/function returnToNewSet\(\)[\s\S]{0,1200}?const \{ wrote, cleared \} = onParentChanged\(parentIndex\);[\s\S]{0,900}?\} else if \(wrote\.sourcePostUrl && wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
+			/function returnToNewSet\(\)[\s\S]{0,1200}?const \{ wrote, cleared \} = onParentChanged\(parentIndex\);[\s\S]{0,1600}?\} else if \(wrote\.sourcePostUrl && wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
 		);
 		expect(UPLOAD).toMatch(
 			/\} else if \(wrote\.sourcePostUrl\) \{\s+announcer\.say\(m\.admin_lookup_announce_shared_refilled_source\(\)\);\s+\} else if \(wrote\.commissionedAt\) \{\s+announcer\.say\(m\.admin_lookup_announce_shared_refilled_date\(\)\);/
@@ -1284,18 +1323,20 @@ describe('focus after the panel goes away', () => {
 		// The no-match arm has no status line of its own, so the sentence is
 		// rendered there as well as under a result.
 		expect(PANEL).toMatch(
-			/\{:else if lookup\.kind === 'no_match'\}[\s\S]{0,600}?\{#if emptiedOnly\}\s+<p class="lookup-status lookup-emptied">\{emptiedText\}<\/p>/
+			/\{:else if lookup\.kind === 'no_match'\}[\s\S]{0,600}?\{#if emptiedOnly\}\s+<p class="lookup-status lookup-emptied">\{statusText\}<\/p>/
 		);
 		// The failed arm has no status line of its own either, and a parent move
 		// onto a tile whose lookup failed empties the fields just the same. Above
 		// the advice: what happened to the form is read before what to do next.
 		expect(PANEL).toMatch(
-			/\{#if emptiedOnly\}\s+<p class="lookup-status lookup-emptied">\{emptiedText\}<\/p>\s+\{\/if\}\s+\{#if failedHint\}/
+			/\{#if emptiedOnly\}\s+<p class="lookup-status lookup-emptied">\{statusText\}<\/p>\s+\{\/if\}\s+\{#if failedHint\}/
 		);
 		expect(PANEL).not.toMatch(/<p class="lookup-status">\{m\.admin_lookup_paused_hint\(\)\}<\/p>/);
-		// Where the sentence renders is read off the sentence itself: a second
-		// list of the same three kinds can disagree with the text it guards.
-		expect(PANEL).toMatch(/const emptiedOnly = \$derived\(emptiedText !== ''\);/);
+		// Where the sentence renders: the three kinds that name no site are the
+		// ones an arm with no match to name can still say.
+		expect(PANEL).toMatch(
+			/const emptiedOnly = \$derived\(\s+statusKind === 'both_emptied' \|\| statusKind === 'url_emptied' \|\| statusKind === 'date_emptied'\s+\);/
+		);
 		// And it reports a change the fields just made, so it is not drawn in the
 		// muted colour the advice lines use.
 		expect(PANEL).toMatch(/\.lookup-emptied \{\s+color: var\(--foreground\);/);
@@ -1303,10 +1344,10 @@ describe('focus after the panel goes away', () => {
 		// only the three that report nothing else: the combined ones say a field
 		// was filled AND one was emptied, which is still a change to the form.
 		expect(PANEL).toMatch(
-			/const reportsEmptied = \$derived\(\s+emptiedOnly \|\|\s+statusKind === 'url_and_date_emptied' \|\|\s+statusKind === 'date_and_url_emptied' \|\|\s+statusKind === 'clash_emptied'\s+\);/
+			/const reportsEmptied = \$derived\(\s+emptiedOnly \|\|\s+statusKind === 'url_and_date_emptied' \|\|\s+statusKind === 'date_and_url_emptied' \|\|\s+statusKind === 'clash_emptied' \|\|\s+statusKind === 'clash_date_url_emptied'\s+\);/
 		);
 		expect(PANEL).toMatch(
-			/<p class="lookup-status" class:lookup-emptied=\{reportsEmptied\}>/
+			/<p class="lookup-status" class:lookup-emptied=\{reportsEmptied\}>\{statusText\}<\/p>/
 		);
 		// The panel reads that record, and says the field was emptied rather than
 		// left as it was.
@@ -1317,9 +1358,10 @@ describe('focus after the panel goes away', () => {
 			'admin_lookup_status_both_emptied',
 			'admin_lookup_status_url_emptied',
 			'admin_lookup_status_date_emptied',
-			'admin_lookup_status_clash_emptied'
+			'admin_lookup_status_clash_emptied',
+			'admin_lookup_status_clash_date_url_emptied'
 		]) {
-			expect(PANEL).toContain(`m.${key}`);
+			expect(LOOKUP).toContain(`m.${key}`);
 		}
 	});
 
@@ -1709,7 +1751,7 @@ describe('the upload page grid', () => {
 	it('lands a throw while applying a result in the failed state', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/\.catch\(\(\) => \{[\s\S]{0,400}?kind: 'failed', reason: 'unavailable', sent[\s\S]{0,120}?console\.error\(LOOKUP_RESULT_THREW\)/
+				/\.catch\(\(\) => \{[\s\S]{0,400}?kind: 'failed', reason: 'unavailable', sent[\s\S]{0,600}?console\.error\(LOOKUP_RESULT_THREW\)/
 			);
 		}
 		// Either callback runs for every settled kind, including a too_large the

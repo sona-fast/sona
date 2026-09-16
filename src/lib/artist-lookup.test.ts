@@ -23,6 +23,7 @@ import {
 	siteLabel,
 	stateFromResponse,
 	statusLineKind,
+	statusSentence,
 	strictestRating,
 	tileResultText,
 	runLookup,
@@ -33,7 +34,8 @@ import {
 	type LookupRating,
 	type LookupResponse,
 	type LookupSite,
-	type LookupState
+	type LookupState,
+	type StatusLineKind
 } from './artist-lookup';
 // A node test may reach into the server module; the browser bundle may not.
 // Importing both here is how the wire shape and the shared rules stay in step.
@@ -797,12 +799,31 @@ describe('statusLineKind', () => {
 		);
 	});
 
-	// The clash sentence already says the URL was left empty, which is exactly
-	// what emptying it leaves behind — so only the date needs the new kinds.
-	it('keeps the clash sentence over an emptied URL', () => {
+	// The clash sentence says the URL was "left empty", which is true of a field
+	// that WAS empty and a false report of one the result just blanked under the
+	// operator — so a dated clash over an emptied URL gets its own sentence.
+	it('says a dated clash emptied the URL rather than leaving it empty', () => {
 		expect(
 			statusLineKind({ commissionedAt: 'd' }, { clash: true, cleared: { sourcePostUrl: true } })
-		).toBe('clash');
+		).toBe('clash_date_url_emptied');
+		// A clash whose URL was empty all along keeps the sentence that says so.
+		expect(statusLineKind({ commissionedAt: 'd' }, { clash: true })).toBe('clash');
+		expect(
+			m.admin_lookup_status_clash_date_url_emptied(
+				{ site: 'FurAffinity', title: 'Ref' },
+				{ locale: 'en' }
+			)
+		).toBe(
+			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because that post is already the source of Ref. You can change the date before you save.'
+		);
+		for (const locale of ['en', 'ja'] as const) {
+			const line = m.admin_lookup_status_clash_date_url_emptied(
+				{ site: 'FurAffinity', title: 'Ref' },
+				{ locale }
+			);
+			expect(line).toContain('Ref');
+			expect(line).toMatch(/cleared the source post URL|消去しました/);
+		}
 		// A clash that carries no date either: the clash sentence claims a date it
 		// did not fill, so the emptied one is what is left to say.
 		expect(
@@ -830,6 +851,54 @@ describe('statusLineKind', () => {
 		}
 	});
 
+	// The panel renders the sentence and the upload page announces it. Picked by
+	// hand on either side, the two named different reasons for the same move:
+	// the announcement said the result had no link to put there while the panel
+	// said the post already belonged to another piece (SONA-220).
+	it('maps every status kind to exactly one sentence', () => {
+		const kinds: StatusLineKind[] = [
+			'both',
+			'url_only',
+			'date_only',
+			'url_kept',
+			'date_kept',
+			'clash',
+			'clash_kept',
+			'clash_emptied',
+			'clash_date_url_emptied',
+			'url_and_date_emptied',
+			'date_and_url_emptied',
+			'both_emptied',
+			'url_emptied',
+			'date_emptied'
+		];
+		const said = kinds.map((kind) => statusSentence(kind, 'FurAffinity', { title: 'Ref' }));
+		// Every kind says something, and no two of them say the same thing: a kind
+		// that fell through to another one's sentence would report the wrong reason.
+		expect(said.filter((line) => line === '')).toEqual([]);
+		expect(new Set(said).size).toBe(kinds.length);
+		// Nothing to report, nothing said.
+		expect(statusSentence('none', 'FurAffinity')).toBe('');
+		// The three that report only an emptied field name no site — which is why
+		// they are the ones a no-match, with no match to name, can still say.
+		expect(statusSentence('both_emptied', null)).toBe(m.admin_lookup_status_both_emptied());
+		expect(statusSentence('url_emptied', null)).toBe(m.admin_lookup_status_url_emptied());
+		expect(statusSentence('date_emptied', null)).toBe(m.admin_lookup_status_date_emptied());
+		// Every other kind names a post. With none to name there is nothing to say
+		// rather than a sentence with an empty site in it.
+		expect(statusSentence('both', null)).toBe('');
+		expect(statusSentence('clash', null, { title: 'Ref' })).toBe('');
+		// The edit page's URL belongs to the image, so the sentence there calls it
+		// the operator's own rather than something the lookup left alone.
+		expect(statusSentence('date_only', 'FurAffinity', { editMode: true })).toBe(
+			m.admin_lookup_status_kept({ site: 'FurAffinity' })
+		);
+		expect(statusSentence('date_only', 'FurAffinity')).toBe(
+			m.admin_lookup_status_date_only({ site: 'FurAffinity' })
+		);
+		expect(statusSentence('clash_kept', 'FurAffinity', { title: 'Ref' })).toContain('Ref');
+	});
+
 	it('names the emptied field in the sentence, in both locales', () => {
 		expect(m.admin_lookup_status_url_and_date_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
 			'Sona filled the source post URL from the Twitter post and cleared the commissioned date the last lookup filled, because that post has no date. You can change the URL before you save.'
@@ -840,10 +909,10 @@ describe('statusLineKind', () => {
 		// A clash result DOES have a post — Sona declined it — so no sentence on
 		// this path may say the lookup found nothing to put there.
 		expect(m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
-			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because this result has no link to put there. You can change the date before you save.'
+			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the match Sona found has no link to put there. You can change the date before you save.'
 		);
 		expect(m.admin_lookup_status_both_emptied({}, { locale: 'en' })).toBe(
-			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.'
 		);
 		// The reason blames the lookup, the way its siblings do: this sentence
 		// renders on the no-match arm too, where there is no result to have a date.

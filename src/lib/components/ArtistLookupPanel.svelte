@@ -25,6 +25,7 @@
 		seedStatusKind,
 		siteLabel,
 		statusLineKind,
+		statusSentence,
 		type ArtistChoice,
 		type LookupCleared,
 		type LookupEdited,
@@ -125,38 +126,34 @@
 	const statusKind = $derived(
 		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared })
 	);
-	// The sentences that only report an emptied field name no site, and the
-	// result that empties one can be a no-match with no prefill match to name.
-	// Held as text rather than inline in the markup because a no-match renders
-	// its own arm, well above the status line every other result uses.
-	const emptiedText = $derived(
-		statusKind === 'both_emptied'
-			? m.admin_lookup_status_both_emptied()
-			: statusKind === 'url_emptied'
-				? m.admin_lookup_status_url_emptied()
-				: statusKind === 'date_emptied'
-					? m.admin_lookup_status_date_emptied()
-					: ''
+	// The one sentence for that kind, from the mapping the upload page's
+	// announcement reads too — picked by hand on either side, the two named
+	// different reasons for the same move (SONA-220).
+	const statusText = $derived(
+		statusSentence(statusKind, prefill?.site ?? null, { title: clash?.title ?? '', editMode })
 	);
-	// Off the text rather than off a second list of the same three kinds: two
-	// lists have to be kept in step, and the one that decides WHERE the sentence
-	// renders is the one that can silently disagree with the sentence itself.
-	const emptiedOnly = $derived(emptiedText !== '');
+	// The kinds that report an emptied field and NOTHING else. They name no site,
+	// which is why they are the ones a no-match or a failure can still say, and
+	// those two arms render well above the status line every result uses.
+	const emptiedOnly = $derived(
+		statusKind === 'both_emptied' || statusKind === 'url_emptied' || statusKind === 'date_emptied'
+	);
 	// Every sentence that reports a field going blank, and not only the three
-	// that report nothing else. The other three say it inline in the markup, so
-	// there is no text to read it off the way emptiedOnly does — kept next to
-	// that one, as the single answer to "does this line describe a change the
-	// operator's fields just made".
+	// that report nothing else — the single answer to "does this line describe a
+	// change the operator's fields just made".
 	const reportsEmptied = $derived(
 		emptiedOnly ||
 			statusKind === 'url_and_date_emptied' ||
 			statusKind === 'date_and_url_emptied' ||
-			statusKind === 'clash_emptied'
+			statusKind === 'clash_emptied' ||
+			statusKind === 'clash_date_url_emptied'
 	);
 	// The two failure reasons that carry advice under the lead. Held as text so
 	// the emptied sentence can go ABOVE it: a parent move onto a tile whose
 	// lookup failed empties the fields, and what just happened to the form is
-	// read before what to do about the failure.
+	// read before what to do about the failure. This list and the failed arm's
+	// own reason branches have to stay in step — a reason that grows a hint in
+	// one and not the other renders nothing.
 	const failedHint = $derived(
 		lookup.kind !== 'failed'
 			? ''
@@ -254,7 +251,7 @@
 				     watches the two fields go blank and this arm carries no status
 				     line of its own. -->
 				{#if emptiedOnly}
-					<p class="lookup-status lookup-emptied">{emptiedText}</p>
+					<p class="lookup-status lookup-emptied">{statusText}</p>
 				{/if}
 				<p class="lookup-status">{m.admin_lookup_no_match_hint()}</p>
 			{:else if lookup.kind === 'failed'}
@@ -295,7 +292,7 @@
 				     advice, because the fields went blank under the operator and that is
 				     the part nothing else on screen reports. -->
 				{#if emptiedOnly}
-					<p class="lookup-status lookup-emptied">{emptiedText}</p>
+					<p class="lookup-status lookup-emptied">{statusText}</p>
 				{/if}
 				{#if failedHint}
 					<p class="lookup-status">{failedHint}</p>
@@ -433,39 +430,9 @@
 				{/if}
 
 				{#if emptiedOnly}
-					<p class="lookup-status lookup-emptied">{emptiedText}</p>
-				{:else if statusKind !== 'none' && prefill}
-					<p class="lookup-status" class:lookup-emptied={reportsEmptied}>
-						{#if statusKind === 'both'}
-							{m.admin_lookup_status_both({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'url_only'}
-							{m.admin_lookup_status_url_only({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'url_and_date_emptied'}
-							{m.admin_lookup_status_url_and_date_emptied({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'date_and_url_emptied'}
-							{m.admin_lookup_status_date_and_url_emptied({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'url_kept'}
-							{m.admin_lookup_status_url_kept({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'date_kept'}
-							{m.admin_lookup_status_date_kept({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'clash'}
-							{m.admin_lookup_status_clash({ site: siteLabel(prefill.site), title: clash?.title ?? '' })}
-						{:else if statusKind === 'clash_kept'}
-							{m.admin_lookup_status_clash_kept({
-								site: siteLabel(prefill.site),
-								title: clash?.title ?? ''
-							})}
-						{:else if statusKind === 'clash_emptied'}
-							{m.admin_lookup_status_clash_emptied({
-								site: siteLabel(prefill.site),
-								title: clash?.title ?? ''
-							})}
-						{:else if editMode}
-							{m.admin_lookup_status_kept({ site: siteLabel(prefill.site) })}
-						{:else}
-							{m.admin_lookup_status_date_only({ site: siteLabel(prefill.site) })}
-						{/if}
-					</p>
+					<p class="lookup-status lookup-emptied">{statusText}</p>
+				{:else if statusText}
+					<p class="lookup-status" class:lookup-emptied={reportsEmptied}>{statusText}</p>
 				{/if}
 
 				<!-- Its own paragraph, on its own condition: nested in the status sentence
@@ -724,6 +691,13 @@
 	   consider rather than as something that happened. */
 	.lookup-emptied {
 		color: var(--foreground);
+	}
+	/* On the no-match and failed arms it lands under the lead that explains the
+	   result, a point of size apart and margin-collapsed to the same 10px every
+	   status line sits at — two subjects reading as one paragraph. Only there:
+	   under a result it follows the outcome lines it belongs with. */
+	.lookup-lead + .lookup-emptied {
+		margin-top: 18px;
 	}
 	/* The searching line carries the spinner, so it lines up with its text. */
 	.searching-line {

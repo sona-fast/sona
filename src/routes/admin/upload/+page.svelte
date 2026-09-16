@@ -17,6 +17,8 @@
 		ratingTag,
 		runLookup,
 		siteLabel,
+		statusLineKind,
+		statusSentence,
 		strictestRating,
 		tileResultText,
 		candidateArtists,
@@ -516,6 +518,8 @@
 	// put back (SONA-220). Without it the status line says a field was left as it
 	// was while the operator watched it go blank (4.1.3).
 	let sharedCleared = $state<LookupCleared>({});
+	// Not $state: nothing renders it. See takePendingCleared.
+	let pendingCleared: { key: number; emptied: LookupCleared } | null = null;
 	const sharedEdited = $derived({
 		sourcePostUrl: sharedFilled.sourcePostUrl !== undefined && !sourceTagged,
 		commissionedAt: sharedFilled.commissionedAt !== undefined && !dateTagged
@@ -612,7 +616,7 @@
 				// applies its result instead of showing it over empty fields. The
 				// group-mode round trip that made this a snapshot is handled where it
 				// happens: the "new" radio re-derives from the parent tile.
-				if (isParent(key)) applyShared(next);
+				if (isParent(key)) applyShared(next, takePendingCleared(key));
 				else {
 					// Focus first, then the announcement — the same order the created
 					// artist takes above. A failure that unmounts the button takes the
@@ -652,6 +656,13 @@
 				if (!applied) {
 					const sent = sentAfterApplyThrew(settled);
 					live.lookup = { kind: 'failed', reason: 'unavailable', sent };
+					// That failure fills nothing, so the only true thing the panel can
+					// say about the two shared fields is what a parent move onto this
+					// still-searching tile emptied. Without this the record the LAST
+					// result left stands, and the failed arm renders its sentence over
+					// fields that never changed. The same thing applyShared does with a
+					// failure that arrives the ordinary way.
+					if (isParent(key)) sharedCleared = takePendingCleared(key);
 				}
 				console.error(LOOKUP_RESULT_THREW);
 				// A variant tile's outcome is plain text outside any live region, so
@@ -948,24 +959,46 @@
 		// Exactly one line. The round trip can refill one field and leave the
 		// other blank, and a say() per field would have the second overwrite the
 		// first before a screen reader reached it — so the mixed case borrows the
-		// panel's own sentence for it, which names both halves at once.
-		if (site && wrote.sourcePostUrl && cleared.commissionedAt) {
-			announcer.say(m.admin_lookup_status_url_and_date_emptied({ site: siteLabel(site) }));
-		} else if (site && wrote.commissionedAt && cleared.sourcePostUrl) {
-			announcer.say(m.admin_lookup_status_date_and_url_emptied({ site: siteLabel(site) }));
+		// panel's own sentence for it, which names both halves at once. Read off
+		// the kind the panel is rendering rather than picked by hand: chosen
+		// here, the announcement said the URL had no link to put there while the
+		// panel said the post already belonged to another piece (SONA-220).
+		const mixed = statusSentence(
+			statusLineKind(sharedFilled, {
+				clash: !!data.sourceClash,
+				edited: sharedEdited,
+				urlHeld: sharedUrlHeld,
+				cleared
+			}),
+			site,
+			{ title: data.sourceClash?.title ?? '' }
+		);
+		const refilledOne =
+			(wrote.sourcePostUrl && cleared.commissionedAt) ||
+			(wrote.commissionedAt && cleared.sourcePostUrl);
+		if (refilledOne && mixed) {
+			announcer.say(mixed);
 		} else if (wrote.sourcePostUrl && wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled());
 		} else if (wrote.sourcePostUrl) {
 			announcer.say(m.admin_lookup_announce_shared_refilled_source());
 		} else if (wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled_date());
-		} else if (cleared.sourcePostUrl && cleared.commissionedAt) {
-			announcer.say(m.admin_lookup_announce_shared_cleared());
-		} else if (cleared.sourcePostUrl) {
-			announcer.say(m.admin_lookup_announce_shared_cleared_source());
-		} else if (cleared.commissionedAt) {
-			announcer.say(m.admin_lookup_announce_shared_cleared_date());
+		} else {
+			const line = clearedLine(cleared);
+			if (line) announcer.say(line);
 		}
+	}
+
+	/** The one sentence for what a parent move emptied, or null when it emptied
+	 * nothing. Both callers of onParentChanged end on it, and a second copy of
+	 * the chain could disagree with this one about which field to name. */
+	function clearedLine(cleared: LookupCleared): string | null {
+		if (cleared.sourcePostUrl && cleared.commissionedAt)
+			return m.admin_lookup_announce_shared_cleared();
+		if (cleared.sourcePostUrl) return m.admin_lookup_announce_shared_cleared_source();
+		if (cleared.commissionedAt) return m.admin_lookup_announce_shared_cleared_date();
+		return null;
 	}
 
 	/** The parent moved: the shared fields describe whatever the parent is now.
@@ -981,8 +1014,25 @@
 	} {
 		parentIndex = index;
 		const emptied = resetSharedPrefill();
-		const wrote = applyShared(tiles[parentIndex]?.lookup ?? { kind: 'idle' }, emptied);
+		const tile = tiles[parentIndex];
+		// A move onto a tile still searching has a result on its way, and that
+		// result calls applyShared again knowing nothing about this move. Held
+		// until it lands, or the record it writes says nothing was emptied and the
+		// fields the operator watched go blank are reported by no sentence at all
+		// (4.1.3). Any other move drops it: the pending record belongs to the tile
+		// the fields are pointing at now.
+		pendingCleared = tile?.lookup.kind === 'searching' ? { key: tile.key, emptied } : null;
+		const wrote = applyShared(tile?.lookup ?? { kind: 'idle' }, emptied);
 		return { wrote, cleared: sharedCleared };
+	}
+
+	/** What a parent move emptied while that tile's own lookup was still out.
+	 * Taken once: from then on the result that landed owns the record. */
+	function takePendingCleared(key: number): LookupCleared {
+		if (pendingCleared?.key !== key) return {};
+		const { emptied } = pendingCleared;
+		pendingCleared = null;
+		return emptied;
 	}
 
 	/** The Parent radio moved, or the parent tile was removed and the radio
@@ -995,13 +1045,8 @@
 		const { cleared } = onParentChanged(index);
 		const kind = tiles[index]?.lookup.kind ?? 'idle';
 		if (kind !== 'idle' && kind !== 'searching') return;
-		if (cleared.sourcePostUrl && cleared.commissionedAt) {
-			announcer.say(m.admin_lookup_announce_shared_cleared());
-		} else if (cleared.sourcePostUrl) {
-			announcer.say(m.admin_lookup_announce_shared_cleared_source());
-		} else if (cleared.commissionedAt) {
-			announcer.say(m.admin_lookup_announce_shared_cleared_date());
-		}
+		const line = clearedLine(cleared);
+		if (line) announcer.say(line);
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {

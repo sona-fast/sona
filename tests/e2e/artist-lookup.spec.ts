@@ -115,7 +115,7 @@ async function stubLookup(page: Page, body: unknown, status = 200) {
 /** A lookup stub the test releases by hand. The role a tile plays is only
  * readable at two different moments if the request can be held open while the
  * operator moves the parent or the group mode under it. */
-async function deferredLookup(page: Page, body: unknown) {
+async function deferredLookup(page: Page, body: unknown, status = 200) {
 	let release!: () => void;
 	const held = new Promise<void>((resolve) => {
 		release = resolve;
@@ -123,7 +123,7 @@ async function deferredLookup(page: Page, body: unknown) {
 	await page.route('**/api/admin/artist-lookup', async (route) => {
 		await held;
 		await route.fulfill({
-			status: 200,
+			status,
 			contentType: 'application/json',
 			body: JSON.stringify(body)
 		});
@@ -902,12 +902,14 @@ test.describe('with a key saved', () => {
 		);
 	});
 
-	test('a clash after a lookup calls the field empty, not the operator\'s', async ({ page }) => {
-		// The clash sentence turns on whether the URL in the field was the
-		// OPERATOR'S when the prefill ran. The field now still holds the previous
-		// lookup's value at that moment, and that value is nobody's to keep: read
-		// as held, the panel would say Sona left "your" URL alone while the field
-		// it is talking about had just been emptied.
+	test('a clash after a lookup says it emptied the field, not that it was empty', async ({
+		page
+	}) => {
+		// The clash sentence turns on what was in the field when the prefill ran.
+		// The previous lookup's value is nobody's to keep, so it is not "your" URL
+		// — and it is not an empty field either: this result blanked it under the
+		// operator, and "left the source post URL empty" would quietly claim it had
+		// been empty all along (SONA-220).
 		await stubLookup(page, xMatchBody());
 		await oneDoneTile(page);
 
@@ -916,14 +918,23 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
 
 		// The X match with a clash on it: the post already belongs to another
-		// piece, so the prefill deliberately leaves the source URL alone.
+		// piece, so the prefill deliberately puts no source URL back.
 		await stubLookup(page, { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') });
 		await pill(page).click();
 
 		await expect(panel(page)).toContainText(
-			'left the source post URL empty, because that post is already the source of Clash Piece'
+			'cleared the source post URL the last lookup filled, because that post is already the source of Clash Piece'
 		);
 		await expect(panel(page)).not.toContainText('left your source post URL as it was');
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+		// And drawn as a report of what just happened to the field, like every
+		// other sentence that says one went blank, rather than in the muted colour
+		// the advice lines use.
+		await expect(
+			panel(page)
+				.locator('p.lookup-status')
+				.filter({ hasText: 'cleared the source post URL the last lookup filled' })
+		).toHaveClass(/lookup-emptied/);
 		// And the sentence matches the field: the tagged value the first lookup
 		// wrote is gone, because this result had nothing to put in its place.
 		await expect(sourceInput(page)).toHaveValue('');
@@ -2353,6 +2364,121 @@ test.describe('with a key saved', () => {
 		);
 	});
 
+	// A parent with no lookup of its own draws no sentence at all: the panel under
+	// it is idle, and the two fields go blank with nothing on screen saying why
+	// (4.1.3). So the move says it, and says it once.
+	test('a parent move onto a tile with no lookup says what it emptied', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
+		);
+	});
+
+	// A move onto a tile that is still SEARCHING is the same case: the panel says
+	// only that a search is running. The result on its way then describes the
+	// fields itself, so the move's line is never said twice.
+	test('a move onto a searching tile says it once, and its result does not repeat it', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's own post, on another date, held open across the move.
+		const SECOND_POST_URL = 'https://www.furaffinity.net/view/54321/';
+		const release = await deferredLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '54321',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: '2026-04-05T10:00:00Z',
+						rating: 'general',
+						postUrl: SECOND_POST_URL
+					}
+				]
+			})
+		);
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const spoken =
+			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled.";
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		release();
+
+		// The result fills both fields back, and its own sentence is the panel's
+		// to say — the region still holds the one line the move said.
+		await expect(sourceInput(page)).toHaveValue(SECOND_POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-04-05');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date from the FurAffinity post.'
+		);
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+	});
+
+	// The move empties the fields while that tile's own lookup is still out, and
+	// the result that lands afterwards calls applyShared again knowing nothing
+	// about the move. It used to overwrite the record with one saying nothing was
+	// emptied, so the failure showed no cleared sentence over two blank fields.
+	test('a move onto a searching tile keeps the cleared sentence when its lookup fails', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		const release = await deferredLookup(
+			page,
+			{ enabled: true, error: 'rate_limited', forwarded: true },
+			429
+		);
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const spoken =
+			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled.";
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		release();
+
+		await expect(panel(page)).toContainText('Lookup paused');
+		// The failure fills nothing, so what the move emptied is still the whole
+		// story about the two fields — and the panel is where it is read now.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.'
+		);
+		// Said once. The region still holds the move's own line, not a second copy.
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+	});
+
 	// A move onto a tile whose lookup FAILED empties the fields too: the failure
 	// has nothing to put back. That arm carries no status line of its own, so the
 	// two fields went blank with the panel talking only about the failure.
@@ -2375,7 +2501,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		const emptied =
-			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.';
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.';
 		await expect(panel(page)).toContainText(emptied);
 		// Above the "try again in a minute" advice: what happened to the form is
 		// read before what to do about the failure.
@@ -2563,6 +2689,52 @@ test.describe('with a key saved', () => {
 		await expect(page.locator(LIVE_REGION)).toHaveText(
 			'Sona filled the source post URL from the FurAffinity post and cleared the commissioned date the last lookup filled, because that post has no date. You can change the URL before you save.'
 		);
+	});
+
+	// The mixed line is the panel's own sentence, and it used to be picked by
+	// hand: a second result that is a DATED clash refills the date and empties the
+	// URL, and the hand-picked branch said the result had no link to put there
+	// while the panel said the post already belonged to another piece (SONA-220).
+	test('returning to a new set names a dated clash the same way the panel does', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// Out of new-piece mode, so this second result lands on the tile rather
+		// than on the shared fields. It claims the same post for another piece.
+		await stubLookup(page, clashBody(9001, 'Clash Piece'));
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await tileLookup(page).nth(0).click();
+		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'false');
+
+		await page.getByRole('radio', { name: 'New piece' }).check();
+
+		// The clash fills the date and has no URL to offer, so the one the first
+		// lookup filled is gone from the form.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		const sentence =
+			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because that post is already the source of Clash Piece. You can change the date before you save.';
+		// One sentence, in both places: the panel renders it and the region says
+		// it, off the same mapping.
+		await expect(panel(page)).toContainText(sentence);
+		await expect(page.locator(LIVE_REGION)).toHaveText(sentence);
+		// Neither of them calls a field Sona just blanked "left empty", and
+		// neither blames a match with no link when Sona found one and declined it.
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+		await expect(page.locator(LIVE_REGION)).not.toContainText('no link to put there');
+		// The date it filled is not the subject: the field that went blank is, so
+		// the line is drawn as a report rather than as advice.
+		await expect(
+			panel(page)
+				.locator('p.lookup-status')
+				.filter({ hasText: 'cleared the source post URL the last lookup filled' })
+		).toHaveClass(/lookup-emptied/);
 	});
 
 	// The refill is announced because it happened. applyShared never overwrites a
@@ -2771,6 +2943,52 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+	});
+
+	// Removing the parent tile itself routes through the same pickParent the
+	// radio does, so the fields re-derive from the tile the parent pick lands on.
+	// The tile that lands there has no lookup of its own, so its panel draws no
+	// sentence and nothing on screen says why the two fields just went blank
+	// (4.1.3) — the removal says it, once.
+	test('removing the parent tile re-derives the fields and says what it emptied', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await page.route('**/api/upload', (route) =>
+			route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
+		);
+		await page.goto('/admin/upload');
+		await waitForDropAttachment(page, '.dropzone');
+		await dropOn(page, '.dropzone', [
+			{ name: 'first.png', type: 'image/png' },
+			{ name: 'second.png', type: 'image/png' }
+		]);
+		await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x1.png', {
+			timeout: 15_000
+		});
+
+		// The first tile is the parent, and its result fills the shared fields.
+		await tileLookup(page).first().click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+
+		await page.getByRole('button', { name: 'Remove first.png' }).click();
+		await expect(page.getByRole('button', { name: 'Remove first.png' })).toHaveCount(0);
+
+		// The surviving tile is the parent now, and it has no result: the fields
+		// describe whatever the parent is, so they empty rather than keep the
+		// removed tile's post.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// Said once, and by the removal: the panel under an idle lookup carries no
+		// sentence to read it from.
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
+		);
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
 	});
 
 	// In the existing-piece mode no tile is the parent: the panel is not rendered
