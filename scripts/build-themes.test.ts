@@ -258,22 +258,24 @@ describe('renderThemesCss', () => {
 	// A directory named like a font passes an existence check and has a size,
 	// and the browser cannot load it. Made and removed here, under static/fonts/.
 	// A symlink to a real font elsewhere passes every stat check, and the face
-	// would then point out of static/fonts/.
+	// would then point out of static/fonts/. Both fixtures below carry the Geist-
+	// prefix because the font manifest test lists static/fonts/ and skips that
+	// family, and vitest may run the two files at the same time.
 	it('rejects a src that is a symlink', () => {
-		const link = new URL('../static/fonts/NotALink-400-latin.woff2', import.meta.url);
+		const link = new URL('../static/fonts/Geist-NotALink-fixture.woff2', import.meta.url);
 		symlinkSync(new URL('../static/fonts/Geist-Regular.woff2', import.meta.url), link);
 		try {
-			expect(() => renderThemesCss(withFace({ src: '/fonts/NotALink-400-latin.woff2' }))).toThrow(/has no file at/);
+			expect(() => renderThemesCss(withFace({ src: '/fonts/Geist-NotALink-fixture.woff2' }))).toThrow(/has no file at/);
 		} finally {
 			rmSync(link, { force: true });
 		}
 	});
 
 	it('rejects a src that is a directory', () => {
-		const dir = new URL('../static/fonts/NotAFile-400-latin.woff2', import.meta.url);
+		const dir = new URL('../static/fonts/Geist-NotAFile-fixture.woff2', import.meta.url);
 		mkdirSync(dir);
 		try {
-			expect(() => renderThemesCss(withFace({ src: '/fonts/NotAFile-400-latin.woff2' }))).toThrow(/has no file at/);
+			expect(() => renderThemesCss(withFace({ src: '/fonts/Geist-NotAFile-fixture.woff2' }))).toThrow(/has no file at/);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
