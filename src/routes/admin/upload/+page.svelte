@@ -520,8 +520,8 @@
 	// was while the operator watched it go blank (4.1.3).
 	let sharedCleared = $state<LookupCleared>({});
 	// Whether the operator has text of their own in each field. Each one rises on
-	// input to its own field, is recomputed against the fields in applyShared when a result
-	// lands, and lowered in resetSharedPrefill. See sharedEdited.
+	// input to its own field, is recomputed against the fields in applyShared when
+	// a result lands, and is lowered in resetSharedPrefill. See sharedEdited.
 	let sourceTypedIn = $state(false);
 	let dateTypedIn = $state(false);
 	// Not $state: nothing renders it. See takePendingCleared.
@@ -608,10 +608,10 @@
 		// LAST result does go now: it is about a search that is over.
 		if (isParent(key)) {
 			// The move's own record goes too. Whatever it describes has already been
-			// told — by pickParent's announcement when the move landed on an idle
-			// tile, by the settled arm otherwise — and this search has changed
-			// nothing yet, so the searching arm about to render must not say it
-			// again into the panel's atomic status region (4.1.3). The one record
+			// told — by the panel's idle arm when the move landed on an idle tile,
+			// by the settled arm otherwise — and this search has changed nothing
+			// yet, so the searching arm about to render must not say it again into
+			// the panel's atomic status region (4.1.3). The one record
 			// the searching arm does speak for is a move that landed on a search
 			// still in flight, and no lookup can start on that tile: the guard above
 			// returns on a searching tile rather than restarting it, which is also
@@ -1119,24 +1119,17 @@
 	}
 
 	/** The Parent radio moved, or the parent tile was removed and the radio
-	 * landed on another one. The panel under it is already mounted and its status
-	 * region carries the sentence for every settled result, and the searching arm
-	 * carries it too, so announcing here on either would say the same thing twice
-	 * — the region is atomic, so the panel re-speaks whole when the sentence
-	 * appears in it. Only a lookup that never ran carries no sentence of its own,
-	 * so the announcement is this move's telling; the panel's idle arm draws the
-	 * same line for sighted operators, aria-hidden so the region does not repeat
-	 * it (4.1.3).
+	 * landed on another one. Says nothing: the panel under it is already mounted
+	 * and its status region carries the sentence in every arm — the settled ones,
+	 * the searching one, and the idle one, which draws what the move emptied — so
+	 * the region is what tells the operator, once, and an announcement here would
+	 * be the same thing twice (4.1.3).
 	 *
-	 * Read straight off the tile: both callers run in the new-set mode only — the
-	 * radio renders under `{#if groupMode === 'new'}`, and the removal path checks
-	 * the mode before calling — so there is no other mode to answer for. */
+	 * Both callers run in the new-set mode only — the radio renders under
+	 * `{#if groupMode === 'new'}`, and the removal path checks the mode before
+	 * calling — so there is no other mode to answer for. */
 	function pickParent(index: number) {
-		const { cleared } = onParentChanged(index);
-		const kind = tiles[index]?.lookup.kind ?? 'idle';
-		if (kind !== 'idle') return;
-		const line = clearedLine(cleared, {});
-		if (line) announcer.say(line);
+		onParentChanged(index);
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {
@@ -1208,6 +1201,10 @@
 	function closeSharedLookup(options: { focus?: boolean } = {}) {
 		const tile = parentTile;
 		if (tile) tile.lookup = { kind: 'idle' };
+		// And the record of what that lookup emptied: the idle arm draws it, so a
+		// record left standing kept the panel open as a bordered card holding the
+		// sentence after the operator asked for it to go (SONA-220).
+		sharedCleared = {};
 		if (options.focus !== false) focusLookupOrigin();
 	}
 

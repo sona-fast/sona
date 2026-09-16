@@ -44,6 +44,9 @@ function endOfString(source: string, i: number): number {
 // so a delimiter written inside one never moves the depth. Throws when the
 // closer never arrives, so a scan that walks off the end says so instead of
 // returning a slice that stops wherever the source did.
+// Regex literals are NOT tracked: a `/[{}]/` inside a scanned body would move
+// the depth and a `/won't/` would open a string that never closes. No function
+// this file slices has one.
 function matchDelim(
 	source: string,
 	from: number,
@@ -73,11 +76,7 @@ function matchDelim(
 		else if (source[i] === close && --depth === 0) return i;
 		i++;
 	}
-	throw new Error(
-		depth === 0
-			? `no ${open} for ${what} in source`
-			: `no closing ${close} for ${what} in source (depth ${depth} at the end of the file)`
-	);
+	throw new Error(`no closing ${close} for ${what} in source (depth ${depth} at the end)`);
 }
 
 // A function's body, sliced from its declaration by matching braces. A
@@ -387,17 +386,21 @@ describe('the panel', () => {
 	// fields, and the idle arm drew nothing: the announcement was the whole
 	// telling, so a sighted operator watched the fields go blank with no reason
 	// anywhere on screen (4.1.3).
-	it('draws the cleared sentence in the idle arm too, without re-speaking it', () => {
+	it('draws the cleared sentence in the idle arm too, spoken by the panel', () => {
 		expect(PANEL).toMatch(
-			/\{:else if movedEmptied\}(?:\s|<!--(?:[^-]|-(?!->))*-->)*<p class="lookup-status lookup-emptied" aria-hidden="true">\{movedEmptied\}<\/p>/
+			/\{:else if movedEmptied\}(?:\s|<!--(?:[^-]|-(?!->))*-->)*<p class="lookup-status lookup-emptied">\{movedEmptied\}<\/p>/
 		);
-		// The same sentence the searching arm draws and pickParent announces, off
-		// the one chooser: a second source could name a different field.
+		// The same sentence the searching arm draws, off the one chooser: a second
+		// source could name a different field.
 		expect(PANEL).toMatch(/const movedEmptied = \$derived\(clearedLine\(cleared, edited\)\);/);
-		// aria-hidden is the whole reason the announcement can stay: the paragraph
-		// lands inside the panel's own status region, which would otherwise say it
-		// a second time.
+		// And NOT aria-hidden: the paragraph lands inside the panel's own status
+		// region, which speaks it the way it speaks every other arm, so the move
+		// needs no announcement of its own and the sentence stays in the
+		// accessibility tree rather than being spoken and gone.
+		expect(PANEL).not.toMatch(/class="lookup-status lookup-emptied" aria-hidden/);
 		expect(PANEL).toMatch(/<div class="lookup-body" role="status">/);
+		// Which is why the radio path says nothing at all.
+		expect(fnBody(UPLOAD, 'pickParent')).not.toContain('announcer.say(');
 	});
 
 	// "Fu", "We", "e6", "Tw" read as truncated text next to the site's own name.
@@ -720,15 +723,23 @@ describe('the "From lookup" tag', () => {
 			// lines unnoticed (SONA-220).
 			const clearedRecord = source === UPLOAD ? 'sharedCleared' : 'lookupCleared';
 			// Every site that resets it beside what a result wrote, which is every
-			// one but startLookup's own drop: that one clears a sentence the page
-			// has already spoken, touches nothing the result filled, and must NOT
-			// lower the latches — they carry text the operator typed before the
-			// search, which the result still has to be told about. Cut out by
-			// slicing that function away rather than by a lookbehind on the line:
+			// one but startLookup's own drop and Close's: those two clear a
+			// sentence the page has already spoken, touch nothing the result
+			// filled, and must NOT lower the latches — they carry text the operator
+			// typed before the search, which the result still has to be told about,
+			// and Close leaves every field exactly as it found it. Cut out by
+			// slicing those functions away rather than by a lookbehind on the line:
 			// the drop is a bare statement, so nothing on the line itself tells it
 			// from the resets that do count. The edit page's two reset sites both
 			// sit outside its startLookup, so the slice costs that file nothing.
-			const counted = source.replace(fnBody(source, 'startLookup'), '');
+			// The edit page's addAsVariant goes idle on its own and drops the record
+			// the way Close does, leaving the fields as it found them, so it is
+			// sliced away for the same reason.
+			const closer = source === UPLOAD ? 'closeSharedLookup' : 'closeLookup';
+			const counted = source
+				.replace(fnBody(source, 'startLookup'), '')
+				.replace(fnBody(source, closer), '')
+				.replace(fnBody(source, 'addAsVariant'), '');
 			const resets = counted.match(new RegExp(`${clearedRecord} = \\{\\};`, 'g')) ?? [];
 			const withLatches =
 				counted.match(
@@ -1214,8 +1225,8 @@ describe('what the lookup copy names', () => {
 		// And nothing else writes sharedCleared. The catch that synthesises a
 		// failure used to assign the held record straight, which skipped the check
 		// above and had the panel report a URL the operator had typed back in.
-		// Five assignments in the file and no more: the declaration, two blankings
-		// that hand over no record — startLookup's and the reset's — and
+		// Six assignments in the file and no more: the declaration, three blankings
+		// that hand over no record — startLookup's, the reset's and Close's — and
 		// applyShared's two. Everything that DESCRIBES a clearing goes through
 		// applyShared.
 		expect(UPLOAD.match(/sharedCleared = [^;]*/g) ?? []).toEqual([
@@ -1223,7 +1234,8 @@ describe('what the lookup copy names', () => {
 			'sharedCleared = {}',
 			'sharedCleared = {}',
 			'sharedCleared = { ...emptied }',
-			'sharedCleared = cleared'
+			'sharedCleared = cleared',
+			'sharedCleared = {}'
 		]);
 		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(failed, emptied\);/);
 		// The record dies with the request it was waiting for, in BOTH arms of
@@ -1236,12 +1248,13 @@ describe('what the lookup copy names', () => {
 		const startBody = fnBody(UPLOAD, 'startLookup');
 		// And a lookup started on the parent tile drops the move's record on the
 		// way in, where nothing else would, whatever that tile's last lookup came
-		// to. Whatever the record describes has been told already — by pickParent
-		// on an idle tile, by the settled arm on any other — and this search has
-		// changed nothing yet, so the searching arm about to render must not put
-		// the same sentence in the panel's atomic status region (4.1.3). Gated on
-		// the tile being idle, a plain repeat lookup after a no-match carried the
-		// no-match's record into the searching arm and said it a second time.
+		// to. Whatever the record describes has been told already — by the panel's
+		// idle arm on an idle tile, by the settled arm on any other — and this
+		// search has changed nothing yet, so the searching arm about to render must
+		// not put the same sentence in the panel's atomic status region (4.1.3).
+		// Gated on the tile being idle, a plain repeat lookup after a no-match
+		// carried the no-match's record into the searching arm and said it a
+		// second time.
 		expect(startBody).toMatch(
 			/if \(isParent\(key\)\) \{[\s\S]{0,900}?\n\t\t\tsharedCleared = \{\};\s+resetSharedResult\(\);\s+\}/
 		);
@@ -1276,18 +1289,18 @@ describe('what the lookup copy names', () => {
 		// The move itself says nothing: one tick holds one line, so the caller
 		// picks it. Each of the three callers says at most one.
 		expect(UPLOAD).not.toMatch(/function onParentChanged\([\s\S]{0,800}?announcer\.say/);
-		for (const name of ['pickParent', 'returnToNewSet']) {
-			const body = fnBody(UPLOAD, name);
-			// One chain, so however many sentences it can choose between, a tick
-			// reaches exactly one of them: two say() calls in a tick leave the region
-			// holding the second, which is how the clearing went unspoken. pickParent
-			// ends on one line held in a variable, returnToNewSet on an else-if chain
-			// that ends the same way — either shape says at most one thing.
-			expect(body).toMatch(/announcer\.say/);
-			expect(body).toMatch(
-				/const line = clearedLine\(cleared, \{\}\);\s+if \(line\) announcer\.say\(line\);/
-			);
-		}
+		// returnToNewSet is the one caller that speaks: it runs on the flip back
+		// into the new-set mode, where the panel was unmounted a moment ago and has
+		// nothing to say for the fields it left behind. One chain, so however many
+		// sentences it can choose between, a tick reaches exactly one of them: two
+		// say() calls in a tick leave the region holding the second, which is how
+		// the clearing went unspoken. The else-if chain ends on one line held in a
+		// variable.
+		const returnBody = fnBody(UPLOAD, 'returnToNewSet');
+		expect(returnBody).toMatch(/announcer\.say/);
+		expect(returnBody).toMatch(
+			/const line = clearedLine\(cleared, \{\}\);\s+if \(line\) announcer\.say\(line\);/
+		);
 		// One chain for what a move emptied, in the shared module rather than on
 		// the page: the panel's searching arm renders the same three sentences
 		// while the result is still out, and a copy on the page could disagree
@@ -1309,16 +1322,12 @@ describe('what the lookup copy names', () => {
 		expect(PANEL).toMatch(
 			/const statusText = \$derived\(\s+statusSentence\(statusKind, prefill\?\.site \?\? null, \{ title: clash\?\.title \?\? '', editMode \}\)\s+\);/
 		);
-		// And the radio path stays quiet wherever the panel SPEAKS the sentence,
-		// which is every arm but idle: the searching arm renders it too, and the
-		// region is atomic, so a say() alongside it would be the second telling.
-		// The idle arm draws it aria-hidden, which the region does not read, so
-		// the announcement there is still the only telling a screen reader gets.
+		// And the radio path stays quiet: the panel SPEAKS the sentence in every
+		// arm — the settled ones, the searching one, and the idle one — and the
+		// region is atomic, so a say() alongside any of them would be the second
+		// telling.
 		const pickBody = fnBody(UPLOAD, 'pickParent');
-		expect(pickBody).toMatch(/if \(kind !== 'idle'\) return;/);
-		// Read straight off the tile: both callers run in the new-set mode only,
-		// so a mode test here had no second answer to give.
-		expect(pickBody).toContain("const kind = tiles[index]?.lookup.kind ?? 'idle';");
+		expect(pickBody).not.toContain('announcer.say(');
 		// The radio is the one caller that could reach another mode, and it is
 		// rendered inside the new-set branch.
 		expect(UPLOAD).toMatch(
@@ -1496,13 +1505,30 @@ describe('focus after the panel goes away', () => {
 		expect(UPLOAD).toMatch(/function focusLookupOrigin\(\)/);
 		expect(UPLOAD).toMatch(/bind:this=\{lookupPill\}/);
 		expect(UPLOAD).toMatch(/bind:this=\{tileLookupButtons\[tile\.key\]\}/);
-		expect(UPLOAD).toMatch(/function closeSharedLookup[\s\S]{0,300}?focusLookupOrigin\(\)/);
+		expect(UPLOAD).toMatch(/function closeSharedLookup[\s\S]{0,600}?focusLookupOrigin\(\)/);
 		// The pill renders above one file only, so in a group it is null: without a
 		// third link the chain would focus nothing if the parent's button ever went
 		// away. The select is where moveFocusOffTileButton ends up too.
 		expect(UPLOAD).toMatch(/\(button \?\? lookupPill \?\? artistSelect\)\?\.focus\(\);/);
-		expect(EDIT).toMatch(/function closeLookup\(\)[\s\S]{0,200}?lookupPill\?\.focus\(\)/);
+		expect(EDIT).toMatch(/function closeLookup\(\)[\s\S]{0,300}?lookupPill\?\.focus\(\)/);
 		expect(EDIT).toMatch(/onclose=\{closeLookup\}/);
+	});
+
+	// Close puts the lookup back to idle, and the idle arm draws whatever the
+	// move or the result emptied. The record left standing, the panel the
+	// operator just closed stayed on screen as a bordered card holding that
+	// sentence (SONA-220).
+	it('drops the cleared record when the panel is closed', () => {
+		expect(fnBody(UPLOAD, 'closeSharedLookup')).toContain('sharedCleared = {};');
+		expect(fnBody(EDIT, 'closeLookup')).toContain('lookupCleared = {};');
+		// The edit page's "Add as a variant" goes idle on its own rather than
+		// through closeLookup, so it drops the record itself; the upload page's
+		// goes through closeSharedLookup.
+		expect(fnBody(EDIT, 'addAsVariant')).toContain('lookupCleared = {};');
+		expect(fnBody(UPLOAD, 'addAsVariant')).toContain('closeSharedLookup(');
+		// Which is what collapses the panel: the idle class is off while a cleared
+		// sentence stands.
+		expect(PANEL).toMatch(/class:idle=\{lookup\.kind === 'idle' && !movedEmptied\}/);
 	});
 
 	it('lands on the select that "Add as a variant" just populated', () => {

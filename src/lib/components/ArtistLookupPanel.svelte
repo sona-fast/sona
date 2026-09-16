@@ -491,13 +491,14 @@
 			<!-- A parent move onto a tile that was never looked up empties what the
 			     last lookup filled, and the idle arm drew nothing at all: the two
 			     fields went blank with only the announcement saying why, so a
-			     sighted operator was told nothing (4.1.3). The searching arm's
-			     sentence and the searching arm's class, off the same chooser, so
-			     the two states name the fields the same way.
-			     aria-hidden because this paragraph lands inside the panel's own
-			     status region: pickParent announces the move, and without it the
-			     region would speak the same sentence a second time. -->
-			<p class="lookup-status lookup-emptied" aria-hidden="true">{movedEmptied}</p>
+			     sighted operator was told nothing (4.1.3). This arm draws the
+			     searching arm's sentence and its class, both off the same chooser,
+			     so the two states name the fields the same way.
+			     Not aria-hidden: the paragraph lands inside the panel's own status
+			     region, which speaks it the way it speaks the searching arm, so the
+			     move needs no announcement of its own and the sentence stays in the
+			     accessibility tree instead of being spoken and gone. -->
+			<p class="lookup-status lookup-emptied">{movedEmptied}</p>
 		{/if}
 		</div>
 
