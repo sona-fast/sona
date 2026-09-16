@@ -631,7 +631,7 @@
 		font-size: 12px; padding: 3px 10px; border-radius: var(--radius-pill);
 		border: 1px dashed var(--input); background: none; color: var(--primary-text); cursor: pointer;
 	}
-	.new-artist-btn:hover { border-color: var(--primary); }
+	.new-artist-btn:hover { border-color: var(--primary-text); }
 	.upload-zone {
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 		padding: 24px; border: 2px dashed var(--border); border-radius: var(--radius-s);

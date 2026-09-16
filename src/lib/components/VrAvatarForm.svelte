@@ -1122,7 +1122,7 @@
 		font-size: 12px; padding: 4px 12px; border-radius: var(--radius-pill);
 		border: 1px dashed var(--input); background: none; color: var(--primary-text); cursor: pointer;
 	}
-	.add-credit-btn:hover { border-color: var(--primary); }
+	.add-credit-btn:hover { border-color: var(--primary-text); }
 
 	.upload-zone {
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;

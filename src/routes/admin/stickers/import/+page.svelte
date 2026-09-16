@@ -700,7 +700,7 @@
 		border-radius: var(--radius-pill); border: 1px dashed var(--input); background: none;
 		color: var(--primary-text); cursor: pointer;
 	}
-	.ctx-new-artist:hover { border-color: var(--primary); }
+	.ctx-new-artist:hover { border-color: var(--primary-text); }
 	.warn-text { color: #f5a623 !important; }
 	.card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.toggle-row { display: flex; gap: 12px; }

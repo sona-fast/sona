@@ -175,9 +175,11 @@ describe('terracotta sets Japanese in IBM Plex Sans JP (SONA-181)', () => {
 	// rather than as a bug. Check the declared ranges against real text.
 	const SAMPLES = 'あいうえおカタカナ漢字日本語！？、。「」';
 
+	// Each slice is bound to its own range: a kana file declared over the kanji
+	// block would load for every kanji and cover none of them.
 	for (const face of jp) {
-		it(`${face.src} declares a unicode-range`, () => {
-			expect(face.unicodeRange).toBeTruthy();
+		it(`${face.src} declares the range its name promises`, () => {
+			expect(face.unicodeRange).toBe(face.src.includes('kanji') ? SUBSET_JP_KANJI : SUBSET_JP_KANA);
 		});
 	}
 

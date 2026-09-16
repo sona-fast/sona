@@ -568,7 +568,7 @@
 			justify-content: center;
 			padding: 14px;
 			margin-top: 8px;
-			border: 1px dashed var(--border);
+			border: 1px dashed var(--input);
 			border-radius: var(--radius-s);
 			background: none;
 			color: var(--primary-text);

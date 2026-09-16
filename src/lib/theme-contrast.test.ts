@@ -1803,17 +1803,28 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 
 	// The dashed "add" buttons are controls too: the dashed edge is the only
 	// thing that marks them as pressable, so it draws with --input like a field.
-	const dashedRules: Array<{ file: string; selector: string }> = [
-		{ file: './components/StickerPackForm.svelte', selector: '.new-artist-btn' },
-		{ file: './components/VrAvatarForm.svelte', selector: '.add-credit-btn' },
-		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.ctx-new-artist' },
-		{ file: '../routes/admin/tags/+page.svelte', selector: '.mobile-add-row' }
+	const dashedRules: Array<{ file: string; selector: string; hover?: boolean }> = [
+		{ file: './components/StickerPackForm.svelte', selector: '.new-artist-btn', hover: true },
+		{ file: './components/VrAvatarForm.svelte', selector: '.add-credit-btn', hover: true },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.ctx-new-artist', hover: true },
+		{ file: '../routes/admin/tags/+page.svelte', selector: '.mobile-add-row' },
+		{ file: '../routes/admin/artists/+page.svelte', selector: '.mobile-add-row' },
+		{ file: '../routes/admin/characters/+page.svelte', selector: '.mobile-add-row' },
+		{ file: '../routes/admin/collections/+page.svelte', selector: '.mobile-add-row' },
+		{ file: '../routes/admin/conventions/+page.svelte', selector: '.mobile-add-row' }
 	];
 
-	for (const { file, selector } of dashedRules) {
+	for (const { file, selector, hover } of dashedRules) {
 		it(`${file} ${selector} draws its dashed border with --input`, () => {
 			expect(ruleBody(file, selector)).toMatch(/border:\s*1px dashed var\(--input\)/);
 		});
+		// The hover used to jump to raw --primary, 2.46:1 on Ember light; the text
+		// shade is at least 4.57:1 against --card on every theme and mode.
+		if (hover) {
+			it(`${file} ${selector}:hover keeps a passing border`, () => {
+				expect(ruleBody(file, `${selector}:hover`)).toMatch(/border-color:\s*var\(--primary-text\)/);
+			});
+		}
 	}
 
 	// The selected platform chip is the same kind of boundary, drawn with
@@ -1843,8 +1854,11 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 				Number(pct),
 				themeHex(id, mode, TOKEN_BY_CSS_NAME.get(over)!)
 			);
-			const edge = contrast(themeHex(id, mode, TOKEN_BY_CSS_NAME.get(chipEdge!)!), ground);
-			expect(edge, `${name}: --${chipEdge} edge on ${ground} measures ${edge.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+			// The edge is what separates the chip from the page, so it is measured
+			// against the page, not against the tint it encloses.
+			const page = themeHex(id, mode, 'background');
+			const edge = contrast(themeHex(id, mode, TOKEN_BY_CSS_NAME.get(chipEdge!)!), page);
+			expect(edge, `${name}: --${chipEdge} edge on ${page} measures ${edge.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
 			const label = contrast(themeHex(id, mode, TOKEN_BY_CSS_NAME.get(chipInk!)!), ground);
 			expect(label, `${name}: --${chipInk} label on ${ground} measures ${label.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
 		});
