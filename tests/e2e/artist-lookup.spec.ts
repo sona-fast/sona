@@ -665,8 +665,13 @@ test.describe('with a key saved', () => {
 		// self-hosted JetBrains Mono to load before reading a box (SONA-181).
 		await page.evaluate(() => document.fonts.ready);
 		// And say so if it did not: fonts.ready resolves on a failed fetch too, and
-		// a missing face would otherwise fail below as an unexplained wrap.
-		expect(await page.evaluate(() => document.fonts.check('11px "JetBrains Mono"'))).toBe(true);
+		// a missing face would otherwise fail below as an unexplained wrap. load()
+		// returns the faces that matched, so a declaration that went missing
+		// returns none; check() would say true for a fallback.
+		const faces = await page.evaluate(async () =>
+			(await document.fonts.load('11px "JetBrains Mono"')).map((face) => face.status)
+		);
+		expect(faces, 'no loaded JetBrains Mono face matched the pills').toContain('loaded');
 		// Compared by centre, not by top: the row centres its items, and the button
 		// is 36px tall beside an 18px label, so equal tops would be the wrong test
 		// for "same row" — they were never equal, even before the button wrapped.
