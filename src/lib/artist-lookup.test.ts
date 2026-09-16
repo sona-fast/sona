@@ -3,6 +3,7 @@ import {
 	LOOKUP_MAX_BYTES,
 	bandLabel,
 	candidateArtists,
+	clearedLine,
 	isCrossSiteAmbiguity,
 	matchForArtist,
 	matchHandle,
@@ -932,6 +933,45 @@ describe('statusLineKind', () => {
 	// that off its own list of the same three kinds, which could drift from the
 	// mapping's — and a kind in one list but not the other renders a sentence
 	// with an empty site in it, or no sentence at all.
+	// The sentence for what a move emptied, said with no reason attached. The
+	// panel's searching arm renders it while the result that would explain the
+	// blank fields is still out, and the upload page announces the same three on
+	// a parent move — so a lookup that is still running is never blamed for the
+	// clearing, and the two surfaces name the same fields.
+	it('names what a move emptied without blaming a result', () => {
+		expect(clearedLine({ sourcePostUrl: true, commissionedAt: true })).toBe(
+			m.admin_lookup_announce_shared_cleared()
+		);
+		expect(clearedLine({ sourcePostUrl: true })).toBe(
+			m.admin_lookup_announce_shared_cleared_source()
+		);
+		expect(clearedLine({ commissionedAt: true })).toBe(
+			m.admin_lookup_announce_shared_cleared_date()
+		);
+		// Nothing emptied, nothing said: the arm renders no paragraph at all.
+		expect(clearedLine({})).toBe(null);
+		expect(clearedLine({ sourcePostUrl: false, commissionedAt: false })).toBe(null);
+	});
+
+	// The operator is free to type into a field the move emptied while the
+	// search is still out. Their own text is not something Sona cleared, so the
+	// sentence drops that field the way the status line does — and with both
+	// fields theirs again it says nothing.
+	it('drops a field the operator has typed into since', () => {
+		expect(
+			clearedLine({ sourcePostUrl: true, commissionedAt: true }, { sourcePostUrl: true })
+		).toBe(m.admin_lookup_announce_shared_cleared_date());
+		expect(
+			clearedLine({ sourcePostUrl: true, commissionedAt: true }, { commissionedAt: true })
+		).toBe(m.admin_lookup_announce_shared_cleared_source());
+		expect(
+			clearedLine(
+				{ sourcePostUrl: true, commissionedAt: true },
+				{ sourcePostUrl: true, commissionedAt: true }
+			)
+		).toBe(null);
+	});
+
 	it('answers which kinds name no post', () => {
 		expect(namesNoSite('both_emptied')).toBe(true);
 		expect(namesNoSite('url_emptied')).toBe(true);

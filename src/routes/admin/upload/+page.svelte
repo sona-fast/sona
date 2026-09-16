@@ -10,6 +10,7 @@
 	import { Announcer } from '$lib/live-announcer.svelte';
 	import {
 		LOOKUP_RESULT_THREW,
+		clearedLine,
 		matchHandle,
 		pickPrefillMatch,
 		prefillForResult,
@@ -534,11 +535,9 @@
 	// from the text, deleting what the operator typed into a field this result
 	// emptied puts "Sona cleared the source post URL" back over a field THEY just
 	// emptied, and the panel re-attributes their own deletion to Sona (SONA-220).
-	// Each latch lives exactly as long as the cleared record it speaks for. It
-	// rises on input to either field — even a character typed and deleted — and
-	// applyShared recomputes it against the fields as each result lands, so a
-	// result that refills a field lowers it again and one the operator's text
-	// survives keeps it up. resetSharedPrefill lowers both on a parent move.
+	// Each latch lives exactly as long as the cleared record it speaks for: it
+	// rises on input to either field, and applyShared recomputes it against the
+	// fields as each result lands. See the recompute there for why.
 	const sharedEdited = $derived({
 		sourcePostUrl: !sourceTagged && (sharedFilled.sourcePostUrl !== undefined || sourceTypedIn),
 		commissionedAt: !dateTagged && (sharedFilled.commissionedAt !== undefined || dateTypedIn)
@@ -916,9 +915,10 @@
 		// the value is kept until here rather than blanked when the search started.
 		const ownSource = sourceTagged ? '' : sourcePostUrl;
 		const ownDate = dateTagged ? '' : commissionedAt;
-		// One answer to "is the operator's own URL in that field", for the seed
-		// below and for the clash sentence's snapshot: computed twice, the two
-		// could disagree about whose text the field holds.
+		// One answer to "is the operator's own URL in that field", read by the
+		// latch recompute just below and by `sharedUrlHeld`, the clash sentence's
+		// snapshot: computed twice, the two could disagree about whose text the
+		// field holds.
 		const sourceHeld = ownSource.trim() !== '';
 		// Each latch is recomputed here, against THIS result, so it describes the
 		// operator's text relative to the record it speaks for. Raised once and
@@ -928,8 +928,12 @@
 		// the lookup's. A third result then blanks the field and the stale latch
 		// drops its own cleared flag, so the panel says nothing about a field the
 		// operator watched go blank, or claims it was left as it was (SONA-220).
-		// Lowered only here and in resetSharedPrefill, never in resetSharedResult:
-		// the previous record's protection has to survive the round trip.
+		// Read off the fields as they stand when the result LANDS, so text the
+		// operator typed and deleted during the round trip is not remembered: a
+		// parent move onto a searching tile, a character typed into the emptied
+		// URL and deleted again, and then a failure leaves the latch down and the
+		// panel says Sona cleared the URL. That is the accepted trade — the move
+		// did clear it, and the sentence matches the empty field on screen.
 		sourceTypedIn = sourceHeld;
 		dateTypedIn = ownDate.trim() !== '';
 		// What a reset the caller ran took out of the fields, kept raw. A field
@@ -938,8 +942,9 @@
 		// the sentences that speak about the screen. Dropped here instead, the
 		// raw fact that the move emptied the field would go with it, and a date
 		// the move emptied and the operator retyped would read as "left the
-		// commissioned date as it was" (SONA-220).
-		const seed: LookupCleared = { ...emptied };
+		// commissioned date as it was" (SONA-220). So `emptied` is spread as it
+		// came in at both sites below, never filtered.
+		//
 		// A failure, or a search cancelled back to idle, leaves both fields exactly
 		// as they are: there is no new post to describe them, and what the last
 		// lookup wrote is still the best thing the page knows.
@@ -953,7 +958,7 @@
 		// Nothing lands, so whatever the caller's reset took out is the whole of
 		// what this move did to the fields.
 		if (next.kind !== 'results' && next.kind !== 'no_match') {
-			sharedCleared = { ...seed };
+			sharedCleared = { ...emptied };
 			return wrote;
 		}
 		sharedUrlHeld = sourceHeld;
@@ -965,7 +970,7 @@
 		// Seeded with what the caller's reset emptied and the operator has not put
 		// back, and unset again for a field this result writes back: a move that
 		// empties both and refills the URL has cleared the date and nothing else.
-		const cleared: LookupCleared = { ...seed };
+		const cleared: LookupCleared = { ...emptied };
 		if (fields.sourcePostUrl !== undefined) {
 			// Assigned plainly. A second lookup that lands on the SAME post writes
 			// the same string, and $state only notifies on a value that differs, so
@@ -1056,17 +1061,6 @@
 			const line = clearedLine(cleared);
 			if (line) announcer.say(line);
 		}
-	}
-
-	/** The one sentence for what a parent move emptied, or null when it emptied
-	 * nothing. Both callers of onParentChanged end on it, and a second copy of
-	 * the chain could disagree with this one about which field to name. */
-	function clearedLine(cleared: LookupCleared): string | null {
-		if (cleared.sourcePostUrl && cleared.commissionedAt)
-			return m.admin_lookup_announce_shared_cleared();
-		if (cleared.sourcePostUrl) return m.admin_lookup_announce_shared_cleared_source();
-		if (cleared.commissionedAt) return m.admin_lookup_announce_shared_cleared_date();
-		return null;
 	}
 
 	/** The parent moved: the shared fields describe whatever the parent is now.

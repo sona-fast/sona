@@ -12,6 +12,7 @@
 	import {
 		bandLabel,
 		candidateArtists,
+		clearedLine,
 		isCrossSiteAmbiguity,
 		matchForArtist,
 		matchHandle,
@@ -141,6 +142,12 @@
 	// disagree with that one about which kinds get rendered in their own
 	// paragraph, and the sentence would land in the arm that has no site to name.
 	const emptiedOnly = $derived(namesNoSite(statusKind));
+	// The same fields, said without a reason, for the searching arm: a move onto
+	// a tile whose lookup is still out empties them right then, and every
+	// status-line sentence blames a lookup that has not answered yet ("because
+	// this lookup filled neither one"). Off the chooser the upload page's own
+	// announcement of that move reads, so the two name the same fields.
+	const movedEmptied = $derived(clearedLine(cleared, edited));
 	// Every sentence that reports a field going blank, and not only the three
 	// that report nothing else — the single answer to "does this line describe a
 	// change the operator's fields just made".
@@ -249,6 +256,17 @@
 					<Loader2 size={14} class="spin" aria-hidden="true" />
 					{m.admin_lookup_searching_body()}
 				</p>
+				<!-- A parent move onto a tile whose own lookup is still out empties
+				     what the last parent's lookup filled, and this arm used to say
+				     nothing about it: the two fields went blank while the panel talked
+				     only about the search, so a sighted operator saw nothing until the
+				     result landed. The reasonless sentence, not the status line's:
+				     nothing is settled about a lookup still running. Under the progress
+				     line, the way the no-match and failed arms put it under their
+				     lead. -->
+				{#if movedEmptied}
+					<p class="lookup-status lookup-emptied">{movedEmptied}</p>
+				{/if}
 			{:else if lookup.kind === 'no_match'}
 				<div class="lookup-eyebrow">{m.admin_lookup_no_match_eyebrow()}</div>
 				<p class="lookup-lead">{m.admin_lookup_no_match_body()}</p>
@@ -699,10 +717,12 @@
 		color: var(--foreground);
 	}
 	/* On the no-match and failed arms it lands under the lead that explains the
-	   result, a point of size apart and margin-collapsed to the same 10px every
-	   status line sits at — two subjects reading as one paragraph. Only there:
-	   under a result it follows the outcome lines it belongs with. */
-	.lookup-lead + .lookup-emptied {
+	   result, and on the searching arm under the progress line, a point of size
+	   apart and margin-collapsed to the same 10px every status line sits at —
+	   two subjects reading as one paragraph. Only there: under a result it
+	   follows the outcome lines it belongs with. */
+	.lookup-lead + .lookup-emptied,
+	.searching-line + .lookup-emptied {
 		margin-top: 18px;
 	}
 	/* The searching line carries the spinner, so it lines up with its text. */

@@ -476,6 +476,37 @@ export interface LookupCleared {
 	commissionedAt?: boolean;
 }
 
+/** The cleared record as the SCREEN has it: a field the operator has typed into
+ * since is theirs again, and no sentence may still say Sona cleared it. The one
+ * copy of that drop — `statusLineKind` and `clearedLine` both answer "did Sona
+ * clear this field" and a second copy could answer it differently (SONA-220). */
+function clearedOnScreen(held: LookupCleared, edited: LookupEdited): LookupCleared {
+	return {
+		sourcePostUrl: held.sourcePostUrl === true && edited.sourcePostUrl !== true,
+		commissionedAt: held.commissionedAt === true && edited.commissionedAt !== true
+	};
+}
+
+/**
+ * The one sentence for what a move emptied, or null when it emptied nothing.
+ * No reason is attached to it, which is what makes it the sentence for a moment
+ * when no reason is settled: the upload page announces it on a parent move, and
+ * the panel's searching arm renders it while the result that would explain the
+ * blank fields is still out. The status-line kinds say "because this lookup
+ * filled neither one", which is not yet true of a lookup still running.
+ *
+ * `edited` drops a field the operator has typed into since, the way
+ * `statusLineKind` does — during a search they are free to fill a field the
+ * move emptied, and the sentence must not claim their own text.
+ */
+export function clearedLine(cleared: LookupCleared, edited: LookupEdited = {}): string | null {
+	const now = clearedOnScreen(cleared, edited);
+	if (now.sourcePostUrl && now.commissionedAt) return m.admin_lookup_announce_shared_cleared();
+	if (now.sourcePostUrl) return m.admin_lookup_announce_shared_cleared_source();
+	if (now.commissionedAt) return m.admin_lookup_announce_shared_cleared_date();
+	return null;
+}
+
 /** Which sentence describes what the prefill actually did. */
 export type StatusLineKind =
 	| 'both'
@@ -545,10 +576,7 @@ export function statusLineKind(
 	// the input. So an edited field drops the flag, the same way the filled half
 	// below drops a value the operator has typed over (SONA-220).
 	const held = options.cleared ?? {};
-	const cleared: LookupCleared = {
-		sourcePostUrl: held.sourcePostUrl === true && edited.sourcePostUrl !== true,
-		commissionedAt: held.commissionedAt === true && edited.commissionedAt !== true
-	};
+	const cleared = clearedOnScreen(held, edited);
 	// The raw flags, which the keystroke above does not reach. A field the result
 	// blanked is one it CHANGED, whoever has typed into it since — so the kept
 	// sentences, which exist to avoid claiming a field was "left as it was", are

@@ -1105,18 +1105,25 @@ test.describe('with a key saved', () => {
 	 * latches against each result now; the edit page reaches the same place
 	 * through resetLookupPrefill, which runs at every lookup start (SONA-220).
 	 *
-	 * The date is kept out of it — every stub here has no posted date — so each
-	 * sentence is about the URL alone. */
-	async function aRefilledUrlGoesBackToBeingSonas(page: Page) {
+	 * Both endings run the same four lookups, so the sequence lives here once and
+	 * the caller supplies the refill body, the result that closes it, and what
+	 * the panel has to say about the URL afterwards. `absent` is the sentence
+	 * that ending must NOT produce. */
+	async function aRefilledUrlIsStillSonas(
+		page: Page,
+		opts: { refill: unknown; closing: unknown; says: string; absent?: string }
+	) {
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue(X_POST);
 		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
 
-		// A no-match takes it away again, and says so.
+		// A no-match takes it away again, and says so. Only the URL half of that
+		// sentence is pinned: the clash ending's stubs carry a date, so its
+		// no-match names the date here as well.
 		await stubLookup(page, { enabled: true, matches: [] });
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue('');
-		await expect(panel(page)).toContainText('cleared the source post URL the last lookup filled');
+		await expect(panel(page)).toContainText('Sona cleared the source post URL');
 
 		// A URL typed and deleted. The field is empty and theirs, which is exactly
 		// the state the latch exists for.
@@ -1125,75 +1132,64 @@ test.describe('with a key saved', () => {
 
 		// A matching lookup puts the URL back and tags it. Nothing in the field is
 		// theirs any more.
-		await stubLookup(page, xMatchBody({ postedAt: null }));
+		await stubLookup(page, opts.refill);
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue(X_POST);
 		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
 
-		// And a second no-match empties it. Under the stale latch the panel said
+		// And the fourth result empties it. Under the stale latch the panel said
 		// nothing at all about a field that had just gone blank.
-		await stubLookup(page, { enabled: true, matches: [] });
+		await stubLookup(page, opts.closing);
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue('');
-		await expect(panel(page)).toContainText(
-			'Sona cleared the source post URL the last lookup filled, because this lookup filled nothing in its place.'
-		);
+		await expect(panel(page)).toContainText(opts.says);
+		if (opts.absent) await expect(panel(page)).not.toContainText(opts.absent);
 	}
+
+	/** The no-match ending: every stub has no posted date, so each sentence is
+	 * about the URL alone. */
+	const goesBackToBeingSonas = {
+		refill: xMatchBody({ postedAt: null }),
+		closing: { enabled: true, matches: [] },
+		says: 'Sona cleared the source post URL the last lookup filled, because this lookup filled nothing in its place.'
+	};
+
+	/** The clash ending, which is the worse half: the stale latch dropped the
+	 * cleared flag, and with a date to report the clash sentence then read "left
+	 * your source post URL as it was" over a field the same result had just
+	 * blanked (SONA-220). The clash fills the date and has nowhere to put its
+	 * URL. */
+	const isNotLeftAsItWasByAClash = {
+		refill: xMatchBody(),
+		closing: { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') },
+		says: 'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Clash Piece.',
+		absent: 'left your source post URL as it was'
+	};
 
 	test('a fourth lookup still says it cleared a URL the operator once typed in', async ({
 		page
 	}) => {
 		await stubLookup(page, xMatchBody({ postedAt: null }));
 		await oneDoneTile(page);
-		await aRefilledUrlGoesBackToBeingSonas(page);
+		await aRefilledUrlIsStillSonas(page, goesBackToBeingSonas);
 	});
 
 	test('the edit page says so too', async ({ page }) => {
 		await stubLookup(page, xMatchBody({ postedAt: null }));
 		await gotoEditHydrated(page);
-		await aRefilledUrlGoesBackToBeingSonas(page);
+		await aRefilledUrlIsStillSonas(page, goesBackToBeingSonas);
 	});
-
-	/** The same sequence, ending on a clash instead of a no-match. This is the
-	 * worse half: the stale latch dropped the cleared flag, and with a date to
-	 * report the clash sentence then read "left your source post URL as it was"
-	 * over a field the same result had just blanked (SONA-220). */
-	async function aRefilledUrlIsNotLeftAsItWasByAClash(page: Page) {
-		await pill(page).click();
-		await expect(sourceInput(page)).toHaveValue(X_POST);
-
-		await stubLookup(page, { enabled: true, matches: [] });
-		await pill(page).click();
-		await expect(sourceInput(page)).toHaveValue('');
-
-		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
-		await sourceInput(page).fill('');
-
-		await stubLookup(page, xMatchBody());
-		await pill(page).click();
-		await expect(sourceInput(page)).toHaveValue(X_POST);
-		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
-
-		// The clash fills the date and has nowhere to put its URL.
-		await stubLookup(page, { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') });
-		await pill(page).click();
-		await expect(sourceInput(page)).toHaveValue('');
-		await expect(panel(page)).toContainText(
-			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Clash Piece.'
-		);
-		await expect(panel(page)).not.toContainText('left your source post URL as it was');
-	}
 
 	test('and a clash after one does not say it left their URL as it was', async ({ page }) => {
 		await stubLookup(page, xMatchBody());
 		await oneDoneTile(page);
-		await aRefilledUrlIsNotLeftAsItWasByAClash(page);
+		await aRefilledUrlIsStillSonas(page, isNotLeftAsItWasByAClash);
 	});
 
 	test('the edit page does not say it either', async ({ page }) => {
 		await stubLookup(page, xMatchBody());
 		await gotoEditHydrated(page);
-		await aRefilledUrlIsNotLeftAsItWasByAClash(page);
+		await aRefilledUrlIsStillSonas(page, isNotLeftAsItWasByAClash);
 	});
 
 	// The same three cases on the edit page, which ran its full reset at the click
@@ -2615,6 +2611,14 @@ test.describe('with a key saved', () => {
 		const spoken =
 			"Sona cleared the source post URL and commissioned date the last lookup filled.";
 		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+		// And it is on screen while the search is still out. The searching arm
+		// rendered nothing about the fields until the result landed, so a sighted
+		// operator watched both go blank with only the progress line to read. The
+		// sentence is the reasonless one the move announces, word for word: the
+		// status line's version blames a lookup that has not answered yet.
+		await expect(panel(page)).toContainText('Looking up');
+		await expect(panel(page)).toContainText(spoken);
+		await expect(panel(page)).not.toContainText('because this lookup filled neither one');
 
 		release();
 
