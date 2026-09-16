@@ -800,6 +800,71 @@ describe('statusLineKind', () => {
 		);
 	});
 
+	// The record is worked out once, when the fields go blank, and read on every
+	// render after. The operator is free to type into a field it names, and the
+	// sentence for a cleared field invites them to fill in something already
+	// sitting in the input — so the field being theirs drops the flag, the same
+	// way it drops a filled value they have typed over (SONA-220).
+	it('drops a cleared flag off a field the operator has since filled', () => {
+		expect(
+			statusLineKind(
+				{},
+				{ cleared: { sourcePostUrl: true, commissionedAt: true }, edited: { sourcePostUrl: true } }
+			)
+		).toBe('date_emptied');
+		expect(
+			statusLineKind(
+				{},
+				{ cleared: { sourcePostUrl: true, commissionedAt: true }, edited: { commissionedAt: true } }
+			)
+		).toBe('url_emptied');
+		// Both fields typed back in: nothing on screen is Sona's doing any more,
+		// so the panel says nothing about them at all.
+		expect(
+			statusLineKind(
+				{},
+				{
+					cleared: { sourcePostUrl: true, commissionedAt: true },
+					edited: { sourcePostUrl: true, commissionedAt: true }
+				}
+			)
+		).toBe('none');
+		expect(
+			statusLineKind({}, { cleared: { sourcePostUrl: true }, edited: { sourcePostUrl: true } })
+		).toBe('none');
+		expect(
+			statusLineKind({}, { cleared: { commissionedAt: true }, edited: { commissionedAt: true } })
+		).toBe('none');
+		// The mixed sentences drop the same half: a result that filled the date
+		// over a URL the operator has typed back in says only what it filled.
+		expect(
+			statusLineKind(
+				{ commissionedAt: 'd' },
+				{ cleared: { sourcePostUrl: true }, edited: { sourcePostUrl: true } }
+			)
+		).toBe('date_only');
+		// And the clash pair, where the emptied URL is what picks the sentence: the
+		// dated clash goes back to the plain one, off the urlHeld snapshot taken
+		// when the prefill ran, rather than claiming a clearing the operator has
+		// undone.
+		expect(
+			statusLineKind(
+				{ commissionedAt: 'd' },
+				{ clash: true, cleared: { sourcePostUrl: true }, edited: { sourcePostUrl: true } }
+			)
+		).toBe('clash');
+		expect(
+			statusLineKind(
+				{},
+				{ clash: true, cleared: { sourcePostUrl: true }, edited: { sourcePostUrl: true } }
+			)
+		).toBe('none');
+		// Typing into the OTHER field leaves the flag alone.
+		expect(
+			statusLineKind({}, { cleared: { sourcePostUrl: true }, edited: { commissionedAt: true } })
+		).toBe('url_emptied');
+	});
+
 	// The clash sentence says the URL was "left empty", which is true of a field
 	// that WAS empty and a false report of one the result just blanked under the
 	// operator — so a dated clash over an emptied URL gets its own sentence.

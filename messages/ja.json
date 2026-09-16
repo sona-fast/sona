@@ -1642,7 +1642,7 @@
 	"admin_lookup_announce_shared_refilled": "親画像の検索結果から共有項目を入力しました。",
 	"admin_lookup_announce_shared_refilled_source": "親画像の検索結果から投稿元URLを入力しました。",
 	"admin_lookup_announce_shared_refilled_date": "親画像の検索結果から制作依頼日を入力しました。",
-	"admin_lookup_announce_shared_cleared": "前の親画像の検索結果から入力した投稿元URLと制作依頼日は消去しました。",
-	"admin_lookup_announce_shared_cleared_source": "前の親画像の検索結果から入力した投稿元URLは消去しました。",
-	"admin_lookup_announce_shared_cleared_date": "前の親画像の検索結果から入力した制作依頼日は消去しました。"
+	"admin_lookup_announce_shared_cleared": "前回の検索で入力した投稿元URLと制作依頼日は消去しました。",
+	"admin_lookup_announce_shared_cleared_source": "前回の検索で入力した投稿元URLは消去しました。",
+	"admin_lookup_announce_shared_cleared_date": "前回の検索で入力した制作依頼日は消去しました。"
 }

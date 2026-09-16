@@ -517,14 +517,18 @@ describe('the "From lookup" tag', () => {
 		] as const) {
 			// Nothing writes the record but the prefill and the resets.
 			expect(source).not.toMatch(new RegExp(`${record} = \\{ \\.\\.\\.${record}`));
+			// Untagged and holding something counts as edited too, so a field the
+			// operator has filled since it went blank stops being one the panel may
+			// say Sona cleared. The filled half is untouched by that arm: a status
+			// line naming a field needs it filled as well as untagged (SONA-220).
 			expect(source).toMatch(
 				new RegExp(
-					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,300}?sourcePostUrl: ${record}\\.sourcePostUrl !== undefined && !sourceTagged`
+					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,400}?sourcePostUrl:\\s+!sourceTagged && \\(${record}\\.sourcePostUrl !== undefined \\|\\| sourcePostUrl\\.trim\\(\\) !== ''\\)`
 				)
 			);
 			expect(source).toMatch(
 				new RegExp(
-					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,300}?commissionedAt: ${record}\\.commissionedAt !== undefined && !dateTagged`
+					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,400}?commissionedAt:\\s+!dateTagged && \\(${record}\\.commissionedAt !== undefined \\|\\| commissionedAt\\.trim\\(\\) !== ''\\)`
 				)
 			);
 			// And the panel is handed both halves.
@@ -700,7 +704,9 @@ describe('round 11 wiring', () => {
 			// Both pages read the value the operator OWNS rather than the raw field:
 			// a URL their own last prefill wrote is not held by anybody, and that one
 			// is no longer blanked before the result lands.
-			expect(source).toMatch(/(shared|lookup)UrlHeld = ownSource\.trim\(\) !== '';/);
+			// The upload page names that test, because its cleared seed reads it too;
+			// the edit page has the one reader and spells it inline.
+			expect(source).toMatch(/(shared|lookup)UrlHeld = (ownSource\.trim\(\) !== ''|sourceHeld);/);
 		}
 	});
 
@@ -916,14 +922,25 @@ describe('what the lookup copy names', () => {
 			];
 			expect(new Set(sentences).size).toBe(3);
 		}
-		// The en side names the image, not the tile's turn at being parent: "the
-		// last parent's lookup" reads as a person.
+		// Both catalogs say it the way the status lines already do. Naming the
+		// parent image was wrong on the other path this copy covers: a return to
+		// the new-set mode clears what the SAME tile's earlier lookup filled, and
+		// the two languages had drifted into describing different things (SONA-220).
 		for (const sentence of [
 			en.admin_lookup_announce_shared_cleared,
 			en.admin_lookup_announce_shared_cleared_source,
 			en.admin_lookup_announce_shared_cleared_date
 		]) {
-			expect(sentence).toContain("the parent image's last lookup filled");
+			expect(sentence).toContain('the last lookup filled');
+			expect(sentence).not.toContain('parent');
+		}
+		for (const sentence of [
+			ja.admin_lookup_announce_shared_cleared,
+			ja.admin_lookup_announce_shared_cleared_source,
+			ja.admin_lookup_announce_shared_cleared_date
+		]) {
+			expect(sentence).toContain('前回の検索で入力した');
+			expect(sentence).not.toContain('親画像');
 		}
 		// The reset hands back what it emptied, and it goes to applyShared, which
 		// unsets the fields the new parent's result writes back. One writer of
@@ -944,30 +961,51 @@ describe('what the lookup copy names', () => {
 		// panel say Sona cleared a URL that is sitting in the input (SONA-220).
 		// Off the operator's own text, which the result's own fill branches read
 		// too: a second copy of the untagged-and-non-empty test could disagree
-		// with them about whose text is in the field.
+		// with them about whose text is in the field. The URL half is one named
+		// answer, shared with the clash sentence's own snapshot.
 		expect(UPLOAD).toMatch(
-			/function applyShared\([\s\S]{0,1500}?const seed: LookupCleared = \{ \.\.\.emptied \};\s+if \(ownSource\.trim\(\) !== ''\) seed\.sourcePostUrl = false;\s+if \(ownDate\.trim\(\) !== ''\) seed\.commissionedAt = false;/
+			/const sourceHeld = ownSource\.trim\(\) !== '';/
 		);
+		expect(UPLOAD).toMatch(
+			/function applyShared\([\s\S]{0,1700}?const seed: LookupCleared = \{ \.\.\.emptied \};\s+if \(sourceHeld\) seed\.sourcePostUrl = false;\s+if \(ownDate\.trim\(\) !== ''\) seed\.commissionedAt = false;/
+		);
+		expect(UPLOAD).toMatch(/sharedUrlHeld = sourceHeld;/);
 		// And nothing else writes sharedCleared. The catch that synthesises a
 		// failure used to assign the held record straight, which skipped the check
 		// above and had the panel report a URL the operator had typed back in.
-		const applyBody = UPLOAD.match(/function applyShared\([\s\S]*?\n\t\}/)?.[0] ?? '';
-		expect(applyBody).toBeTruthy();
-		// The reset's own blanking is the one write outside it, and it hands over
-		// no record: everything that DESCRIBES a clearing goes through applyShared.
-		expect(UPLOAD.replace(applyBody, '').match(/(?<!let )sharedCleared = [^;]*/g) ?? []).toEqual([
-			'sharedCleared = {}'
+		// Four assignments in the file and no more: the declaration, the reset's
+		// own blanking — which hands over no record — and applyShared's two.
+		// Everything that DESCRIBES a clearing goes through applyShared.
+		expect(UPLOAD.match(/sharedCleared = [^;]*/g) ?? []).toEqual([
+			'sharedCleared = $state<LookupCleared>({})',
+			'sharedCleared = {}',
+			'sharedCleared = { ...seed }',
+			'sharedCleared = cleared'
 		]);
-		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(failed, takePendingCleared\(key\)\);/);
+		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(failed, emptied\);/);
 		// The record dies with the request it was waiting for, in BOTH arms of
-		// that request and whatever the tile's parent status is by then. Dropped
-		// only on the parent branch, a flip into the existing-piece mode mid-
-		// flight left it behind, and the next lookup on that tile consumed it and
-		// re-reported a clearing announced several steps earlier (SONA-220).
+		// that request and whatever the tile's parent status is by then: each arm
+		// takes it once, before the branch that asks whether this tile is the
+		// parent. Taken only on the parent branch, a flip into the existing-piece
+		// mode mid-flight left it behind, and the next lookup on that tile
+		// consumed it and re-reported a clearing announced several steps earlier
+		// (SONA-220).
 		const startBody = UPLOAD.match(/function startLookup\([\s\S]*?\n\t\}/)?.[0] ?? '';
-		expect(
-			startBody.match(/if \(pendingCleared\?\.key === key\) pendingCleared = null;/g) ?? []
-		).toHaveLength(2);
+		expect(startBody.match(/const emptied = takePendingCleared\(key\);/g) ?? []).toHaveLength(2);
+		expect(startBody).toMatch(/const emptied = takePendingCleared\(key\);\s+if \(isParent\(key\)\) applyShared\(next, emptied\);/);
+		// And neither arm drops it by hand any more: takePendingCleared is the one
+		// place the record is read and cleared together.
+		expect(startBody).not.toContain('pendingCleared = null');
+		// Those two arms and the cancel are the whole account of a record's life,
+		// because a tile holds one only while it is SEARCHING and startLookup
+		// returns on a searching tile — it never aborts the request a record is
+		// waiting for and leaves the record behind for the lookup after.
+		expect(startBody).toMatch(
+			/if \(!tile \|\| !tile\.file \|\| tile\.lookup\.kind === 'searching'\) return;\s+lookupAborts\.get\(key\)\?\.abort\(\);/
+		);
+		expect(UPLOAD).toMatch(
+			/pendingCleared = tile\?\.lookup\.kind === 'searching' \? \{ key: tile\.key, emptied \} : null;/
+		);
 		// A cancelled search is never coming back, so the record it was holding
 		// goes with it: left behind, the NEXT lookup on that tile consumes it and
 		// reports fields that have been blank the whole time.
@@ -1023,13 +1061,13 @@ describe('what the lookup copy names', () => {
 			/function takePendingCleared\(key: number\): LookupCleared \{[\s\S]{0,400}?pendingCleared = null;\s+return emptied;/
 		);
 		// The result that lands merges it in.
-		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next, takePendingCleared\(key\)\);/);
+		expect(UPLOAD).toMatch(/const emptied = takePendingCleared\(key\);\s+if \(isParent\(key\)\) applyShared\(next, emptied\);/);
 		// And so does the failure the catch synthesises, which calls nothing else:
 		// without this the record the LAST result left renders over fields that
 		// never changed. Merged the same way a result is, through applyShared, so a
 		// flag the operator's own typing has invalidated is dropped on this path too.
 		expect(UPLOAD).toMatch(
-			/const failed: LookupState = \{ kind: 'failed', reason: 'unavailable', sent \};\s+live\.lookup = failed;[\s\S]{0,800}?if \(isParent\(key\)\) applyShared\(failed, takePendingCleared\(key\)\);/
+			/const failed: LookupState = \{ kind: 'failed', reason: 'unavailable', sent \};\s+live\.lookup = failed;[\s\S]{0,800}?if \(isParent\(key\)\) applyShared\(failed, emptied\);/
 		);
 	});
 
@@ -1265,7 +1303,7 @@ describe('focus after the panel goes away', () => {
 		expect(UPLOAD).toMatch(
 			/function startLookup\(key: number\)[\s\S]{0,1400}?if \(isParent\(key\)\) resetSharedResult\(\);/
 		);
-		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next, takePendingCleared\(key\)\);/);
+		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next, emptied\);/);
 		expect(UPLOAD).not.toMatch(/wasParent/);
 		expect(UPLOAD).toMatch(/groupMode = 'new';\s+returnToNewSet\(\);/);
 		// Only re-derive from a parent that still HAS a result: with the panel
@@ -1345,7 +1383,7 @@ describe('focus after the panel goes away', () => {
 			);
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,4000}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
+					`function ${apply}\\([\\s\\S]{0,4200}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
 				)
 			);
 			expect(source).toMatch(/cleared=\{(shared|lookup)Cleared\}/);
@@ -1805,7 +1843,7 @@ describe('the upload page grid', () => {
 	it('lands a throw while applying a result in the failed state', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/\.catch\(\(\) => \{[\s\S]{0,500}?kind: 'failed', reason: 'unavailable', sent[\s\S]{0,900}?console\.error\(LOOKUP_RESULT_THREW\)/
+				/\.catch\(\(\) => \{[\s\S]{0,800}?kind: 'failed', reason: 'unavailable', sent[\s\S]{0,900}?console\.error\(LOOKUP_RESULT_THREW\)/
 			);
 		}
 		// Either callback runs for every settled kind, including a too_large the

@@ -524,7 +524,17 @@ export function statusLineKind(
 	} = {}
 ): StatusLineKind {
 	const edited = options.edited ?? {};
-	const cleared = options.cleared ?? {};
+	// A cleared flag is worked out once, when the field goes blank, and read on
+	// every render after — including the renders that follow the operator typing
+	// into the field it names. Their own text is not a field Sona cleared, and
+	// the sentence for it invites them to fill in something already sitting in
+	// the input. So an edited field drops the flag, the same way the filled half
+	// below drops a value the operator has typed over (SONA-220).
+	const held = options.cleared ?? {};
+	const cleared: LookupCleared = {
+		sourcePostUrl: held.sourcePostUrl === true && edited.sourcePostUrl !== true,
+		commissionedAt: held.commissionedAt === true && edited.commissionedAt !== true
+	};
 	const urlFilled = filled.sourcePostUrl !== undefined;
 	const dateFilled = filled.commissionedAt !== undefined;
 	const url = urlFilled && !edited.sourcePostUrl;

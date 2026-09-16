@@ -2043,7 +2043,7 @@
 	"admin_lookup_announce_shared_refilled": "Sona filled the shared fields from the parent image's result.",
 	"admin_lookup_announce_shared_refilled_source": "Sona filled the source post URL from the parent image's result.",
 	"admin_lookup_announce_shared_refilled_date": "Sona filled the commissioned date from the parent image's result.",
-	"admin_lookup_announce_shared_cleared": "Sona cleared the source post URL and commissioned date the parent image's last lookup filled.",
-	"admin_lookup_announce_shared_cleared_source": "Sona cleared the source post URL the parent image's last lookup filled.",
-	"admin_lookup_announce_shared_cleared_date": "Sona cleared the commissioned date the parent image's last lookup filled."
+	"admin_lookup_announce_shared_cleared": "Sona cleared the source post URL and commissioned date the last lookup filled.",
+	"admin_lookup_announce_shared_cleared_source": "Sona cleared the source post URL the last lookup filled.",
+	"admin_lookup_announce_shared_cleared_date": "Sona cleared the commissioned date the last lookup filled."
 }

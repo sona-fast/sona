@@ -520,9 +520,16 @@
 	let sharedCleared = $state<LookupCleared>({});
 	// Not $state: nothing renders it. See takePendingCleared.
 	let pendingCleared: { key: number; emptied: LookupCleared } | null = null;
+	// A field the operator has typed into is theirs whether or not a lookup
+	// filled it first: an emptied field they have since filled is not one the
+	// panel may still say Sona cleared (SONA-220). The filled half is unchanged
+	// — a status line that names a field needs it filled as well as untouched,
+	// so the extra arm only ever speaks for the cleared half.
 	const sharedEdited = $derived({
-		sourcePostUrl: sharedFilled.sourcePostUrl !== undefined && !sourceTagged,
-		commissionedAt: sharedFilled.commissionedAt !== undefined && !dateTagged
+		sourcePostUrl:
+			!sourceTagged && (sharedFilled.sourcePostUrl !== undefined || sourcePostUrl.trim() !== ''),
+		commissionedAt:
+			!dateTagged && (sharedFilled.commissionedAt !== undefined || commissionedAt.trim() !== '')
 	});
 	// The artist this result put in the select, so "Use X" can read back as
 	// "Using X" and revert when the operator changes the select by hand.
@@ -616,16 +623,17 @@
 				// applies its result instead of showing it over empty fields. The
 				// group-mode round trip that made this a snapshot is handled where it
 				// happens: the "new" radio re-derives from the parent tile.
-				if (isParent(key)) applyShared(next, takePendingCleared(key));
+				// The record belongs to the request it was waiting for, not to the
+				// tile's parent status, so it is taken before the branch: a flip into
+				// the existing-piece mode between the move and the result does not
+				// make the request any less over. Taken only on the parent branch, it
+				// outlived the flip — the flip back bails when this tile has no
+				// results of its own, and the NEXT lookup on it, parent again,
+				// consumed the record and re-reported a clearing announced several
+				// steps earlier (SONA-220).
+				const emptied = takePendingCleared(key);
+				if (isParent(key)) applyShared(next, emptied);
 				else {
-					// The record belongs to the request it was waiting for, not to the
-					// tile's parent status: this result is that request, and a flip into
-					// the existing-piece mode between the move and the result does not
-					// make it any less over. Dropped only here, it outlived the flip —
-					// the flip back bails when this tile has no results of its own, and
-					// the NEXT lookup on it, parent again, consumed the record and
-					// re-reported a clearing announced several steps earlier (SONA-220).
-					if (pendingCleared?.key === key) pendingCleared = null;
 					// Focus first, then the announcement — the same order the created
 					// artist takes above. A failure that unmounts the button takes the
 					// focus standing on it (2.4.3), and moving focus in the same frame
@@ -661,6 +669,10 @@
 				lookupAborts.delete(key);
 				const live = tiles.find((t) => t.key === key);
 				if (!live) return;
+				// Taken before the branch here too, for the same reason: this request
+				// is over however it ended, so the record it was holding dies with it
+				// rather than waiting for the next lookup on the tile.
+				const emptied = takePendingCleared(key);
 				if (!applied) {
 					const sent = sentAfterApplyThrew(settled);
 					const failed: LookupState = { kind: 'failed', reason: 'unavailable', sent };
@@ -674,7 +686,7 @@
 					// where a flag the operator's own typing has since invalidated gets
 					// dropped — assigned straight, the panel said Sona cleared a URL
 					// that was sitting in the input.
-					if (isParent(key)) applyShared(failed, takePendingCleared(key));
+					if (isParent(key)) applyShared(failed, emptied);
 				}
 				console.error(LOOKUP_RESULT_THREW);
 				// A variant tile's outcome is plain text outside any live region, so
@@ -687,10 +699,6 @@
 				// constant is logged and nothing is said, rather than escaping into
 				// another unhandled rejection.
 				if (!isParent(key)) {
-					// The same drop the .then arm makes, for the same reason: this
-					// request is over however it ended, so the record it was holding
-					// dies with it rather than waiting for the next lookup on the tile.
-					if (pendingCleared?.key === key) pendingCleared = null;
 					try {
 						announcer.say(tileLookupLine(live));
 					} catch {
@@ -894,6 +902,10 @@
 		// the value is kept until here rather than blanked when the search started.
 		const ownSource = sourceTagged ? '' : sourcePostUrl;
 		const ownDate = dateTagged ? '' : commissionedAt;
+		// One answer to "is the operator's own URL in that field", for the seed
+		// below and for the clash sentence's snapshot: computed twice, the two
+		// could disagree about whose text the field holds.
+		const sourceHeld = ownSource.trim() !== '';
 		// A cleared flag means an empty field. The record a parent move hands over
 		// can be minutes old — the move onto a still-searching tile holds it until
 		// that result lands — and the operator is free to type into either field
@@ -902,7 +914,7 @@
 		// the one that says the field was held. Read off the operator's own text:
 		// a field with something of theirs in it was not left empty by anyone.
 		const seed: LookupCleared = { ...emptied };
-		if (ownSource.trim() !== '') seed.sourcePostUrl = false;
+		if (sourceHeld) seed.sourcePostUrl = false;
 		if (ownDate.trim() !== '') seed.commissionedAt = false;
 		// A failure, or a search cancelled back to idle, leaves both fields exactly
 		// as they are: there is no new post to describe them, and what the last
@@ -920,7 +932,7 @@
 			sharedCleared = { ...seed };
 			return wrote;
 		}
-		sharedUrlHeld = ownSource.trim() !== '';
+		sharedUrlHeld = sourceHeld;
 		const fields: LookupFields =
 			next.kind === 'results'
 				? prefillForResult(next.data, { sourcePostUrl: ownSource, commissionedAt: ownDate })
@@ -1052,18 +1064,23 @@
 		// until it lands, or the record it writes says nothing was emptied and the
 		// fields the operator watched go blank are reported by no sentence at all
 		// (4.1.3). Any other move drops it: the pending record belongs to the tile
-		// the fields are pointing at now. It never outlives the request it is
-		// waiting for — both arms of startLookup drop it, whatever mode the page
-		// is in by then.
+		// the fields are pointing at now. It never reaches a LATER lookup on that
+		// tile. A record exists only while that tile is searching, startLookup
+		// bails on a searching tile, and the request it is waiting for ends in one
+		// of three places that all account for it: both arms of startLookup take
+		// it before they ask anything about the tile, and a cancel drops it.
 		pendingCleared = tile?.lookup.kind === 'searching' ? { key: tile.key, emptied } : null;
 		const wrote = applyShared(tile?.lookup ?? { kind: 'idle' }, emptied);
 		return { wrote, cleared: sharedCleared };
 	}
 
 	/** What a parent move emptied while that tile's own lookup was still out.
-	 * Taken once: from then on the result that landed owns the record. The
-	 * record's life is the request's, not the tile's — whichever arm of that
-	 * request lands drops it, so it can never reach a later lookup. */
+	 * Taken once: from then on the result that landed owns the record. Whichever
+	 * arm of that request lands takes it, whatever the tile's parent status is by
+	 * then, so a result that is over can never leave it for the lookup after.
+	 * Nor can a restart reach around that: a tile only holds a record while it is
+	 * searching, and startLookup returns on a searching tile rather than aborting
+	 * the request the record belongs to. */
 	function takePendingCleared(key: number): LookupCleared {
 		if (pendingCleared?.key !== key) return {};
 		const { emptied } = pendingCleared;

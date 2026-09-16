@@ -118,9 +118,16 @@
 	// only the fields the operator has not typed over (SONA-156). The seed writes
 	// its link to whichever of the two social fields matches the site, so either
 	// tag standing means the seeded link is still the lookup's.
+	// A field the operator has typed into is theirs whether or not a lookup
+	// filled it first: an emptied field they have since filled is not one the
+	// panel may still say Sona cleared (SONA-220). The filled half is unchanged
+	// — a status line that names a field needs it filled as well as untouched,
+	// so the extra arm only ever speaks for the cleared half.
 	const lookupEdited = $derived({
-		sourcePostUrl: lookupFilled.sourcePostUrl !== undefined && !sourceTagged,
-		commissionedAt: lookupFilled.commissionedAt !== undefined && !dateTagged
+		sourcePostUrl:
+			!sourceTagged && (lookupFilled.sourcePostUrl !== undefined || sourcePostUrl.trim() !== ''),
+		commissionedAt:
+			!dateTagged && (lookupFilled.commissionedAt !== undefined || commissionedAt.trim() !== '')
 	});
 	const lookupSeedEdited = $derived({
 		artistName: lookupSeeded.artistName !== undefined && !nameTagged,

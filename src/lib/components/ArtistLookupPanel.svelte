@@ -46,9 +46,10 @@
 		/** What the page's prefill actually wrote, for the status line. This record
 		 * is immutable — it describes the lookup, not the form as it stands now. */
 		filled?: LookupFields;
-		/** Which of those fields the operator has typed over since. An edited field
-		 * is no longer the lookup's, so the sentence stops claiming it AND stops
-		 * saying it was left alone. */
+		/** Which of the two fields holds the operator's own text: one they typed
+		 * over since, or one they filled that no lookup had. An edited field is
+		 * no longer the lookup's, so the sentence stops claiming it, stops saying
+		 * it was left alone, and stops saying Sona cleared it. */
 		edited?: LookupEdited;
 		/** What the page seeded into an inline new-artist form, for the status
 		 * line — the seed is subject to the same never-overwrite rule, so the
@@ -56,7 +57,9 @@
 		seeded?: NewArtistSeed;
 		/** Which of the two fields this result EMPTIED, because the last lookup
 		 * filled them and this one has nothing to put in their place (SONA-220).
-		 * A snapshot like `filled`: the sentence says what this result did. */
+		 * A snapshot like `filled`: the sentence says what this result did. Read
+		 * against `edited`, which is live — a field the operator has filled since
+		 * is theirs, and no sentence may still say Sona cleared it. */
 		cleared?: LookupCleared;
 		/** `edited`, for the seeded fields — same rule, same reason. */
 		seedEdited?: SeedEdited;

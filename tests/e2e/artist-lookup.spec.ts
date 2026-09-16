@@ -898,7 +898,7 @@ test.describe('with a key saved', () => {
 		// And it says so. The new parent has no result, so the panel shows nothing
 		// about the two fields that just emptied under the operator (4.1.3).
 		await expect(page.locator(LIVE_REGION)).toContainText(
-			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
 		);
 	});
 
@@ -977,6 +977,41 @@ test.describe('with a key saved', () => {
 		await stubLookup(page, xMatchBody());
 		await gotoEditHydrated(page);
 		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+	});
+
+	// The record of what that no-match emptied is worked out once and rendered on
+	// every frame after. The operator is free to type into either field, and the
+	// sentence for a cleared one invites them to fill in something already
+	// sitting in the input — so each half goes as its field is filled, and when
+	// both are the panel says nothing about them at all (SONA-220).
+	async function typingIntoAnEmptiedFieldDropsItsHalfOfTheSentence(page: Page) {
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+
+		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
+		// Half the sentence goes with it. The date is still Sona's doing, so that
+		// half stands, and the URL is named by nothing.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the commissioned date the last lookup filled, because this lookup filled no date in its place.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+
+		await dateInput(page).fill('2026-05-06');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And the no-match itself is still on screen: only the sentence about the
+		// two fields went.
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+	}
+
+	test('typing into an emptied field stops the panel naming it', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+		await typingIntoAnEmptiedFieldDropsItsHalfOfTheSentence(page);
+	});
+
+	test('the edit page stops naming an emptied field the operator fills too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+		await typingIntoAnEmptiedFieldDropsItsHalfOfTheSentence(page);
 	});
 
 	// The branch that empties the commissioned date had no test of its own: a
@@ -2360,7 +2395,7 @@ test.describe('with a key saved', () => {
 		// region carries that sentence, and the announcement it used to make said
 		// only half of what happened — the clearing, never the refill.
 		await expect(page.locator(LIVE_REGION)).not.toContainText(
-			"Sona cleared the commissioned date the parent image's last lookup filled."
+			"Sona cleared the commissioned date the last lookup filled."
 		);
 	});
 
@@ -2380,7 +2415,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator(LIVE_REGION)).toHaveText(
-			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
 		);
 	});
 
@@ -2423,7 +2458,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		const spoken =
-			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled.";
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
 		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
 
 		release();
@@ -2464,7 +2499,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		const spoken =
-			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled.";
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
 		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
 
 		release();
@@ -2604,7 +2639,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		const move =
-			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled.";
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
 		await expect(page.locator(LIVE_REGION)).toHaveText(move);
 
 		// Into the existing-piece mode while that search is out: no tile is the
@@ -2675,7 +2710,7 @@ test.describe('with a key saved', () => {
 		);
 		// The panel reports it, so the announcer does not repeat it.
 		await expect(page.locator(LIVE_REGION)).not.toContainText(
-			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
 		);
 	});
 
@@ -3149,7 +3184,7 @@ test.describe('with a key saved', () => {
 		// Said once, and by the removal: the panel under an idle lookup carries no
 		// sentence to read it from.
 		await expect(page.locator(LIVE_REGION)).toHaveText(
-			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
 		);
 		await expect(panel(page)).not.toContainText('cleared the source post URL');
 	});
