@@ -1628,6 +1628,11 @@ describe('no text rule paints with raw --primary (SONA-126)', () => {
 
 	// file → the rules that keep raw --primary, and why. Every entry is an icon:
 	// icons carry no text, so WCAG's 4.5:1 small-text bar does not apply to them.
+	// Where the icon is a state cue (a pressed chip's check glyph), 1.4.11 asks
+	// for 3:1 on the cue, and the glyph alone does not meet it on Ember light;
+	// each of those states also carries a border and a background tint, so the
+	// state is not read from the glyph alone. Repainting the glyphs is 1.4.11
+	// polish left for the theme work in SONA-209.
 	// The list is counted, not just matched — a file may keep exactly as many raw
 	// --primary colour rules as it has reasons here, so a NEW one in a listed file
 	// fails this test the same way a new one anywhere else does.

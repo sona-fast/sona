@@ -2,9 +2,11 @@
 # appends its own block for SvelteKit's hashed assets, so only hand-written
 # rules belong here.
 #
-# The self-hosted typefaces (SONA-181) are static bytes that change only when
-# scripts/fetch-fonts.mjs runs, but their names carry no content hash — so a
-# month of caching, and no `immutable`, which would let a stale file outlive a
-# font update.
+# The self-hosted typefaces (SONA-181) change only when a font script is run
+# on purpose, and their names carry no content hash. A month of caching means a
+# returning visitor keeps the old bytes for up to a month after such a change;
+# that is accepted, because the change is rare and the old file still renders
+# (a widened glyph set falls back per glyph). To force a refresh, rename the
+# file in the theme's `faces` list.
 /fonts/*
   Cache-Control: public, max-age=2592000

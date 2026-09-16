@@ -22,6 +22,10 @@
  * The source is pinned by version AND sha256. An upstream tarball that changes
  * bytes under the same version is a supply-chain event, not a font update, so
  * the script stops rather than quietly reshaping the typeface.
+ *
+ * POSIX only. The work directory check reads real owner and mode bits, which
+ * Windows does not have; run it under WSL there. Importing the module is fine
+ * anywhere, which is what the tests do.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -98,7 +102,7 @@ for ku in range(16, 48):
             chars.append(bytes([0xA0 + ku, 0xA0 + ten]).decode('euc_jp'))
         except UnicodeDecodeError:
             pass
-open(OUT, 'w').write(''.join(chars))
+open(OUT, 'w', encoding='utf-8').write(''.join(chars))
 print(len(chars))
 `;
 
