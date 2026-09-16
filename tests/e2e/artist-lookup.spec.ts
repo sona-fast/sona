@@ -661,6 +661,12 @@ test.describe('with a key saved', () => {
 		// difference instead and wrap their own text (SONA-220).
 		await expect(page.locator('#lookup-rating-tag')).toBeVisible();
 		await expect(page.locator('#tags-rating')).toBeVisible();
+		// Every width below is measured in the theme's own face, so wait for the
+		// self-hosted JetBrains Mono to load before reading a box (SONA-181).
+		await page.evaluate(() => document.fonts.ready);
+		// And say so if it did not: fonts.ready resolves on a failed fetch too, and
+		// a missing face would otherwise fail below as an unexplained wrap.
+		expect(await page.evaluate(() => document.fonts.check('11px "JetBrains Mono"'))).toBe(true);
 		// Compared by centre, not by top: the row centres its items, and the button
 		// is 36px tall beside an 18px label, so equal tops would be the wrong test
 		// for "same row" — they were never equal, even before the button wrapped.
@@ -680,44 +686,14 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('.tag-check-row .btn')).toHaveText('Mark it NSFW');
 		// One line each, not just one row. The note wrapped "entail.dev." onto a
 		// second line for an 8px shortfall, which the row's own gap pays for: three
-		// gaps at 4px instead of 8px buys back 12px (SONA-220). How much the four
-		// items want depends on the font the pills are drawn in, and the theme's
-		// primary face is not self-hosted yet, so a machine without it draws them
-		// in whatever monospace it has (the CI runner's is wider than a Mac's).
-		// Measured, then: when the items fit unwrapped, each holds one line, and
-		// when they do not, the pills give up their width and the button keeps it.
-		const fits = await page.evaluate(() => {
-			const row = document.querySelector('.tag-check-row');
-			if (!(row instanceof HTMLElement)) throw new Error('no row');
-			const items = Array.from(row.children).filter(
-				(el): el is HTMLElement => el instanceof HTMLElement
-			);
-			const want = items.reduce((sum, el) => {
-				const probe = el.cloneNode(true) as HTMLElement;
-				probe.style.position = 'absolute';
-				probe.style.width = 'max-content';
-				probe.style.whiteSpace = 'nowrap';
-				row.appendChild(probe);
-				const style = getComputedStyle(probe);
-				const width =
-					probe.getBoundingClientRect().width +
-					parseFloat(style.marginLeft) +
-					parseFloat(style.marginRight);
-				probe.remove();
-				return sum + width;
-			}, 0);
-			const gap = parseFloat(getComputedStyle(row).columnGap) * (items.length - 1);
-			return want + gap <= row.clientWidth;
-		});
+		// gaps at 4px instead of 8px buys back 12px (SONA-220).
 		const button = await page.locator('.tag-check-row .btn').boundingBox();
 		if (!button) throw new Error('the button has no box');
 		expect(button.height).toBeLessThan(44);
-		if (fits) {
-			for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
-				const box = await page.locator(selector).boundingBox();
-				if (!box) throw new Error(`${selector} has no box`);
-				expect(box.height).toBeLessThan(24);
-			}
+		for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			expect(box.height).toBeLessThan(24);
 		}
 		await expect(page.locator('.tag-check-row')).toHaveCSS('gap', '4px');
 		// The 4px is between the two rating items, which report the same kind of
