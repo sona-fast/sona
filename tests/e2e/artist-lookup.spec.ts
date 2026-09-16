@@ -2608,6 +2608,50 @@ test.describe('with a key saved', () => {
 		);
 	});
 
+	// No parent move involved: a plain second lookup on a settled tile. The
+	// no-match before it emptied the two fields and the panel said so, and that
+	// record has to go at the start of the next search — it describes a lookup
+	// that is over, and this one has changed nothing yet. Left standing, the
+	// searching arm re-renders the same sentence into the panel's atomic status
+	// region and the clearing is spoken a second time (4.1.3).
+	test('a repeat lookup does not re-speak what the last result cleared', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// A no-match next, which fills neither field and so empties both.
+		await stubLookup(page, { enabled: true, matches: [] });
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+		const spoken = (await page.locator(LIVE_REGION).textContent()) ?? '';
+
+		// Held open, so the searching arm is what is on screen. The tile is
+		// settled rather than idle, which is the case the first gate let through.
+		const release = await deferredLookup(page, matchedBody());
+		await pill(page).click();
+		await expect(panel(page)).toContainText('Looking up');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And nothing was queued into the live region behind it either.
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		release();
+
+		// The result then refills both fields and the panel reports that, with no
+		// clearing left over from the no-match.
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date from the FurAffinity post.'
+		);
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+	});
+
 	// A move onto a tile that is still SEARCHING is NOT that case: the searching
 	// arm renders the same sentence, and its region is atomic, so the panel
 	// re-speaks whole when the sentence appears in it. The move stays quiet there

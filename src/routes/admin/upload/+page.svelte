@@ -596,9 +596,6 @@
 		lookupAborts.get(key)?.abort();
 		const controller = new AbortController();
 		lookupAborts.set(key, controller);
-		// Read before the tile flips to searching: what its lookup WAS decides
-		// whether a move onto it has already been spoken. See below.
-		const wasIdle = tile.lookup.kind === 'idle';
 		tile.lookup = { kind: 'searching' };
 		tile.sentPrivate = isPrivate;
 		// The fields the last prefill wrote are NOT emptied here. Blanking the
@@ -610,15 +607,16 @@
 		// when the result names a different post. What the panel says about the
 		// LAST result does go now: it is about a search that is over.
 		if (isParent(key)) {
-			// The move's own record goes too, but only where the page already spoke
-			// it. A move onto an idle tile draws no panel arm at all, so pickParent
-			// announces it; left standing, the searching arm about to render would
-			// put the same sentence in the panel's status region, and that region is
-			// atomic, so the move would be told a second time (4.1.3). Every other
-			// kind had the panel carry it, and the reasonless sentence is the right
-			// one to keep while this search is out — the settled arm's version
-			// blames a lookup that is over.
-			if (wasIdle) sharedCleared = {};
+			// The move's own record goes too. Whatever it describes has already been
+			// told — by pickParent's announcement when the move landed on an idle
+			// tile, by the settled arm otherwise — and this search has changed
+			// nothing yet, so the searching arm about to render must not say it
+			// again into the panel's atomic status region (4.1.3). The one record
+			// the searching arm does speak for is a move that landed on a search
+			// still in flight, and no lookup can start on that tile: the guard above
+			// returns on a searching tile rather than restarting it, which is also
+			// why the record that move parks in `pendingCleared` survives this.
+			sharedCleared = {};
 			resetSharedResult();
 		}
 		// What runLookup settled on, so the catch below can keep this lookup's own

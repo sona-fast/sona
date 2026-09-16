@@ -583,14 +583,18 @@ describe('the "From lookup" tag', () => {
 			// lines unnoticed (SONA-220).
 			const clearedRecord = source === UPLOAD ? 'sharedCleared' : 'lookupCleared';
 			// Every site that resets it beside what a result wrote, which is every
-			// one but startLookup's `if (wasIdle)` drop: that one clears a sentence
-			// the page has already spoken, touches nothing the result filled, and
-			// must NOT lower the latches — they carry text the operator typed
-			// before the search, which the result still has to be told about.
-			const resets =
-				source.match(new RegExp(`(?<!if \\(wasIdle\\) )${clearedRecord} = \\{\\};`, 'g')) ?? [];
+			// one but startLookup's own drop: that one clears a sentence the page
+			// has already spoken, touches nothing the result filled, and must NOT
+			// lower the latches — they carry text the operator typed before the
+			// search, which the result still has to be told about. Cut out by
+			// slicing that function away rather than by a lookbehind on the line:
+			// the drop is a bare statement, so nothing on the line itself tells it
+			// from the resets that do count. The edit page's two reset sites both
+			// sit outside its startLookup, so the slice costs that file nothing.
+			const counted = source.replace(fnBody(source, 'startLookup'), '');
+			const resets = counted.match(new RegExp(`${clearedRecord} = \\{\\};`, 'g')) ?? [];
 			const withLatches =
-				source.match(
+				counted.match(
 					new RegExp(
 						`${clearedRecord} = \\{\\};\\s+sourceTypedIn = false;\\s+dateTypedIn = false;`,
 						'g'
@@ -1093,17 +1097,23 @@ describe('what the lookup copy names', () => {
 		// consumed it and re-reported a clearing announced several steps earlier
 		// (SONA-220).
 		const startBody = fnBody(UPLOAD, 'startLookup');
-		// And a lookup started on a parent tile that was IDLE drops the move's
-		// record on the way in, where nothing else would. The move onto an idle
-		// tile draws no panel arm, so pickParent announced it; left standing, the
-		// searching arm about to render would put the same sentence in the panel's
-		// atomic status region and the move would be told twice (4.1.3). Read
-		// before the flip, or every start looks idle.
+		// And a lookup started on the parent tile drops the move's record on the
+		// way in, where nothing else would, whatever that tile's last lookup came
+		// to. Whatever the record describes has been told already — by pickParent
+		// on an idle tile, by the settled arm on any other — and this search has
+		// changed nothing yet, so the searching arm about to render must not put
+		// the same sentence in the panel's atomic status region (4.1.3). Gated on
+		// the tile being idle, a plain repeat lookup after a no-match carried the
+		// no-match's record into the searching arm and said it a second time.
 		expect(startBody).toMatch(
-			/const wasIdle = tile\.lookup\.kind === 'idle';\s+tile\.lookup = \{ kind: 'searching' \};/
+			/if \(isParent\(key\)\) \{[\s\S]{0,900}?\n\t\t\tsharedCleared = \{\};\s+resetSharedResult\(\);\s+\}/
 		);
+		// The one record the searching arm does speak for — a parent move that
+		// landed on a search still in flight — is out of this drop's reach because
+		// no lookup can start on a searching tile at all. The guard returns rather
+		// than restarting, which is the same fact takePendingCleared rests on.
 		expect(startBody).toMatch(
-			/if \(isParent\(key\)\) \{[\s\S]{0,900}?if \(wasIdle\) sharedCleared = \{\};\s+resetSharedResult\(\);\s+\}/
+			/if \(!tile \|\| !tile\.file \|\| tile\.lookup\.kind === 'searching'\) return;/
 		);
 		expect(startBody.match(/const emptied = takePendingCleared\(key\);/g) ?? []).toHaveLength(2);
 		expect(startBody).toMatch(/const emptied = takePendingCleared\(key\);\s+if \(isParent\(key\)\) applyShared\(next, emptied\);/);
