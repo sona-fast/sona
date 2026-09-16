@@ -234,6 +234,49 @@ input, select, textarea {
 	padding: 12px 24px;
 }
 
+/* Compact toolbar button for bulk-action rows above a table or grid. Standalone,
+   NOT a size modifier for .btn: it carries its own border, fill and radius, so
+   write class="btn-compact" on its own. Was an identical copy scoped into both
+   the sticker pack form and the sticker importer (SONA-209). The VR form's
+   file-picker pair keeps its own .file-btn — see the comment there. */
+.btn-compact {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+	padding: 5px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-xs);
+	background: var(--secondary);
+	color: var(--foreground);
+	cursor: pointer;
+}
+
+.btn-compact:hover:not(:disabled) {
+	border-color: var(--primary-text);
+}
+
+.btn-compact:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+/* A button that shares a row on a wide screen and takes the whole row on a
+   phone. Six pages had this scoped under their own action-row container. */
+@media (max-width: 768px) {
+	.btn-full-mobile {
+		width: 100%;
+	}
+}
+
+/* An admin header action that has a duplicate in the page's mobile list, so it
+   drops out of the header below the table breakpoint rather than showing twice. */
+@media (max-width: 768px) {
+	.btn-desktop-only {
+		display: none;
+	}
+}
+
 /* Tags / Labels — matches Icon Label/Secondary */
 .tag {
 	display: inline-flex;
@@ -314,6 +357,41 @@ select.input {
 		-webkit-appearance: auto;
 		background-image: none;
 		padding-right: 16px;
+	}
+}
+
+/* Compact input for dense admin rows (bulk-action bars, per-sticker fields).
+   Written as .input.input-sm so it also outranks select.input's padding — the
+   scoped .input.sm copies it replaces did the same by being scoped. */
+.input.input-sm {
+	font-size: 12px;
+	padding: 5px 8px;
+}
+
+/* An input that sits inside its own bordered wrapper (the social rows on
+   /admin/artists and /admin/characters draw the pill and the icon, the input
+   only carries the text), so the control's own chrome is handed to the wrapper. */
+.input-plain {
+	border: none;
+	background: none;
+	padding: 0;
+	height: auto;
+}
+
+/* The wrapper takes the focus treatment for these. */
+.input-plain:focus {
+	outline: none;
+}
+
+/* A single-field add form at the top of an admin list: capped so one short name
+   field doesn't stretch the full table width, full width once the form stacks. */
+.input-form-width {
+	max-width: 300px;
+}
+
+@media (max-width: 768px) {
+	.input-form-width {
+		max-width: 100%;
 	}
 }
 

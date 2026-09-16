@@ -278,8 +278,8 @@
 			{/if}
 
 			<div class="actions">
-				<a href={image.imageUrl} download class="btn btn-primary" onclick={countDownload}><Download size={16} /> {m.gallery_download()}</a>
-				<button class="btn btn-outline" onclick={share}>
+				<a href={image.imageUrl} download class="btn btn-primary btn-full-mobile" onclick={countDownload}><Download size={16} /> {m.gallery_download()}</a>
+				<button class="btn btn-outline btn-full-mobile" onclick={share}>
 					<Share2 size={16} /> {copied ? m.gallery_copied() : m.gallery_share()}
 				</button>
 			</div>
@@ -566,10 +566,6 @@
 
 		.actions {
 			flex-direction: column;
-		}
-
-		.actions .btn {
-			width: 100%;
 		}
 	}
 

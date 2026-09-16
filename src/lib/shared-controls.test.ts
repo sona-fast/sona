@@ -1,0 +1,174 @@
+import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// SONA-209 step 4: buttons and form controls are declared once, in app.css.
+//
+// A page that restates `.btn` or `.input` drifts from the shared class the
+// moment the shared class changes, and the drift is invisible until someone
+// opens that one page. Sixty-six scoped rules had accumulated across the app by
+// 2026-09-14; the restatements are gone, the differences that repeated are named
+// variants in app.css (.btn-compact, .btn-full-mobile, .btn-desktop-only,
+// .input-sm, .input-plain, .input-form-width), and what is left is listed below
+// with the reason it stays scoped.
+//
+// The list is counted, not just matched, in the same shape as the raw --primary
+// allowlist in theme-contrast.test.ts: a file may keep exactly as many scoped
+// control rules as it has reasons here, so a NEW one in a listed file fails this
+// test the same way a new one in an unlisted file does.
+describe('control styling lives in app.css (SONA-209)', () => {
+	const srcRoot = fileURLToPath(new URL('..', import.meta.url));
+
+	// Almost every entry is layout: the rule positions a shared-class control
+	// inside the component's own row or grid (flex, order, width, margin) and
+	// sets no property the shared class sets. Those cannot become variants
+	// without moving the container's layout into app.css. The rest are one-offs
+	// that no second page shares.
+	const ALLOWED = new Map<string, string[]>([
+		[
+			'/lib/components/ConCard.svelte',
+			[
+				'.actions .btn — a 7px gap, one past the shared 6px, on this card\'s own rhythm',
+				'.actions .btn-primary — order, so the save sits on top once the pair stacks'
+			]
+		],
+		['/lib/components/ConfirmDialog.svelte', ['.dialog-actions .btn — the two buttons split the dialog footer evenly']],
+		[
+			'/lib/components/NewArtistDialog.svelte',
+			[
+				'.social-field .input — fills the rest of its icon row',
+				'.name-field .input — fills the row beside the lookup spinner'
+			]
+		],
+		['/lib/components/StickerPackForm.svelte', ['.select-with-action .input — fills the row beside its action button']],
+		[
+			'/lib/components/TagSuggestions.svelte',
+			[
+				'.input-group — the row wrapper, not the .input control it holds',
+				'.input-group .input — fills the row beside the add button',
+				'.input-group — the same wrapper wrapping onto two rows below 640px'
+			]
+		],
+		[
+			'/lib/components/VrAvatarForm.svelte',
+			[
+				'.artist-pick select — fills the row beside the "new artist" button',
+				'.btn-destructive-outline — the "delete avatar" button, the only one of its shape in the app',
+				'.btn-destructive-outline:hover — its tinted hover fill',
+				'.btn-destructive-outline:disabled — it shows a progress cursor, not a refusal'
+			]
+		],
+		[
+			'/routes/admin/artists/+page.svelte',
+			[
+				'.social-field .input — fills the rest of its icon row',
+				'.modal-actions .btn — the modal footer buttons split the row on a phone'
+			]
+		],
+		['/routes/admin/collections/+page.svelte', ['.add-form-actions .btn — add and cancel split the row once the form stacks']],
+		[
+			'/routes/admin/fursuit/+page.svelte',
+			[
+				'.tag-field .input — a floor rather than a cap, so the tag list keeps room to type',
+				'.grant-row .input — a denser field than .input-sm, sized to the grant row it sits in',
+				'.btn-icon — a 32px square icon button; no second page uses one',
+				'.btn-icon:hover — its hover colour'
+			]
+		],
+		[
+			'/routes/admin/settings/+page.svelte',
+			[
+				'.security-section > .btn — spacing below the section it submits',
+				'textarea — vertical-only resize; the settings textareas sit in a fixed-width column',
+				'.export-card .btn, .danger-card .btn — nowrap, so the description text takes the squeeze',
+				'.lookup-section .btn-remove — destructive label on an outline button, with its contrast rationale in place',
+				'.lookup-section .btn-remove:hover — the hover signal rides the border, for the same reason',
+				'.lookup-section .remove-confirm .btn-outline — a boundary mixed for the panel it sits on',
+				'.add-color .input — the hex field is capped narrower than a name field'
+			]
+		],
+		['/routes/admin/stickers/+page.svelte', ['.btn.disabled — an anchor cannot be :disabled, so the state is a class']],
+		['/routes/admin/stickers/import/+page.svelte', ['.select-with-action .input — fills the row beside its action button']],
+		['/routes/admin/tags/+page.svelte', ['.add-form-actions .btn — add and cancel split the row once the form stacks']]
+	]);
+
+	const pages = readdirSync(srcRoot, { recursive: true })
+		.map(String)
+		.filter((p) => p.endsWith('.svelte'))
+		.map((p) => `/${p}`);
+
+	// The subject of a selector is its last compound — `.input-group .tag-pill`
+	// styles a pill, not an input. A compound counts when it names one of the
+	// shared controls: `.btn`, `.input`, any `.btn-*`/`.input-*` variant, or a
+	// bare `select`/`textarea` element.
+	const CONTROL_CLASS = /^\.(?:btn|input)(?:-[A-Za-z0-9_-]+)?$/;
+
+	function isControlSubject(selector: string): boolean {
+		return selector.split(',').some((part) => {
+			const compound = part.trim().split(/[\s>+~]+/).filter(Boolean).pop();
+			if (!compound) return false;
+			if (/^(?:select|textarea)\b/.test(compound)) return true;
+			return (compound.match(/\.[A-Za-z][A-Za-z0-9_-]*/g) ?? []).some((c) => CONTROL_CLASS.test(c));
+		});
+	}
+
+	// Walks the <style> blocks of a component and returns every rule selector,
+	// including the ones nested inside @media and other at-rules.
+	function selectors(source: string): string[] {
+		const found: string[] = [];
+		for (const block of source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+			const css = block[1].replace(/\/\*[\s\S]*?\*\//g, '');
+			let depth = 0;
+			let selectorStart = 0;
+			let selector = '';
+			let body = '';
+			for (let i = 0; i < css.length; i++) {
+				const char = css[i];
+				if (char === '{') {
+					if (depth === 0) {
+						selector = css.slice(selectorStart, i).trim().replace(/\s+/g, ' ');
+						body = '';
+					} else body += char;
+					depth++;
+				} else if (char === '}') {
+					depth--;
+					if (depth === 0) {
+						if (selector.startsWith('@')) {
+							for (const nested of body.matchAll(/([^{}]+)\{[^{}]*\}/g)) {
+								found.push(nested[1].trim().replace(/\s+/g, ' '));
+							}
+						} else found.push(selector);
+						selectorStart = i + 1;
+					} else body += char;
+				} else if (depth > 0) body += char;
+			}
+		}
+		return found;
+	}
+
+	const scopedCount = (file: string) =>
+		selectors(readFileSync(`${srcRoot}${file}`, 'utf8')).filter(isControlSubject).length;
+
+	it('has no allowlist entry for a file that no longer scopes a control rule', () => {
+		const stale = [...ALLOWED.keys()].filter((f) => !pages.includes(f) || scopedCount(f) === 0);
+		expect(stale, 'these files stopped scoping control rules — drop them from ALLOWED').toEqual([]);
+	});
+
+	it('allows exactly as many scoped control rules per file as it has reasons', () => {
+		const drifted = [...ALLOWED]
+			.filter(([file, reasons]) => pages.includes(file) && scopedCount(file) !== reasons.length)
+			.map(([file, reasons]) => `${file}: ${scopedCount(file)} rules, ${reasons.length} reasons`);
+		expect(
+			drifted,
+			'a scoped .btn/.input/select/textarea rule was added to or removed from an allowlisted file — use a variant from app.css, or list the rule above with the reason it cannot be one.'
+		).toEqual([]);
+	});
+
+	it('declares button and input styling once, in app.css', () => {
+		const offenders = pages.filter((f) => !ALLOWED.has(f) && scopedCount(f) > 0);
+		expect(
+			offenders,
+			'a page restated a shared control class. Delete the restatement, or add a named variant to app.css (.btn-compact, .btn-full-mobile, .btn-desktop-only, .input-sm, .input-plain, .input-form-width) and use that.'
+		).toEqual([]);
+	});
+});

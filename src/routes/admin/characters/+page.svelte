@@ -46,7 +46,7 @@
 
 <div class="page-header">
 	<h1>{m.admin_nav_characters()} <span class="count">{m.admin_count_characters({ count: data.characters.length })}</span></h1>
-	<button class="btn btn-primary" onclick={() => (editingChar = { ...BLANK_CHAR })}><Plus size={16} /> {m.admin_characters_add()}</button>
+	<button class="btn btn-primary btn-desktop-only" onclick={() => (editingChar = { ...BLANK_CHAR })}><Plus size={16} /> {m.admin_characters_add()}</button>
 </div>
 
 {#if form?.error}
@@ -204,31 +204,31 @@
 					<div class="social-grid">
 						<label class="social-field">
 							<TwitterIcon size={14} /><span class="sr-only">Twitter</span>
-							<input type="text" class="input" name="twitter" value={editingChar.twitterUrl || ''} placeholder="@handle" />
+							<input type="text" class="input input-plain" name="twitter" value={editingChar.twitterUrl || ''} placeholder="@handle" />
 						</label>
 						<label class="social-field">
 							<BlueskyIcon size={14} /><span class="sr-only">Bluesky</span>
-							<input type="text" class="input" name="bluesky" value={editingChar.blueskyUrl || ''} placeholder="bsky.app/profile/..." />
+							<input type="text" class="input input-plain" name="bluesky" value={editingChar.blueskyUrl || ''} placeholder="bsky.app/profile/..." />
 						</label>
 						<label class="social-field">
 							<TelegramIcon size={14} /><span class="sr-only">Telegram</span>
-							<input type="text" class="input" name="telegram" value={editingChar.telegramUrl || ''} placeholder="t.me/..." />
+							<input type="text" class="input input-plain" name="telegram" value={editingChar.telegramUrl || ''} placeholder="t.me/..." />
 						</label>
 						<label class="social-field">
 							<FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span>
-							<input type="text" class="input" name="furaffinity" value={editingChar.furAffinityUrl || ''} placeholder="furaffinity.net/user/..." />
+							<input type="text" class="input input-plain" name="furaffinity" value={editingChar.furAffinityUrl || ''} placeholder="furaffinity.net/user/..." />
 						</label>
 						<label class="social-field">
 							<DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span>
-							<input type="text" class="input" name="deviantart" value={editingChar.deviantArtUrl || ''} placeholder="deviantart.com/..." />
+							<input type="text" class="input input-plain" name="deviantart" value={editingChar.deviantArtUrl || ''} placeholder="deviantart.com/..." />
 						</label>
 						<label class="social-field">
 							<PatreonIcon size={14} /><span class="sr-only">Patreon</span>
-							<input type="text" class="input" name="patreon" value={editingChar.patreonUrl || ''} placeholder="patreon.com/..." />
+							<input type="text" class="input input-plain" name="patreon" value={editingChar.patreonUrl || ''} placeholder="patreon.com/..." />
 						</label>
 						<label class="social-field">
 							<InstagramIcon size={14} /><span class="sr-only">Instagram</span>
-							<input type="text" class="input" name="instagram" value={editingChar.instagramUrl || ''} placeholder="instagram.com/..." />
+							<input type="text" class="input input-plain" name="instagram" value={editingChar.instagramUrl || ''} placeholder="instagram.com/..." />
 						</label>
 					</div>
 				</div>
@@ -367,16 +367,6 @@
 		height: 40px;
 	}
 
-	.social-field .input {
-		border: none;
-		background: none;
-		padding: 0;
-		height: auto;
-	}
-
-	.social-field .input:focus {
-		outline: none;
-	}
 
 	.empty {
 		text-align: center;
@@ -493,7 +483,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.page-header .btn { display: none; }
 		.table-wrapper { display: none; }
 		.social-grid { grid-template-columns: 1fr; }
 

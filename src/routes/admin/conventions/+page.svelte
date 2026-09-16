@@ -37,10 +37,10 @@
 <div class="page-header">
 	<h1>{m.admin_nav_conventions()} <span class="count">{data.conventions.length}</span></h1>
 	<div class="header-actions">
-		<button class="btn btn-outline" disabled={syncing} onclick={() => syncForm.requestSubmit()}>
+		<button class="btn btn-outline btn-desktop-only" disabled={syncing} onclick={() => syncForm.requestSubmit()}>
 			<RefreshCw size={16} /> {syncing ? m.admin_conventions_syncing() : m.admin_conventions_sync()}
 		</button>
-		<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_conventions_add()}</button>
+		<button class="btn btn-primary btn-desktop-only" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_conventions_add()}</button>
 	</div>
 </div>
 
@@ -516,10 +516,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.page-header .btn {
-			display: none;
-		}
-
 		.table-wrapper {
 			display: none;
 		}

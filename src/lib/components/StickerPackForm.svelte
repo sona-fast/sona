@@ -466,17 +466,17 @@
 							<span class="bulk-managed">{m.admin_pack_artist_locked({ managerName })}</span>
 							<span class="bulk-div"></span>
 						{:else}
-							<select class="input sm" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
+							<select class="input input-sm" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
 								<option value="">{m.admin_pack_set_artist()}</option>
 								{#each artistList as a}<option value={String(a.id)}>{a.name}</option>{/each}
 							</select>
-							<button type="button" class="btn-sm" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>{m.admin_pack_apply()}</button>
-							<button type="button" class="btn-sm" onclick={() => applyArtistToSelected('')}>{m.admin_pack_unassign()}</button>
+							<button type="button" class="btn-compact" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>{m.admin_pack_apply()}</button>
+							<button type="button" class="btn-compact" onclick={() => applyArtistToSelected('')}>{m.admin_pack_unassign()}</button>
 							<button type="button" class="new-artist-btn" onclick={() => openNewArtist('bulk')}><UserPlus size={13} /> {m.admin_pack_new_artist()}</button>
 							<span class="bulk-div"></span>
 						{/if}
-						<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(true)}>{m.admin_pack_nsfw_on()}</button>
-						<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(false)}>{m.admin_pack_nsfw_off()}</button>
+						<button type="button" class="btn-compact" onclick={() => bulkSetNsfw(true)}>{m.admin_pack_nsfw_on()}</button>
+						<button type="button" class="btn-compact" onclick={() => bulkSetNsfw(false)}>{m.admin_pack_nsfw_off()}</button>
 					</div>
 					<button type="button" class="link-btn" onclick={clearSelection}>{m.admin_pack_clear()}</button>
 				{/if}
@@ -531,7 +531,7 @@
 							<input type="hidden" name="sticker[{i}][format]" value={sticker.format} />
 							<label>
 								<span>{m.stickers_emojis_label()}</span>
-								<input type="text" class="input sm" name="sticker[{i}][emojis]" bind:value={sticker.emojis} placeholder="😀,🔥" />
+								<input type="text" class="input input-sm" name="sticker[{i}][emojis]" bind:value={sticker.emojis} placeholder="😀,🔥" />
 							</label>
 							{#if managerArtistId}
 								<label>
@@ -541,7 +541,7 @@
 							{:else}
 								<label>
 									<span>{m.admin_field_artist()}</span>
-									<select class="input sm" name="sticker[{i}][artistId]" bind:value={sticker.artistId}>
+									<select class="input input-sm" name="sticker[{i}][artistId]" bind:value={sticker.artistId}>
 										<option value="">{m.admin_pack_default_artist()}</option>
 										{#each artistList as a}
 											<option value={String(a.id)}>{a.name}</option>
@@ -690,7 +690,6 @@
 	   read as one neat cluster rather than the delete-top / NSFW-bottom stagger. */
 	.row-controls { display: flex; align-items: center; gap: 10px; align-self: center; flex-shrink: 0; }
 	.nsfw-check { white-space: nowrap; color: var(--muted-foreground); }
-	.input.sm { font-size: 12px; padding: 5px 8px; }
 	.muted { color: var(--muted-foreground); font-size: 13px; }
 
 	/* Bulk-edit bar */
@@ -700,9 +699,6 @@
 	.bulk-count { font-size: 13px; font-weight: 600; }
 	.bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.bulk-managed { font-size: 12px; color: var(--muted-foreground); font-style: italic; }
-	.btn-sm { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--secondary); color: var(--foreground); cursor: pointer; }
-	.btn-sm:hover:not(:disabled) { border-color: var(--primary-text); }
-	.btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
 	.bulk-div { width: 1px; height: 20px; background: var(--border); }
 	.bulk-bar .link-btn { margin-left: auto; }
 	.link-btn { background: none; border: none; color: var(--primary-text); font-size: 12px; padding: 0; cursor: pointer; }

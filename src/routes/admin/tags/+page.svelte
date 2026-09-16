@@ -22,7 +22,7 @@
 
 <div class="page-header">
 	<h1>{m.admin_nav_tags()} <span class="count">{m.admin_count_tags({ count: data.total })}</span></h1>
-	<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_tags_add()}</button>
+	<button class="btn btn-primary btn-desktop-only" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_tags_add()}</button>
 </div>
 
 {#if form?.error}
@@ -38,7 +38,7 @@
 			showAdd = false;
 		};
 	}} class="add-form">
-		<input type="text" class="input" name="name" placeholder={m.admin_tags_name_placeholder()} autofocus />
+		<input type="text" class="input input-form-width" name="name" placeholder={m.admin_tags_name_placeholder()} autofocus />
 		<div class="add-form-actions">
 			<button type="submit" class="btn btn-primary" disabled={creating}>
 				{#if creating}<Loader2 size={16} class="spin" /> {m.admin_adding()}{:else}{m.admin_add()}{/if}
@@ -182,10 +182,6 @@
 		align-items: center;
 	}
 
-	.add-form .input {
-		max-width: 300px;
-	}
-
 	.add-form-actions {
 		display: flex;
 		gap: 8px;
@@ -271,10 +267,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.page-header .btn {
-			display: none;
-		}
-
 		.table-wrapper {
 			display: none;
 		}
@@ -338,10 +330,6 @@
 		.add-form {
 			flex-direction: column;
 			align-items: stretch;
-		}
-
-		.add-form .input {
-			max-width: 100%;
 		}
 
 		.add-form-actions .btn {

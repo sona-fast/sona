@@ -73,12 +73,12 @@
 				};
 			}}
 		>
-			<button class="btn btn-secondary" type="submit" disabled={refreshingAvatars}>
+			<button class="btn btn-secondary btn-desktop-only" type="submit" disabled={refreshingAvatars}>
 				{#if refreshingAvatars}<Loader2 size={16} class="spin" />{/if}
 				{refreshingAvatars ? m.admin_artists_refresh_avatars_busy() : m.admin_artists_refresh_avatars()}
 			</button>
 		</form>
-		<button class="btn btn-primary" onclick={() => (showAdd = true)}><Plus size={16} /> {m.admin_artists_add()}</button>
+		<button class="btn btn-primary btn-desktop-only" onclick={() => (showAdd = true)}><Plus size={16} /> {m.admin_artists_add()}</button>
 	</div>
 </div>
 
@@ -357,31 +357,31 @@
 					<div class="social-grid">
 						<label class="social-field">
 							<TwitterIcon size={14} /><span class="sr-only">Twitter</span>
-							<input type="text" class="input" name="twitter" value={editingArtist.twitterUrl || ''} placeholder="@handle" disabled={saving} />
+							<input type="text" class="input input-plain" name="twitter" value={editingArtist.twitterUrl || ''} placeholder="@handle" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<BlueskyIcon size={14} /><span class="sr-only">Bluesky</span>
-							<input type="text" class="input" name="bluesky" value={editingArtist.blueskyUrl || ''} placeholder="lunarpaws.bsky.social" disabled={saving} />
+							<input type="text" class="input input-plain" name="bluesky" value={editingArtist.blueskyUrl || ''} placeholder="lunarpaws.bsky.social" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<TelegramIcon size={14} /><span class="sr-only">Telegram</span>
-							<input type="text" class="input" name="telegram" value={editingArtist.telegramUrl || ''} placeholder="t.me/lunarpaws" disabled={saving} />
+							<input type="text" class="input input-plain" name="telegram" value={editingArtist.telegramUrl || ''} placeholder="t.me/lunarpaws" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span>
-							<input type="text" class="input" name="furaffinity" value={editingArtist.furAffinityUrl || ''} placeholder="furaffinity.net/user/lunarpaws" disabled={saving} />
+							<input type="text" class="input input-plain" name="furaffinity" value={editingArtist.furAffinityUrl || ''} placeholder="furaffinity.net/user/lunarpaws" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span>
-							<input type="text" class="input" name="deviantart" value={editingArtist.deviantArtUrl || ''} placeholder="deviantart.com/..." disabled={saving} />
+							<input type="text" class="input input-plain" name="deviantart" value={editingArtist.deviantArtUrl || ''} placeholder="deviantart.com/..." disabled={saving} />
 						</label>
 						<label class="social-field">
 							<PatreonIcon size={14} /><span class="sr-only">Patreon</span>
-							<input type="text" class="input" name="patreon" value={editingArtist.patreonUrl || ''} placeholder="patreon.com/lunarpaws" disabled={saving} />
+							<input type="text" class="input input-plain" name="patreon" value={editingArtist.patreonUrl || ''} placeholder="patreon.com/lunarpaws" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<InstagramIcon size={14} /><span class="sr-only">Instagram</span>
-							<input type="text" class="input" name="instagram" value={editingArtist.instagramUrl || ''} placeholder="instagram.com/..." disabled={saving} />
+							<input type="text" class="input input-plain" name="instagram" value={editingArtist.instagramUrl || ''} placeholder="instagram.com/..." disabled={saving} />
 						</label>
 					</div>
 				</div>
@@ -448,10 +448,6 @@
 		gap: 8px;
 		margin-bottom: 20px;
 		align-items: center;
-	}
-
-	.add-form .input {
-		max-width: 300px;
 	}
 
 	.toolbar {
@@ -706,17 +702,10 @@
 		height: 40px;
 	}
 
+	/* Layout only — the borderless treatment is .input-plain in app.css. */
 	.social-field .input {
-		border: none;
-		background: none;
-		padding: 0;
-		height: auto;
 		flex: 1;
 		min-width: 0;
-	}
-
-	.social-field .input:focus {
-		outline: none;
 	}
 
 	.social-label {
@@ -752,10 +741,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.page-header .btn {
-			display: none;
-		}
-
 		.table-wrapper {
 			display: none;
 		}
@@ -835,10 +820,6 @@
 
 		.add-form {
 			flex-direction: column;
-		}
-
-		.add-form .input {
-			max-width: 100%;
 		}
 
 		.modal {
