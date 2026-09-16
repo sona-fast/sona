@@ -274,7 +274,7 @@ function main() {
 			// Write to a .part file and rename it once it is whole, the way download()
 			// does: the output path is a committed file, and an interrupted run would
 			// otherwise leave it truncated in the working tree. A failed run removes
-			// its own .part so nothing stray sits beside the committed fonts.
+			// its own .part, so no partial file is left next to the committed fonts.
 			const outPath = join(OUT_DIR, slice.name);
 			try {
 				run(pyftsubset, [

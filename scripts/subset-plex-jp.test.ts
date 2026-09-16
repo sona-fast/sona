@@ -24,7 +24,7 @@ describe('subset-plex-jp work-dir mode (SONA-181)', () => {
 describe('subset-plex-jp work-dir predicate (SONA-181)', () => {
 	const stat = (over: { symlink?: boolean; file?: boolean; uid?: number; mode?: number } = {}) => ({
 		isSymbolicLink: () => over.symlink ?? false,
-		isDirectory: () => !(over.file ?? false),
+		isDirectory: () => !(over.symlink ?? false) && !(over.file ?? false),
 		uid: over.uid ?? 501,
 		mode: over.mode ?? 0o40700
 	});
