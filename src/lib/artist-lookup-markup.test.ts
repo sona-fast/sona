@@ -745,9 +745,7 @@ describe('the "From lookup" tag', () => {
 			// the way Close does, leaving the fields as it found them, so it is
 			// sliced away for the same reason.
 			const closer = source === UPLOAD ? 'closeSharedLookup' : 'closeLookup';
-			// Cancel is sliced away for the same reason as Close: it leaves both
-			// fields exactly as it found them and only drops a sentence the page
-			// has already spoken.
+			// Cancel too: it only drops a sentence the page has already spoken.
 			const counted = source
 				.replace(fnBody(source, 'startLookup'), '')
 				.replace(fnBody(source, closer), '')
