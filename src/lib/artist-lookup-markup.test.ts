@@ -1226,15 +1226,15 @@ describe('what the lookup copy names', () => {
 		// leave the two subjects reading as one. Pinned here in all three arms:
 		// only comments and whitespace stand between them.
 		expect(PANEL).toMatch(
-			/<p class="lookup-status searching-line">[\s\S]{0,300}?<\/p>(?:\s|<!--[\s\S]*?-->)*\{#if movedEmptied\}/
+			/<p class="lookup-status searching-line">[\s\S]{0,300}?<\/p>(?:\s|<!--(?:[^-]|-(?!->))*-->)*\{#if movedEmptied\}/
 		);
 		expect(PANEL).toMatch(
-			/<p class="lookup-lead">\{m\.admin_lookup_no_match_body\(\)\}<\/p>(?:\s|<!--[\s\S]*?-->)*\{#if emptiedOnly\}/
+			/<p class="lookup-lead">\{m\.admin_lookup_no_match_body\(\)\}<\/p>(?:\s|<!--(?:[^-]|-(?!->))*-->)*\{#if emptiedOnly\}/
 		);
 		// Every branch of the failed arm ends on a lead, so the last one before
 		// the arm's own {/if} stands for all of them.
 		expect(PANEL).toMatch(
-			/<p class="lookup-lead">\{m\.admin_lookup_failed_body\(\)\}<\/p>\s*\{\/if\}(?:\s|<!--[\s\S]*?-->)*\{#if emptiedOnly\}/
+			/<p class="lookup-lead">\{m\.admin_lookup_failed_body\(\)\}<\/p>\s*\{\/if\}(?:\s|<!--(?:[^-]|-(?!->))*-->)*\{#if emptiedOnly\}/
 		);
 	});
 
