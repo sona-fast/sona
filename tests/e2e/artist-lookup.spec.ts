@@ -3437,6 +3437,68 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).toBeHidden();
 	});
 
+	// Cancel ends the same way, and the searching arm it ends is the one arm that
+	// draws a parent move's record. Left standing, Cancel dropped the panel to
+	// idle with that sentence still in it — a bordered card with no Close button
+	// on it, and the atomic status region spoke the sentence again as the arm
+	// changed (SONA-220).
+	test('cancelling a lookup that emptied the fields collapses the panel', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The parent moves onto the second tile while its search is still out, so
+		// the move empties both fields and the searching arm says so.
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const moved = 'Sona cleared the source post URL and commissioned date the last lookup filled.';
+		await expect(panel(page)).toContainText(moved);
+
+		await panel(page).getByRole('button', { name: 'Cancel lookup' }).click();
+		release();
+		await expect(panel(page)).toBeHidden();
+		await expect(page.locator('body')).not.toContainText(moved);
+	});
+
+	// The edit page's two drops, which only source assertions covered: Close and
+	// "Add as a variant" both go idle with a record standing, and the idle arm
+	// draws it there too (SONA-220).
+	test('the edit page collapses the panel on Close too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(panel(page)).toBeHidden();
+	});
+
+	test('the edit page collapses the panel when the clash becomes the parent', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+
+		// The same post, now claimed by another piece: the prefill puts no URL
+		// back, so the field the first lookup filled empties and the panel says so.
+		await stubLookup(page, { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') });
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText('cleared the source post URL the last lookup filled');
+
+		await panel(page).getByRole('button', { name: 'Add as a variant' }).click();
+		await expect(page.locator('select[name="parentImageId"]')).toHaveValue('9001');
+		await expect(panel(page)).toBeHidden();
+	});
+
 	// parentIndex is submitted as the hidden field the server picks the parent
 	// with, so a tile removed ahead of the parent must move it along: otherwise
 	// the piece that saves is a different file than the shared artist, date and

@@ -862,6 +862,13 @@
 		if (pendingCleared?.key === key) pendingCleared = null;
 		const tile = tiles.find((t) => t.key === key);
 		if (tile) tile.lookup = { kind: 'idle' };
+		// And the record a parent move parked for the search being cancelled, the
+		// way closeSharedLookup drops it: the idle arm draws that record too, so a
+		// record left standing kept the panel open as a bordered card holding the
+		// sentence after the operator cancelled, and the atomic status region
+		// spoke it again as the arm changed (SONA-220). The fields are left
+		// exactly as they are found, so the typed-in latches stay where they are.
+		sharedCleared = {};
 	}
 
 	/** Undo what a previous shared prefill wrote, but only where the operator has

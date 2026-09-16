@@ -76,7 +76,11 @@ function matchDelim(
 		else if (source[i] === close && --depth === 0) return i;
 		i++;
 	}
-	throw new Error(`no closing ${close} for ${what} in source (depth ${depth} at the end)`);
+	throw new Error(
+		depth === 0
+			? `no ${open} for ${what} in source`
+			: `no closing ${close} for ${what} in source (depth ${depth} at the end)`
+	);
 }
 
 // A function's body, sliced from its declaration by matching braces. A
@@ -149,6 +153,11 @@ describe('the function-body slicer', () => {
 			/no closing \} for sample's body/
 		);
 		expect(() => fnBody('const x = 1;\n', 'sample')).toThrow(/no function named sample/);
+		// And the other way the scan can walk off the end: the opening delimiter
+		// never arrives at all, which is not a missing closer.
+		expect(() => fnBody('function sample()\n', 'sample')).toThrow(
+			/no \{ for sample's body in source/
+		);
 	});
 
 	// The case the slicer exists for: a multi-line return type annotation is a
@@ -736,9 +745,13 @@ describe('the "From lookup" tag', () => {
 			// the way Close does, leaving the fields as it found them, so it is
 			// sliced away for the same reason.
 			const closer = source === UPLOAD ? 'closeSharedLookup' : 'closeLookup';
+			// Cancel is sliced away for the same reason as Close: it leaves both
+			// fields exactly as it found them and only drops a sentence the page
+			// has already spoken.
 			const counted = source
 				.replace(fnBody(source, 'startLookup'), '')
 				.replace(fnBody(source, closer), '')
+				.replace(fnBody(source, 'cancelLookup'), '')
 				.replace(fnBody(source, 'addAsVariant'), '');
 			const resets = counted.match(new RegExp(`${clearedRecord} = \\{\\};`, 'g')) ?? [];
 			const withLatches =
@@ -1225,12 +1238,13 @@ describe('what the lookup copy names', () => {
 		// And nothing else writes sharedCleared. The catch that synthesises a
 		// failure used to assign the held record straight, which skipped the check
 		// above and had the panel report a URL the operator had typed back in.
-		// Six assignments in the file and no more: the declaration, three blankings
-		// that hand over no record — startLookup's, the reset's and Close's — and
-		// applyShared's two. Everything that DESCRIBES a clearing goes through
-		// applyShared.
+		// Seven assignments in the file and no more: the declaration, four
+		// blankings that hand over no record — startLookup's, Cancel's, the
+		// reset's and Close's — and applyShared's two. Everything that DESCRIBES a
+		// clearing goes through applyShared.
 		expect(UPLOAD.match(/sharedCleared = [^;]*/g) ?? []).toEqual([
 			'sharedCleared = $state<LookupCleared>({})',
+			'sharedCleared = {}',
 			'sharedCleared = {}',
 			'sharedCleared = {}',
 			'sharedCleared = { ...emptied }',
@@ -1521,6 +1535,14 @@ describe('focus after the panel goes away', () => {
 	it('drops the cleared record when the panel is closed', () => {
 		expect(fnBody(UPLOAD, 'closeSharedLookup')).toContain('sharedCleared = {};');
 		expect(fnBody(EDIT, 'closeLookup')).toContain('lookupCleared = {};');
+		// Cancel ends the same way — idle, with the panel gone — so it drops the
+		// record too. The upload page's cancelLookup goes idle on its own rather
+		// than through Close, and left the record standing: a parent move that
+		// emptied the fields mid-search then kept the panel on screen as a
+		// bordered card with no Close button after Cancel (SONA-220). The edit
+		// page's cancelLookup routes through closeLookup, covered above.
+		expect(fnBody(UPLOAD, 'cancelLookup')).toContain('sharedCleared = {};');
+		expect(fnBody(EDIT, 'cancelLookup')).toContain('closeLookup();');
 		// The edit page's "Add as a variant" goes idle on its own rather than
 		// through closeLookup, so it drops the record itself; the upload page's
 		// goes through closeSharedLookup.
