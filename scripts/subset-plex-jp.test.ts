@@ -22,18 +22,23 @@ describe('subset-plex-jp work-dir mode (SONA-181)', () => {
 // reachable at module load, so the decision is tested here rather than through
 // the filesystem.
 describe('subset-plex-jp work-dir predicate (SONA-181)', () => {
-	const stat = (over: { symlink?: boolean; uid?: number; mode?: number } = {}) => ({
+	const stat = (over: { symlink?: boolean; file?: boolean; uid?: number; mode?: number } = {}) => ({
 		isSymbolicLink: () => over.symlink ?? false,
+		isDirectory: () => !(over.file ?? false),
 		uid: over.uid ?? 501,
 		mode: over.mode ?? 0o40700
 	});
 
-	it('accepts a directory its owner owns at 0o700', () => {
+	it('accepts a directory you own at 0o700', () => {
 		expect(workDirProblem(stat(), 501)).toBeNull();
 	});
 
 	it('rejects a symlink planted at the path', () => {
 		expect(workDirProblem(stat({ symlink: true }), 501)).toMatch(/symlink/);
+	});
+
+	it('rejects a plain file left at the path', () => {
+		expect(workDirProblem(stat({ file: true }), 501)).toMatch(/not a directory/);
 	});
 
 	it('rejects a directory another user owns', () => {

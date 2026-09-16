@@ -127,11 +127,12 @@ export function reachableByOthers(mode) {
  * Why the work directory cannot be used as it stands, or `null` when it can.
  * Ours or nothing: not a symlink, same owner, and nothing group- or
  * world-accessible.
- * @param {{ isSymbolicLink(): boolean, uid: number, mode: number }} st an lstat of the path
+ * @param {{ isSymbolicLink(): boolean, isDirectory(): boolean, uid: number, mode: number }} st an lstat of the path
  * @param {number | undefined} uid the current uid; undefined on Windows, which has none
  */
 export function workDirProblem(st, uid) {
 	if (st.isSymbolicLink()) return 'it is a symlink, not a directory';
+	if (!st.isDirectory()) return 'it is not a directory';
 	if (uid !== undefined && st.uid !== uid) return `it belongs to uid ${st.uid}, not you`;
 	if (reachableByOthers(st.mode)) {
 		return `it is mode ${(st.mode & 0o777).toString(8)}, so other users can reach it`;
@@ -142,10 +143,10 @@ export function workDirProblem(st, uid) {
 /**
  * The work directory lives in the shared OS temp dir, so anyone on the machine
  * could have created it first and left a tarball (or a venv) there for this
- * script to trust. Create it ourselves and check what is there either way: a
- * checked existsSync followed by a create trusts a directory another user wins
- * the race to make. lstat rather than stat, because a symlink planted at this
- * path would otherwise be checked as whatever it points at.
+ * script to trust. Create it ourselves and check what is there either way.
+ * Testing with existsSync before creating would trust a directory another
+ * user created in between. lstat rather than stat, because a symlink planted
+ * at this path would otherwise be checked as whatever it points at.
  */
 function prepareWorkDir() {
 	try {
@@ -158,7 +159,7 @@ function prepareWorkDir() {
 	// getuid is POSIX-only; on Windows there is no uid to compare.
 	const reason = workDirProblem(lstatSync(WORK_DIR), process.getuid?.());
 	if (reason !== null) {
-		throw new Error(`${WORK_DIR}: ${reason}. Remove it and rerun.`);
+		throw new Error(`${WORK_DIR}: ${reason}. Remove it and rerun, or point TMPDIR elsewhere.`);
 	}
 }
 
@@ -270,20 +271,26 @@ function main() {
 			// set rather than merely incomplete. --name-IDs+=13,14 keeps the license
 			// description and URL in the file, so the OFL notice travels with the
 			// binary the way the license asks, not only in static/fonts/OFL.txt.
-			// Into a .part file and renamed once whole, the way download() does: the
-			// output path is a committed file, and an interrupted run would otherwise
-			// leave it truncated in the working tree.
+			// Write to a .part file and rename it once it is whole, the way download()
+			// does: the output path is a committed file, and an interrupted run would
+			// otherwise leave it truncated in the working tree. A failed run removes
+			// its own .part so nothing stray sits beside the committed fonts.
 			const outPath = join(OUT_DIR, slice.name);
-			run(pyftsubset, [
-				source,
-				'--flavor=woff2',
-				'--layout-features=*',
-				'--name-IDs+=13,14',
-				...slice.args,
-				`--output-file=${outPath}.part`
-			]);
+			try {
+				run(pyftsubset, [
+					source,
+					'--flavor=woff2',
+					'--layout-features=*',
+					'--name-IDs+=13,14',
+					...slice.args,
+					`--output-file=${outPath}.part`
+				]);
+			} catch (err) {
+				rmSync(`${outPath}.part`, { force: true });
+				throw err;
+			}
 			renameSync(`${outPath}.part`, outPath);
-			console.log(`${slice.name}\t${statSync(join(OUT_DIR, slice.name)).size} bytes`);
+			console.log(`${slice.name}\t${statSync(outPath).size} bytes`);
 		}
 	}
 
