@@ -1804,19 +1804,34 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	// The selected platform chip is the same kind of boundary, drawn with
 	// border-color rather than the border shorthand because the resting rule
 	// already sets the width and style. It marked selection with raw --primary,
-	// which is 2.46:1 against --card on Ember light; --primary-text is 4.57:1 at
-	// its worst (terracotta dark) across the six theme × mode pairs.
-	it('the selected platform chip draws its edge with --primary-text', () => {
-		const body = ruleBody('./components/VrAvatarForm.svelte', '.platform-chip.on');
-		const border = body.match(/border-color:\s*var\(--([\w-]+)\)/)?.[1];
-		expect(border, '.platform-chip.on declares no border-color').toBeDefined();
-		expect(border).toBe('primary-text');
+	// 2.46:1 against its ground on Ember light. Both the edge and the label are
+	// measured on the chip's own tint, read out of the rule, because that is what
+	// they sit on: the label at --primary-text was 4.20:1 on Terracotta light.
+	const chipBody = ruleBody('./components/VrAvatarForm.svelte', '.platform-chip.on');
+	const chipTint = chipBody.match(
+		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/
+	);
+	const chipEdge = chipBody.match(/border-color:\s*var\(--([\w-]+)\)/)?.[1];
+	const chipInk = chipBody.match(/(?<![-\w])color:\s*var\(--([\w-]+)\)/)?.[1];
+
+	it('the selected platform chip draws its edge with --primary-text on a declared tint', () => {
+		expect(chipTint, '.platform-chip.on no longer mixes its background over a token').not.toBeNull();
+		expect(chipEdge).toBe('primary-text');
+		expect(chipInk, '.platform-chip.on declares no color').toBeDefined();
 	});
 
 	for (const { name, id, mode } of THEME_BLOCKS) {
-		it(`${name}: the selected chip's edge clears 3:1 on --card`, () => {
-			const ratio = contrast(themeHex(id, mode, 'primaryText'), themeHex(id, mode, 'card'));
-			expect(ratio, `${name}: --primary-text on --card measures ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+		it(`${name}: the selected chip's edge clears 3:1 and its label 4.5:1 on the tint`, () => {
+			const [, base, pct, over] = chipTint!;
+			const ground = mix2(
+				themeHex(id, mode, TOKEN_BY_CSS_NAME.get(base)!),
+				Number(pct),
+				themeHex(id, mode, TOKEN_BY_CSS_NAME.get(over)!)
+			);
+			const edge = contrast(themeHex(id, mode, TOKEN_BY_CSS_NAME.get(chipEdge!)!), ground);
+			expect(edge, `${name}: --${chipEdge} edge on ${ground} measures ${edge.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+			const label = contrast(themeHex(id, mode, TOKEN_BY_CSS_NAME.get(chipInk!)!), ground);
+			expect(label, `${name}: --${chipInk} label on ${ground} measures ${label.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
 		});
 	}
 

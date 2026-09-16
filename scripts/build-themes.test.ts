@@ -245,6 +245,9 @@ describe('renderThemesCss', () => {
 		['a weight range that runs from high to low', { weight: '700 400' }, /runs from high to low/],
 		['a unicode-range past the last codepoint', { unicodeRange: 'U+110000' }, /above U\+10FFFF/],
 		['a unicode-range interval that runs backwards', { unicodeRange: 'U+4E00-3040' }, /runs from high to low/],
+		['a unicode-range wildcard that is not trailing', { unicodeRange: 'U+4?0' }, /CSS does not accept/],
+		['a unicode-range wildcard with an explicit high end', { unicodeRange: 'U+4E??-5000' }, /CSS does not accept/],
+		['a unicode-range value longer than six digits', { unicodeRange: 'U+0000000' }, /CSS does not accept/],
 		['a style that is not normal, italic or oblique', { style: 'slanted' }, /is not normal, italic or oblique/],
 		['a malformed unicode-range', { unicodeRange: 'U+ZZZZ' }, /is not a comma-separated list of U\+ ranges/],
 		['a src with no file behind it', { src: '/fonts/NotHere-400-latin.woff2' }, /has no file at/]

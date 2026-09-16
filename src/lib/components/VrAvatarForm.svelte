@@ -1085,9 +1085,11 @@
 		cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s;
 	}
 	.platform-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+	/* The label sits on the chip's own tint, where --primary-text reads 4.20:1
+	   on Terracotta light; --foreground clears 4.5:1 on every theme and mode. */
 	.platform-chip.on {
-		border-color: var(--primary-text); color: var(--primary-text);
-		background: color-mix(in srgb, var(--primary) 8%, transparent);
+		border-color: var(--primary-text); color: var(--foreground);
+		background: color-mix(in srgb, var(--primary) 8%, var(--background));
 	}
 	.platform-chip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 

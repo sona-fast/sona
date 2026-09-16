@@ -145,12 +145,15 @@ export function parseManifest(text) {
 	return files;
 }
 
-// Only a missing manifest is an empty baseline: that is the first run. Anything
-// else propagates, so a corrupt file stops the run instead of resetting it.
-function readManifest() {
+/**
+ * Only a missing manifest is an empty baseline: that is the first run. Anything
+ * else propagates, so a corrupt or unreadable file stops the run instead of
+ * resetting it. The path is a parameter so the test can point it at a temp dir.
+ */
+export function readManifest(path = MANIFEST_PATH) {
 	let text;
 	try {
-		text = readFileSync(MANIFEST_PATH, 'utf8');
+		text = readFileSync(path, 'utf8');
 	} catch (err) {
 		if (err.code === 'ENOENT') return {};
 		throw err;

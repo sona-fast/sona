@@ -125,11 +125,20 @@ const JP_SLICE = /^IBMPlexSansJP-\d+-(kana|kanji)\.woff2$/;
  * static/fonts/manifest.json uses. fetch-fonts.mjs writes that one and never
  * these names, so without a second manifest the Japanese files are the only
  * fonts in the directory nothing checks against recorded bytes.
+ * @param {string[]} written the slice names this run wrote
  */
-function writeJpManifest() {
+function writeJpManifest(written) {
+	// Only the slices this run produced are recorded. A leftover from an earlier
+	// WEIGHTS list would otherwise get a digest and pass the test that compares
+	// the manifest's keys to the directory, so it stops the run instead.
+	const onDisk = readdirSync(OUT_DIR).filter((f) => JP_SLICE.test(f)).sort();
+	const stale = onDisk.filter((f) => !written.includes(f));
+	if (stale.length > 0) {
+		throw new Error(`static/fonts/ holds Japanese slices this run did not write: ${stale.join(', ')}. Remove them and rerun.`);
+	}
 	/** @type {Record<string, string>} */
 	const files = {};
-	for (const name of readdirSync(OUT_DIR).filter((f) => JP_SLICE.test(f)).sort()) {
+	for (const name of [...written].sort()) {
 		files[name] = createHash('sha256').update(readFileSync(join(OUT_DIR, name))).digest('hex');
 	}
 	writeFileSync(
@@ -291,6 +300,8 @@ function main() {
 		throw new Error(`${outside.length} derived kanji fall outside ${KANJI_BLOCK}: ${outside.join('')}`);
 	}
 
+	/** @type {string[]} */
+	const written = [];
 	for (const { weight, file } of WEIGHTS) {
 		const source = join(fontsDir, file);
 		const slices = [
@@ -322,11 +333,12 @@ function main() {
 				throw err;
 			}
 			renameSync(`${outPath}.part`, outPath);
+			written.push(slice.name);
 			console.log(`${slice.name}\t${statSync(outPath).size} bytes`);
 		}
 	}
 
-	writeJpManifest();
+	writeJpManifest(written);
 
 	const total = readdirSync(OUT_DIR)
 		.filter((f) => /^IBMPlexSansJP-\d+-(kana|kanji)\.woff2$/.test(f))

@@ -224,8 +224,17 @@ function validateWeightValues(id: string, weight: string): void {
 	}
 }
 
+// One value of a unicode-range: up to six hex digits, or a range of two, or a
+// single value whose trailing digits are wildcards. A wildcard anywhere else, or
+// on either side of a range, is invalid CSS: the browser drops the descriptor and
+// loads the face for every codepoint.
+const RANGE_PART = /^U\+(?:[0-9A-Fa-f]{1,6}-[0-9A-Fa-f]{1,6}|(?=[0-9A-Fa-f?]{1,6}$)[0-9A-Fa-f]*\?*)$/;
+
 function validateUnicodeRange(id: string, range: string): void {
 	for (const part of range.split(',')) {
+		if (!RANGE_PART.test(part.trim())) {
+			throw new Error(`theme '${id}': font face unicode-range '${range}' has a value CSS does not accept: '${part.trim()}'`);
+		}
 		// 'U+4E?' covers U+4E0 through U+4EF: the wildcards read as 0 at the low end
 		// and F at the high end.
 		const [low, high] = part.trim().slice(2).split('-');

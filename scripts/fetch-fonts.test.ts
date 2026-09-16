@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, fileName, parseManifest, staleFiles } from './fetch-fonts.mjs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, fileName, parseManifest, readManifest, staleFiles } from './fetch-fonts.mjs';
 
 // The prune is the one destructive thing this script does, and it runs over a
 // directory holding three other things: Geist (hand-placed), the Japanese slices
@@ -117,5 +120,34 @@ describe('fetch-fonts digest check on fetched bytes', () => {
 
 	it('accepts the new bytes under --force, which is how an update is recorded', () => {
 		expect(acceptBytes('Test-latin.woff2', bytes, { force: true, recorded: 'a'.repeat(64) })).toBe(digest);
+	});
+});
+
+// readManifest is where the parse errors above are allowed to surface. A
+// catch-all that returned {} would pass every parseManifest case and still
+// reset the baseline on a corrupt file, so the read path is pinned on its own.
+describe('fetch-fonts readManifest', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sona-fetch-fonts-test-'));
+
+	it('reads an empty baseline only when the file is missing', () => {
+		expect(readManifest(join(dir, 'absent.json'))).toEqual({});
+	});
+
+	it('propagates a corrupt manifest instead of resetting the baseline', () => {
+		const corrupt = join(dir, 'corrupt.json');
+		writeFileSync(corrupt, '{ "files": ');
+		expect(() => readManifest(corrupt)).toThrow();
+	});
+
+	it('propagates a read error that is not a missing file', () => {
+		// A directory at the path fails with EISDIR, not ENOENT.
+		expect(() => readManifest(dir)).toThrow(/EISDIR/);
+	});
+
+	it('returns the digests of a well-formed manifest', () => {
+		const good = join(dir, 'good.json');
+		const files = { 'A-400-latin.woff2': 'a'.repeat(64) };
+		writeFileSync(good, JSON.stringify({ note: 'x', files }));
+		expect(readManifest(good)).toEqual(files);
 	});
 });
