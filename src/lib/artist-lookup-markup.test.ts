@@ -922,26 +922,30 @@ describe('what the lookup copy names', () => {
 			];
 			expect(new Set(sentences).size).toBe(3);
 		}
-		// Both catalogs say it the way the status lines already do. Naming the
-		// parent image was wrong on the other path this copy covers: a return to
-		// the new-set mode clears what the SAME tile's earlier lookup filled, and
-		// the two languages had drifted into describing different things (SONA-220).
-		for (const sentence of [
-			en.admin_lookup_announce_shared_cleared,
-			en.admin_lookup_announce_shared_cleared_source,
-			en.admin_lookup_announce_shared_cleared_date
-		]) {
-			expect(sentence).toContain('the last lookup filled');
-			expect(sentence).not.toContain('parent');
-		}
-		for (const sentence of [
-			ja.admin_lookup_announce_shared_cleared,
-			ja.admin_lookup_announce_shared_cleared_source,
-			ja.admin_lookup_announce_shared_cleared_date
-		]) {
-			expect(sentence).toContain('前回の検索で入力した');
-			expect(sentence).not.toContain('親画像');
-		}
+		// Both catalogs say it the way the status lines already do, and all six are
+		// pinned whole. Naming the parent image was wrong on the other path this
+		// copy covers — a return to the new-set mode clears what the SAME tile's
+		// earlier lookup filled — and a clause-level assertion on one key while
+		// its siblings were pinned in full is how the two languages drifted into
+		// describing different things without a test noticing (SONA-220).
+		expect(en.admin_lookup_announce_shared_cleared).toBe(
+			'Sona cleared the source post URL and commissioned date the last lookup filled.'
+		);
+		expect(en.admin_lookup_announce_shared_cleared_source).toBe(
+			'Sona cleared the source post URL the last lookup filled.'
+		);
+		expect(en.admin_lookup_announce_shared_cleared_date).toBe(
+			'Sona cleared the commissioned date the last lookup filled.'
+		);
+		expect(ja.admin_lookup_announce_shared_cleared).toBe(
+			'前回の検索で入力した投稿元URLと制作依頼日は消去しました。'
+		);
+		expect(ja.admin_lookup_announce_shared_cleared_source).toBe(
+			'前回の検索で入力した投稿元URLは消去しました。'
+		);
+		expect(ja.admin_lookup_announce_shared_cleared_date).toBe(
+			'前回の検索で入力した制作依頼日は消去しました。'
+		);
 		// The reset hands back what it emptied, and it goes to applyShared, which
 		// unsets the fields the new parent's result writes back. One writer of
 		// sharedCleared: a caller that recomputed the record alongside it could
