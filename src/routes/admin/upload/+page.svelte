@@ -519,8 +519,8 @@
 	// put back (SONA-220). Without it the status line says a field was left as it
 	// was while the operator watched it go blank (4.1.3).
 	let sharedCleared = $state<LookupCleared>({});
-	// Whether the operator has text of their own in each field. Raised on input
-	// to either field, recomputed against the fields in applyShared when a result
+	// Whether the operator has text of their own in each field. Each one rises on
+	// input to its own field, is recomputed against the fields in applyShared when a result
 	// lands, and lowered in resetSharedPrefill. See sharedEdited.
 	let sourceTypedIn = $state(false);
 	let dateTypedIn = $state(false);
