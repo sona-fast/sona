@@ -1801,6 +1801,21 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		});
 	}
 
+	// The dashed "add" buttons are controls too: the dashed edge is the only
+	// thing that marks them as pressable, so it draws with --input like a field.
+	const dashedRules: Array<{ file: string; selector: string }> = [
+		{ file: './components/StickerPackForm.svelte', selector: '.new-artist-btn' },
+		{ file: './components/VrAvatarForm.svelte', selector: '.add-credit-btn' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.ctx-new-artist' },
+		{ file: '../routes/admin/tags/+page.svelte', selector: '.mobile-add-row' }
+	];
+
+	for (const { file, selector } of dashedRules) {
+		it(`${file} ${selector} draws its dashed border with --input`, () => {
+			expect(ruleBody(file, selector)).toMatch(/border:\s*1px dashed var\(--input\)/);
+		});
+	}
+
 	// The selected platform chip is the same kind of boundary, drawn with
 	// border-color rather than the border shorthand because the resting rule
 	// already sets the width and style. It marked selection with raw --primary,

@@ -203,7 +203,7 @@ function validateFace(id: string, face: FontFace): void {
 	}
 	if (face.unicodeRange !== undefined) validateUnicodeRange(id, face.unicodeRange);
 	const onDisk = STATIC_DIR + face.src.slice(1);
-	if (!existsSync(onDisk) || statSync(onDisk).size === 0) {
+	if (!existsSync(onDisk) || !statSync(onDisk).isFile() || statSync(onDisk).size === 0) {
 		throw new Error(`theme '${id}': font face src '${face.src}' has no file at ${onDisk} — run \`node scripts/fetch-fonts.mjs\``);
 	}
 }

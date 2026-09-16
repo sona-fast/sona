@@ -697,7 +697,7 @@
 	.artist-select.input.sm { font-size: 12px; padding: 5px 8px; width: 100%; }
 	.ctx-new-artist {
 		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 10px;
-		border-radius: var(--radius-pill); border: 1px dashed var(--border); background: none;
+		border-radius: var(--radius-pill); border: 1px dashed var(--input); background: none;
 		color: var(--primary-text); cursor: pointer;
 	}
 	.ctx-new-artist:hover { border-color: var(--primary); }

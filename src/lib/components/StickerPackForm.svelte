@@ -629,7 +629,7 @@
 	.new-artist-btn {
 		display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-shrink: 0;
 		font-size: 12px; padding: 3px 10px; border-radius: var(--radius-pill);
-		border: 1px dashed var(--border); background: none; color: var(--primary-text); cursor: pointer;
+		border: 1px dashed var(--input); background: none; color: var(--primary-text); cursor: pointer;
 	}
 	.new-artist-btn:hover { border-color: var(--primary); }
 	.upload-zone {

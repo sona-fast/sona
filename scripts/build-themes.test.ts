@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -253,6 +253,18 @@ describe('renderThemesCss', () => {
 		['a src with no file behind it', { src: '/fonts/NotHere-400-latin.woff2' }, /has no file at/]
 	])('rejects %s', (_name, face, message) => {
 		expect(() => renderThemesCss(withFace(face))).toThrow(message);
+	});
+
+	// A directory named like a font passes an existence check and has a size,
+	// and the browser cannot load it. Made and removed here, under static/fonts/.
+	it('rejects a src that is a directory', () => {
+		const dir = new URL('../static/fonts/NotAFile-400-latin.woff2', import.meta.url);
+		mkdirSync(dir);
+		try {
+			expect(() => renderThemesCss(withFace({ src: '/fonts/NotAFile-400-latin.woff2' }))).toThrow(/has no file at/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it('emits a face with font-display: swap and its unicode-range', () => {

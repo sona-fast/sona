@@ -1120,7 +1120,7 @@
 	.add-credit-btn {
 		display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
 		font-size: 12px; padding: 4px 12px; border-radius: var(--radius-pill);
-		border: 1px dashed var(--border); background: none; color: var(--primary-text); cursor: pointer;
+		border: 1px dashed var(--input); background: none; color: var(--primary-text); cursor: pointer;
 	}
 	.add-credit-btn:hover { border-color: var(--primary); }
 
