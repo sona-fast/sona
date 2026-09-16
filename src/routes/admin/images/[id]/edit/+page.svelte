@@ -474,7 +474,10 @@
 			extraParents = [...extraParents, { id: clash.imageId, title: clash.title }];
 		}
 		selectedParentId = String(clash.imageId);
+		// Idle, and without the cleared record, for the same reason closeLookup
+		// drops it: the idle arm draws whatever stands there.
 		lookup = { kind: 'idle' };
+		lookupCleared = {};
 		// The click unmounted its own button; land on the select it just set.
 		await tick();
 		parentSelect?.focus();
@@ -484,6 +487,10 @@
 	 * back to the control the lookup started from. */
 	function closeLookup() {
 		lookup = { kind: 'idle' };
+		// And the record of what that lookup emptied: the panel's idle arm draws
+		// it, so a record left standing kept the panel open as a bordered card
+		// holding the sentence after the operator asked for it to go (SONA-220).
+		lookupCleared = {};
 		lookupPill?.focus();
 	}
 </script>

@@ -237,7 +237,7 @@
      hears the panel once for it, not once per keystroke. -->
 <div
 	class="lookup-panel"
-	class:idle={lookup.kind === 'idle'}
+	class:idle={lookup.kind === 'idle' && !movedEmptied}
 	role="region"
 	aria-label={m.admin_lookup_panel_label()}
 >
@@ -487,10 +487,25 @@
 			{#if privateNotice}
 				<p class="private-notice">{m.admin_lookup_private_notice()}</p>
 			{/if}
+		{:else if movedEmptied}
+			<!-- A parent move onto a tile that was never looked up empties what the
+			     last lookup filled, and the idle arm drew nothing at all: the two
+			     fields went blank with only the announcement saying why, so a
+			     sighted operator was told nothing (4.1.3). This arm draws the
+			     searching arm's sentence and its class, both off the same chooser,
+			     so the two states name the fields the same way.
+			     Not aria-hidden: the paragraph lands inside the panel's own status
+			     region, which speaks it the way it speaks the searching arm, so the
+			     move needs no announcement of its own and the sentence stays in the
+			     accessibility tree instead of being spoken and gone.
+			     The actions row below renders for this arm too, with Close alone:
+			     the card this sentence sits in needs a way out that is not typing
+			     into a field or starting another lookup. -->
+			<p class="lookup-status lookup-emptied">{movedEmptied}</p>
 		{/if}
 		</div>
 
-		{#if lookup.kind !== 'idle'}
+		{#if lookup.kind !== 'idle' || movedEmptied}
 		<div class="lookup-actions">
 			<!-- One Use button for both action rows. Under a clash it used to render
 			     unapplied whatever the state, so clicking it moved the select and the
@@ -564,7 +579,18 @@
 					</button>
 				{/if}
 			{/snippet}
-			{#if lookup.kind === 'searching'}
+			{#if lookup.kind === 'idle'}
+				<!-- The idle arm's only action. No lookup is running and none has
+				     settled, so the row holds Close alone: nothing here can be
+				     retried, applied or cancelled, and the card is on screen only to
+				     say what a parent move emptied. Without it the sentence had no
+				     dismissal at all — the operator's ways out were typing into a
+				     field or starting another lookup — while every other arm that
+				     draws this sentence offers Close or Cancel. Same onclose as those
+				     arms, so the record goes and the panel collapses, and focus
+				     returns wherever the page's Close returns it. -->
+				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+			{:else if lookup.kind === 'searching'}
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>
 					{m.admin_lookup_cancel()}
 				</button>
@@ -673,7 +699,9 @@
 
 	/* Idle: no card, no space, but the live region above still exists so the
 	   first message written into it is announced. Not display:none — a hidden
-	   region is not a region a screen reader watches. */
+	   region is not a region a screen reader watches. Dropped when the idle arm
+	   has a cleared sentence to draw, so that line sits in the card every other
+	   arm's status line sits in rather than against a padless edge. */
 	.lookup-panel.idle {
 		border: 0;
 		padding: 0;

@@ -258,6 +258,25 @@ const THREE_TAG_SUGGESTION = {
 
 const panel = (page: Page) => page.getByRole('region', { name: 'Artist lookup' });
 
+/** The sentence a parent move onto a tile with no lookup of its own leaves on
+ * screen. The panel's status region draws it and speaks it, so it is one node:
+ * visible, drawn as a report of what the two fields just did rather than in the
+ * muted colour the advice lines use, and left in the accessibility tree instead
+ * of spoken and gone (4.1.3). */
+async function expectMovedEmptiedSentence(page: Page) {
+	const emptied = panel(page)
+		.locator('p.lookup-status')
+		.filter({
+			hasText: 'cleared the source post URL and commissioned date the last lookup filled'
+		});
+	await expect(emptied).toBeVisible();
+	await expect(emptied).toHaveClass(/lookup-emptied/);
+	await expect(emptied).not.toHaveAttribute('aria-hidden', /.*/);
+	// And the panel is the open card, not the collapsed idle one it would be
+	// with nothing to draw.
+	await expect(panel(page)).toBeVisible();
+}
+
 test('without a key there is no button, only a pointer at Settings', async ({ page }) => {
 	test.setTimeout(60_000);
 	await adminLogin(page, PASSWORD);
@@ -928,11 +947,10 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
-		// And it says so. The new parent has no result, so the panel shows nothing
-		// about the two fields that just emptied under the operator (4.1.3).
-		await expect(page.locator(LIVE_REGION)).toContainText(
-			"Sona cleared the source post URL and commissioned date the last lookup filled."
-		);
+		// And it says so. The new parent has no result, so the panel's idle arm is
+		// what carries the sentence for the two fields that just emptied under the
+		// operator (4.1.3).
+		await expectMovedEmptiedSentence(page);
 	});
 
 	test('a clash after a lookup says it emptied the field, not that it was empty', async ({
@@ -2583,9 +2601,10 @@ test.describe('with a key saved', () => {
 		);
 	});
 
-	// A parent with no lookup of its own draws no sentence at all: the panel under
-	// it is idle, and the two fields go blank with nothing on screen saying why
-	// (4.1.3). So the move says it, and says it once.
+	// A parent with no lookup of its own used to draw no sentence at all: the
+	// panel under it is idle, and the two fields went blank with nothing on
+	// screen saying why (4.1.3). The idle arm draws it now, inside the panel's
+	// own status region, so one node both shows the sentence and speaks it.
 	test('a parent move onto a tile with no lookup says what it emptied', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);
@@ -2598,9 +2617,10 @@ test.describe('with a key saved', () => {
 
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
-		await expect(page.locator(LIVE_REGION)).toHaveText(
-			"Sona cleared the source post URL and commissioned date the last lookup filled."
-		);
+		await expectMovedEmptiedSentence(page);
+		// And nothing says it a second time: the page's own live region is the
+		// other place this sentence could come from.
+		await expect(page.locator(LIVE_REGION)).not.toContainText('the last lookup filled');
 	});
 
 	// And starting that tile's own lookup must not say it again. The searching
@@ -2616,9 +2636,7 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 
 		await page.locator('input[name="parentPick"]').nth(1).check();
-		const spoken =
-			"Sona cleared the source post URL and commissioned date the last lookup filled.";
-		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+		await expectMovedEmptiedSentence(page);
 
 		// The second tile is the parent now and has never been looked up. Held
 		// open, so the searching arm is what is on screen.
@@ -2626,9 +2644,9 @@ test.describe('with a key saved', () => {
 		await tileLookup(page).nth(1).click();
 		await expect(panel(page)).toContainText('Looking up');
 		await expect(panel(page)).not.toContainText('the last lookup filled');
-		// And the announcer holds the one telling, unchanged: nothing was queued
-		// behind it, so nothing was said twice.
-		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+		// And nothing was queued into the page's live region behind it either, so
+		// the move was never told twice.
+		await expect(page.locator(LIVE_REGION)).not.toContainText('the last lookup filled');
 
 		release();
 
@@ -3396,6 +3414,131 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
+	// Close puts the lookup back to idle, and the idle arm draws whatever that
+	// lookup emptied. The record left standing, Close left the panel on screen as
+	// a bordered card holding that sentence, with no way to dismiss it (SONA-220).
+	test('closing a lookup that emptied the fields collapses the panel', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// A no-match is a result with nothing to prefill, so it empties both fields
+		// and the panel says so.
+		await stubLookup(page, { enabled: true, matches: [] });
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(panel(page)).toBeHidden();
+	});
+
+	// Cancel does NOT end that way. The searching arm it ends is the one arm that
+	// draws a parent move's record, and the two fields the move emptied are still
+	// blank after the cancel: dropping the record collapsed the panel and took
+	// the only reason for those blank fields with it (4.1.3). The panel falls to
+	// its idle arm holding the sentence, and Close is the way out of it
+	// (SONA-220).
+	test('cancelling a lookup that emptied the fields keeps the sentence until Close', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The parent moves onto the second tile while its search is still out, so
+		// the move empties both fields and the searching arm says so.
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const moved = 'Sona cleared the source post URL and commissioned date the last lookup filled.';
+		await expect(panel(page)).toContainText(moved);
+
+		await panel(page).getByRole('button', { name: 'Cancel lookup' }).click();
+		release();
+
+		// The idle arm: the sentence still on screen over the two fields it
+		// describes, with Close as its one action and nothing left to cancel.
+		await expectMovedEmptiedSentence(page);
+		await expect(panel(page).getByRole('button', { name: 'Cancel lookup' })).toHaveCount(0);
+		const close = panel(page).getByRole('button', { name: 'Close' });
+		await expect(close).toBeVisible();
+		// And the page's own live region does not say it a second time: the panel's
+		// status region is where this sentence lives.
+		await expect(page.locator(LIVE_REGION)).not.toContainText('the last lookup filled');
+
+		await close.click();
+		await expect(panel(page)).toBeHidden();
+		await expect(page.locator('body')).not.toContainText(moved);
+	});
+
+	// The other way into that idle card, and the one with no test on it: a parent
+	// move onto a tile that was never looked up. No lookup runs, no result lands,
+	// so the card the sentence sits in has only its own Close to go by — without
+	// one the operator's ways out were typing into a field or starting another
+	// lookup (SONA-220).
+	test('the idle card a parent move leaves closes on its own Close', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile has never been looked up, so the move empties both fields
+		// with no result on its way and the idle arm is what says so.
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expectMovedEmptiedSentence(page);
+
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(panel(page)).toBeHidden();
+		await expect(page.locator('body')).not.toContainText('the last lookup filled');
+	});
+
+	// The edit page's two drops, which only source assertions covered: Close and
+	// "Add as a variant" both go idle with a record standing, and the idle arm
+	// draws it there too (SONA-220).
+	test('the edit page collapses the panel on Close too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(panel(page)).toBeHidden();
+	});
+
+	test('the edit page collapses the panel when the clash becomes the parent', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+
+		// The same post, now claimed by another piece: the prefill puts no URL
+		// back, so the field the first lookup filled empties and the panel says so.
+		await stubLookup(page, { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') });
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText('cleared the source post URL the last lookup filled');
+
+		await panel(page).getByRole('button', { name: 'Add as a variant' }).click();
+		await expect(page.locator('select[name="parentImageId"]')).toHaveValue('9001');
+		await expect(panel(page)).toBeHidden();
+	});
+
 	// parentIndex is submitted as the hidden field the server picks the parent
 	// with, so a tile removed ahead of the parent must move it along: otherwise
 	// the piece that saves is a different file than the shared artist, date and
@@ -3435,9 +3578,8 @@ test.describe('with a key saved', () => {
 
 	// Removing the parent tile itself routes through the same pickParent the
 	// radio does, so the fields re-derive from the tile the parent pick lands on.
-	// The tile that lands there has no lookup of its own, so its panel draws no
-	// sentence and nothing on screen says why the two fields just went blank
-	// (4.1.3) — the removal says it, once.
+	// The tile that lands there has no lookup of its own, and the panel's idle arm
+	// is what says why the two fields just went blank (4.1.3).
 	test('removing the parent tile re-derives the fields and says what it emptied', async ({
 		page
 	}) => {
@@ -3471,12 +3613,10 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
-		// Said once, and by the removal: the panel under an idle lookup carries no
-		// sentence to read it from.
-		await expect(page.locator(LIVE_REGION)).toHaveText(
-			"Sona cleared the source post URL and commissioned date the last lookup filled."
-		);
-		await expect(panel(page)).not.toContainText('cleared the source post URL');
+		// Said once, and by the panel: its idle arm draws the sentence and its
+		// status region speaks it.
+		await expectMovedEmptiedSentence(page);
+		await expect(page.locator(LIVE_REGION)).not.toContainText('the last lookup filled');
 	});
 
 	// In the existing-piece mode no tile is the parent: the panel is not rendered
