@@ -504,7 +504,7 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--primary-text);
-		border: 1px solid var(--primary);
+		border: 1px solid var(--primary-text);
 		border-radius: var(--radius-pill);
 		vertical-align: middle;
 	}

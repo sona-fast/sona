@@ -124,7 +124,7 @@
 
 	.chip.permission {
 		background: transparent;
-		border: 1px solid var(--primary);
+		border: 1px solid var(--primary-text);
 		color: var(--primary-text);
 		cursor: help;
 	}

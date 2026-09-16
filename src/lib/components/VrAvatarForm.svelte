@@ -1101,7 +1101,7 @@
 		transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
 	}
 	.credit-row.dragging { opacity: 0.4; }
-	.credit-row.drop-target { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
+	.credit-row.drop-target { border-color: var(--primary-text); box-shadow: 0 0 0 2px var(--primary-text); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
 	.drag-handle {
 		display: flex; align-items: center; justify-content: center; width: 24px; align-self: stretch;
 		padding: 0; background: none; border: none; color: var(--muted-foreground);
@@ -1130,10 +1130,10 @@
 		color: var(--muted-foreground); cursor: pointer; font-size: 13px; text-align: center;
 		transition: border-color 0.15s, background-color 0.15s, opacity 0.15s; min-height: 88px;
 	}
-	.upload-zone:hover { border-color: var(--primary); }
+	.upload-zone:hover { border-color: var(--primary-text); }
 	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
 	   as the upload page's dropzone. The class is set by the drop attachment. */
-	.upload-zone:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
+	.upload-zone:global(.drag-over) { border-color: var(--primary-text); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
 	/* No pointer-events: none — the drop attachment has to receive dragover/drop
 	   to preventDefault, or a drop while uploading navigates away from the form.
 	   The nested input's own disabled attribute keeps clicks inert. */
@@ -1184,11 +1184,11 @@
 		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
 		transition: border-color 0.15s, background-color 0.15s;
 	}
-	.btn-sm:hover { border-color: var(--primary); }
+	.btn-sm:hover { border-color: var(--primary-text); }
 	/* Same busy treatment as the zones: dimmed, and no hover invitation. */
 	.btn-sm.disabled { opacity: 0.55; cursor: not-allowed; }
 	.btn-sm.disabled:hover { border-color: var(--border); }
-	.btn-sm:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
+	.btn-sm:global(.drag-over) { border-color: var(--primary-text); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
 
 	/* Showcase media rows (same row chrome as the credit list). */
 	.media-list { display: flex; flex-direction: column; gap: 10px; }
@@ -1199,7 +1199,7 @@
 		transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
 	}
 	.media-row.dragging { opacity: 0.4; }
-	.media-row.drop-target { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
+	.media-row.drop-target { border-color: var(--primary-text); box-shadow: 0 0 0 2px var(--primary-text); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
 	.media-thumb {
 		width: 56px; height: 56px; border-radius: var(--radius-xs); overflow: hidden;
 		background: var(--secondary); flex-shrink: 0;
@@ -1244,7 +1244,7 @@
 		transition: border-color 0.15s;
 	}
 	.poster-option:hover { border-color: var(--border); }
-	.poster-option.selected { border-color: var(--primary); }
+	.poster-option.selected { border-color: var(--primary-text); }
 	/* The square comes from the IMG's aspect-ratio: engines that ignore
 	   aspect-ratio on form controls size the button from its content, so the
 	   old height:100% img fell back to its natural ratio — ragged cells once

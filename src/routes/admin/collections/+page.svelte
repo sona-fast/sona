@@ -466,7 +466,7 @@
 	}
 
 	.cover-option.selected {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 	}
 
 	.cover-option img {

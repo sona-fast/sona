@@ -1610,7 +1610,7 @@
 	}
 
 	.dropzone:hover {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
@@ -1618,7 +1618,7 @@
 	   because the drop attachment sets the class imperatively, so Svelte can't
 	   see it in the markup. Same treatment as the VR and sticker zones. */
 	.dropzone:global(.drag-over) {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
@@ -1650,7 +1650,7 @@
 	}
 
 	.tile-grid:global(.drag-over) {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
@@ -1671,7 +1671,7 @@
 	}
 
 	.tile-parent {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 	}
 
 	.tile-error {

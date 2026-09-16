@@ -536,7 +536,7 @@
 	}
 
 	.media-thumb.current {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 	}
 
 	/* Disabled while the 3D stage is active (R2-D12). */

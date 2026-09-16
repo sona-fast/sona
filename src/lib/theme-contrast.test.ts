@@ -447,11 +447,11 @@ describe('ember light theme WCAG AA contrast', () => {
 // iterates every theme × mode and checks the pairings that hold for all of them:
 // text on its surface at 4.5:1, and the two non-text tokens at 3:1.
 //
-// Scope: raw --primary as TEXT is deliberately absent. It fails on Ember light
-// (2.20:1), which is why --link, --status-attention and now --primary-text
-// (SONA-126) exist; --primary-text is swept at 4.5:1 below. --primary itself is
-// swept at the 3:1 non-text floor, where it draws selection and drop-target
-// borders.
+// Scope: raw --primary is deliberately absent, as text and as a boundary alike.
+// It fails on Ember light (2.20:1), which is why --link, --status-attention and
+// --primary-text (SONA-126) exist. --primary-text is swept at 4.5:1 below for
+// text and at 3:1 further down for the state boundaries it now draws; what is
+// left on raw --primary is fills and decoration, which 1.4.11 does not measure.
 //
 // Scope: only --sidebar-border is out of the sweep. Its dark value is an alpha
 // value (rgba over whatever sits behind it), and this sweep measures opaque
@@ -504,12 +504,7 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	// --input is the form-field boundary, in both places a field sits: on the
 	// page and inside a card. WCAG 1.4.11 wants 3:1 of it.
 	{ ink: 'input', ground: 'background', floor: 3 },
-	{ ink: 'input', ground: 'card', floor: 3 },
-	// --primary is not only a fill: it draws the selected-item and drop-target
-	// borders, which are non-text state indicators and so 1.4.11 at 3:1. Fixing
-	// the light-Ember case is SONA-126.
-	{ ink: 'primary', ground: 'background', floor: 3 },
-	{ ink: 'primary', ground: 'card', floor: 3 }
+	{ ink: 'input', ground: 'card', floor: 3 }
 ];
 
 // Pairings that fail TODAY, allowlisted with the ratio measured when the sweep
@@ -528,8 +523,8 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 //     identifying nothing — so 1.4.11 does not apply and the ratios stay
 //     recorded here rather than silenced.
 //
-// Same for --primary as a selection/drop-target border on light Ember: that one
-// is still real debt, recorded rather than tuned.
+// The selection and drop-target borders left this table with SONA-126: they draw
+// with --primary-text now, which is swept at 3:1 in its own describe below.
 const KNOWN_FAILURES = new Map<string, number>([
 	['default dark border on background', 1.39],
 	['default light border on background', 1.45],
@@ -543,8 +538,6 @@ const KNOWN_FAILURES = new Map<string, number>([
 	['aurora light border on card', 1.4],
 	['terracotta dark border on card', 1.26],
 	['terracotta light border on card', 1.82],
-	['default light primary on background', 2.2],
-	['default light primary on card', 2.46],
 	['terracotta light mutedForeground on secondary', 3.96],
 	// The hover twin of the pairing above, and it fails for the same reason.
 	['terracotta light mutedForeground on muted', 4.11],
@@ -1875,4 +1868,126 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		});
 	}
 
+});
+
+// SONA-126: the state boundaries moved off raw --primary and onto --primary-text
+// — selection borders, drop-target rings, hover edges on buttons and drop zones.
+// Those are non-text state indicators, so WCAG 1.4.11 asks 3:1 of them on both
+// surfaces a control sits on. --primary-text already clears 4.5:1 as text (the
+// sweep at the top of this file); this loop is the floor that still holds if a
+// theme ever relaxes the text bar.
+describe('state boundaries drawn with --primary-text meet 1.4.11 (SONA-126)', () => {
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: a --primary-text boundary meets 3:1 on the ${surface} surface`, () => {
+				const ratio = contrast(blockToken(sel, 'primary-text'), blockToken(sel, surface));
+				expect(
+					ratio,
+					`${name}: --primary-text on --${surface} measures ${ratio.toFixed(2)}:1`
+				).toBeGreaterThanOrEqual(3);
+			});
+		}
+	}
+});
+
+// SONA-126, the boundary twin of the text sweep above: a `border`, `outline` or
+// `box-shadow` painted with raw --primary. On Ember light that edge is 2.20:1 on
+// the page and 2.46:1 on a card, so wherever it is what identifies a control or
+// its state it fails WCAG 1.4.11's 3:1. Every such rule now draws with
+// --primary-text (or --ring, for the focus outlines). What is left is decoration
+// and fills, named here with why. A new state border on raw --primary fails this
+// test until it is repointed or listed below with a reason.
+describe('no state boundary draws with raw --primary (SONA-126)', () => {
+	const srcRoot = fileURLToPath(new URL('..', import.meta.url));
+
+	// file → the boundary rules that keep raw --primary, and why. Three reasons
+	// only: an accent bar (a decorative rule down one edge of a note or a row,
+	// identifying no control), the home page's hero ring around the portrait, and
+	// a border drawn over a fill of the same colour, where the edge is invisible
+	// and the state is carried by the fill.
+	// Counted, not just matched: a listed file may keep exactly as many raw
+	// --primary boundary rules as it has reasons, so a NEW one in a listed file
+	// fails the same way a new one anywhere else does.
+	const ALLOWED_BOUNDARIES = new Map<string, string[]>([
+		[
+			'/app.css',
+			[
+				'.tag-chip:hover — the hover edge, darkened to --link for the light themes right below it (SONA-220)',
+				'.tag-pill:hover — the same hover edge on the suggest pill, darkened the same way'
+			]
+		],
+		['/lib/components/CloudflareSetupDialog.svelte', ['.unlocks — the accent bar down the note']],
+		[
+			'/lib/components/StickerPackForm.svelte',
+			['.select-check.on — the border sits on a fill of the same colour']
+		],
+		['/routes/(public)/+page@.svelte', ['.avatar — the hero ring around the portrait']],
+		['/routes/(public)/gallery/+page.svelte', ['.aka-pointer — the accent bar down the note']],
+		[
+			'/routes/(public)/stickers/[slug]/+page.svelte',
+			['.contrib-chip.active — the border sits on a fill of the same colour']
+		],
+		[
+			'/routes/admin/conventions/+page.svelte',
+			[
+				'tr.is-live > td:first-child — the accent bar down the live row, beside the live pill that names it',
+				'.mobile-item.is-live — the same accent bar on the phone layout'
+			]
+		],
+		['/routes/admin/fursuit/+page.svelte', ['.unlocks — the accent bar down the note']],
+		['/routes/admin/settings/+page.svelte', ['.unlocks — the accent bar down the note']],
+		['/routes/admin/stickers/+page.svelte', ['.unlocks — the accent bar down the note']],
+		[
+			'/routes/admin/stickers/import/+page.svelte',
+			['.select-check.on — the border sits on a fill of the same colour']
+		]
+	]);
+
+	const styledFiles = readdirSync(srcRoot, { recursive: true })
+		.map(String)
+		.filter((p) => p.endsWith('.svelte') || p.endsWith('.css'))
+		.map((p) => `/${p}`);
+
+	// The boundary properties only, with their value up to the `;` or `}`. The
+	// `var(--primary)` spelling excludes --primary-text, which ends in different
+	// characters; color-mix() spans are cut out of the value first, because a
+	// border mixed 25% into the surface is a decorative tint rather than the
+	// boundary 1.4.11 measures.
+	const BOUNDARY =
+		/(?:^|[;{\s])(?:border(?:-color|-top|-bottom|-left|-right)?|outline(?:-color)?|box-shadow)\s*:\s*([^;}]*)/gm;
+	const COLOR_MIX = /color-mix\([^()]*(?:\([^()]*\)[^()]*)*\)/g;
+	const boundaryCount = (file: string) => {
+		const text = readFileSync(`${srcRoot}${file}`, 'utf8');
+		return [...text.matchAll(BOUNDARY)].filter((m) =>
+			m[1].replace(COLOR_MIX, '').includes('var(--primary)')
+		).length;
+	};
+
+	it('has no allowlist entry for a file that no longer draws one', () => {
+		const stale = [...ALLOWED_BOUNDARIES.keys()].filter(
+			(f) => !styledFiles.includes(f) || boundaryCount(f) === 0
+		);
+		expect(
+			stale,
+			'these files stopped drawing a raw --primary boundary — drop them from ALLOWED_BOUNDARIES'
+		).toEqual([]);
+	});
+
+	it('allows exactly as many raw --primary boundaries per file as it has reasons', () => {
+		const drifted = [...ALLOWED_BOUNDARIES]
+			.filter(([file, reasons]) => styledFiles.includes(file) && boundaryCount(file) !== reasons.length)
+			.map(([file, reasons]) => `${file}: ${boundaryCount(file)} rules, ${reasons.length} reasons`);
+		expect(
+			drifted,
+			'a raw --primary border, outline or box-shadow was added to or removed from an allowlisted file — repoint it at --primary-text, or list it above with the reason it is not a state boundary.'
+		).toEqual([]);
+	});
+
+	it('draws every other boundary with --primary-text', () => {
+		const offenders = styledFiles.filter((f) => !ALLOWED_BOUNDARIES.has(f) && boundaryCount(f) > 0);
+		expect(
+			offenders,
+			'a raw --primary edge measures 2.20:1 on Ember light. Use var(--primary-text) for a boundary that marks a control or its state, or add the rule to ALLOWED_BOUNDARIES above with the reason it does not.'
+		).toEqual([]);
+	});
 });

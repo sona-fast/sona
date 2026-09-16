@@ -663,22 +663,22 @@
 	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
 	.sticker-card { border: 1px solid var(--border); border-radius: var(--radius-m, 10px); overflow: hidden; display: flex; flex-direction: column; background: var(--card); transition: opacity 0.15s; }
 	.sticker-card.excluded { opacity: 0.55; }
-	.sticker-card.already { border-color: var(--primary); }
+	.sticker-card.already { border-color: var(--primary-text); }
 	.sticker-img { position: relative; aspect-ratio: 16 / 9; background: var(--secondary); display: flex; align-items: center; justify-content: center; overflow: hidden; border-bottom: 1px solid var(--border); }
 	.nsfw-badge { position: absolute; top: 8px; left: 8px; z-index: 1; background: var(--destructive); color: var(--destructive-foreground); font: 700 10px var(--font-secondary); padding: 3px 8px; border-radius: var(--radius-pill); }
 
 	/* Bulk selection */
 	.bulk-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-s); }
-	.bulk-bar.active { border-style: solid; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, transparent); }
+	.bulk-bar.active { border-style: solid; border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 6%, transparent); }
 	.bulk-hint { font-size: 12px; color: var(--muted-foreground); }
 	.bulk-count { font-size: 13px; font-weight: 600; }
 	.bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.btn-sm { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--secondary); color: var(--foreground); cursor: pointer; }
-	.btn-sm:hover:not(:disabled) { border-color: var(--primary); }
+	.btn-sm:hover:not(:disabled) { border-color: var(--primary-text); }
 	.btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
 	.bulk-div { width: 1px; height: 20px; background: var(--border); }
 	.bulk-bar .link-btn { margin-left: auto; }
-	.sticker-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+	.sticker-card.selected { border-color: var(--primary-text); box-shadow: 0 0 0 2px var(--primary-text); }
 	.sticker-img { cursor: pointer; }
 	.sticker-img.selected::after { content: ''; position: absolute; inset: 0; background: color-mix(in srgb, var(--primary) 18%, transparent); pointer-events: none; }
 	.select-check {

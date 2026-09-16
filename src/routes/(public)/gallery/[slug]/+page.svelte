@@ -614,7 +614,7 @@
 	}
 
 	.variant-tile.current .variant-thumb {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 	}
 
 	.variant-badge {

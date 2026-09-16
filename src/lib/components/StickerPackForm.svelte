@@ -639,7 +639,7 @@
 		transition: border-color 0.15s, background-color 0.15s, opacity 0.15s; min-height: 80px;
 	}
 	.upload-zone.multi { width: 100%; }
-	.upload-zone:hover { border-color: var(--primary); }
+	.upload-zone:hover { border-color: var(--primary-text); }
 	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
 	/* The hidden file input stays keyboard-focusable — surface its focus on the
 	   zone, which is the only thing visible. */
@@ -647,7 +647,7 @@
 	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
 	   as the upload page's dropzone. :global because the drop attachment sets the
 	   class imperatively, so Svelte can't see it in the markup. */
-	.upload-zone:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
+	.upload-zone:global(.drag-over) { border-color: var(--primary-text); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
 	/* No pointer-events: none — the drop attachment has to receive dragover/drop
 	   to preventDefault, or a drop while uploading navigates away from the form.
 	   The nested input's own disabled attribute keeps clicks inert. */
@@ -663,11 +663,11 @@
 	.remove-btn:hover { color: var(--destructive); border-color: var(--destructive); }
 	.sticker-list { display: flex; flex-direction: column; gap: 10px; }
 	.sticker-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-s); transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s; background: var(--background); }
-	.sticker-row.selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+	.sticker-row.selected { border-color: var(--primary-text); box-shadow: 0 0 0 1px var(--primary-text); }
 	/* The row being dragged dims; the row it would drop onto gets a primary outline +
 	   tint so the landing spot is obvious. */
 	.sticker-row.dragging { opacity: 0.4; }
-	.sticker-row.drop-target { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
+	.sticker-row.drop-target { border-color: var(--primary-text); box-shadow: 0 0 0 2px var(--primary-text); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
 	.drag-handle {
 		display: flex; align-items: center; justify-content: center; width: 24px; align-self: stretch;
 		padding: 0; background: none; border: none; color: var(--muted-foreground);
@@ -675,9 +675,9 @@
 	}
 	.drag-handle:hover { color: var(--foreground); }
 	.drag-handle:active { cursor: grabbing; }
-	.drag-handle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-xs); }
+	.drag-handle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.sticker-thumb { position: relative; width: 56px; height: 56px; border-radius: var(--radius-xs); background: var(--secondary); flex-shrink: 0; overflow: hidden; cursor: pointer; }
-	.sticker-thumb:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+	.sticker-thumb:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 	.sticker-thumb.selected::after { content: ''; position: absolute; inset: 0; background: color-mix(in srgb, var(--primary) 18%, transparent); pointer-events: none; }
 	.select-check {
 		position: absolute; top: 4px; right: 4px; z-index: 2; width: 18px; height: 18px; border-radius: 50%;
@@ -695,13 +695,13 @@
 
 	/* Bulk-edit bar */
 	.bulk-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-s); }
-	.bulk-bar.active { border-style: solid; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, transparent); }
+	.bulk-bar.active { border-style: solid; border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 6%, transparent); }
 	.bulk-hint { font-size: 12px; color: var(--muted-foreground); }
 	.bulk-count { font-size: 13px; font-weight: 600; }
 	.bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.bulk-managed { font-size: 12px; color: var(--muted-foreground); font-style: italic; }
 	.btn-sm { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--secondary); color: var(--foreground); cursor: pointer; }
-	.btn-sm:hover:not(:disabled) { border-color: var(--primary); }
+	.btn-sm:hover:not(:disabled) { border-color: var(--primary-text); }
 	.btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
 	.bulk-div { width: 1px; height: 20px; background: var(--border); }
 	.bulk-bar .link-btn { margin-left: auto; }
