@@ -125,7 +125,6 @@ describe('defaultPrivacyPolicy', () => {
 		expect(declined).toMatch(/IP addresses, page URLs, and browser user-agent strings/);
 		// The rest of the policy is unchanged.
 		expect(declined).toContain('Resend');
-		expect(declined).toMatch(/Google Fonts/);
 	});
 
 	// The feed (SONA-172) publishes titles, thumbnails and credits, and feed
@@ -172,9 +171,9 @@ describe('defaultPrivacyPolicy', () => {
 			.flatMap((s) => s.body)
 			.join('\n');
 		expect(text).toMatch(/Web Analytics script/);
-		// app.css imports web fonts from Google on every public page, so Google
-		// is a recipient of visitor IPs whether or not we mention the beacon.
-		expect(text).toMatch(/Google Fonts/);
+		// SONA-181 self-hosted the typefaces, so Google is no longer a recipient of
+		// visitor IPs and naming it would be a disclosure the site does not earn.
+		expect(text).not.toMatch(/Google Fonts/);
 		expect(text).toContain('Turnstile');
 		expect(text).toContain('Telegram');
 		expect(text).toContain('cons.fyi');
@@ -300,7 +299,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = 'b2c656867b76ec288a85b230ccce8279bdff6cd963edea4e90e1b31f0c7351fa';
+	const RECORDED_TEXT_HASH = 'cdfdecab4469f68d4e085812041fb1c652232f3f9d63db9a54aacd854faed30a';
 	const RECORDED_UPDATED = '2026-09-15';
 
 	function defaultsText(): string {

@@ -175,7 +175,7 @@
 									</div>
 								{/if}
 								<!-- Source chip overlays the cover, top-left -->
-								<span class="source-chip" class:telegram={pack.source === 'telegram'}>
+								<span class="source-chip">
 									{#if pack.source === 'telegram'}
 										<Send size={13} />
 										{m.stickers_source_telegram()}
@@ -258,6 +258,7 @@
 		gap: 8px;
 		margin-bottom: 24px;
 		padding: 4px;
+		border: 1px solid var(--input);
 		border-radius: var(--radius-pill);
 		background: var(--secondary);
 	}
@@ -535,10 +536,6 @@
 		border-radius: var(--radius-pill);
 		background: rgba(0, 0, 0, 0.7);
 		color: #ffffff;
-	}
-
-	.source-chip.telegram {
-		color: var(--primary);
 	}
 
 	.pack-body {

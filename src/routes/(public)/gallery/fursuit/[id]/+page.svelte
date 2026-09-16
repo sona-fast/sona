@@ -264,8 +264,8 @@
 	}
 
 	.license-badge.permission {
-		border-color: var(--primary);
-		color: var(--primary);
+		border-color: var(--primary-text);
+		color: var(--primary-text);
 		cursor: help;
 	}
 

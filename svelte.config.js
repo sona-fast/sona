@@ -30,7 +30,9 @@ const config = {
 		// (e.g. app.html's display:contents, `style:` directives) that hashing can't
 		// cover, and SvelteKit skips its own style hashing when 'unsafe-inline' is
 		// present. Style injection is low-value to an attacker vs. script; scripts
-		// stay locked. fonts.googleapis.com is the Google Fonts @import stylesheet.
+		// stay locked. No external stylesheet or font origin is listed: the
+		// typefaces are self-hosted under static/fonts/ and 'self' covers them
+		// (SONA-181).
 		//
 		// img-src / media-src are intentionally broad (https:): image and media
 		// hosts are per-fork configurable (r2PublicUrl) and user-entered artist
@@ -68,8 +70,8 @@ const config = {
 				// to exactly that one handler string — an injected onerror=... hashes
 				// differently and stays blocked, so XSS containment holds.
 				'script-src-attr': ['unsafe-hashes', 'sha256-7dQwUgLau1NFCCGjfn9FsYptB6ZtWxJin6VohGIu20I='],
-				'style-src': ['self', 'unsafe-inline', 'https://fonts.googleapis.com'],
-				'font-src': ['self', 'https://fonts.gstatic.com'],
+				'style-src': ['self', 'unsafe-inline'],
+				'font-src': ['self'],
 				// blob: is required, not a loosening: the admin upload page renders each
 				// picked file through URL.createObjectURL(file) — both the preview
 				// thumbnail AND getImageDimensions(), which reads naturalWidth/Height off

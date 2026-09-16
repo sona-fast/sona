@@ -93,7 +93,7 @@
 	}
 
 	.tab.active {
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.theme-tab {

@@ -310,7 +310,7 @@
 	}
 
 	a.next-con:hover {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		text-decoration: none;
 	}
 
@@ -360,7 +360,7 @@
 	}
 
 	a.con-row:hover {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		text-decoration: none;
 	}
 

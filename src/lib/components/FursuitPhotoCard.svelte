@@ -124,8 +124,8 @@
 
 	.chip.permission {
 		background: transparent;
-		border: 1px solid var(--primary);
-		color: var(--primary);
+		border: 1px solid var(--primary-text);
+		color: var(--primary-text);
 		cursor: help;
 	}
 
@@ -138,6 +138,6 @@
 	}
 
 	.card:hover .furtrack-link {
-		color: var(--primary, var(--foreground));
+		color: var(--primary-text, var(--foreground));
 	}
 </style>

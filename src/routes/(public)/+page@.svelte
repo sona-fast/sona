@@ -270,7 +270,7 @@
 	}
 
 	.card:hover {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		background: var(--secondary);
 		text-decoration: none;
 	}

@@ -1,0 +1,27 @@
+{
+	"note": "sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Each run checks every file against it and stops on a mismatch; see the script.",
+	"files": {
+		"ChakraPetch-400-latin-ext.woff2": "c2086b274b3c6e1597c9c1638e40be0220f406e7dd04247069d423f292ab8ec7",
+		"ChakraPetch-400-latin.woff2": "e592818029a919d578974df32686d415d6acd8401bc5420695de41a46eeae426",
+		"ChakraPetch-400-vietnamese.woff2": "90cc8fa7f45882c82058fb9df255a474266df849cdb18211fa544c236458200d",
+		"ChakraPetch-500-latin-ext.woff2": "b821fcd55102d303590e2b5da0c6097f2e0c384bd5ad8fbf157bb5e91402c250",
+		"ChakraPetch-500-latin.woff2": "adf007cd277ef6dac0c8cecacfb60cc5e24e7c8bcce4db98aa233bd3a88ef5a3",
+		"ChakraPetch-500-vietnamese.woff2": "193afbc30f4bf583873584f719bc1f629d4fcdab2bef12af329bde191f9e1c30",
+		"ChakraPetch-600-latin-ext.woff2": "140bd5c457550ed1e06cf2346e5ab432d4a7344c4ba44d5460ee7384f210d098",
+		"ChakraPetch-600-latin.woff2": "4d6d5f0b31b3a471a843779c4ecada040e5bc291f96bca9805a94293fe8003fa",
+		"ChakraPetch-600-vietnamese.woff2": "752ec6b8cdc54147e98e31fea5de9747e612f75c0d5d9740c4d78949f900222d",
+		"ChakraPetch-700-latin-ext.woff2": "afe317b164b50683882a9cc969421017f72dcea9ce681bb9d28b59f72302a4b7",
+		"ChakraPetch-700-latin.woff2": "3c2433eb167176cddcdb3eb2ea306d68c2a4ed4c6e78a0dc07b3853d8f6ae8e3",
+		"ChakraPetch-700-vietnamese.woff2": "48dcd6d3f4f969fc722846a9aef1b1bd59810d2982db6a9f89a99a46c24f5b3c",
+		"IBMPlexSansJP-400-latin-ext.woff2": "5b221a16ea2bbecc850f05a8115d1d5161e37115629cf65120ae8b9c685e6943",
+		"IBMPlexSansJP-400-latin.woff2": "88b72720aa92b860f29d17a791aaacbcf684d3c0ea5b435e29833e361fee8974",
+		"IBMPlexSansJP-500-latin-ext.woff2": "d2b352597396341218d31f5e8348247dca146b7b2a3ff9a76d604c6f785e0ac4",
+		"IBMPlexSansJP-500-latin.woff2": "82fc6c992d224f31ff6fd3edc65f2e1b66bfe26145df2c4c9d55323f24dd7b8e",
+		"IBMPlexSansJP-600-latin-ext.woff2": "655ac7350d318c911a94bb6019b5de4db231cfc2cece6be5d1f3db4bc61f3b72",
+		"IBMPlexSansJP-600-latin.woff2": "1dc72dbf4347bb1817d2c469374492abaf414150c1ccf222112238a21c220833",
+		"IBMPlexSansJP-700-latin-ext.woff2": "df890fdd10115c2a311fad2bf6fb61873f40f63e0c1a6f0143bb4c517d4fd734",
+		"IBMPlexSansJP-700-latin.woff2": "5d0be34a8fef479a8bf6f5ade9ad971000bb7a8c52b0e944b9d969038ab412ed",
+		"JetBrainsMono-latin-ext.woff2": "9c38cb2d0d2d93c1ee6e21fa78db76f13ea7e15e15cc64214c7ca89b6aaa35c4",
+		"JetBrainsMono-latin.woff2": "2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4"
+	}
+}

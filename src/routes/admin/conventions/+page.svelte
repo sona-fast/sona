@@ -335,7 +335,7 @@
 		background: none;
 		border: none;
 		padding: 0;
-		color: var(--primary);
+		color: var(--primary-text);
 		font-size: 13px;
 		font-family: var(--font-secondary);
 		cursor: pointer;
@@ -416,7 +416,7 @@
 
 	.status-maybe {
 		background: color-mix(in srgb, var(--primary) 18%, transparent);
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.status-considering {
@@ -568,10 +568,10 @@
 			justify-content: center;
 			padding: 14px;
 			margin-top: 8px;
-			border: 1px dashed var(--border);
+			border: 1px dashed var(--input);
 			border-radius: var(--radius-s);
 			background: none;
-			color: var(--primary);
+			color: var(--primary-text);
 			font-size: 14px;
 			font-family: var(--font-primary);
 			font-weight: 500;

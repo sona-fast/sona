@@ -1893,7 +1893,7 @@
 	}
 
 	.dropzone:hover {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
@@ -1901,7 +1901,7 @@
 	   because the drop attachment sets the class imperatively, so Svelte can't
 	   see it in the markup. Same treatment as the VR and sticker zones. */
 	.dropzone:global(.drag-over) {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
@@ -1933,7 +1933,7 @@
 	}
 
 	.tile-grid:global(.drag-over) {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
@@ -1954,7 +1954,7 @@
 	}
 
 	.tile-parent {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 	}
 
 	.tile-error {
@@ -2094,7 +2094,7 @@
 	}
 
 	.tile-parent .tile-parent-pick {
-		color: var(--primary);
+		color: var(--primary-text);
 		font-weight: 500;
 	}
 
@@ -2109,6 +2109,7 @@
 		gap: 6px;
 		min-height: 160px;
 		border-style: dashed;
+		border-color: var(--input);
 		background: none;
 		color: var(--muted-foreground);
 		font-size: 13px;
@@ -2118,8 +2119,8 @@
 	}
 
 	.tile-add:hover {
-		border-color: var(--primary);
-		color: var(--primary);
+		border-color: var(--primary-text);
+		color: var(--primary-text);
 	}
 
 	/* Mirrors .dropzone.disabled — the other way into the picker has to read as
@@ -2132,7 +2133,7 @@
 	/* aria-disabled leaves the button hoverable, so undo exactly what :hover
 	   above sets and hold the resting look. */
 	.tile-add[aria-disabled='true']:hover {
-		border-color: var(--border);
+		border-color: var(--input);
 		color: var(--muted-foreground);
 	}
 
@@ -2206,7 +2207,7 @@
 		gap: 6px;
 		align-self: flex-start;
 		padding: 6px 12px;
-		border: 1px solid var(--border);
+		border: 1px solid var(--input);
 		border-radius: var(--radius-pill);
 		background: none;
 		color: var(--foreground);
@@ -2217,8 +2218,8 @@
 	}
 
 	.add-artist-btn:hover {
-		border-color: var(--primary);
-		color: var(--primary);
+		border-color: var(--primary-text);
+		color: var(--primary-text);
 	}
 
 	.field {

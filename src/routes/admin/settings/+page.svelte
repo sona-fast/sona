@@ -2408,7 +2408,7 @@
 	}
 
 	.provider {
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.danger-zone {
@@ -2510,7 +2510,7 @@
 		line-height: 1.5;
 	}
 	.reg-status.connected {
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 	.reg-status code {
 		font-family: var(--font-primary);

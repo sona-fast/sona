@@ -1,4 +1,10 @@
-import type { ThemeDefinition, PartialThemeTokens } from './types.ts';
+import {
+	SUBSET_LATIN,
+	SUBSET_LATIN_EXT,
+	SUBSET_VIETNAMESE,
+	type ThemeDefinition,
+	type PartialThemeTokens
+} from './types.ts';
 
 // Terracotta — warm clay (the akito.dog fork's brand palette, upstreamed). Also
 // carries that fork's typography; the font tokens are emitted in the dark block and apply to
@@ -17,6 +23,9 @@ const dark: PartialThemeTokens = {
 	// is 5.05:1.
 	primary: '#E2694D',
 	primaryForeground: '#1E1E1E',
+	// primary already clears AA as small text here (5.05:1 on the background,
+	// 4.57:1 on cards), so the text token is the same colour.
+	primaryText: { ref: 'primary' },
 	secondary: '#3A3633',
 	secondaryForeground: '#EADED6',
 	muted: '#3A3633',
@@ -31,7 +40,8 @@ const dark: PartialThemeTokens = {
 	// background, 4.57:1 on cards).
 	link: { ref: 'primary' },
 	border: '#3A3633',
-	input: '#3A3633',
+	// 3.57:1 on the page background, 3.23:1 on cards (WCAG 1.4.11).
+	input: '#7A736C',
 	ring: '#E2694D',
 	sidebar: '#181716',
 	sidebarAccent: '#2A2724',
@@ -50,6 +60,10 @@ const light: PartialThemeTokens = {
 	// is 4.68:1.
 	primary: '#AD3A1E',
 	primaryForeground: '#EADED6',
+	// This theme's light primary is dark enough to read as small text (4.68:1 on
+	// the background, 6.17:1 on cards). Declared here rather than inherited for
+	// the same source-order reason as --link below.
+	primaryText: { ref: 'primary' },
 	secondary: '#DDD0C6',
 	secondaryForeground: '#1E1E1E',
 	muted: '#E0D4CA',
@@ -72,7 +86,8 @@ const light: PartialThemeTokens = {
 	// lands on the right color — but only by luck, so declare it explicitly).
 	link: { ref: 'primary' },
 	border: '#CBBEB3',
-	input: '#CBBEB3',
+	// 3.50:1 on the page background, 4.62:1 on cards.
+	input: '#7E736A',
 	ring: '#AD3A1E',
 	sidebar: '#DDD0C6',
 	sidebarAccent: '#CBBEB3',
@@ -86,7 +101,36 @@ export const terracottaTheme: ThemeDefinition = {
 	dark,
 	light,
 	fonts: {
-		primary: "'Chakra Petch', sans-serif",
-		secondary: "'IBM Plex Sans JP', sans-serif"
+		primary: "'Chakra Petch', 'IBM Plex Sans JP', sans-serif",
+		secondary: "'IBM Plex Sans JP', sans-serif",
+		// Chakra Petch carries no Japanese, so the headings name the body face next:
+		// a Japanese heading falls to IBM Plex Sans JP rather than straight to the
+		// reader's system font.
+		//
+		// Self-hosted, Latin only: the slices come from `node scripts/fetch-fonts.mjs`
+		// — static/fonts/README.md says why. Japanese text falls back to the reader's
+		// system font, since the Japanese glyph set is megabytes every visitor pays for.
+		faces: [
+			{ family: 'Chakra Petch', weight: 400, src: '/fonts/ChakraPetch-400-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'Chakra Petch', weight: 400, src: '/fonts/ChakraPetch-400-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'Chakra Petch', weight: 400, src: '/fonts/ChakraPetch-400-vietnamese.woff2', unicodeRange: SUBSET_VIETNAMESE },
+			{ family: 'Chakra Petch', weight: 500, src: '/fonts/ChakraPetch-500-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'Chakra Petch', weight: 500, src: '/fonts/ChakraPetch-500-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'Chakra Petch', weight: 500, src: '/fonts/ChakraPetch-500-vietnamese.woff2', unicodeRange: SUBSET_VIETNAMESE },
+			{ family: 'Chakra Petch', weight: 600, src: '/fonts/ChakraPetch-600-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'Chakra Petch', weight: 600, src: '/fonts/ChakraPetch-600-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'Chakra Petch', weight: 600, src: '/fonts/ChakraPetch-600-vietnamese.woff2', unicodeRange: SUBSET_VIETNAMESE },
+			{ family: 'Chakra Petch', weight: 700, src: '/fonts/ChakraPetch-700-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'Chakra Petch', weight: 700, src: '/fonts/ChakraPetch-700-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'Chakra Petch', weight: 700, src: '/fonts/ChakraPetch-700-vietnamese.woff2', unicodeRange: SUBSET_VIETNAMESE },
+			{ family: 'IBM Plex Sans JP', weight: 400, src: '/fonts/IBMPlexSansJP-400-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'IBM Plex Sans JP', weight: 400, src: '/fonts/IBMPlexSansJP-400-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'IBM Plex Sans JP', weight: 500, src: '/fonts/IBMPlexSansJP-500-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'IBM Plex Sans JP', weight: 500, src: '/fonts/IBMPlexSansJP-500-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'IBM Plex Sans JP', weight: 600, src: '/fonts/IBMPlexSansJP-600-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'IBM Plex Sans JP', weight: 600, src: '/fonts/IBMPlexSansJP-600-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'IBM Plex Sans JP', weight: 700, src: '/fonts/IBMPlexSansJP-700-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'IBM Plex Sans JP', weight: 700, src: '/fonts/IBMPlexSansJP-700-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT }
+		]
 	}
 };

@@ -1,0 +1,225 @@
+import { describe, it, expect } from 'vitest';
+import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FAMILIES, acceptBytes, acceptCached, fileName, missingFaces, parseManifest, readManifest, refuseSymlink, staleFiles } from './fetch-fonts.mjs';
+import { ALL_THEMES } from '../src/lib/themes/all.ts';
+
+// The prune is the one destructive thing this script does, and it runs over a
+// directory holding two other things: Geist (hand-placed) and the slices this
+// script fetched last time.
+// Nothing here touches the network — the decision is a function of the listing.
+describe('fetch-fonts prune (SONA-181)', () => {
+	const wanted = [
+		'JetBrainsMono-latin.woff2',
+		'JetBrainsMono-latin-ext.woff2',
+		'IBMPlexSansJP-400-latin.woff2'
+	];
+	const listing = [
+		...wanted,
+		'IBMPlexSansJP-300-latin.woff2',
+		'Geist-Regular.woff2',
+		'Geist-Medium.woff2',
+		'README.md',
+		'manifest.json'
+	];
+	const stale = staleFiles(listing, wanted);
+
+	it('prunes a slice from a weight the families no longer ask for', () => {
+		expect(stale).toEqual(['IBMPlexSansJP-300-latin.woff2']);
+	});
+
+	// The kana and kanji slices were cut by a subsetter this repo no longer
+	// carries, and the prune used to be told to leave them alone. A leftover is
+	// now this script's to remove like any other slice the families do not ask for.
+	it('prunes a leftover Japanese slice', () => {
+		expect(staleFiles([...wanted, 'IBMPlexSansJP-400-kana.woff2'], wanted)).toEqual([
+			'IBMPlexSansJP-400-kana.woff2'
+		]);
+	});
+
+	it('leaves Geist alone, because app.css declares it and no family here owns the slug', () => {
+		expect(stale.filter((f) => f.startsWith('Geist-'))).toEqual([]);
+	});
+
+	it('keeps the shared JetBrains Mono file, which carries no weight in its name', () => {
+		expect(stale).not.toContain('JetBrainsMono-latin.woff2');
+	});
+
+	// Only binaries are ever this script's to remove.
+	it('considers nothing but woff2 files', () => {
+		expect(stale.every((f) => f.endsWith('.woff2'))).toBe(true);
+		expect(staleFiles(['IBMPlexSansJP-notes.json'], [])).toEqual([]);
+	});
+});
+
+// A manifest that fails to parse used to read as an empty one, which drops the
+// baseline acceptBytes checks against — the run then records whatever bytes it
+// finds as correct.
+describe('fetch-fonts manifest parsing (SONA-181)', () => {
+	it('returns the recorded digests', () => {
+		const files = { 'Test-latin.woff2': 'a'.repeat(64) };
+		expect(parseManifest(JSON.stringify({ note: 'x', files }))).toEqual(files);
+	});
+
+	it('throws on invalid JSON rather than reading as empty', () => {
+		expect(() => parseManifest('{ files: ')).toThrow();
+	});
+
+	it('throws when `files` is missing', () => {
+		expect(() => parseManifest('{"note":"x"}')).toThrow(/no `files` object/);
+	});
+
+	it('throws on a digest that is not 64 hex characters', () => {
+		expect(() => parseManifest('{"files":{"Test-latin.woff2":"nope"}}')).toThrow(/non-sha256 digest/);
+	});
+});
+
+describe('fetch-fonts file names', () => {
+	it('names a per-weight slice with its weight', () => {
+		expect(fileName('IBM Plex Sans JP', { weight: 400, subset: 'latin-ext' })).toBe(
+			'IBMPlexSansJP-400-latin-ext.woff2'
+		);
+	});
+
+	// One variable file serves every weight of the subset, so four copies under
+	// four names is four identical binaries in the repo.
+	it('drops the weight from a file shared across weights', () => {
+		expect(fileName('JetBrains Mono', { weight: 400, subset: 'latin', shared: true })).toBe(
+			'JetBrainsMono-latin.woff2'
+		);
+	});
+
+	// Read from the theme data, not a second list here: a family added to a theme
+	// without a FAMILIES entry would otherwise ship a face with no file behind it.
+	// Geist is the one family declared in app.css by hand, so it is not in faces.
+	it('covers every family the themes declare', () => {
+		const declared = new Set(
+			ALL_THEMES.flatMap((theme) => (theme.fonts?.faces ?? []).map((face) => face.family))
+		);
+		expect(new Set(FAMILIES.map((f) => f.family))).toEqual(declared);
+	});
+});
+
+// Every file writeFace handles goes through acceptBytes — see its doc comment.
+describe('fetch-fonts digest check on fetched bytes', () => {
+	const bytes = Buffer.from('woff2 bytes');
+	const digest = acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: undefined });
+
+	it('returns the digest when the manifest records nothing yet', () => {
+		expect(digest).toMatch(/^[0-9a-f]{64}$/);
+	});
+
+	it('returns the digest when the bytes still hash as recorded', () => {
+		expect(acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: digest })).toBe(digest);
+	});
+
+	it('throws on bytes that moved under the same URL', () => {
+		expect(() => acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: 'a'.repeat(64) })).toThrow(
+			/static\/fonts\/manifest\.json records/
+		);
+	});
+
+	it('accepts the new bytes under --force, which is how an update is recorded', () => {
+		expect(acceptBytes('Test-latin.woff2', bytes, { force: true, recorded: 'a'.repeat(64) })).toBe(digest);
+	});
+});
+
+// readManifest is where the parse errors above are allowed to surface. A
+// catch-all that returned {} would pass every parseManifest case and still
+// reset the baseline on a corrupt file, so the read path is pinned on its own.
+describe('fetch-fonts readManifest', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sona-fetch-fonts-test-'));
+
+	it('reads an empty baseline only when the file is missing', () => {
+		expect(readManifest(join(dir, 'absent.json'))).toEqual({ present: false, files: {} });
+	});
+
+	it('propagates a corrupt manifest instead of resetting the baseline', () => {
+		const corrupt = join(dir, 'corrupt.json');
+		writeFileSync(corrupt, '{ "files": ');
+		expect(() => readManifest(corrupt)).toThrow();
+	});
+
+	it('propagates a read error that is not a missing file', () => {
+		// A directory at the path fails with EISDIR, not ENOENT.
+		expect(() => readManifest(dir)).toThrow(/EISDIR/);
+	});
+
+	it('returns the digests of a well-formed manifest', () => {
+		const good = join(dir, 'good.json');
+		const files = { 'A-400-latin.woff2': 'a'.repeat(64) };
+		writeFileSync(good, JSON.stringify({ note: 'x', files }));
+		expect(readManifest(good)).toEqual({ present: true, files });
+	});
+});
+
+// A manifest that exists but does not name a file already on disk is a lost
+// line, not a first run; accepting the file would record its bytes unchecked.
+describe('fetch-fonts acceptCached', () => {
+	const bytes = Buffer.from('woff2 bytes');
+	const digest = acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: undefined });
+
+	it('accepts an unrecorded file when there is no manifest yet', () => {
+		expect(acceptCached('Test-latin.woff2', bytes, { force: false, recorded: undefined, present: false })).toBe(digest);
+	});
+
+	it('refuses an unrecorded file when a manifest exists', () => {
+		expect(() =>
+			acceptCached('Test-latin.woff2', bytes, { force: false, recorded: undefined, present: true })
+		).toThrow(/does not record it/);
+	});
+
+	it('accepts an unrecorded file under --force', () => {
+		expect(acceptCached('Test-latin.woff2', bytes, { force: true, recorded: undefined, present: true })).toBe(digest);
+	});
+
+	it('still checks a recorded file against its digest', () => {
+		expect(() =>
+			acceptCached('Test-latin.woff2', bytes, { force: false, recorded: 'a'.repeat(64), present: true })
+		).toThrow(/records/);
+	});
+});
+
+// A CSS2 response that carries some of the requested slices used to pass, and
+// the prune then deleted the committed file for the slice it lacked.
+describe('fetch-fonts missingFaces', () => {
+	const entry = { family: 'Test', weights: [400, 700], subsets: ['latin', 'latin-ext'] };
+	const face = (weight: number, subset: string) => ({ weight, subset, url: 'https://fonts.gstatic.com/x' });
+
+	it('is empty when every requested pair is present', () => {
+		expect(
+			missingFaces(entry, [face(400, 'latin'), face(400, 'latin-ext'), face(700, 'latin'), face(700, 'latin-ext')])
+		).toEqual([]);
+	});
+
+	it('names each pair the response lacks', () => {
+		expect(missingFaces(entry, [face(400, 'latin'), face(700, 'latin')])).toEqual(['400/latin-ext', '700/latin-ext']);
+	});
+
+	it('names everything when nothing matched', () => {
+		expect(missingFaces(entry, [])).toHaveLength(4);
+	});
+});
+
+// A symlink under static/fonts/ would send a fetched write, or a cached read,
+// wherever it points.
+describe('fetch-fonts refuseSymlink', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sona-fetch-fonts-symlink-'));
+
+	it('lets a missing path through, which is the fetch case', () => {
+		expect(() => refuseSymlink(join(dir, 'absent.woff2'))).not.toThrow();
+	});
+
+	it('lets a regular file through', () => {
+		writeFileSync(join(dir, 'real.woff2'), 'bytes');
+		expect(() => refuseSymlink(join(dir, 'real.woff2'))).not.toThrow();
+	});
+
+	it('refuses a symlink, dangling or not', () => {
+		symlinkSync(join(dir, 'real.woff2'), join(dir, 'link.woff2'));
+		symlinkSync(join(dir, 'nowhere.woff2'), join(dir, 'dangling.woff2'));
+		expect(() => refuseSymlink(join(dir, 'link.woff2'))).toThrow(/symlink/);
+		expect(() => refuseSymlink(join(dir, 'dangling.woff2'))).toThrow(/symlink/);
+	});
+});

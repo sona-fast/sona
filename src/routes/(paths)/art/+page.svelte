@@ -399,7 +399,7 @@
 		font-weight: 700;
 		font-size: 12px;
 		letter-spacing: 1px;
-		color: var(--primary);
+		color: var(--primary-text);
 		text-decoration: none;
 	}
 

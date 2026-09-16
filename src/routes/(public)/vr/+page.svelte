@@ -116,6 +116,7 @@
 		gap: 8px;
 		margin-bottom: 24px;
 		padding: 4px;
+		border: 1px solid var(--input);
 		border-radius: var(--radius-pill);
 		background: var(--secondary);
 	}

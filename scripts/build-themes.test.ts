@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderThemesCss, checkThemesCss, OUTPUT_PATH } from './build-themes.ts';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
-import type { ThemeDefinition, TokenKey } from '../src/lib/themes/types.ts';
+import type { FontFace, ThemeDefinition, TokenKey } from '../src/lib/themes/types.ts';
 
 // A two-token fixture rather than the real palettes: this asserts the LAYOUT
 // (selectors, order, aliases, fonts, the inherit rule), and pinning it to the
@@ -208,6 +208,101 @@ describe('renderThemesCss', () => {
 			}
 		];
 		expect(renderThemesCss(ok)).toContain("--font-primary: 'ヒラギノ角ゴシック', sans-serif;");
+	});
+
+	// A face's family and src reach the CSS unescaped too — inside a quoted string
+	// and inside url() — and a src that resolves to no file renders as a valid
+	// @font-face the browser silently falls back from, so the page just wears the
+	// wrong typeface. Each of these is a build failure instead.
+	const withFace = (face: Partial<FontFace>): ThemeDefinition[] => [
+		{
+			id: 'default',
+			label: 'Faces',
+			dark: {},
+			light: {},
+			fonts: {
+				primary: "'A', monospace",
+				secondary: "'B', sans-serif",
+				faces: [
+					{
+						family: 'JetBrains Mono',
+						weight: 400,
+						src: '/fonts/JetBrainsMono-latin.woff2',
+						...face
+					}
+				]
+			}
+		}
+	];
+
+	it.each([
+		['a src that climbs out of /fonts/', { src: '/fonts/../../etc/passwd.woff2' }, /must be a \/fonts\/\*\.woff2 path/],
+		['a src that closes the url()', { src: '/fonts/x).woff2' }, /must be a \/fonts\/\*\.woff2 path/],
+		['a family with a quote', { family: "Jet'Brains" }, /must not contain a quote/],
+		['a weight that is neither three digits nor a range', { weight: 40 }, /not a 3- or 4-digit weight/],
+		['a weight of zero, which is three digits but names nothing', { weight: '000' }, /outside the 1-1000 CSS range/],
+		['a weight past the top of the CSS range', { weight: 1001 }, /outside the 1-1000 CSS range/],
+		['a weight range that runs from high to low', { weight: '700 400' }, /runs from high to low/],
+		['a unicode-range past the last codepoint', { unicodeRange: 'U+110000' }, /above U\+10FFFF/],
+		['a unicode-range interval that runs backwards', { unicodeRange: 'U+4E00-3040' }, /runs from high to low/],
+		['a unicode-range wildcard that is not trailing', { unicodeRange: 'U+4?0' }, /CSS does not accept/],
+		['a unicode-range wildcard with an explicit high end', { unicodeRange: 'U+4E??-5000' }, /CSS does not accept/],
+		['a unicode-range value longer than six digits', { unicodeRange: 'U+0000000' }, /CSS does not accept/],
+		['a style that is not normal, italic or oblique', { style: 'slanted' }, /is not normal, italic or oblique/],
+		['a malformed unicode-range', { unicodeRange: 'U+ZZZZ' }, /is not a comma-separated list of U\+ ranges/],
+		['a src with no file behind it', { src: '/fonts/NotHere-400-latin.woff2' }, /has no file at/]
+	])('rejects %s', (_name, face, message) => {
+		expect(() => renderThemesCss(withFace(face))).toThrow(message);
+	});
+
+	// A directory named like a font passes an existence check and has a size,
+	// and the browser cannot load it. Made and removed here, under static/fonts/.
+	// A symlink to a real font elsewhere passes every stat check, and the face
+	// would then point out of static/fonts/. Both fixtures below carry the Geist-
+	// prefix because the font manifest test lists static/fonts/ and skips that
+	// family, and vitest may run the two files at the same time.
+	it('rejects a src that is a symlink', () => {
+		const link = new URL('../static/fonts/Geist-NotALink-fixture.woff2', import.meta.url);
+		symlinkSync(new URL('../static/fonts/Geist-Regular.woff2', import.meta.url), link);
+		try {
+			expect(() => renderThemesCss(withFace({ src: '/fonts/Geist-NotALink-fixture.woff2' }))).toThrow(/has no file at/);
+		} finally {
+			rmSync(link, { force: true });
+		}
+	});
+
+	it('rejects a src that is a directory', () => {
+		const dir = new URL('../static/fonts/Geist-NotAFile-fixture.woff2', import.meta.url);
+		mkdirSync(dir);
+		try {
+			expect(() => renderThemesCss(withFace({ src: '/fonts/Geist-NotAFile-fixture.woff2' }))).toThrow(/has no file at/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('emits a face with font-display: swap and its unicode-range', () => {
+		const css = renderThemesCss(withFace({ unicodeRange: 'U+0000-00FF, U+2122' }));
+		const block = css.match(/@font-face \{([^}]*)\}/)?.[1] ?? '';
+		expect(block).toContain("font-family: 'JetBrains Mono';");
+		expect(block).toContain('font-style: normal;');
+		expect(block).toContain('font-weight: 400;');
+		expect(block).toContain('font-display: swap;');
+		expect(block).toContain("src: url('/fonts/JetBrainsMono-latin.woff2') format('woff2');");
+		expect(block).toContain('unicode-range: U+0000-00FF, U+2122;');
+	});
+
+	it('accepts a variable face declared over a weight range', () => {
+		const css = renderThemesCss(withFace({ weight: '400 700' }));
+		expect(css).toContain('font-weight: 400 700;');
+	});
+
+	it('accepts 1000, the top of the CSS weight range', () => {
+		expect(renderThemesCss(withFace({ weight: 1000 }))).toContain('font-weight: 1000;');
+	});
+
+	it('accepts a wildcard range inside the codepoint space', () => {
+		expect(renderThemesCss(withFace({ unicodeRange: 'U+4E??' }))).toContain('unicode-range: U+4E??;');
 	});
 
 	it('rejects a theme list whose first entry is not the default theme', () => {

@@ -11,15 +11,18 @@
  * are load-bearing, because theme blocks tie on specificity and the later one
  * wins.
  */
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { argv, env, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
 import { assertNoAliasCycles } from '../src/lib/themes/cascade.ts';
 import { DEFAULT_THEME_ID } from '../src/lib/themes/index.ts';
-import { TOKEN_CSS_NAMES, cssName, cssValue, type ThemeDefinition, type TokenKey } from '../src/lib/themes/types.ts';
+import { TOKEN_CSS_NAMES, cssName, cssValue, type FontFace, type ThemeDefinition, type TokenKey } from '../src/lib/themes/types.ts';
 
 export const OUTPUT_PATH = fileURLToPath(new URL('../src/lib/themes/generated.css', import.meta.url));
+
+/** Where a face's `src` path resolves on disk: '/fonts/x.woff2' → static/fonts/x.woff2. */
+const STATIC_DIR = fileURLToPath(new URL('../static/', import.meta.url));
 
 const HEADER = `/* GENERATED FILE — do not edit.
    Rendered from src/lib/themes/*.theme.ts by scripts/build-themes.ts.
@@ -31,6 +34,14 @@ const HEADER = `/* GENERATED FILE — do not edit.
    block in this file wins — which is why an alternate theme's light block has to
    re-declare --link rather than inherit it from [data-theme='light']. A token no
    matching block declares falls through to :root — see types.ts. */
+`;
+
+const FONT_HEADER = `/* Self-hosted @font-face blocks (SONA-181). Top-level on purpose: @font-face
+   cannot live inside a selector, so every theme's faces are declared here and
+   the browser fetches a file only when an element actually renders in that
+   family — which only happens under the theme whose block names it in
+   --font-primary/--font-secondary. Files come from static/fonts/, fetched by
+   \`node scripts/fetch-fonts.mjs\`. */
 `;
 
 /** One selector + its declarations, as a formatted CSS rule. '' is a blank line. */
@@ -93,7 +104,11 @@ function validateTheme(theme: ThemeDefinition): void {
 	if (theme.label.includes('*' + '/')) {
 		throw new Error(`theme '${theme.id}': label must not contain a comment terminator`);
 	}
-	for (const [slot, family] of Object.entries(theme.fonts ?? {})) {
+	// Only the two family lists — `faces` is an array and is validated separately
+	// by validateFace. A slot the caller left unset is skipped.
+	for (const slot of ['primary', 'secondary'] as const) {
+		const family = theme.fonts?.[slot];
+		if (family === undefined) continue;
 		if (!FONT_FAMILY.test(family)) {
 			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has characters outside letters, digits, spaces, commas, quotes, and hyphens`);
 		}
@@ -132,6 +147,110 @@ function validateTheme(theme: ThemeDefinition): void {
 	}
 }
 
+// A face's family name and src reach the CSS unescaped, same as the font-family
+// lists above. The family goes inside a quoted string and the src inside url(),
+// so anything that could close either one is rejected rather than emitted.
+const FACE_SRC = /^\/fonts\/[A-Za-z0-9._-]+\.woff2$/;
+const FACE_WEIGHT = /^\d{3,4}( \d{3,4})?$/;
+const MAX_CODEPOINT = 0x10ffff;
+
+/**
+ * One theme's `@font-face` blocks. They are emitted at the TOP of the file and
+ * outside every selector, because @font-face is a top-level at-rule: nesting it
+ * under [data-theme-id='terracotta'] would make the browser drop it. That is not
+ * a leak — a browser downloads a font file only when an element actually renders
+ * in that family, and only the theme's own block names these families in
+ * --font-primary/--font-secondary. So the rules are always parsed and the bytes
+ * are only fetched under the theme that uses them.
+ */
+function fontFaceRules(theme: ThemeDefinition): string[] {
+	return (theme.fonts?.faces ?? []).map((face) => {
+		validateFace(theme.id, face);
+		const declarations = [
+			`font-family: '${face.family}';`,
+			`font-style: ${face.style ?? 'normal'};`,
+			`font-weight: ${face.weight};`,
+			'font-display: swap;',
+			`src: url('${face.src}') format('woff2');`
+		];
+		if (face.unicodeRange) declarations.push(`unicode-range: ${face.unicodeRange};`);
+		return rule('@font-face', declarations);
+	});
+}
+
+// A src that does not resolve to a real, non-empty file renders as a perfectly
+// valid @font-face the browser silently falls back from, so the page just wears
+// the wrong typeface. Checked at generation time, where it is a build failure.
+function validateFace(id: string, face: FontFace): void {
+	if (!FONT_FAMILY.test(face.family)) {
+		throw new Error(`theme '${id}': font face family '${face.family}' has characters outside letters, digits, spaces, commas, quotes, and hyphens`);
+	}
+	if (face.family.includes("'")) {
+		throw new Error(`theme '${id}': font face family '${face.family}' must not contain a quote`);
+	}
+	if (!FACE_WEIGHT.test(String(face.weight))) {
+		throw new Error(`theme '${id}': font face weight '${face.weight}' is not a 3- or 4-digit weight or a 'min max' range`);
+	}
+	validateWeightValues(id, String(face.weight));
+	if (face.style !== undefined && !/^(normal|italic|oblique)$/.test(face.style)) {
+		throw new Error(`theme '${id}': font face style '${face.style}' is not normal, italic or oblique`);
+	}
+	if (!FACE_SRC.test(face.src)) {
+		throw new Error(`theme '${id}': font face src '${face.src}' must be a /fonts/*.woff2 path`);
+	}
+	if (face.unicodeRange !== undefined && !/^U\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?(,\s*U\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?)*$/.test(face.unicodeRange)) {
+		throw new Error(`theme '${id}': font face unicode-range '${face.unicodeRange}' is not a comma-separated list of U+ ranges`);
+	}
+	if (face.unicodeRange !== undefined) validateUnicodeRange(id, face.unicodeRange);
+	const onDisk = STATIC_DIR + face.src.slice(1);
+	// lstat, so a symlink is seen as what it is rather than as its target: the
+	// face has to be a real file inside static/fonts/, not a pointer out of it.
+	if (!existsSync(onDisk) || lstatSync(onDisk).isSymbolicLink() || !statSync(onDisk).isFile() || statSync(onDisk).size === 0) {
+		throw new Error(`theme '${id}': font face src '${face.src}' has no file at ${onDisk} — run \`node scripts/fetch-fonts.mjs\``);
+	}
+}
+
+// The shapes above are digit counts, which accept numbers CSS has no meaning
+// for: '000' is three digits and names no weight, and U+110000 is valid hex past
+// the last codepoint. A face carrying either parses and then matches nothing, so
+// the numbers are checked too.
+function validateWeightValues(id: string, weight: string): void {
+	const parts = weight.split(' ').map(Number);
+	for (const n of parts) {
+		if (n < 1 || n > 1000) {
+			throw new Error(`theme '${id}': font face weight '${weight}' is outside the 1-1000 CSS range`);
+		}
+	}
+	if (parts.length === 2 && parts[0] > parts[1]) {
+		throw new Error(`theme '${id}': font face weight range '${weight}' runs from high to low`);
+	}
+}
+
+// One value of a unicode-range: up to six hex digits, or a range of two, or a
+// single value whose trailing digits are wildcards. A wildcard anywhere else, or
+// on either side of a range, is invalid CSS: the browser drops the descriptor and
+// loads the face for every codepoint.
+const RANGE_PART = /^U\+(?:[0-9A-Fa-f]{1,6}-[0-9A-Fa-f]{1,6}|(?=[0-9A-Fa-f?]{1,6}$)[0-9A-Fa-f]*\?*)$/;
+
+function validateUnicodeRange(id: string, range: string): void {
+	for (const part of range.split(',')) {
+		if (!RANGE_PART.test(part.trim())) {
+			throw new Error(`theme '${id}': font face unicode-range '${range}' has a value CSS does not accept: '${part.trim()}'`);
+		}
+		// 'U+4E?' covers U+4E0 through U+4EF: the wildcards read as 0 at the low end
+		// and F at the high end.
+		const [low, high] = part.trim().slice(2).split('-');
+		const from = parseInt(low.replace(/\?/g, '0'), 16);
+		const to = high === undefined ? parseInt(low.replace(/\?/g, 'F'), 16) : parseInt(high, 16);
+		if (to > MAX_CODEPOINT) {
+			throw new Error(`theme '${id}': font face unicode-range '${range}' names a codepoint above U+10FFFF`);
+		}
+		if (from > to) {
+			throw new Error(`theme '${id}': font face unicode-range '${range}' has an interval that runs from high to low`);
+		}
+	}
+}
+
 export function renderThemesCss(themes: ThemeDefinition[]): string {
 	for (const theme of themes) validateTheme(theme);
 	// Emission order is source order and the default theme is the fallback floor,
@@ -152,6 +271,7 @@ export function renderThemesCss(themes: ThemeDefinition[]): string {
 	// here, over the same cascade chains the contrast test reads (cascade.ts),
 	// after the default-first check that those chains depend on.
 	assertNoAliasCycles(themes);
+	const faces = themes.flatMap(fontFaceRules);
 	const blocks = themes.flatMap((theme) => {
 		const sel = themeSelectors(theme);
 		return [
@@ -159,7 +279,8 @@ export function renderThemesCss(themes: ThemeDefinition[]): string {
 			block(theme, 'light', sel.light)
 		];
 	});
-	return `${HEADER}\n${blocks.join('\n')}`;
+	const fontSection = faces.length === 0 ? '' : `${FONT_HEADER}\n${faces.join('\n')}\n`;
+	return `${HEADER}\n${fontSection}${blocks.join('\n')}`;
 }
 
 /** Exit code: 0 when the committed file matches, 1 when it is stale or missing. */

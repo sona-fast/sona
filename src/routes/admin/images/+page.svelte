@@ -713,7 +713,7 @@
 	}
 
 	.dialog-row:has(input:checked) {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 	}
 
 	.dialog-row img {

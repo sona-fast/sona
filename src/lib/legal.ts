@@ -144,7 +144,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Service providers',
 			body: [
-				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, Web Analytics, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services. Public pages also load web fonts from Google Fonts, so Google receives your IP address, browser user-agent, and the page you are viewing when those files are fetched.",
+				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, Web Analytics, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services.",
 				// The CATEGORY is disclosed unconditionally: an owner who declines the
 				// /ai page may still use these tools, and dropping the whole
 				// paragraph with the toggle would delete a real processor

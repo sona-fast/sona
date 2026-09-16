@@ -34,7 +34,7 @@
 		font-family: var(--font-primary);
 		font-size: 96px;
 		font-weight: 700;
-		color: var(--primary);
+		color: var(--primary-text);
 		line-height: 1;
 		margin-bottom: 8px;
 	}

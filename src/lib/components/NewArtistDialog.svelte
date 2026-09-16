@@ -649,14 +649,14 @@
 		background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-s); box-shadow: 0 8px 24px rgba(0,0,0,0.28);
 	}
 	.reg-results li { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 1px solid transparent; border-radius: var(--radius-xs); padding: 6px 10px; cursor: pointer; color: var(--foreground); font-size: 14px; }
-	/* Hover and keyboard both drive activeIndex, so only .active is styled. */
-	.reg-results li.active { border-color: var(--primary); background: var(--secondary); }
-	/* Default-light --primary (#FF8400) is only ~2.5:1 on the card; add a --ring
-	   outline in light mode for a ≥3:1 non-text indicator (1.4.11). Dark themes
-	   keep the passing --primary border. */
-	:global([data-theme='light']) .reg-results li.active { outline: 2px solid var(--ring); outline-offset: -2px; }
+	/* Hover and keyboard both drive activeIndex, so only .active is styled. The
+	   border was raw --primary, only ~2.5:1 on a light card, and light mode
+	   carried a second --ring outline to reach the 3:1 of 1.4.11. --primary-text
+	   clears 3:1 in every theme and mode, so the doubled outline is gone
+	   (SONA-126). */
+	.reg-results li.active { border-color: var(--primary-text); background: var(--secondary); }
 	.linked-row { display: flex; align-items: center; gap: 8px; }
-	.linked { color: var(--primary); font-size: 12px; }
+	.linked { color: var(--primary-text); font-size: 12px; }
 	.unlink { background: none; border: none; padding: 0; cursor: pointer; color: var(--muted-foreground); font-size: 12px; font-family: inherit; text-decoration: underline; }
 	.unlink:hover { color: var(--foreground); }
 	.reg-id { display: flex; flex-direction: column; min-width: 0; }
@@ -664,12 +664,12 @@
 	.reg-handle { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.reg-import-pill {
 		margin-left: auto; flex-shrink: 0; padding: 1px 8px; font-size: 11px;
-		color: var(--primary); border: 1px solid var(--primary); border-radius: var(--radius-pill);
+		color: var(--primary-text); border: 1px solid var(--primary-text); border-radius: var(--radius-pill);
 	}
 	.reg-footer { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
 	.reg-import-all {
 		background: none; border: none; padding: 0; cursor: pointer;
-		color: var(--primary); font-size: 12px; font-family: inherit;
+		color: var(--primary-text); font-size: 12px; font-family: inherit;
 	}
 	.reg-import-all:hover { text-decoration: underline; }
 	.confirm-layer { z-index: 110; }

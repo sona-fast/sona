@@ -848,7 +848,7 @@
 
 	/* Visitors · Tier A (issue #149) */
 	.eyebrow.tier-a {
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 	.vhero {
 		padding: 24px 26px;

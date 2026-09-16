@@ -221,7 +221,7 @@
 		font-family: var(--font-primary);
 		font-size: 24px;
 		font-weight: 700;
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.stat-label {

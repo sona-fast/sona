@@ -87,8 +87,11 @@ npx wrangler pages secret put CLOUDFLARE_ZONE_ID       --project-name <your-proj
 		width: 24px;
 		height: 24px;
 		border-radius: var(--radius-pill);
-		background: color-mix(in srgb, var(--primary) 16%, transparent);
-		color: var(--primary);
+		/* On this tint --primary-text reads 3.67:1 on Terracotta dark; --foreground
+		   clears 4.5:1 on every theme and mode. The tint is mixed over --card, which
+		   is the dialog's surface, so the test can measure what the eye sees. */
+		background: color-mix(in srgb, var(--primary) 16%, var(--card));
+		color: var(--foreground);
 		font: 600 12px var(--font-primary);
 		display: flex;
 		align-items: center;

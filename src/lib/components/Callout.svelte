@@ -69,7 +69,7 @@
 	}
 
 	.primary .title {
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.success .title {
