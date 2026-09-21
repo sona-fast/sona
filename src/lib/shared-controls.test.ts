@@ -203,6 +203,9 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	// (SONA-209 r3).
 	it('both VR file-picker buttons take the disabled class while saving', () => {
 		const source = readFileSync(`${srcRoot}/lib/components/VrAvatarForm.svelte`, 'utf8');
+		const replace = source.match(/<label[^>]*class="file-btn"[^>]*>/)?.[0];
+		expect(replace, 'the replace-model label moved or was renamed').toBeDefined();
+		expect(replace).toContain('class:disabled={saving}');
 		const remove = source.match(/<button[^>]*onclick=\{removeModel\}[^>]*>/)?.[0];
 		expect(remove, 'the remove-model button moved or was renamed').toBeDefined();
 		expect(remove).toContain('class:disabled={saving}');
