@@ -26,6 +26,12 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	// that no second page shares.
 	const ALLOWED = new Map<string, string[]>([
 		[
+			'/routes/(public)/gallery/+page.svelte',
+			[
+				"select.filter-select under forced-colors — hands the native caret back where the page's own appearance:none outranks app.css's forced-colors rule; not expressible as a variant (SONA-209 #446)"
+			]
+		],
+		[
 			'/lib/components/ConCard.svelte',
 			[
 				'.actions .btn — a 7px gap, one past the shared 6px, on this card\'s own rhythm',
