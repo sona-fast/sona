@@ -1341,14 +1341,27 @@
 		return async ({ result, update }) => {
 			await update();
 			syncing = false;
-			if (result.type === 'success') toast.success((result.data?.syncMessage as string) ?? m.admin_settings_sync_complete());
-			else if (result.type === 'failure')
+			if (result.type === 'success') {
+				const done = (result.data?.syncMessage as string) ?? m.admin_settings_sync_complete();
+				// A run that finished with failed registry calls did less than the counts
+				// suggest — say how much, rather than reporting a clean "0 and 0".
+				const degraded = result.data?.syncDegraded as number | undefined;
+				toast.success(
+					degraded ? `${done} ${m.admin_settings_sync_degraded({ failed: degraded })}` : done
+				);
+			} else if (result.type === 'failure')
 				// A registry refusal comes back as a reason, not a message: the wording is
-				// localized here and only the registry's own text is interpolated.
+				// localized here and only the registry's own text is interpolated. A refused
+				// KEY and an unreachable registry get different wording — the first points
+				// at this site's connection, the second at nothing the operator can fix.
 				toast.error(
 					result.data?.syncRefusedReason
 						? m.admin_settings_sync_refused({ reason: result.data.syncRefusedReason as string })
-						: ((result.data?.error as string) ?? m.admin_settings_sync_failed())
+						: result.data?.syncUpstreamReason
+							? m.admin_settings_sync_upstream_failed({
+									reason: result.data.syncUpstreamReason as string
+								})
+							: ((result.data?.error as string) ?? m.admin_settings_sync_failed())
 				);
 		};
 	}}>

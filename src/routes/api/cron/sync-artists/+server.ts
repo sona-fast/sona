@@ -9,7 +9,7 @@ import {
 } from '$lib/server/registry';
 import { syncArtists, describeSync } from '$lib/server/artist-sync';
 import { requireCronSecret } from '$lib/server/cron-auth';
-import { recordJobRun, schedule } from '$lib/server/metrics';
+import { cleanMessage, recordJobRun, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
 // POST /api/cron/sync-artists
@@ -44,10 +44,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// instead: the workflow prints the body, and 502 keeps the run red. Anything
 		// else (a D1 failure) is still our bug and still propagates as a 500.
 		if (e instanceof RegistrySyncError) {
+			// The reason quotes an upstream body, and the sync workflow prints this
+			// response into a PUBLIC Actions log — so it goes through the same
+			// redaction (and 300-char clamp) that job_run.detail gets.
 			return json(
 				{
 					ok: false,
-					error: e.message,
+					error: cleanMessage(e.message),
 					...(e instanceof RegistryRefusalError ? { upstreamStatus: e.httpStatus } : {})
 				},
 				{ status: 502 }
@@ -56,5 +59,9 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		throw e;
 	}
 	schedule(platform, recordJobRun(db, 'sync-artists', 'ok', describeSync(summary)));
-	return json({ ok: true, ...summary });
+	// lastFailure quotes an upstream body verbatim; it belongs in the job_run detail
+	// (which redacts it) and not in a response the workflow log prints. The counters
+	// still say the run degraded.
+	const { lastFailure: _lastFailure, ...counters } = summary;
+	return json({ ok: true, ...counters });
 };

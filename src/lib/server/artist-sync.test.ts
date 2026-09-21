@@ -409,8 +409,68 @@ describe('syncArtists backfill — degraded searches are counted, and an all-fai
 		stubSearchBlocked();
 
 		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(
-			/every backfill search failed \(3 of 3\).*blocked by a Cloudflare challenge/
+			/all 3 backfill searches failed.*blocked by a Cloudflare challenge/
 		);
+	});
+
+	// "Every search failed" means nothing on a one-artist fork: a single timeout or
+	// 5xx would turn its daily run red forever. The run needs a sample first.
+	it('does not throw when only one or two searches existed to fail', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 1);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string) =>
+				Promise.resolve(
+					String(url).includes('/v1/artists/search')
+						? new Response('bad gateway', { status: 502 })
+						: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+				)
+			)
+		);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 1, searchFailed: 1 });
+		expect(summary.lastFailure).toMatch(/HTTP 502/);
+	});
+
+	// The registry's unauthenticated read limiter is shared by every fork, so one
+	// 06:30 UTC sweep rate-limits all of them at once. isFatalRefusal already calls a
+	// 429 non-fatal everywhere else; counting it here would contradict that.
+	it('does not count a rate-limited search as a failure, but still names it', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string) =>
+				Promise.resolve(
+					String(url).includes('/v1/artists/search')
+						? new Response('slow down', { status: 429 })
+						: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+				)
+			)
+		);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 3, searchFailed: 0 });
+		expect(summary.lastFailure).toMatch(/HTTP 429/);
+	});
+
+	// A 4xx delta refusal returns before `call`'s onFail hook, so a non-fatal one used
+	// to leave every counter at zero — a rate-limited run read as a healthy empty feed.
+	it('counts a non-fatal delta refusal (429) and names it', async () => {
+		const db = makeDb();
+		stubDeltaResponse(429, { error: 'rate limited — slow down' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ deltaFailed: 1 });
+		expect(summary.lastFailure).toMatch(/429/);
 	});
 
 	it('does NOT throw when some searches got through, but counts and names the failures', async () => {
@@ -493,5 +553,33 @@ describe('describeSync', () => {
 				lastFailure: 'HTTP 502 (cf-ray x-SEA)'
 			})
 		).toBe('refreshed 0, linked 0, 3 of 20 searches failed (HTTP 502 (cf-ray x-SEA))');
+	});
+
+	it('names failed delta pages', () => {
+		expect(
+			describeSync({
+				refreshed: 0,
+				linked: 0,
+				scanned: 0,
+				searchFailed: 0,
+				deltaFailed: 2,
+				lastFailure: 'HTTP 503: registry down'
+			})
+		).toBe('refreshed 0, linked 0, 2 delta page(s) failed (HTTP 503: registry down)');
+	});
+
+	// A rate-limited search sets the reason without counting as a failure, so the
+	// reason has to survive on its own — otherwise that run reports nothing at all.
+	it('appends the reason whenever one was recorded, even with both counters at zero', () => {
+		expect(
+			describeSync({
+				refreshed: 0,
+				linked: 0,
+				scanned: 3,
+				searchFailed: 0,
+				deltaFailed: 0,
+				lastFailure: 'HTTP 429'
+			})
+		).toBe('refreshed 0, linked 0 (HTTP 429)');
 	});
 });

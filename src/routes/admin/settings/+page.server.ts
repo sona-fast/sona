@@ -51,6 +51,7 @@ import {
 	isRegistryEnabled,
 	resolveRegistryEnv,
 	registryRegisterFork,
+	RegistryRefusalError,
 	RegistrySyncError,
 	REGISTRY_API_KEY_SETTING,
 	REGISTRY_URL_SETTING
@@ -663,19 +664,29 @@ export const actions = {
 		try {
 			summary = await syncArtists(db, renv, settings);
 		} catch (e) {
-			// A registry refusal (401/403 on a bad/revoked fork key) or a run in which every
-			// backfill search failed throws — hand the registry's own reason back as data
-			// so the page renders a LOCALIZED message around it, instead of a bare 500
-			// page or an untranslated internal string. Any other exception (a D1 error,
-			// say) must not be echoed verbatim to the operator: return no payload so the
-			// page shows its generic sync-failed toast.
-			if (e instanceof RegistrySyncError)
+			// A registry refusal (401/403 on a bad/revoked fork key) throws — hand the
+			// registry's own reason back as data so the page renders a LOCALIZED message
+			// around it, instead of a bare 500 page or an untranslated internal string.
+			if (e instanceof RegistryRefusalError)
 				return fail(502, { syncRefusedReason: e.reason.slice(0, 300) });
+			// Any other upstream failure (every backfill search blocked, say) gets its own
+			// reason field: the refusal toast tells the operator to check this site's key,
+			// which is the wrong place to look when the key is fine and the registry is
+			// simply unreachable.
+			if (e instanceof RegistrySyncError)
+				return fail(502, { syncUpstreamReason: e.reason.slice(0, 300) });
+			// Any other exception (a D1 error, say) must not be echoed verbatim to the
+			// operator: return no payload so the page shows its generic sync-failed toast.
 			return fail(500, {});
 		}
+		// A run can finish while most of its registry calls failed. "0 refreshed, 0 newly
+		// linked" reads as "nothing to do" in that case, so pass the failure count along
+		// and let the page say so.
+		const degraded = summary.searchFailed + summary.deltaFailed;
 		return {
 			success: true,
-			syncMessage: `Sync complete — ${summary.refreshed} refreshed, ${summary.linked} newly linked.`
+			syncMessage: `Sync complete — ${summary.refreshed} refreshed, ${summary.linked} newly linked.`,
+			...(degraded > 0 ? { syncDegraded: degraded } : {})
 		};
 	},
 

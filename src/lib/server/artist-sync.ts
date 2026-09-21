@@ -42,8 +42,9 @@ export interface SyncSummary {
 	linked: number;
 	scanned: number;
 	/** Backfill searches that produced no usable answer (timeout, network, 5xx, or a
-	 *  block in front of the registry). Each one fails soft, so without this count a
-	 *  run whose searches all silently failed reads exactly like "no matches". */
+	 *  block in front of the registry — but NOT a 429/408, which is back-pressure).
+	 *  Each one fails soft, so without this count a run whose searches all silently
+	 *  failed reads exactly like "no matches". */
 	searchFailed: number;
 	/** Delta-feed pages that failed soft the same way (5xx/network; a 4xx refusal is
 	 *  handled separately and fatally when it's 401/403). */
@@ -59,7 +60,7 @@ export function describeSync(s: SyncSummary): string {
 	let out = `refreshed ${s.refreshed}, linked ${s.linked}`;
 	if (s.searchFailed > 0) out += `, ${s.searchFailed} of ${s.scanned} searches failed`;
 	if (s.deltaFailed > 0) out += `, ${s.deltaFailed} delta page(s) failed`;
-	if (s.lastFailure && (s.searchFailed > 0 || s.deltaFailed > 0)) out += ` (${s.lastFailure})`;
+	if (s.lastFailure) out += ` (${s.lastFailure})`;
 	return out;
 }
 
@@ -157,6 +158,11 @@ export async function syncArtists(
 			if (!isFatalRefusal(feed.httpStatus)) {
 				// Transient (429/408/400): degrade to a no-op like an outage, but leave a
 				// trace — a silently short sync is what this whole path exists to prevent.
+				// It counts as a failed page for the same reason: a 4xx refusal returns
+				// before `call`'s onFail hook, so without this the run would report zero
+				// failures and read exactly like a healthy empty feed.
+				deltaFailed++;
+				lastFailure = `HTTP ${feed.httpStatus}: ${feed.error}`;
 				console.warn(
 					`registry delta refused: HTTP ${feed.httpStatus} — ${feed.error} (failing soft)`
 				);
@@ -244,8 +250,12 @@ export async function syncArtists(
 		if (!handle) continue;
 		scanned++;
 		const matches = await registrySearch(env, { handle }, {
-			onFail: (why) => {
-				searchFailed++;
+			onFail: (why, { httpStatus }) => {
+				// A rate limit or a gateway timeout is back-pressure, not an outage, and
+				// isFatalRefusal already treats those as non-fatal everywhere else. The
+				// registry's unauthenticated read limiter is shared by every fork, so a
+				// 429 sweep at the cron hour would otherwise fail every small fork at once.
+				if (httpStatus !== 429 && httpStatus !== 408) searchFailed++;
 				lastFailure = why;
 			}
 		});
@@ -286,8 +296,12 @@ export async function syncArtists(
 	// Same reasoning for the backfill: one failed search is noise, but a run in which
 	// EVERY search failed did nothing and must not read as a healthy "linked 0". (When
 	// a zone bot rule started challenging Worker fetches, this path ran empty for
-	// days with a green job.) A run with no searches at all has nothing to judge.
-	if (scanned > 0 && searchFailed === scanned) {
+	// days with a green job.) Two rules keep this from crying wolf: a run needs a
+	// meaningful sample before "all of them failed" means anything — one unlinked
+	// artist and one timeout is not an outage — and rate limits and gateway timeouts
+	// never count toward searchFailed at all (see the onFail hook above), so a
+	// fleet-wide 429 leaves the run degraded rather than red.
+	if (scanned >= 3 && searchFailed === scanned) {
 		throw new RegistrySearchError(searchFailed, lastFailure ?? 'no response');
 	}
 

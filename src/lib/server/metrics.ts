@@ -236,7 +236,7 @@ function redactIps(s: string): string {
  * fake a boundary and stop the redaction early, while a genuine chain keeps its
  * wrapper segments readable after the redacted one.
  */
-function cleanMessage(message: string | string[]): string {
+export function cleanMessage(message: string | string[]): string {
 	// Empty segments (a whitespace-only wrapper message) are dropped so the
 	// stored text never carries a dangling ' ← ' separator.
 	const segments = Array.isArray(message) ? message : [message];

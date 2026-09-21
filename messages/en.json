@@ -1156,6 +1156,8 @@
 	"admin_settings_sync_complete": "Sync complete",
 	"admin_settings_sync_failed": "Sync failed",
 	"admin_settings_sync_refused": "The shared registry refused this site's key. Check the registry connection below. ({reason})",
+	"admin_settings_sync_upstream_failed": "The registry could not be reached, so nothing was matched this run. ({reason})",
+	"admin_settings_sync_degraded": "{failed} registry calls failed this run.",
 	"admin_settings_registry_sync": "Registry Sync",
 	"admin_settings_registry_sync_desc": "Pull artist updates from the shared registry now, and link any local artists already in it. (This also runs on a schedule via the sync cron.)",
 	"admin_settings_syncing": "Syncing…",

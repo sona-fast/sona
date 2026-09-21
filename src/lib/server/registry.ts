@@ -192,20 +192,23 @@ export class RegistryRefusalError extends RegistrySyncError {
  *  of them got through did no backfill at all, and reporting that as "ok, linked 0"
  *  is the silent empty result this whole family of checks exists to prevent. */
 export class RegistrySearchError extends RegistrySyncError {
-	readonly failed: number;
 	constructor(failed: number, lastReason: string) {
-		super(`every backfill search failed (${failed} of ${failed}): ${lastReason}`, lastReason);
+		super(`all ${failed} backfill searches failed: ${lastReason}`, lastReason);
 		this.name = 'RegistrySearchError';
-		this.failed = failed;
 	}
 }
 
 /** Optional hook for the fail-soft paths in `call`: invoked with a one-line reason
  *  whenever a request produced NO usable result (timeout, network error, 5xx, or a
  *  4xx the caller didn't opt to receive as a refusal). Lets a caller count how much
- *  of a run silently degraded without changing the fallback contract. */
+ *  of a run silently degraded without changing the fallback contract.
+ *
+ *  `httpStatus` is the response's status when the failure came from a response, and
+ *  undefined when nothing answered (timeout or network error) — a caller that treats
+ *  a rate limit or a gateway timeout differently from a real outage needs to tell
+ *  those apart. */
 export interface CallOptions {
-	onFail?: (reason: string) => void;
+	onFail?: (reason: string, info: { httpStatus?: number }) => void;
 }
 
 /** Name what answered a 4xx that carried no registry error message. A challenge or
@@ -213,13 +216,21 @@ export interface CallOptions {
  *  (its value is the mitigation kind, e.g. "challenge"), and every Cloudflare
  *  response carries a `cf-ray` id the security event log can be searched by. Naming
  *  those turns "HTTP 403" — which reads as a registry key problem — into "blocked by
- *  a Cloudflare challenge", which is a zone setting, and points at the log entry. */
+ *  a Cloudflare challenge", which is a zone setting, and points at the log entry.
+ *
+ *  Both headers come from whatever answered, which on this path is by definition NOT
+ *  the registry — so each is used only if it matches its documented shape, and an
+ *  off-shape value is dropped rather than pasted into a job log and an operator toast.
+ *  The ray is split into id and colo because job_run.detail redacts any 20-character
+ *  token-like run, and the joined "<16 hex>-SEA" form is exactly 20. */
 function describeOpaqueRefusal(res: Response): string {
 	const mitigated = res.headers.get('cf-mitigated');
 	const ray = res.headers.get('cf-ray');
-	const where = ray ? ` (cf-ray ${ray})` : '';
-	if (mitigated)
-		return `HTTP ${res.status}: blocked by a Cloudflare ${mitigated} in front of the registry${where}`;
+	const kind = mitigated && /^[a-z_-]{1,32}$/.test(mitigated) ? mitigated : '';
+	const rayMatch = ray?.match(/^([0-9a-f]{16})-([A-Z]{3})$/);
+	const where = rayMatch ? ` (cf-ray ${rayMatch[1]} ${rayMatch[2]})` : '';
+	if (kind)
+		return `HTTP ${res.status}: blocked by a Cloudflare ${kind} in front of the registry${where}`;
 	return `HTTP ${res.status}${where}`;
 }
 
@@ -248,7 +259,8 @@ async function call<T, R = never>(
 			null
 		);
 		if (!res) {
-			onFail?.(rejected ?? `timed out after ${TIMEOUT_MS}ms`);
+			// Nothing answered, so there is no status to report.
+			onFail?.(rejected ?? `timed out after ${TIMEOUT_MS}ms`, {});
 			return fallback;
 		}
 		if (!res.ok) {
@@ -268,12 +280,12 @@ async function call<T, R = never>(
 				const error = reason || describeOpaqueRefusal(res);
 				return { error, httpStatus: res.status } as R;
 			}
-			onFail?.(describeOpaqueRefusal(res));
+			onFail?.(describeOpaqueRefusal(res), { httpStatus: res.status });
 			return fallback;
 		}
 		return (await res.json()) as T;
 	} catch (e) {
-		onFail?.(e instanceof Error ? e.message : 'request failed');
+		onFail?.(e instanceof Error ? e.message : 'request failed', {});
 		return fallback;
 	}
 }

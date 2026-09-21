@@ -391,20 +391,47 @@ describe('registry client — naming what answered instead of the registry', () 
 	// with an HTML page, a 403, and `cf-mitigated: challenge`. Reporting that as a bare
 	// "HTTP 403" reads as a fork-key problem and sent the investigation the wrong way;
 	// the header names the actual product, and cf-ray points at the security event.
+	// The ray travels as "<id> <colo>", not as the raw "<id>-<colo>": job_run.detail
+	// redacts any token-like run of 20+ characters, and the joined form is exactly 20,
+	// so the panel used to show "(cf-ray [redacted])" — the one detail worth keeping.
 	it('names a Cloudflare mitigation (and its cf-ray) on an opaque 4xx refusal', async () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn().mockResolvedValue(
 				new Response('<html>Just a moment...</html>', {
 					status: 403,
-					headers: { 'content-type': 'text/html', 'cf-mitigated': 'challenge', 'cf-ray': 'abc123-SEA' }
+					headers: {
+						'content-type': 'text/html',
+						'cf-mitigated': 'challenge',
+						'cf-ray': 'a3e7bc522cbfa3c2-SEA'
+					}
 				})
 			)
 		);
 		expect(await registryDelta(env, {})).toEqual({
-			error: 'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray abc123-SEA)',
+			error:
+				'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray a3e7bc522cbfa3c2 SEA)',
 			httpStatus: 403
 		});
+	});
+
+	// Neither header comes from the registry on this path — whatever blocked the call
+	// set them — so an off-shape value is dropped instead of being pasted into a job
+	// log and an operator toast.
+	it('ignores an off-shape cf-mitigated and cf-ray, falling back to the bare status', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response('<html/>', {
+					status: 403,
+					headers: {
+						'cf-mitigated': 'challenge'.repeat(20),
+						'cf-ray': 'not a real ray id at all'
+					}
+				})
+			)
+		);
+		expect(await registryDelta(env, {})).toEqual({ error: 'HTTP 403', httpStatus: 403 });
 	});
 
 	it('keeps the registry\'s own reason when the body has one, even behind Cloudflare headers', async () => {
@@ -423,23 +450,52 @@ describe('registry client — naming what answered instead of the registry', () 
 	// The search endpoint has always failed soft (empty list), which is right for one
 	// call and invisible across a whole run. The hook lets the caller count and name
 	// the failures without changing the empty-list contract.
+	// The status rides along so a caller can tell back-pressure (429/408) from an
+	// outage; it is undefined when nothing answered at all.
 	it.each([
-		['a 5xx', () => Promise.resolve(new Response('bad gateway', { status: 502 })), /HTTP 502/],
+		['a 5xx', () => Promise.resolve(new Response('bad gateway', { status: 502 })), /HTTP 502/, 502],
 		[
 			'a challenge page',
 			() =>
 				Promise.resolve(
 					new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
 				),
-			/blocked by a Cloudflare challenge/
+			/blocked by a Cloudflare challenge/,
+			403
 		],
-		['a network error', () => Promise.reject(new Error('offline')), /offline/]
-	])('registrySearch still returns [] on %s but reports the reason through onFail', async (_l, fetchImpl, expected) => {
+		[
+			'a rate limit',
+			() => Promise.resolve(new Response('slow down', { status: 429 })),
+			/HTTP 429/,
+			429
+		],
+		['a network error', () => Promise.reject(new Error('offline')), /offline/, undefined]
+	])('registrySearch still returns [] on %s but reports the reason through onFail', async (_l, fetchImpl, expected, status) => {
 		vi.stubGlobal('fetch', vi.fn(fetchImpl));
 		const onFail = vi.fn();
 		expect(await registrySearch(env, { handle: 'x' }, { onFail })).toEqual([]);
 		expect(onFail).toHaveBeenCalledTimes(1);
 		expect(onFail.mock.calls[0][0]).toMatch(expected);
+		expect(onFail.mock.calls[0][1]?.httpStatus).toBe(status);
+	});
+
+	// The timeout arm: withTimeout resolves to null with nothing to report, so the
+	// reason has to be synthesized. Without this the slowest failure mode — the one
+	// an overloaded registry actually produces — would report no reason at all.
+	it('reports a timeout through onFail when nothing ever answers', async () => {
+		vi.useFakeTimers();
+		try {
+			vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+			const onFail = vi.fn();
+			const pending = registrySearch(env, { handle: 'x' }, { onFail });
+			await vi.advanceTimersByTimeAsync(5001);
+			expect(await pending).toEqual([]);
+			expect(onFail).toHaveBeenCalledTimes(1);
+			expect(onFail.mock.calls[0][0]).toMatch(/timed out/);
+			expect(onFail.mock.calls[0][1]?.httpStatus).toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('does not call onFail on a healthy search', async () => {

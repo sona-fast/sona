@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
-import { siteSettings } from '$lib/server/db/schema';
+import { artists, siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import {
 	FUZZYSEARCH_API_KEY_SETTING,
@@ -829,12 +829,48 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			status: number;
-			data: { syncRefusedReason?: string; error?: string };
+			data: { syncRefusedReason?: string; syncUpstreamReason?: string; error?: string };
 		};
 
 		expect(result.status).toBe(502);
 		expect(result.data.syncRefusedReason).toBe('invalid fork key');
+		// The key really is the problem here, so it takes the key-specific toast.
+		expect(result.data.syncUpstreamReason).toBeUndefined();
 		// No untranslated internals ("registry delta refused: HTTP 401 …") in the payload.
+		expect(result.data.error).toBeUndefined();
+	});
+
+	// A blocked search is not a key problem. Routing it through syncRefusedReason told
+	// the operator to "check the registry connection below" while the key was fine, so
+	// an unreachable registry gets its own reason field and its own wording.
+	it('502s with an upstream reason (not a key refusal) when every search is challenged', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		const now = new Date().toISOString();
+		await db.insert(artists).values([
+			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
+			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now },
+			{ name: 'three', twitterUrl: 'https://twitter.com/three', createdAt: now }
+		]);
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists/search')
+					? new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+					: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+							status: 200,
+							headers: { 'content-type': 'application/json' }
+						})
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncRefusedReason?: string; syncUpstreamReason?: string; error?: string };
+		};
+
+		expect(result.status).toBe(502);
+		expect(result.data.syncUpstreamReason).toMatch(/blocked by a Cloudflare challenge/);
+		expect(result.data.syncRefusedReason).toBeUndefined();
 		expect(result.data.error).toBeUndefined();
 	});
 
@@ -860,9 +896,46 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			success: boolean;
 			syncMessage: string;
+			syncDegraded?: number;
 		};
 		expect(result.success).toBe(true);
 		expect(result.syncMessage).toMatch(/Sync complete/);
+		expect(result.syncDegraded).toBeUndefined();
+	});
+
+	// "0 refreshed, 0 newly linked" is the same sentence whether there was nothing to
+	// do or nothing got through. Pass the failure count so the toast can say which.
+	it('reports how many registry calls failed on a partially degraded run', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		const now = new Date().toISOString();
+		await db.insert(artists).values([
+			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
+			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now }
+		]);
+		let searches = 0;
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				!String(input).includes('/v1/artists/search')
+					? new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+							status: 200,
+							headers: { 'content-type': 'application/json' }
+						})
+					: searches++ === 0
+						? new Response('bad gateway', { status: 502 })
+						: new Response(JSON.stringify({ artists: [] }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			success: boolean;
+			syncDegraded?: number;
+		};
+		expect(result.success).toBe(true);
+		expect(result.syncDegraded).toBe(1);
 	});
 });
 

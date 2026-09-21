@@ -876,6 +876,8 @@
 	"admin_settings_sync_complete": "同期が完了しました",
 	"admin_settings_sync_failed": "同期に失敗しました",
 	"admin_settings_sync_refused": "共有レジストリがこのサイトのキーを拒否しました。以下のレジストリ接続を確認してください。({reason})",
+	"admin_settings_sync_upstream_failed": "レジストリに接続できなかったため、今回の実行では何も照合されませんでした。({reason})",
+	"admin_settings_sync_degraded": "今回の実行ではレジストリへの{failed}件の呼び出しが失敗しました。",
 	"admin_settings_registry_sync": "レジストリ同期",
 	"admin_settings_registry_sync_desc": "共有レジストリからアーティストの更新を今すぐ取得し、すでに登録済みのローカルアーティストを連携します。（同期cronによって定期的にも実行されます。）",
 	"admin_settings_syncing": "同期中…",

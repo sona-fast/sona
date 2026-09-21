@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
-import { siteSettings } from '$lib/server/db/schema';
+import { artists, siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import { POST } from './+server';
 
@@ -111,6 +111,9 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 
 		const res = await POST(postEvent(platform));
 		expect(res.status).toBe(200);
+		// The reason quotes an upstream body; it stays in job_run, out of the response
+		// the sync workflow prints into a public log.
+		expect((await res.json()) as Record<string, unknown>).not.toHaveProperty('lastFailure');
 		await Promise.all(waits);
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -183,7 +186,7 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		expect(res.status).toBe(502);
 		const body = (await res.json()) as { error: string; upstreamStatus: number };
 		expect(body.error).toContain('blocked by a Cloudflare challenge in front of the registry');
-		expect(body.error).toContain('cf-ray a3e7bc522cbfa3c2-SEA');
+		expect(body.error).toContain('cf-ray a3e7bc522cbfa3c2 SEA');
 		expect(body.upstreamStatus).toBe(403);
 		await Promise.all(waits);
 
@@ -191,6 +194,80 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		const row = (sqlite as any).prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'").get();
 		expect(row?.status).toBe('failed');
 		expect(row?.detail).toContain('Cloudflare challenge');
+		// The ray id survives the detail's 20-char token redaction, which is the whole
+		// reason it is stored as "<id> <colo>" rather than the raw header value.
+		expect(row?.detail).toContain('a3e7bc522cbfa3c2');
+	});
+
+	// The workflow prints this body into a PUBLIC Actions log, and the reason is an
+	// upstream string we don't control. It gets the same redaction as job_run.detail.
+	it('redacts an email or token echoed back inside the registry reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'revoked-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response(
+								JSON.stringify({
+									error: 'no fork for owner@example.com with key sk_live_0123456789abcdefghij'
+								}),
+								{ status: 401, headers: { 'content-type': 'application/json' } }
+							)
+						)
+					: Promise.reject(new Error('offline'))
+			)
+		);
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).not.toContain('owner@example.com');
+		expect(body.error).not.toContain('sk_live_0123456789abcdefghij');
+		expect(body.error).toContain('[redacted]');
+	});
+
+	// One bad search among several is a degraded run, not a failed one: the counters
+	// and the reason land in the job detail while the endpoint still answers 200.
+	it('stays 200 and names the degradation when only some searches failed', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		const now = new Date().toISOString();
+		await db.insert(artists).values([
+			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
+			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now }
+		]);
+		let searches = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) => {
+				if (!String(input).includes('/v1/artists/search'))
+					return Promise.resolve(
+						new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+							status: 200,
+							headers: { 'content-type': 'application/json' }
+						})
+					);
+				return Promise.resolve(
+					searches++ === 0
+						? new Response('bad gateway', { status: 502 })
+						: new Response(JSON.stringify({ artists: [] }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+				);
+			})
+		);
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(200);
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any).prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'").get();
+		expect(row?.status).toBe('ok');
+		expect(row?.detail).toMatch(/searches failed/);
 	});
 
 	// A D1 failure is still our bug: it must keep propagating as a real 500, not be
