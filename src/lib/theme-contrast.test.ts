@@ -38,12 +38,16 @@ function blockBody(selector: string): string {
 // The same read against a component source file: the describes below parse the
 // tint rules out of the components that paint them, so a rule that moves or
 // stops matching fails here instead of dropping silently out of a sweep.
-function ruleBody(file: string, selector: string): string {
+function ruleBodies(file: string, selector: string): string[] {
 	const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
 	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-	if (!body) throw new Error(`${selector} rule not found in ${file}`);
-	return body;
+	const bodies = [...source.matchAll(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'gm'))].map((m) => m[1]);
+	if (bodies.length === 0) throw new Error(`${selector} rule not found in ${file}`);
+	return bodies;
+}
+
+function ruleBody(file: string, selector: string): string {
+	return ruleBodies(file, selector)[0];
 }
 
 // One self-tint rule: `background: color-mix(in srgb, var(--<ink>) N%,
@@ -2218,10 +2222,13 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 
 	// The "remove model" twin holds no hidden input, so the form's :has() ring
 	// never reaches it — it needs a :focus-visible of its own (SONA-209 r2).
+	// A second rule with the same selector later in the file would win, so the
+	// last outline the file declares for it is the one that counts.
 	it('.file-btn rings on focus-visible', () => {
-		expect(ruleBody('./components/VrAvatarForm.svelte', '.file-btn:focus-visible')).toMatch(
-			/outline:\s*2px solid var\(--ring\)/
+		const outlines = ruleBodies('./components/VrAvatarForm.svelte', '.file-btn:focus-visible').flatMap(
+			(body) => body.match(/outline:\s*[^;]+/g) ?? []
 		);
+		expect(outlines.at(-1)).toMatch(/outline:\s*2px solid var\(--ring\)/);
 	});
 
 	for (const { file, selector } of componentRules) {

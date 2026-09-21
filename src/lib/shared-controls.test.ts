@@ -111,9 +111,16 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	// step, and the pattern grows when that step gives them shared names.
 	const CONTROL_CLASS = /^\.(?:btn|input)(?:-[A-Za-z0-9_-]+)?$/;
 
+	// `:global(select)` and `:where(textarea)` style the element they wrap, so
+	// the wrapper comes off before the subject is read.
+	const unwrap = (part: string): string => {
+		const inner = part.replace(/:(?:global|where|is)\(([^()]*)\)/g, ' $1 ');
+		return inner === part ? part : unwrap(inner);
+	};
+
 	function isControlSubject(selector: string): boolean {
 		return selector.split(',').some((part) => {
-			const compound = part.trim().split(/[\s>+~]+/).filter(Boolean).pop();
+			const compound = unwrap(part).trim().split(/[\s>+~]+/).filter(Boolean).pop();
 			if (!compound) return false;
 			if (/^(?:select|textarea)\b/.test(compound)) return true;
 			return (compound.match(/\.[A-Za-z][A-Za-z0-9_-]*/g) ?? []).some((c) => CONTROL_CLASS.test(c));
@@ -165,6 +172,13 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	// No file uses CSS nesting today, so a fixture is the only thing holding the
 	// walk to it: a nested restatement would otherwise be invisible to all three
 	// counts below and drift exactly the way this suite exists to stop.
+	it('reads the subject through :global, :where and :is', () => {
+		expect(isControlSubject(':global(select)')).toBe(true);
+		expect(isControlSubject('.row :where(textarea)')).toBe(true);
+		expect(isControlSubject(':is(.card .btn)')).toBe(true);
+		expect(isControlSubject(':global(.card) .tag-pill')).toBe(false);
+	});
+
 	it('counts a control rule nested inside another rule', () => {
 		const nested = '<style>\n\t.card { padding: 4px; .btn { border: none; } }\n</style>';
 		expect(selectors(nested)).toContain('.btn');
