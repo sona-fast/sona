@@ -701,16 +701,41 @@ test.describe('with a key saved', () => {
 		const button = await page.locator('.tag-check-row .btn').boundingBox();
 		if (!button) throw new Error('the button has no box');
 		expect(button.height).toBeLessThan(44);
-		for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
-			const fit = await page.locator(selector).evaluate((el) => {
-				const box = el.getBoundingClientRect();
-				const row = el.parentElement?.getBoundingClientRect();
-				// scrollWidth is the width the content wants on one line.
-				return { height: box.height, wants: el.scrollWidth, row: row?.width ?? 0 };
+		// The row's items all want a width on one line; the sum, plus the gaps, is
+		// what the row would need to hold every item unwrapped. Each item's want is
+		// read from a nowrap clone at max-content, because a wrapped element's own
+		// scrollWidth reports the width it was given, not the width it needs.
+		const fit = await page.locator('.tag-check-row').evaluate((row) => {
+			const items = Array.from(row.children).filter(
+				(el): el is HTMLElement => el instanceof HTMLElement
+			);
+			const wants = items.map((el) => {
+				const probe = el.cloneNode(true) as HTMLElement;
+				probe.style.position = 'absolute';
+				probe.style.width = 'max-content';
+				probe.style.whiteSpace = 'nowrap';
+				row.appendChild(probe);
+				const style = getComputedStyle(probe);
+				const width =
+					probe.getBoundingClientRect().width +
+					parseFloat(style.marginLeft) +
+					parseFloat(style.marginRight);
+				probe.remove();
+				return width;
 			});
-			expect(fit.row).toBeGreaterThan(0);
-			// Wrapped while the row could have held it on one line: a real defect.
-			if (fit.wants <= fit.row) expect(fit.height).toBeLessThan(24);
+			const gap = parseFloat(getComputedStyle(row).columnGap) * (items.length - 1);
+			return { need: wants.reduce((a, b) => a + b, 0) + gap, have: row.clientWidth };
+		});
+		expect(fit.have).toBeGreaterThan(0);
+		// The row could hold every item on one line, so a wrapped pill is a real
+		// defect. When it could not (Linux at 1x, or a longer locale), the wrap is
+		// the platform's text, not the layout's fault, and the height is not judged.
+		if (fit.need <= fit.have) {
+			for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
+				const box = await page.locator(selector).boundingBox();
+				if (!box) throw new Error(`${selector} has no box`);
+				expect(box.height).toBeLessThan(24);
+			}
 		}
 		await expect(page.locator('.tag-check-row')).toHaveCSS('gap', '4px');
 		// The 4px is between the two rating items, which report the same kind of
