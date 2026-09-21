@@ -2384,7 +2384,7 @@ describe('the mosaic hero text survives its scrim over white artwork', () => {
 	it('pins the scrim stops the offsets below are measured against', () => {
 		expect(stops).toEqual([
 			{ pos: 0.05, alpha: 0 },
-			{ pos: 0.55, alpha: 0.8 },
+			{ pos: 0.48, alpha: 0.8 },
 			{ pos: 1, alpha: 0.8 }
 		]);
 	});

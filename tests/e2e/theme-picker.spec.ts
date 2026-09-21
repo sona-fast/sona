@@ -30,23 +30,24 @@ async function openSiteTab(page: Page) {
 	await page.getByRole('tab', { name: 'Site', exact: true }).click();
 }
 
-async function saveSiteSettings(page: Page) {
-	const [resp] = await Promise.all([
-		page.waitForResponse(
-			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
-		),
-		page.getByRole('button', { name: 'Save site settings' }).click()
-	]);
-	expect(resp.ok()).toBeTruthy();
-}
-
-/** Log in, pick a theme by its visible label, and save the Site tab. */
-async function chooseTheme(page: Page, label: string) {
+/**
+ * Log in, pick a theme by its visible label, save the Site tab, and wait until
+ * the server renders the public page with that id. The wait is on the stored
+ * result rather than on the POST response: on a loaded CI runner the save can
+ * go out as a plain form navigation while the response listener is still
+ * arming, so the theme changes and the listener never resolves. Reading the
+ * server's own HTML back is true whichever way the submit went.
+ */
+async function chooseTheme(page: Page, label: string, id: string) {
 	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/settings');
 	await openSiteTab(page);
 	await page.selectOption('select[name="themeId"]', { label });
-	await saveSiteSettings(page);
+	await page.getByRole('button', { name: 'Save site settings' }).click();
+	await expect(async () => {
+		const res = await page.request.get('/');
+		expect(await res.text()).toContain(`data-theme-id="${id}"`);
+	}).toPass({ timeout: 30_000 });
 }
 
 /** The resolved --background on the public home page. */
@@ -63,7 +64,10 @@ function renderedHtml(page: Page): Promise<string> {
 
 let stockBackground = '';
 
-test('the seeded fork starts on the default theme', async ({ page }) => {
+test('the fork on the default theme gives the stock background', async ({ page }) => {
+	// Set it rather than assume it: a retry of this serial file starts over
+	// after a later test may already have saved Petal.
+	await chooseTheme(page, 'Ember — warm orange (default)', 'default');
 	await page.goto('/');
 	await expect(page.locator('html')).toHaveAttribute('data-theme-id', 'default');
 	stockBackground = await background(page);
@@ -71,7 +75,7 @@ test('the seeded fork starts on the default theme', async ({ page }) => {
 });
 
 test('saving Petal repaints the public page', async ({ page }) => {
-	await chooseTheme(page, 'Petal — soft pink');
+	await chooseTheme(page, 'Petal — soft pink', 'petal');
 
 	const response = await page.goto('/');
 	// The server's own HTML, before hydration: SSR writes the id and the preload,
@@ -96,7 +100,7 @@ test('saving Petal repaints the public page', async ({ page }) => {
 });
 
 test('choosing the default again puts the fork back', async ({ page }) => {
-	await chooseTheme(page, 'Ember — warm orange (default)');
+	await chooseTheme(page, 'Ember — warm orange (default)', 'default');
 
 	const response = await page.goto('/');
 	const serverHtml = (await response?.text()) ?? '';

@@ -13,7 +13,8 @@
 
 import { ALL_THEMES } from './all.ts';
 import { DEFAULT_THEME_ID } from './index.ts';
-import { SUBSET_LATIN, type ThemeDefinition } from './types.ts';
+import { SUBSET_LATIN } from './types.ts';
+import type { ThemeDefinition } from './types.ts';
 
 /**
  * The first family named in a `font-family` list, unquoted. The list may quote

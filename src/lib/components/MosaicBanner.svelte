@@ -124,20 +124,20 @@
 		   its top lands near 44% of the banner on a wide viewport and near 37% on a
 		   phone with a two-line name over a three-line tagline. The scrim therefore
 		   has to be dark by 40%, not by 78%. One continuous ramp from clear at 5%
-		   to 0.80 at 55%, with no step in the middle: the old jump from 0.2 to 0.7
+		   to 0.80 at 48%, with no step in the middle: the old jump from 0.2 to 0.7
 		   across ten percent of the height showed as a seam over pale artwork. The
 		   ramp starts at 5% rather than 15% because a long site name wraps to two
 		   lines on a phone and lands at 37.5%, where the old ramp was only 0.45
-		   alpha and white read 3.36:1. These stops give 0.56 alpha at 40% and 0.80
-		   from 55% down, so over the brightest possible artwork white measures
-		   4.29:1 at the highest offset the text reaches and 12.63:1 at the lowest,
+		   alpha and white read 3.36:1. These stops give 0.65 alpha at 40% and 0.80
+		   from 48% down, so over the brightest possible artwork white measures
+		   5.83:1 at the highest offset the text reaches and 12.63:1 at the lowest,
 		   and the #D4D4D4 tagline 8.52:1 at worst.
 		   theme-contrast.test.ts interpolates these stops at the offsets the layout
 		   actually produces, so changing them moves the measured numbers. */
 		background: linear-gradient(
 			to bottom,
 			transparent 5%,
-			rgba(0, 0, 0, 0.8) 55%,
+			rgba(0, 0, 0, 0.8) 48%,
 			rgba(0, 0, 0, 0.8) 100%
 		);
 	}

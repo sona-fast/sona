@@ -295,7 +295,11 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		}
 	}
 	// Built once, outside transformPageChunk: the callback runs per streamed
-	// chunk, and the tag depends only on the theme id.
+	// chunk, and the tag depends only on the theme id. The tag goes into every
+	// HTML page, error pages included: the status is not known inside the
+	// chunk callback, and a 404 renders the same headings in the same face, so
+	// the file it names is not wasted there. Only the Link header below is
+	// gated on a successful response.
 	const preloadTag = fontPreloadTag(themeId);
 	const response = await resolve(event, {
 		transformPageChunk: ({ html }) =>
