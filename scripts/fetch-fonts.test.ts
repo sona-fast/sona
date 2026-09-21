@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FAMILIES, acceptBytes, acceptCached, fileName, missingFaces, parseManifest, readManifest, refuseSymlink, staleFiles } from './fetch-fonts.mjs';
+import { FAMILIES, acceptBytes, acceptCached, fileName, missingFaces, digestMap, readManifest, refuseSymlink, staleFiles } from './fetch-fonts.mjs';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
 
 // The prune is the one destructive thing this script does, and it runs over a
@@ -18,8 +18,7 @@ describe('fetch-fonts prune (SONA-181)', () => {
 	const listing = [
 		...wanted,
 		'IBMPlexSansJP-300-latin.woff2',
-		'Geist-Regular.woff2',
-		'Geist-Medium.woff2',
+		'Geist-variable.woff2',
 		'README.md',
 		'manifest.json'
 	];
@@ -59,19 +58,23 @@ describe('fetch-fonts prune (SONA-181)', () => {
 describe('fetch-fonts manifest parsing (SONA-181)', () => {
 	it('returns the recorded digests', () => {
 		const files = { 'Test-latin.woff2': 'a'.repeat(64) };
-		expect(parseManifest(JSON.stringify({ note: 'x', files }))).toEqual(files);
+		expect(digestMap({ note: 'x', files }, 'files', true)).toEqual(files);
 	});
 
-	it('throws on invalid JSON rather than reading as empty', () => {
-		expect(() => parseManifest('{ files: ')).toThrow();
+	it('throws when a required key is missing', () => {
+		expect(() => digestMap({ note: 'x' }, 'files', true)).toThrow(
+			/no `files` object/
+		);
 	});
 
-	it('throws when `files` is missing', () => {
-		expect(() => parseManifest('{"note":"x"}')).toThrow(/no `files` object/);
+	it('reads a missing optional key as empty', () => {
+		expect(digestMap({ note: 'x' }, 'handPlaced', false)).toEqual({});
 	});
 
 	it('throws on a digest that is not 64 hex characters', () => {
-		expect(() => parseManifest('{"files":{"Test-latin.woff2":"nope"}}')).toThrow(/non-sha256 digest/);
+		expect(() =>
+			digestMap({ files: { 'Test-latin.woff2': 'nope' } }, 'files', true)
+		).toThrow(/non-sha256 digest/);
 	});
 });
 
@@ -126,13 +129,17 @@ describe('fetch-fonts digest check on fetched bytes', () => {
 });
 
 // readManifest is where the parse errors above are allowed to surface. A
-// catch-all that returned {} would pass every parseManifest case and still
+// catch-all that returned {} would pass every digestMap case and still
 // reset the baseline on a corrupt file, so the read path is pinned on its own.
 describe('fetch-fonts readManifest', () => {
 	const dir = mkdtempSync(join(tmpdir(), 'sona-fetch-fonts-test-'));
 
 	it('reads an empty baseline only when the file is missing', () => {
-		expect(readManifest(join(dir, 'absent.json'))).toEqual({ present: false, files: {} });
+		expect(readManifest(join(dir, 'absent.json'))).toEqual({
+			present: false,
+			files: {},
+			handPlaced: {}
+		});
 	});
 
 	it('propagates a corrupt manifest instead of resetting the baseline', () => {
@@ -150,7 +157,31 @@ describe('fetch-fonts readManifest', () => {
 		const good = join(dir, 'good.json');
 		const files = { 'A-400-latin.woff2': 'a'.repeat(64) };
 		writeFileSync(good, JSON.stringify({ note: 'x', files }));
-		expect(readManifest(good)).toEqual({ present: true, files });
+		expect(readManifest(good)).toEqual({ present: true, files, handPlaced: {} });
+	});
+
+	// Geist is placed by hand rather than fetched, so its digest lives under its
+	// own key. The script rewrites `files` from scratch on every run and carries
+	// this key through untouched; a manifest written before the key existed still
+	// reads as a manifest with nothing hand-placed.
+	it('reads the hand-placed digests alongside the fetched ones', () => {
+		const good = join(dir, 'hand-placed.json');
+		const files = { 'A-400-latin.woff2': 'a'.repeat(64) };
+		const handPlaced = { 'Geist-variable.woff2': 'b'.repeat(64) };
+		writeFileSync(good, JSON.stringify({ note: 'x', files, handPlaced }));
+		expect(readManifest(good)).toEqual({ present: true, files, handPlaced });
+	});
+
+	it('refuses a hand-placed entry that is not a sha256', () => {
+		const bad = join(dir, 'bad-hand-placed.json');
+		writeFileSync(bad, JSON.stringify({ note: 'x', files: {}, handPlaced: { 'X.woff2': 'nope' } }));
+		expect(() => readManifest(bad)).toThrow(/non-sha256 digest for X.woff2/);
+	});
+
+	it('refuses a hand-placed key that is not an object', () => {
+		const bad = join(dir, 'hand-placed-array.json');
+		writeFileSync(bad, JSON.stringify({ note: 'x', files: {}, handPlaced: [] }));
+		expect(() => readManifest(bad)).toThrow(/`handPlaced` that is not an object/);
 	});
 });
 

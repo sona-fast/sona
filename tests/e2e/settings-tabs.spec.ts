@@ -122,6 +122,26 @@ test.describe('admin settings ?tab= deep links', () => {
 		await expect(page).not.toHaveURL(/[?&]tab=/);
 	});
 
+	test('the admin navs mark this page as current, once each', async ({ page }) => {
+		// The sidebar link and the phone tab strip both set aria-current="page" on
+		// the item whose href prefixes the URL. The tab strip is display:none at
+		// this viewport but still in the DOM, so both can be counted here. More
+		// than one in either nav would mean two items claim the same page; none
+		// would mean the page is marked by fill alone.
+		await page.goto('/admin/settings');
+
+		await expect(page.locator('.sidebar-nav [aria-current="page"]')).toHaveCount(1);
+		await expect(page.locator('.sidebar-nav [aria-current="page"]')).toHaveAttribute(
+			'href',
+			'/admin/settings'
+		);
+		await expect(page.locator('nav.admin-tabs [aria-current="page"]')).toHaveCount(1);
+		await expect(page.locator('nav.admin-tabs [aria-current="page"]')).toHaveAttribute(
+			'href',
+			'/admin/settings'
+		);
+	});
+
 	test('a same-route client-side navigation to ?tab=account switches tabs', async ({ page }) => {
 		await page.goto('/admin/settings');
 		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'site');

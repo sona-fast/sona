@@ -98,6 +98,7 @@
 						href={item.href}
 						class="sidebar-link"
 						class:active={$page.url.pathname.startsWith(item.href)}
+						aria-current={$page.url.pathname.startsWith(item.href) ? 'page' : undefined}
 					>
 						<item.icon size={16} />
 						{item.label()}
@@ -220,10 +221,29 @@
 		text-decoration: none;
 	}
 
+	/* Hover and active used to paint the same fill and differ only by weight, so
+	   a hovered link looked like the current page. The active item keeps the fill
+	   and adds a 3px edge marker; hover stays the fill alone. inset box-shadow
+	   rather than border-left so the item's box does not move under the pointer,
+	   and --primary-text rather than --primary because the marker is a state
+	   boundary held to 3:1 (WCAG 1.4.11) and raw --primary is 2.20:1 on Ember
+	   light. */
 	.sidebar-link.active {
 		background: var(--sidebar-accent);
 		color: var(--sidebar-foreground);
 		font-weight: 500;
+		box-shadow: inset 3px 0 0 var(--primary-text);
+	}
+
+	/* Forced colors drops box-shadow, so the marker above disappears and the
+	   active item reads like any other. A real border in a system colour
+	   replaces it, and the left padding drops by the same 3px so the row does
+	   not shift. */
+	@media (forced-colors: active) {
+		.sidebar-link.active {
+			border-left: 3px solid Highlight;
+			padding-left: 9px;
+		}
 	}
 
 	.sidebar-footer {

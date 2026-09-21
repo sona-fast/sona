@@ -15,8 +15,8 @@ const fixture: ThemeDefinition[] = [
 	{
 		id: 'default',
 		label: 'Fixture default',
-		dark: { background: '#111111', primary: '#FF8400', link: { ref: 'primary' } },
-		light: { background: '#FFFFFF', primary: '#AA4400', link: '#883300' },
+		dark: { background: '#111111', primary: '#FF8400', link: { ref: 'primary' }, input: '#333333' },
+		light: { background: '#FFFFFF', primary: '#AA4400', link: '#883300', input: '#CCCCCC' },
 		fonts: { primary: "'A', monospace", secondary: "'B', sans-serif" }
 	},
 	{
@@ -55,6 +55,24 @@ describe('renderThemesCss', () => {
 		// wins a source-order tie the real palettes depend on.
 		expect(altLight).not.toContain('--link');
 		expect(altLight).not.toContain('--primary');
+	});
+
+	// The select caret is an SVG data URI, and a data URI cannot read a custom
+	// property, so the colour is baked in per block at generation time.
+	it('emits a --select-caret carrying the block\'s own resolved --input', () => {
+		const root = css.match(/^:root \{([^}]*)\}/m)?.[1] ?? '';
+		expect(root).toContain("stroke='%23333333'");
+		expect(root).toContain('--select-caret: url("data:image/svg+xml,');
+		// The stroked chevron, not a filled shape.
+		expect(root).toContain("d='m6%209%206%206%206-6'");
+	});
+
+	it('bakes the caret colour a block INHERITS, not only one it declares', () => {
+		const altLight =
+			css.match(/\[data-theme-id='alt'\]\[data-theme='light'\] \{([^}]*)\}/)?.[1] ?? '';
+		// alt declares no --input in either set, so both blocks fall through to the
+		// default theme's: light to #CCCCCC, not to the dark #333333.
+		expect(altLight).toContain("stroke='%23CCCCCC'");
 	});
 
 	it('sets color-scheme per mode and the fonts only in the dark block', () => {
@@ -263,7 +281,7 @@ describe('renderThemesCss', () => {
 	// family, and vitest may run the two files at the same time.
 	it('rejects a src that is a symlink', () => {
 		const link = new URL('../static/fonts/Geist-NotALink-fixture.woff2', import.meta.url);
-		symlinkSync(new URL('../static/fonts/Geist-Regular.woff2', import.meta.url), link);
+		symlinkSync(new URL('../static/fonts/Geist-variable.woff2', import.meta.url), link);
 		try {
 			expect(() => renderThemesCss(withFace({ src: '/fonts/Geist-NotALink-fixture.woff2' }))).toThrow(/has no file at/);
 		} finally {

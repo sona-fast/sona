@@ -51,17 +51,25 @@ function ruleBody(file: string, selector: string): string {
 // fractional, and the label is anchored to a declaration boundary so a rule
 // whose FIRST declaration is `color:` still parses while `border-color:` still
 // does not.
+// The mix endpoint may also be a token (`var(--background)`) instead of
+// `transparent`: a chip that can sit on a tinted row paints its fill opaque so
+// the row's wash does not composite into it. `over` names that token when there
+// is one, and the sweeps ground such a rule on it rather than on the surface.
 // `where` names the rule in the failure, so a component that stops self-tinting
 // says which one rather than leaving the reader to find it among the rows below.
-function selfTint(body: string, where = 'rule'): { ink: string; pct: number; label: string | undefined } {
+function selfTint(
+	body: string,
+	where = 'rule'
+): { ink: string; pct: number; label: string | undefined; over: string | undefined } {
 	const tint = body.match(
-		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+(?:\.\d+)?)%,\s*transparent\)/
+		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+(?:\.\d+)?)%,\s*(transparent|var\(--([\w-]+)\))\)/
 	);
 	if (!tint) throw new Error(`${where} no longer tints with a color-mix over transparent`);
 	return {
 		ink: tint[1],
 		pct: Number(tint[2]),
-		label: body.match(/(?:^|[;{])\s*color:\s*var\(--([\w-]+)\)/)?.[1]
+		label: body.match(/(?:^|[;{])\s*color:\s*var\(--([\w-]+)\)/)?.[1],
+		over: tint[4]
 	};
 }
 
@@ -85,6 +93,13 @@ describe('selfTint rule parsing', () => {
 			'\n\tborder-color: var(--border);\n\tbackground: color-mix(in srgb, var(--destructive) 20%, transparent);\n'
 		);
 		expect(label).toBeUndefined();
+	});
+
+	it('parses a tint mixed over a token rather than transparent', () => {
+		const { ink, pct, over } = selfTint(
+			'\n\tbackground: color-mix(in srgb, var(--status-ok) 12%, var(--background));\n\tcolor: var(--status-ok);\n'
+		);
+		expect({ ink, pct, over }).toEqual({ ink: 'status-ok', pct: 12, over: 'background' });
 	});
 
 	it('names the rule when it no longer tints', () => {
@@ -480,6 +495,10 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	// The admin nav paints its hover and active items this way (+layout.svelte:217
 	// and :223): --sidebar-foreground on the --sidebar-accent fill.
 	{ ink: 'sidebarForeground', ground: 'sidebarAccent', floor: 4.5 },
+	// The active nav item's 3px edge marker (+layout.svelte .sidebar-link.active)
+	// is what tells the current page apart from a hovered one, now that both carry
+	// the same fill. WCAG 1.4.11 holds that boundary to 3:1 of the fill it sits on.
+	{ ink: 'primaryText', ground: 'sidebarAccent', floor: 3 },
 	// The admin nav link's focus ring is drawn on the --sidebar surface, so
 	// WCAG 1.4.11 wants 3:1 of it there too.
 	{ ink: 'ring', ground: 'sidebar', floor: 3 },
@@ -497,6 +516,11 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	{ ink: 'statusOk', ground: 'background', floor: 4.5 },
 	{ ink: 'statusWarn', ground: 'background', floor: 4.5 },
 	{ ink: 'statusAttention', ground: 'card', floor: 4.5 },
+	// --destructive is a TEXT colour as well as a fill: field errors, remove-button
+	// hovers and inline failure lines paint with it on both surfaces (43 rules
+	// across src/ today, e.g. ConfirmDialog.svelte and NewArtistDialog.svelte).
+	{ ink: 'destructive', ground: 'background', floor: 4.5 },
+	{ ink: 'destructive', ground: 'card', floor: 4.5 },
 	{ ink: 'destructiveForeground', ground: 'destructive', floor: 4.5 },
 	{ ink: 'primaryForeground', ground: 'primary', floor: 4.5 },
 	// The other two foreground/fill pairs the palettes declare. Both clear AA
@@ -654,21 +678,15 @@ describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SON
 // icons, the copy button and other icon-only affordances, which WCAG 1.4.11
 // (non-text contrast) holds to 3:1 against their background.
 //
-// The select chevron is NOT one of them, despite sitting on `select.input`: it
-// is an SVG data URI in app.css painted with a hardcoded #9ca3af (a data URI
-// can't read a custom property), so it neither follows this token nor changes
-// with the theme, and nothing here measures it. Moving it onto a token is the
-// palette step (SONA-126); this change alters no colour.
+// The select caret is not one of them: it is drawn from its own token, and the
+// next describe measures it. Before it moved onto a token it was an SVG data URI
+// painted with a hardcoded #9ca3af that no custom property could reach, so it
+// stayed the same grey on every palette (1.92:1 on terracotta light).
 //
-// Recorded so the debt has a number rather than a shrug: on the LIGHT page
-// backgrounds #9ca3af measures 2.28:1 (ember), 2.34:1 (aurora) and 1.92:1
-// (terracotta) — all under the 3:1 that 1.4.11 asks of the glyph that says a
-// field is a dropdown. The dark modes pass. Measured 2026-09-14 against the
-// theme data; re-measure rather than trust these once a palette moves.
-// Every pairing currently clears it with room to spare — the tightest is
-// terracotta light on --background at 4.53:1 — so this is a pin against a future
-// token tweak, not a fix. A failure here is a finding to report, not to silence
-// by tuning the assertion.
+// Every --muted-foreground pairing currently clears 3:1 with room to spare. The
+// tightest is terracotta light on --background at 4.53:1, so this is a pin
+// against a future token tweak, not a fix. A failure here is a finding to
+// report, not to silence by tuning the assertion.
 describe('muted-foreground non-text contrast, every theme × surface × mode (WCAG 1.4.11)', () => {
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
@@ -676,6 +694,72 @@ describe('muted-foreground non-text contrast, every theme × surface × mode (WC
 				expect(
 					contrast(blockToken(sel, 'muted-foreground'), blockToken(sel, surface))
 				).toBeGreaterThanOrEqual(3);
+			});
+		}
+	}
+});
+
+// The select caret is the glyph that says a field is a dropdown, so WCAG 1.4.11
+// holds it to 3:1 against the surface behind it. The token it draws with is READ
+// out of the rule rather than assumed: re-pointing the caret at a paler token
+// then fails here instead of passing because the old token still clears.
+describe('select caret non-text contrast, every theme × surface × mode (WCAG 1.4.11)', () => {
+	const rule = blockBody('select.input');
+	const generated = readFileSync(
+		fileURLToPath(new URL('./themes/generated.css', import.meta.url)),
+		'utf8'
+	);
+
+	// The fallback after the comma is not part of the palette-following path: it
+	// draws only for a theme whose --input the generator could not bake, so it is
+	// stripped before the rule is checked for baked-in colour.
+	const caretFallback = rule.match(/var\(--select-caret,\s*(url\("data:image\/svg\+xml,[^"]*"\))\)/);
+	const ruleWithoutFallback = rule.replace(/var\(--select-caret,[\s\S]*?"\)\)/, 'var(--select-caret)');
+
+	it('draws the caret from --select-caret, not a colour app.css bakes in', () => {
+		expect(rule).toMatch(/background-image:\s*var\(--select-caret[,)]/);
+		expect(
+			ruleWithoutFallback,
+			'a literal colour in the caret cannot follow the palette'
+		).not.toMatch(/#[0-9a-fA-F]{3,8}|%23[0-9a-fA-F]{3,6}/);
+	});
+
+	// A theme is free to declare --input as `#fff` or an rgb() value, and the
+	// generator bakes a caret only from a six-digit hex, so a select in that theme
+	// falls back to this one. It has to be the same chevron, or those selects get
+	// a different glyph from everyone else's.
+	it('falls back to the same chevron in a neutral grey', () => {
+		expect(caretFallback, '--select-caret has no fallback, so an unbaked theme draws no caret').not.toBeNull();
+		const decoded = decodeURIComponent(caretFallback![1]);
+		expect(decoded, 'the fallback draws a different path from the baked caret').toContain(
+			"<path d='m6 9 6 6 6-6'/>"
+		);
+		expect(decoded, 'the fallback is not a stroked chevron').toContain("fill='none'");
+		expect(decoded.match(/stroke='(#[0-9A-Fa-f]{6})'/)?.[1], 'the fallback strokes with no colour').toBeDefined();
+	});
+
+	// The colour is baked into the data URI by scripts/build-themes.ts, so it is
+	// read back out of the generated block rather than assumed: a caret left on
+	// another block's colour fails here instead of passing on the old token.
+	function caretStroke(selector: string): string {
+		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const body = generated.match(new RegExp(`^${escaped} \\{([^}]*)\\}`, 'm'))?.[1];
+		if (!body) throw new Error(`${selector} block not found in generated.css`);
+		const stroke = body.match(/--select-caret:[^;]*stroke='%23([0-9A-Fa-f]{6})'/)?.[1];
+		if (!stroke) throw new Error(`${selector} declares no --select-caret with a baked stroke`);
+		return `#${stroke}`;
+	}
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the caret is stroked with that block's own --input`, () => {
+			expect(caretStroke(sel).toUpperCase()).toBe(blockToken(sel, 'input').toUpperCase());
+		});
+	}
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: the caret meets 3:1 on the ${surface} surface`, () => {
+				expect(contrast(caretStroke(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(3);
 			});
 		}
 	}
@@ -998,16 +1082,42 @@ describe('SONA-124 chip CSS keeps the --foreground token (R2-A3)', () => {
 // fails the token pin; a tint-percentage change re-runs the math) and assert
 // the composite pairing for every theme × mode.
 describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)', () => {
-	const banners: Array<{ file: string; selector: string }> = [
+	// `labelIn` names a child rule to read the text token from, for a block that
+	// tints itself but paints its text on an inner element.
+	const banners: Array<{ file: string; selector: string; labelIn?: string }> = [
 		{ file: './components/VrAvatarForm.svelte', selector: '.banner.err' },
 		{ file: './components/VrViewer.svelte', selector: '.load-error' },
 		// Same banner shape on the sticker-pack form. Its text is --foreground
 		// today, so this row pins that rather than fixing anything (r4-06).
-		{ file: './components/StickerPackForm.svelte', selector: '.banner.err' }
+		{ file: './components/StickerPackForm.svelte', selector: '.banner.err' },
+		// The admin error banners, which painted a baked-in #f87171 over an rgba
+		// tint until SONA-227's follow-ups. They land here rather than in the
+		// self-tint sweep below for the reason R3-A2 found: --destructive on its
+		// own tint measures 3.92:1 on aurora light, and no tint percentage fixes
+		// that (5% still only reaches 4.37:1, and 3% is 4.5003:1 over a fill too
+		// faint to see). Same declaration as VrAvatarForm's .banner.err above.
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.banner.err' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.banner.err' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.banner.err' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.alert.err' },
+		// The failed-import block, whose border already followed --destructive
+		// while its fill stayed a baked rgba red. Its heading was --destructive on
+		// that tint and measured under 4.5:1 on the light themes, which is the
+		// same pairing as the banners above, so it takes the same answer:
+		// --foreground text, a tint deep enough to see, the red left to the edge.
+		{
+			file: '../routes/admin/stickers/import/+page.svelte',
+			selector: '.failed-block',
+			labelIn: '.failed-block h3'
+		}
 	];
 
-	for (const { file, selector } of banners) {
-		const { ink, pct: tintPct, label: textToken } = selfTint(ruleBody(file, selector), `${file} ${selector}`);
+	for (const { file, selector, labelIn } of banners) {
+		const tint = selfTint(ruleBody(file, selector), `${file} ${selector}`);
+		const { ink, pct: tintPct } = tint;
+		const textToken = labelIn
+			? ruleBody(file, labelIn).match(/(?:^|[;{])\s*color:\s*var\(--([\w-]+)\)/)?.[1]
+			: tint.label;
 
 		it(`${file} ${selector} keeps the destructive tint and --foreground text`, () => {
 			expect(ink, `${selector} lost its destructive tint`).toBe('destructive');
@@ -1024,6 +1134,65 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 			}
 		}
 	}
+
+	// Moving the text to --foreground took the colour out of the admin error
+	// banners, and they ended up reading quieter than their warn siblings, which
+	// still carry a coloured ink. The fill, the edge and the icon put the weight
+	// back: warn is a 10% tint with no border, error a 20% tint with a 40% edge
+	// and a destructive icon.
+	const LOUD_ERROR_BANNERS: Array<{ file: string; selector: string }> = [
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.banner.err' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.banner.err' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.banner.err' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.alert.err' }
+	];
+
+	for (const { file, selector } of LOUD_ERROR_BANNERS) {
+		it(`${file} ${selector} outranks its warn sibling`, () => {
+			const body = ruleBody(file, selector);
+			expect(
+				selfTint(body, `${file} ${selector}`).pct,
+				`${selector} fill is no deeper than the warn banner's`
+			).toBe(20);
+			expect(body, `${selector} lost its destructive edge`).toMatch(
+				/border:\s*1px solid color-mix\(in srgb, var\(--destructive\) 40%, transparent\)/
+			);
+			const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+			const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			expect(source, `${selector} no longer colours its icon --destructive`).toMatch(
+				new RegExp(`${escaped} :global\\(svg\\) \\{ color: var\\(--destructive\\); \\}`)
+			);
+		});
+
+		// The edge is the error variant's mark, but it must not also make the
+		// error variant 2px taller than the ok/warn/info banner it replaces in the
+		// same slot. The base rule reserves the box with a transparent border.
+		it(`${file} ${selector} costs its base rule no extra height`, () => {
+			const base = `.${selector.slice(1).split('.')[0]}`;
+			expect(
+				ruleBody(file, base),
+				`${base} in ${file} reserves no border box, so ${selector} is 2px taller than its siblings`
+			).toMatch(/border:\s*1px solid transparent/);
+		});
+	}
+
+	it('the warn banners keep their coloured ink, so warn reads under error', () => {
+		for (const file of [
+			'../routes/admin/fursuit/+page.svelte',
+			'../routes/admin/storage/migrate/+page.svelte',
+			'../routes/admin/stickers/import/+page.svelte'
+		]) {
+			const body = ruleBody(file, '.banner.warn');
+			const { ink, pct, label } = selfTint(body, `${file} .banner.warn`);
+			expect(ink).toBe('status-warn');
+			expect(label, `${file} .banner.warn stopped painting its own ink`).toBe('status-warn');
+			expect(pct, `${file} .banner.warn is now as heavy as the error banner`).toBeLessThan(20);
+			expect(
+				body,
+				`${file} .banner.warn took on an edge, which is the error banner's mark`
+			).not.toMatch(/border:/);
+		}
+	});
 });
 
 // The status chips and callouts paint their label in the SAME ink as their
@@ -1044,6 +1213,19 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 //
 // --status-attention is deliberately absent: nothing paints a tint of it (it is
 // small text on a plain surface, covered by the SONA-162 describe below).
+
+// The conventions table's live row washes its cells in --primary over the page
+// background. Anything drawn inside that row composites over the wash, so the
+// sweeps ground the chips on this rather than on the bare background. The
+// percentage is read out of the row rule, so retuning the wash re-runs the math.
+const LIVE_ROW = selfTint(
+	ruleBody('../routes/admin/conventions/+page.svelte', 'tr.is-live > td'),
+	'the conventions live row'
+);
+function liveRowHex(sel: string): string {
+	return mix2(blockToken(sel, LIVE_ROW.ink), LIVE_ROW.pct, blockToken(sel, 'background'));
+}
+
 describe('status-ink text on its own tint (SONA-209)', () => {
 	const TINTED_RULES: Array<{ file: string; selector: string }> = [
 		{ file: './components/CloudflareSetupDialog.svelte', selector: '.scope' },
@@ -1052,9 +1234,40 @@ describe('status-ink text on its own tint (SONA-209)', () => {
 		{ file: '../routes/admin/vr/+page.svelte', selector: '.vis-chip.mature' },
 		{ file: '../routes/admin/observability/+page.svelte', selector: '.en' },
 		{ file: '../routes/admin/observability/+page.svelte', selector: '.sbadge.amber' },
-		{ file: '../routes/admin/observability/+page.svelte', selector: '.sbadge.red' }
+		{ file: '../routes/admin/observability/+page.svelte', selector: '.sbadge.red' },
+		// The success/ok banners and chips that used to paint a baked-in #22c55e or
+		// #4ade80 over a matching rgba tint. They follow --status-ok now, so they
+		// belong in this sweep rather than sitting outside it as fixed greens.
+		{ file: './components/Callout.svelte', selector: '.callout.success' },
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.banner.ok' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.banner.ok' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.alert.ok' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.status-chip.imported' },
+		{ file: '../routes/admin/conventions/+page.svelte', selector: '.status-confirmed' },
+		// The warn siblings of those banners, which kept a baked-in #f5a623 over a
+		// matching rgba tint after the ok rule moved to a token. --status-warn
+		// carries its own tint at 10% on every block; the error siblings could not
+		// (see the R3-A2 describe above, where they are measured instead).
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.banner.warn' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.banner.warn' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.banner.warn' },
+		// The import page's idle-form note, which painted the same baked-in #f5a623
+		// over an rgba amber at 8%.
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.note' }
 	];
 	const SURFACES = ['background', 'card'] as const;
+	// 'live row' is not a token and not a surface every rule can land on: it is
+	// the conventions table's live row, whose cells wash the page background in
+	// --primary. A chip that sits in that table composites over the wash rather
+	// than over the bare background, so the conventions rules are swept on it as
+	// well. A rule that mixes its fill over a token instead of transparent comes
+	// out the same on it as off it, which is the point of painting it that way.
+	const CONVENTIONS_PAGE = '../routes/admin/conventions/+page.svelte';
+	const surfacesFor = (file: string) =>
+		file === CONVENTIONS_PAGE ? ([...SURFACES, 'live row'] as const) : SURFACES;
+	function surfaceHex(sel: string, surface: string): string {
+		return surface === 'live row' ? liveRowHex(sel) : blockToken(sel, surface);
+	}
 
 	// Read each rule once: the tint percentage, the token it mixes, and the token
 	// the label is painted with. A rule that stops self-tinting (or stops being
@@ -1099,8 +1312,8 @@ describe('status-ink text on its own tint (SONA-209)', () => {
 
 	it('has no allowlist entry this sweep does not generate', () => {
 		const generated = new Set(
-			TINTS.flatMap(({ ink, pct }) =>
-				SURFACES.flatMap((surface) =>
+			TINTS.flatMap(({ file, ink, pct }) =>
+				surfacesFor(file).flatMap((surface) =>
 					THEME_BLOCKS.map(({ name }) => `${name} ${ink} ${pct}% on ${surface}`)
 				)
 			)
@@ -1108,17 +1321,72 @@ describe('status-ink text on its own tint (SONA-209)', () => {
 		expect([...TINT_KNOWN_FAILURES.keys()].filter((k) => !generated.has(k))).toEqual([]);
 	});
 
+	// The callout paints a second string on that tint: the BODY text under the
+	// title, which is a different token from the ink and so is not covered by the
+	// pairing sweep below. It reads at 13px, so it carries the 4.5:1 floor too.
+	// --muted-foreground used to sit here and measured 3.94:1 on terracotta light
+	// over the tint; --foreground clears 10:1 on every block.
+	const calloutTint = TINTS.find(
+		(t) => t.file === './components/Callout.svelte' && t.selector === '.callout.success'
+	);
+	if (!calloutTint) throw new Error('the success callout dropped out of TINTED_RULES');
+	// The success variant warms that body ink toward --status-ok so it does not
+	// read as neutral grey on a green surface, so the colour here is a mix of two
+	// tokens rather than one token. Either form is measured: a plain
+	// `var(--token)` counts as 100% of that token.
+	const calloutBodyInk = (() => {
+		const body = ruleBody('./components/Callout.svelte', '.success .text');
+		const mix = body.match(
+			/color:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/
+		);
+		if (mix) return { base: mix[1], pct: Number(mix[2]), toward: mix[3] };
+		const plain = body.match(/color:\s*var\(--([\w-]+)\)/);
+		return plain ? { base: plain[1], pct: 100, toward: undefined } : undefined;
+	})();
+
+	it('the callout body text is painted from theme tokens', () => {
+		expect(calloutBodyInk, '.success .text in Callout.svelte no longer names a token').toBeTruthy();
+	});
+
+	for (const surface of SURFACES) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: the callout body text meets 4.5:1 on the success tint over the ${surface}`, () => {
+				const tint = mix2(
+					blockToken(sel, calloutTint.ink),
+					calloutTint.pct,
+					calloutTint.over ? blockToken(sel, calloutTint.over) : surfaceHex(sel, surface)
+				);
+				if (!calloutBodyInk) throw new Error('the callout body text names no token');
+				const base = blockToken(sel, calloutBodyInk.base);
+				const ink =
+					calloutBodyInk.toward === undefined
+						? base
+						: mix2(base, calloutBodyInk.pct, blockToken(sel, calloutBodyInk.toward));
+				const ratio = contrast(ink, tint);
+				expect(
+					ratio,
+					`${name}: callout body text measures ${ratio.toFixed(2)}:1 on the ${calloutTint.pct}% tint over the ${surface}`
+				).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+
 	// Two rules can share an ink and a percentage (the two 20% observability
 	// badges do not, but a third could), so measure each distinct pairing once.
-	const PAIRINGS = [...new Map(TINTS.map((t) => [`${t.ink} ${t.pct}`, t])).values()];
+	const PAIRINGS = [
+		...new Map(
+			TINTS.map((t) => [`${t.ink} ${t.pct} ${t.over} ${surfacesFor(t.file).join()}`, t])
+		).values()
+	];
 
-	for (const { ink, pct } of PAIRINGS) {
-		for (const surface of SURFACES) {
+	for (const { file, ink, pct, over } of PAIRINGS) {
+		for (const surface of surfacesFor(file)) {
 			for (const { name, sel } of THEME_BLOCKS) {
 				const key = `${name} ${ink} ${pct}% on ${surface}`;
 				it(`${name}: --${ink} text meets 4.5:1 on its ${pct}% tint over the ${surface}`, () => {
 					const hex = blockToken(sel, ink);
-					const ratio = contrast(hex, mix2(hex, pct, blockToken(sel, surface)));
+					const ground = over ? blockToken(sel, over) : surfaceHex(sel, surface);
+					const ratio = contrast(hex, mix2(hex, pct, ground));
 					const known = TINT_KNOWN_FAILURES.get(key);
 					if (known !== undefined) {
 						expect(
@@ -1138,6 +1406,86 @@ describe('status-ink text on its own tint (SONA-209)', () => {
 				});
 			}
 		}
+	}
+});
+
+// The conventions "maybe" chip is the one chip whose label is not its own ink,
+// so the self-tint sweep above cannot measure it. It cannot be a self-tint:
+// --primary-text has 4.68:1 of headroom on a bare terracotta light surface, so
+// no percentage of a tint of it leaves 4.5:1 for the label. The tint and the
+// edge keep the primary hue and the label is --foreground, the way Callout's
+// .text and the mobile list's live meta already do it. Measured on the page and
+// on a live row, because the chip appears in both.
+describe('the conventions maybe chip is readable on its tint (SONA-209)', () => {
+	const CONVENTIONS = '../routes/admin/conventions/+page.svelte';
+	const chip = selfTint(ruleBody(CONVENTIONS, '.status-maybe'), `${CONVENTIONS} .status-maybe`);
+
+	it('tints with --primary and labels with a token that is not its ink', () => {
+		expect(chip.ink, '.status-maybe no longer tints with --primary').toBe('primary');
+		expect(
+			chip.label,
+			'.status-maybe labels with a token whose contrast on the tint is not measured here'
+		).toBe('foreground');
+	});
+
+	for (const ground of ['background', 'live row'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: the maybe chip label meets 4.5:1 on its tint over the ${ground}`, () => {
+				const under = ground === 'live row' ? liveRowHex(sel) : blockToken(sel, 'background');
+				const tint = mix2(blockToken(sel, chip.ink), chip.pct, under);
+				const ratio = contrast(blockToken(sel, chip.label!), tint);
+				expect(
+					ratio,
+					`${name}: --${chip.label} on the maybe chip's ${chip.pct}% tint over the ${ground} (${tint}) measures ${ratio.toFixed(2)}:1`
+				).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+});
+
+// The plain ink swaps: rules that paint status-coloured text on an untinted
+// surface, where the resting sweep already covers the pairing but nothing pins
+// the rule itself. Each was a baked-in #22c55e, #f5a623 or #f87171 before
+// SONA-227's follow-ups and SONA-209, and a literal reads the same on every
+// palette, so what is pinned here is that the declaration still names the token.
+//
+// NOT a ban on colour literals in these files: src/routes/admin/settings has
+// five deliberate greens that are the green half of an amber/green chart pair
+// with their own light-mode overrides, and they are left alone on purpose.
+describe('status ink swaps keep the token (SONA-209)', () => {
+	const INK_RULES: Array<{ file: string; selector: string; ink: string }> = [
+		{ file: '../routes/admin/settings/+page.svelte', selector: '.success', ink: 'status-ok' },
+		{ file: '../routes/admin/settings/+page.svelte', selector: '.provider-status.ok', ink: 'status-ok' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.activity-status.migrated', ink: 'status-ok' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.success', ink: 'status-ok' },
+		{ file: '../routes/admin/conventions/+page.svelte', selector: '.success', ink: 'status-ok' },
+		{ file: '../routes/admin/images/+page.svelte', selector: '.sfw-badge', ink: 'status-ok' },
+		// The amber inks. The fursuit hint link sits inside the warn banner, whose
+		// 10% --status-warn tint is measured by the self-tint sweep above.
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.hint-link', ink: 'status-warn' },
+		{ file: '../routes/admin/stickers/import/+page.svelte', selector: '.warn-text', ink: 'status-warn' },
+		{ file: '../routes/admin/settings/+page.svelte', selector: '.provider-status.warn', ink: 'status-warn' },
+		// The red inks. Every one of these is plain text on --background or --card,
+		// which the resting sweep already holds to 4.5:1 for --destructive.
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.status.excluded', ink: 'destructive' },
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.reason', ink: 'destructive' },
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.btn-icon:hover', ink: 'destructive' },
+		{ file: '../routes/admin/fursuit/+page.svelte', selector: '.error', ink: 'destructive' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.activity-status.failed', ink: 'destructive' },
+		{ file: '../routes/admin/storage/migrate/+page.svelte', selector: '.error', ink: 'destructive' },
+		{ file: '../routes/admin/settings/+page.svelte', selector: '.provider-status.bad', ink: 'destructive' }
+	];
+
+	for (const { file, selector, ink } of INK_RULES) {
+		it(`${file} ${selector} paints --${ink}, not a literal`, () => {
+			const body = ruleBody(file, selector);
+			expect(body, `${selector} in ${file} no longer names --${ink}`).toMatch(
+				new RegExp(`color:\\s*var\\(--${ink}\\)`)
+			);
+			expect(body, `${selector} in ${file} carries a colour literal again`).not.toMatch(
+				/#[0-9a-fA-F]{3,8}|%23[0-9a-fA-F]{3,6}/
+			);
+		});
 	}
 });
 
@@ -1931,6 +2279,306 @@ describe('state boundaries drawn with --primary-text meet 1.4.11 (SONA-126)', ()
 			});
 		}
 	}
+});
+
+// The mosaic hero puts its site name and tagline over artwork the visitor
+// uploaded, so nothing about the surface behind them is known. What IS known is
+// the black scrim between the two, and where in that scrim each line of text
+// lands. This describe reads the overlay's own layout numbers (banner height,
+// padding, gap, font sizes, and the Browse button's height) out of the
+// component, walks up from the bottom edge to the top of each line of text,
+// interpolates the scrim gradient at that offset, and measures the ink against
+// pure white artwork dimmed by exactly that alpha. Measuring against the
+// gradient's darkest stop instead would pass however high the text sat.
+// The tagline is clamped to three lines and the site name to two, so the
+// three-line tagline under a two-line name is the real worst case: nothing the
+// visitor writes in the about text or the site name pushes the heading higher
+// than that. Both inks are opaque literals on purpose: a
+// translucent label composites with the artwork and its contrast moves with the
+// upload.
+describe('the mosaic hero text survives its scrim over white artwork', () => {
+	const banner = './components/MosaicBanner.svelte';
+	const bannerSource = readFileSync(fileURLToPath(new URL(banner, import.meta.url)), 'utf8');
+	const overlay = ruleBody(banner, '.hero-overlay');
+
+	// The phone overrides live in the component's one max-width block, so read
+	// rules out of the source from that point on to get the overriding value.
+	const narrowSource = bannerSource.slice(bannerSource.indexOf('@media (max-width: 768px)'));
+	function narrowRule(selector: string): string {
+		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const body = narrowSource.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+		if (!body) throw new Error(`${selector} has no rule inside the phone media query`);
+		return body;
+	}
+
+	function px(body: string, prop: string, where: string): number {
+		const value = body.match(new RegExp(`(?:^|[;{])\\s*${prop}:\\s*(\\d+)px`))?.[1];
+		if (!value) throw new Error(`${where} no longer sets ${prop} in px`);
+		return Number(value);
+	}
+
+	// Neither the component nor app.css sets a line-height on the hero heading or
+	// the tagline, so these stand in for the browser's `normal`, rounded UP.
+	// Rounding up is the cautious direction: a taller text block starts higher in
+	// the banner, where the scrim is lighter. Nunito's `normal` works out around
+	// 1.36, so 1.2 would have been a round-down; 1.4 is the bound above it.
+	const HEADING_LINE_HEIGHT = 1.4;
+	const BODY_LINE_HEIGHT = 1.5;
+
+	const buttonHeight = px(ruleBody('../app.css', '.btn-lg'), 'height', '.btn-lg');
+
+	const viewports = [
+		{
+			name: '1280x900',
+			height: px(ruleBody(banner, '.mosaic-banner'), 'height', '.mosaic-banner'),
+			padding: px(overlay, 'padding', '.hero-overlay'),
+			gap: px(overlay, 'gap', '.hero-overlay'),
+			siteFont: px(ruleBody(banner, '.site-name'), 'font-size', '.site-name'),
+			taglineFont: px(ruleBody(banner, '.hero-tagline'), 'font-size', '.hero-tagline')
+		},
+		{
+			name: '390x844',
+			height: px(narrowRule('.mosaic-banner'), 'height', '.mosaic-banner (phone)'),
+			padding: px(narrowRule('.hero-overlay'), 'padding', '.hero-overlay (phone)'),
+			gap: px(narrowRule('.hero-overlay'), 'gap', '.hero-overlay (phone)'),
+			siteFont: px(narrowRule('.site-name'), 'font-size', '.site-name (phone)'),
+			taglineFont: px(narrowRule('.hero-tagline'), 'font-size', '.hero-tagline (phone)')
+		}
+	];
+
+	// The overlay is a bottom-aligned column: button, gap, tagline, gap, site
+	// name. Each text top is therefore a fixed walk up from the banner's bottom
+	// edge, and a longer about text (more tagline lines) pushes both higher, as
+	// does a site name long enough to wrap onto a second line.
+	function textTops(
+		v: (typeof viewports)[number],
+		taglineLines: number,
+		siteNameLines: number
+	) {
+		const buttonTop = v.height - v.padding - buttonHeight;
+		const taglineTop = buttonTop - v.gap - taglineLines * v.taglineFont * BODY_LINE_HEIGHT;
+		const siteNameTop = taglineTop - v.gap - siteNameLines * v.siteFont * HEADING_LINE_HEIGHT;
+		return { '.hero-tagline': taglineTop / v.height, '.site-name': siteNameTop / v.height };
+	}
+
+	// The gradient's stops, as fractions of the banner height.
+	const stops = [...overlay.matchAll(/(transparent|rgba\(0, 0, 0, (0?\.\d+)\))\s+(\d+)%/g)].map(
+		(m) => ({ pos: Number(m[3]) / 100, alpha: m[2] ? Number(m[2]) : 0 })
+	);
+
+	function scrimAlpha(pos: number): number {
+		if (!stops.length) throw new Error('the hero overlay no longer paints a black scrim');
+		if (pos <= stops[0].pos) return stops[0].alpha;
+		for (let i = 1; i < stops.length; i++) {
+			if (pos <= stops[i].pos) {
+				const span = stops[i].pos - stops[i - 1].pos;
+				const t = span === 0 ? 1 : (pos - stops[i - 1].pos) / span;
+				return stops[i - 1].alpha + t * (stops[i].alpha - stops[i - 1].alpha);
+			}
+		}
+		return stops[stops.length - 1].alpha;
+	}
+
+	// Pinned so that flattening the scrim back to a single late stop fails here
+	// rather than passing on an average.
+	it('pins the scrim stops the offsets below are measured against', () => {
+		expect(stops).toEqual([
+			{ pos: 0.05, alpha: 0 },
+			{ pos: 0.48, alpha: 0.8 },
+			{ pos: 1, alpha: 0.8 }
+		]);
+	});
+
+	// The tagline is what the about text flows into, and the about text has no
+	// length limit. Without the clamp a long one adds lines, each of which pushes
+	// the site name higher into the lighter part of the scrim, past the
+	// three-line worst case the offsets below measure.
+	it('clamps the tagline to the three lines the offsets below model', () => {
+		const tagline = ruleBody(banner, '.hero-tagline');
+		expect(tagline, '.hero-tagline no longer clamps its line count').toMatch(
+			/(?:-webkit-)?line-clamp:\s*3/
+		);
+		expect(tagline, 'the clamp needs the prefixed property to work at all').toMatch(
+			/-webkit-line-clamp:\s*3/
+		);
+		expect(tagline, 'a line clamp only takes effect on a -webkit-box').toMatch(
+			/display:\s*-webkit-box/
+		);
+		expect(tagline, 'without overflow: hidden the clamped lines still render').toMatch(
+			/overflow:\s*hidden/
+		);
+	});
+
+	// Same argument for the heading: the settings form takes a 100-character site
+	// name, which wraps past two lines on a phone and lifts the heading above the
+	// offsets measured below.
+	it('clamps the site name to the two lines the offsets below model', () => {
+		const siteName = ruleBody(banner, '.site-name');
+		expect(siteName, '.site-name no longer clamps its line count').toMatch(
+			/(?:-webkit-)?line-clamp:\s*2/
+		);
+		expect(siteName, 'the clamp needs the prefixed property to work at all').toMatch(
+			/-webkit-line-clamp:\s*2/
+		);
+		expect(siteName, 'a line clamp only takes effect on a -webkit-box').toMatch(
+			/display:\s*-webkit-box/
+		);
+		expect(siteName, 'without overflow: hidden the clamped lines still render').toMatch(
+			/overflow:\s*hidden/
+		);
+	});
+
+	// Large text (48px, and 28px bold on the phone) so the site name's bar is 3:1;
+	// the tagline is body copy and gets the full 4.5:1.
+	const inks: Array<{ selector: '.site-name' | '.hero-tagline'; floor: number }> = [
+		{ selector: '.site-name', floor: 3 },
+		{ selector: '.hero-tagline', floor: 4.5 }
+	];
+
+	for (const { selector, floor } of inks) {
+		const rule = ruleBody(banner, selector);
+
+		it(`${selector} paints with an opaque colour`, () => {
+			expect(
+				rule,
+				`${selector} colours with an alpha, so its contrast moves with the artwork underneath`
+			).not.toMatch(/color:\s*rgba\(/);
+		});
+
+		// The tagline sits below the heading, so its offset does not move with the
+		// name's line count; only the heading is measured at both counts.
+		const nameCounts = selector === '.site-name' ? [1, 2] : [1];
+
+		for (const v of viewports) {
+			for (const lines of [1, 2, 3]) {
+				for (const nameLines of nameCounts) {
+					const where =
+						selector === '.site-name' ? ` under a ${nameLines}-line site name` : '';
+					it(`${selector} meets ${floor}:1 at ${v.name} with a ${lines}-line tagline${where}`, () => {
+						const hex = rule.match(/(?:^|[;{])\s*color:\s*(#[0-9a-fA-F]{6})/)?.[1];
+						if (!hex) throw new Error(`${selector} no longer sets a 6-digit hex colour`);
+						const top = textTops(v, lines, nameLines)[selector];
+						const alpha = scrimAlpha(top);
+						const ground = mixSrgb('#FFFFFF', (1 - alpha) * 100, 'black');
+						const ratio = contrast(hex, ground);
+						expect(
+							ratio,
+							`${selector} (${hex}) tops out at ${(top * 100).toFixed(1)}% of the banner, where the scrim is ${alpha.toFixed(3)} alpha; over white artwork (${ground}) it measures ${ratio.toFixed(2)}:1`
+						).toBeGreaterThanOrEqual(floor);
+					});
+				}
+			}
+		}
+	}
+});
+
+// The admin nav's current page is told apart from a hovered one by an edge
+// marker, not by weight alone: both states paint the same --sidebar-accent fill.
+// The marker's contrast against that fill is swept in RESTING_PAIRS; this pins
+// the rule that draws it, so dropping the marker (or moving hover onto the same
+// shape) fails here rather than quietly returning the two states to a tie.
+describe('the admin nav marks its active item with an edge, not weight alone', () => {
+	const layout = '../routes/admin/+layout.svelte';
+
+	it('the active link draws a --primary-text inset edge', () => {
+		expect(ruleBody(layout, '.sidebar-link.active')).toMatch(
+			/box-shadow:\s*inset\s+\d+px\s+0\s+0\s+var\(--primary-text\)/
+		);
+	});
+
+	it('the hover state stays the fill alone', () => {
+		expect(ruleBody(layout, '.sidebar-link:hover')).not.toMatch(/box-shadow|border-left/);
+	});
+
+	// Forced colors drops box-shadow, so that inset edge disappears and the active
+	// item reads like any other. A real border in a system colour replaces it, and
+	// the left padding drops by the border's width so the row does not shift.
+	it('forced colors swaps the inset edge for a real border of the same width', () => {
+		const layoutSource = readFileSync(fileURLToPath(new URL(layout, import.meta.url)), 'utf8');
+		const marker = ruleBody(layout, '.sidebar-link.active').match(
+			/box-shadow:\s*inset\s+(\d+)px/
+		)?.[1];
+		const restingPad = ruleBody(layout, '.sidebar-link').match(/padding:\s*\d+px\s+(\d+)px/)?.[1];
+		expect(marker, '.sidebar-link.active no longer draws an inset marker').toBe('3');
+		expect(restingPad, '.sidebar-link no longer sets a two-value padding').toBeDefined();
+
+		const block = layoutSource.match(
+			/@media \(forced-colors: active\) \{\s*\.sidebar-link\.active \{([^}]*)\}/
+		)?.[1];
+		expect(block, 'the forced-colors fallback for the active sidebar link is gone').toBeDefined();
+		expect(block).toMatch(/border-left:\s*3px solid \w+/);
+		const forcedPad = block!.match(/padding-left:\s*(\d+)px/)?.[1];
+		expect(
+			Number(forcedPad),
+			`the forced-colors border adds 3px, so padding-left has to drop from ${restingPad}px by the same 3`
+		).toBe(Number(restingPad) - 3);
+	});
+});
+
+// Two affordances that forced colors would otherwise turn into a defect: the
+// masked tab strips fade to nothing rather than dimming, and the selects lose
+// the background-image caret app.css paints. Each filter page keeps exactly one
+// arrow under forced colors: the stickers page its own overlaid chevron, the
+// gallery the native caret it asks for itself.
+describe('the forced-colors fallbacks stay in place', () => {
+	for (const [where, file] of [
+		['the admin tab strip', './components/AdminTabs.svelte'],
+		['the settings sub-tab strip', '../routes/admin/settings/+page.svelte']
+	] as const) {
+		it(`${where} drops its edge fade under forced colors`, () => {
+			const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+			const block = source.match(/@media \(forced-colors: active\) \{[\s\S]*?\n\t*\}\n/)?.[0];
+			expect(block, `${where} has no forced-colors block`).toBeDefined();
+			expect(block).toMatch(/[^-]mask-image:\s*none/);
+			expect(block).toMatch(/-webkit-mask-image:\s*none/);
+			// The padding that keeps the last tab off the edge is NOT dropped with it.
+			expect(block).not.toMatch(/padding/);
+		});
+	}
+
+	it('app.css hands the native select caret back', () => {
+		const forced = [...css.matchAll(/@media \(forced-colors: active\) \{[\s\S]*?\n\}/g)]
+			.map((m) => m[0])
+			.find((block) => block.includes('select.input'));
+		expect(forced, 'app.css no longer hands the native select caret back').toBeDefined();
+		expect(forced).toMatch(/select\.input \{[^}]*appearance: auto/);
+		// It must not reach for the overlaid chevron the filter pages draw: that
+		// icon is the only arrow those pages have left once forced colors drops the
+		// background-image caret, because their own `.filter-select` rule outranks
+		// the appearance:auto above.
+		expect(
+			forced,
+			'app.css hides the overlaid chevron again, which leaves the filter pages with no arrow'
+		).not.toMatch(/\.select-chevron/);
+	});
+
+	// The gallery's filter selects carry no chevron of their own (only its artist
+	// combobox does), and Svelte's scoping makes their `appearance: none` beat the
+	// app.css rule above, so the page has to take the native caret itself.
+	it('the gallery filter selects take the native caret at page scope', () => {
+		const gallery = readFileSync(
+			fileURLToPath(new URL('../routes/(public)/gallery/+page.svelte', import.meta.url)),
+			'utf8'
+		);
+		const block = gallery.match(
+			/@media \(forced-colors: active\) \{\s*select\.filter-select \{([^}]*)\}/
+		)?.[1];
+		expect(block, 'the gallery has no forced-colors fallback for its filter selects').toBeDefined();
+		expect(block).toMatch(/appearance: auto/);
+		expect(block).toMatch(/padding-right: 16px/);
+	});
+
+	// The stickers filter select DOES overlay its own chevron, so it needs no
+	// fallback: dropping the background-image caret leaves that icon in place.
+	it('the stickers filter select still overlays its own chevron', () => {
+		const stickers = readFileSync(
+			fileURLToPath(new URL('../routes/(public)/stickers/+page.svelte', import.meta.url)),
+			'utf8'
+		);
+		expect(stickers, 'the stickers filter select lost the chevron it draws itself').toMatch(
+			/class="select-chevron"/
+		);
+	});
 });
 
 // SONA-126, the boundary twin of the text sweep above: a `border`, `outline` or

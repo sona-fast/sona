@@ -15,7 +15,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileS
 import { argv, env, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
-import { assertNoAliasCycles } from '../src/lib/themes/cascade.ts';
+import { assertNoAliasCycles, resolveToken } from '../src/lib/themes/cascade.ts';
 import { DEFAULT_THEME_ID } from '../src/lib/themes/index.ts';
 import { TOKEN_CSS_NAMES, cssName, cssValue, type FontFace, type ThemeDefinition, type TokenKey } from '../src/lib/themes/types.ts';
 
@@ -49,6 +49,7 @@ function rule(selector: string, declarations: string[]): string {
 	return `${selector} {\n${declarations.map((d) => (d === '' ? '' : `\t${d}`)).join('\n')}\n}\n`;
 }
 
+/** The `--token: value;` lines for one mode's palette, in declaration order. */
 function tokenDeclarations(tokens: ThemeDefinition['dark']): string[] {
 	const out: string[] = [];
 	for (const key of Object.keys(TOKEN_CSS_NAMES) as TokenKey[]) {
@@ -60,8 +61,47 @@ function tokenDeclarations(tokens: ThemeDefinition['dark']): string[] {
 	return out;
 }
 
-function block(theme: ThemeDefinition, mode: 'dark' | 'light', selector: string): string {
+/**
+ * The select caret as a data URI, with the stroke colour baked in. It is the
+ * same stroked chevron the icon set draws elsewhere (`m6 9 6 6 6-6`, 2px round
+ * caps), so the dropdown glyph matches the icons beside it instead of being the
+ * one filled shape. A data URI cannot read a custom property, so the colour has
+ * to be resolved here, per block, which is what --select-caret carries.
+ */
+function selectCaret(stroke: string): string {
+	const svg =
+		`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='${stroke}'` +
+		` stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>`;
+	// The '#' of the colour would end the URL at the fragment, and the angle
+	// brackets and spaces are not URL-safe either.
+	const encoded = svg.replace(
+		/[<>#%"{}|\\^`\s]/g,
+		(c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`
+	);
+	return `url("data:image/svg+xml,${encoded}")`;
+}
+
+/**
+ * One CSS rule for a theme in one mode: its selector, its token declarations,
+ * the caret baked from its resolved --input, and (dark block only) its fonts.
+ */
+function block(
+	themes: ThemeDefinition[],
+	theme: ThemeDefinition,
+	mode: 'dark' | 'light',
+	selector: string
+): string {
 	const declarations = tokenDeclarations(theme[mode]);
+	// Derived from --input as this block resolves it, not from whatever --input
+	// the block itself declares: a theme whose light block leaves --input to the
+	// cascade still needs a caret in that block's own colour.
+	// Real data always resolves it, because the default theme's token set is
+	// complete by type. A hand-built partial set (the generator's own fixtures)
+	// gets no caret rather than failing the render.
+	const input = resolveToken(themes, theme.id, mode, 'input');
+	if (input !== undefined && /^#[0-9A-Fa-f]{6}$/.test(input)) {
+		declarations.push(`--select-caret: ${selectCaret(input)};`);
+	}
 	// Fonts ride the dark block: its selector matches in BOTH modes (the light
 	// selector is the same one plus [data-theme='light']), so one declaration
 	// serves the whole theme.
@@ -251,6 +291,10 @@ function validateUnicodeRange(id: string, range: string): void {
 	}
 }
 
+/**
+ * The whole generated stylesheet: every theme's dark and light blocks in the
+ * order given (the default first), followed by the @font-face section.
+ */
 export function renderThemesCss(themes: ThemeDefinition[]): string {
 	for (const theme of themes) validateTheme(theme);
 	// Emission order is source order and the default theme is the fallback floor,
@@ -275,8 +319,8 @@ export function renderThemesCss(themes: ThemeDefinition[]): string {
 	const blocks = themes.flatMap((theme) => {
 		const sel = themeSelectors(theme);
 		return [
-			`/* ${theme.label} */\n${block(theme, 'dark', sel.dark)}`,
-			block(theme, 'light', sel.light)
+			`/* ${theme.label} */\n${block(themes, theme, 'dark', sel.dark)}`,
+			block(themes, theme, 'light', sel.light)
 		];
 	});
 	const fontSection = faces.length === 0 ? '' : `${FONT_HEADER}\n${faces.join('\n')}\n`;

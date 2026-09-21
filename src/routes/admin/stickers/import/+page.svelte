@@ -583,23 +583,41 @@
 	.page-header { margin-bottom: 20px; }
 	.page-header h1 { font-size: 22px; margin: 0 0 4px; }
 	.subtitle { font-size: 13px; color: var(--muted-foreground); max-width: 70ch; margin: 0; }
+	/* The transparent edge is what keeps every variant the same height: only the
+	   error banner draws a visible border, and without this the box grows by 2px
+	   when one replaces another in the same slot. */
 	.banner {
 		display: flex; align-items: center; gap: 8px; padding: 12px 16px;
-		border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px;
+		border: 1px solid transparent; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px;
 	}
-	.banner.warn { background: rgba(245,166,35,0.1); color: #f5a623; }
-	.banner.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	.banner.warn { background: color-mix(in srgb, var(--status-warn) 10%, transparent); color: var(--status-warn); }
+	.banner.err {
+		background: color-mix(in srgb, var(--destructive) 20%, transparent);
+		border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+		color: var(--foreground);
+	}
+	/* The error banner and alert read louder than their warn siblings: a deeper
+	   fill, an edge, and the icon left in the destructive ink while the text stays
+	   --foreground. */
+	.banner.err :global(svg) { color: var(--destructive); }
 	code { background: var(--secondary); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
 
 	/* Rich alerts (success / error) — icon + title + body */
+	/* Same transparent edge as .banner, for the same reason: .alert.err is the
+	   only variant with a visible border. */
 	.alert {
 		display: flex; align-items: flex-start; gap: 12px; padding: 16px;
-		border-radius: var(--radius-s); margin-bottom: 18px;
+		border: 1px solid transparent; border-radius: var(--radius-s); margin-bottom: 18px;
 	}
 	.alert strong { display: block; font-size: 14px; font-weight: 600; }
 	.alert p { margin: 2px 0 0; font-size: 12px; opacity: 0.85; }
-	.alert.ok { background: rgba(74,222,128,0.1); color: #4ade80; }
-	.alert.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	.alert.ok { background: color-mix(in srgb, var(--status-ok) 10%, transparent); color: var(--status-ok); }
+	.alert.err {
+		background: color-mix(in srgb, var(--destructive) 20%, transparent);
+		border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+		color: var(--foreground);
+	}
+	.alert.err :global(svg) { color: var(--destructive); }
 
 	/* Success summary stats */
 	.summary {
@@ -612,8 +630,15 @@
 	.actions { display: flex; gap: 12px; flex-wrap: wrap; }
 
 	/* Failed-import detail */
-	.failed-block { border: 1px solid var(--destructive); border-radius: var(--radius-s); padding: 16px; margin-bottom: 18px; background: rgba(248,113,113,0.06); }
-	.failed-block h3 { font-size: 14px; margin: 0 0 4px; color: #f87171; }
+	/* The fill follows --destructive with the border rather than staying a baked
+	   red, so the block tints with whatever red the fork's theme carries. The
+	   heading is --foreground, not --destructive, for the reason R3-A2 found on
+	   the error banners: --destructive on its own tint measures under 4.5:1 on the
+	   light themes, and the only percentages that clear it are too faint to see.
+	   With the heading on --foreground the tint is free to be legible, so it sits
+	   at 12% — the banners' pre-20% depth — and the block keeps its red edge. */
+	.failed-block { border: 1px solid var(--destructive); border-radius: var(--radius-s); padding: 16px; margin-bottom: 18px; background: color-mix(in srgb, var(--destructive) 12%, transparent); }
+	.failed-block h3 { font-size: 14px; margin: 0 0 4px; color: var(--foreground); }
 	.failed-hint { font-size: 12px; color: var(--muted-foreground); margin: 0 0 12px; max-width: 70ch; }
 	.failed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
 	.failed-card { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 8px; }
@@ -643,7 +668,8 @@
 	.hint { font-size: 11px; color: var(--muted-foreground); margin: 0; }
 	.note {
 		display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px;
-		border-radius: var(--radius-s); background: rgba(245,166,35,0.08); color: #f5a623;
+		border-radius: var(--radius-s);
+		background: color-mix(in srgb, var(--status-warn) 8%, transparent); color: var(--status-warn);
 	}
 	.note strong { display: block; font-size: 13px; font-weight: 600; }
 	.note p { margin: 2px 0 0; font-size: 12px; color: var(--muted-foreground); }
@@ -701,13 +727,13 @@
 		color: var(--primary-text); cursor: pointer;
 	}
 	.ctx-new-artist:hover { border-color: var(--primary-text); }
-	.warn-text { color: #f5a623 !important; }
+	.warn-text { color: var(--status-warn) !important; }
 	.card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.toggle-row { display: flex; gap: 12px; }
 	.check-label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted-foreground); cursor: pointer; }
 	.badge-row { display: flex; gap: 4px; flex-wrap: wrap; }
 	.fmt-chip { font-size: 10px; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--secondary); color: var(--muted-foreground); }
-	.status-chip.imported { font-size: 10px; padding: 2px 6px; border-radius: var(--radius-pill); background: rgba(74,222,128,0.1); color: #4ade80; }
+	.status-chip.imported { font-size: 10px; padding: 2px 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--status-ok) 10%, transparent); color: var(--status-ok); }
 
 	/* Review action bar */
 	.action-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--border); }

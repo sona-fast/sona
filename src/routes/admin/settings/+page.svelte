@@ -444,21 +444,25 @@
 		<div class="page-header">
 			<h1>{m.admin_nav_settings()}</h1>
 		</div>
-		<div class="settings-tabnav" role="tablist" aria-label={m.admin_nav_settings()}>
-			{#each tabs as tab, i (tab)}
-				<button
-					type="button"
-					role="tab"
-					id={tabButtonId(tab)}
-					aria-selected={selectedTab === tab}
-					aria-controls="settings-panels"
-					tabindex={selectedTab === tab ? 0 : -1}
-					bind:this={tabButtons[i]}
-					class:active={selectedTab === tab}
-					onclick={() => selectTab(tab)}
-					onkeydown={onTabKeydown}>{TAB_LABELS[tab]()}</button
-				>
-			{/each}
+		<!-- The wrapper exists for the phone-width rule below: the strip's edge fade
+		     would take its own bottom border with it, so the border sits out here. -->
+		<div class="settings-tabnav-wrap">
+			<div class="settings-tabnav" role="tablist" aria-label={m.admin_nav_settings()}>
+				{#each tabs as tab, i (tab)}
+					<button
+						type="button"
+						role="tab"
+						id={tabButtonId(tab)}
+						aria-selected={selectedTab === tab}
+						aria-controls="settings-panels"
+						tabindex={selectedTab === tab ? 0 : -1}
+						bind:this={tabButtons[i]}
+						class:active={selectedTab === tab}
+						onclick={() => selectTab(tab)}
+						onkeydown={onTabKeydown}>{TAB_LABELS[tab]()}</button
+					>
+				{/each}
+			</div>
 		</div>
 	</div>
 
@@ -1863,7 +1867,7 @@
 	}
 
 	.success {
-		color: #4ade80;
+		color: var(--status-ok);
 		font-size: 14px;
 		margin-bottom: 16px;
 	}
@@ -1932,15 +1936,15 @@
 	}
 
 	.provider-status.ok {
-		color: #4ade80;
+		color: var(--status-ok);
 	}
 
 	.provider-status.warn {
-		color: #f5a623;
+		color: var(--status-warn);
 	}
 
 	.provider-status.bad {
-		color: #f87171;
+		color: var(--destructive);
 	}
 
 	.ut-leftover {
@@ -2475,6 +2479,42 @@
 			display: none;
 		}
 
+		/* Same treatment as the admin tab strip: the sub-tabs scroll with no
+		   scrollbar, so 24px fade out at both ends to say there is more past the
+		   edge, the matching padding keeps the first and last tab off those edges,
+		   and the scroll padding keeps a focused tab from landing under a fade.
+		   The mask fades everything it covers, including the strip's own bottom
+		   border, and between about 560px and this query's 768px the strip does
+		   not overflow at all, so that faded corner reads as a frayed rule rather
+		   than an affordance. The border and the gap under it move to the
+		   unmasked wrapper instead. */
+		.settings-tabnav-wrap {
+			border-bottom: 1px solid var(--border);
+			margin-bottom: 28px;
+		}
+
+		.settings-tabnav {
+			border-bottom: none;
+			margin-bottom: 0;
+			padding-right: 24px;
+			padding-left: 24px;
+			scroll-padding-inline-end: 24px;
+			scroll-padding-inline-start: 24px;
+			-webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+			mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+		}
+
+		/* Forced colors keeps the mask's alpha, so the last tab fades out to
+		   nothing instead of being dimmed against a chosen background. Clipping is
+		   the honest fallback; the padding stays, so the strip still ends short of
+		   the edge. */
+		@media (forced-colors: active) {
+			.settings-tabnav {
+				-webkit-mask-image: none;
+				mask-image: none;
+			}
+		}
+
 		.row {
 			flex-direction: column;
 			margin-bottom: 0;
@@ -2528,11 +2568,27 @@
 		cursor: pointer;
 		margin-bottom: 10px;
 	}
+	/* A hint belongs to the field ABOVE it, so it needs more air below than above.
+	   With no bottom margin it sat 8px under its own input and flush against the
+	   next label, which read as a caption for the wrong field. A <p> between two
+	   labels also breaks the `label + label` rule that gives stacked fields their
+	   20px, so the next field gets no top margin of its own and this is the only
+	   gap there is. */
 	.hint {
 		font-size: 12px;
 		color: var(--muted-foreground);
-		margin: 8px 0 0;
+		/* 20px below, matching the gap the label-to-label rule gives two stacked
+		   fields: the hint is what breaks that rule, so this is the only thing
+		   holding the next field off it. */
+		margin: 8px 0 20px;
 		line-height: 1.5;
+	}
+	/* Inside a flex column the column's own gap already spaces the hint from the
+	   control below it, so the 20px would stack on top of that gap and push the
+	   button away. The margin is for section-level hints between stacked fields. */
+	.feed-key .hint,
+	.palette .hint {
+		margin-bottom: 0;
 	}
 
 	/* ── Supporter key (SONA-105) ─────────────────────────────── */

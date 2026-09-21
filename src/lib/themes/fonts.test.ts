@@ -66,13 +66,17 @@ describe('every @font-face points at a real file (SONA-181)', () => {
 	const appSrcs = [...appCss.matchAll(/src:\s*url\('([^']+)'\)/g)].map((m) => m[1]);
 
 	// Geist is declared by hand in app.css, so the existence check below would
-	// pass vacuously if those declarations went missing.
-	it('finds the three Geist faces app.css declares', () => {
-		expect(appSrcs).toEqual([
-			'/fonts/Geist-Regular.woff2',
-			'/fonts/Geist-Medium.woff2',
-			'/fonts/Geist-SemiBold.woff2'
-		]);
+	// pass vacuously if that declaration went missing. One variable file over the
+	// weights the app uses, not three static cuts: reverting to per-weight files
+	// costs 70 KB and two extra requests on every first paint.
+	it('finds the one variable Geist face app.css declares', () => {
+		expect(appSrcs).toEqual(['/fonts/Geist-variable.woff2']);
+	});
+
+	it('declares Geist over a weight range rather than a single weight', () => {
+		const geist = appCss.match(/@font-face\s*\{[^}]*Geist-variable[^}]*\}/)?.[0] ?? '';
+		expect(geist).toMatch(/font-weight:\s*\d+\s+\d+/);
+		expect(geist).toContain('font-display: swap');
 	});
 
 	it('finds the faces the themes declare', () => {
@@ -200,6 +204,7 @@ describe('a theme with its own faces keeps those families to itself (SONA-181)',
 describe('the fetched fonts match their recorded digests (SONA-181)', () => {
 	const manifest = JSON.parse(readFileSync(`${repoRoot}static/fonts/manifest.json`, 'utf8')) as {
 		files: Record<string, string>;
+		handPlaced?: Record<string, string>;
 	};
 
 	it('records every Google-fetched file in static/fonts/', () => {
@@ -208,6 +213,30 @@ describe('the fetched fonts match their recorded digests (SONA-181)', () => {
 			.sort();
 		expect(Object.keys(manifest.files).sort()).toEqual(fetched);
 	});
+
+	// Geist is not fetched: it comes from the vercel/geist-font GitHub release
+	// and is placed by hand, so scripts/fetch-fonts.mjs never records it under
+	// `files` (it rewrites that key from scratch and the entry would vanish).
+	// Nothing else pins those bytes, which is what this is for.
+	it('records every hand-placed file, and nothing it does not have', () => {
+		const handPlaced = readdirSync(`${repoRoot}static/fonts`)
+			.filter((f) => f.endsWith('.woff2') && f.startsWith('Geist-'))
+			.sort();
+		expect(Object.keys(manifest.handPlaced ?? {}).sort()).toEqual(handPlaced);
+	});
+
+	for (const [name, digest] of Object.entries(manifest.handPlaced ?? {})) {
+		it(`${name} hashes as recorded`, () => {
+			const bytes = readFileSync(`${repoRoot}static/fonts/${name}`);
+			expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+		});
+
+		it(`${name} is a real WOFF2 file`, () => {
+			expect(readFileSync(`${repoRoot}static/fonts/${name}`).subarray(0, 4).toString('latin1')).toBe(
+				'wOF2'
+			);
+		});
+	}
 
 	for (const [name, digest] of Object.entries(manifest.files)) {
 		it(`${name} hashes as recorded`, () => {
@@ -232,4 +261,61 @@ describe('the fonts are cached at the edge (SONA-181)', () => {
 		expect(rule).toContain('Cache-Control: public, max-age=2592000');
 		expect(rule).not.toContain('immutable');
 	});
+});
+
+// Bundling a font is a licensing obligation, and the three places that discharge
+// it (NOTICE, static/fonts/README.md, and the copyright header of
+// static/fonts/OFL.txt) are all hand-written. A theme that adds a family ships
+// its bytes without touching any of them, and nothing else notices. This ties
+// the three back to the font data, so the next family fails here until it is
+// attributed.
+describe('every bundled family is attributed (SONA-227)', () => {
+	// Geist is not in any theme's `faces`: it is the default body font, declared by
+	// hand in app.css, so it is read from there rather than assumed.
+	const geist = [...appCss.matchAll(/@font-face\s*\{[^}]*font-family:\s*'([^']+)'/g)].map(
+		(m) => m[1]
+	);
+	const families = [...new Set([...ALL_THEMES.flatMap((t) => t.fonts?.faces ?? []).map((f) => f.family), ...geist])].sort();
+
+	// The OFL copyright line names the upstream PROJECT, which is not always the
+	// family: these files are Google's Latin slices of IBM Plex Sans JP, released
+	// under IBM's "Plex" Reserved Font Name line. Anything not listed is looked up
+	// under its own name.
+	const OFL_NAME: Record<string, string> = { 'IBM Plex Sans JP': 'Plex' };
+
+	const notice = readFileSync(`${repoRoot}NOTICE`, 'utf8');
+	const fontsReadme = readFileSync(`${repoRoot}static/fonts/README.md`, 'utf8');
+	// Only the header: the license body below it is boilerplate that mentions
+	// neither family, and matching it would make every assert here vacuous.
+	const oflHeader = readFileSync(`${repoRoot}static/fonts/OFL.txt`, 'utf8').split(
+		'This Font Software is licensed'
+	)[0];
+
+	it('finds a family to check, including the hand-declared Geist', () => {
+		expect(geist).toContain('Geist');
+		expect(families.length).toBeGreaterThan(1);
+	});
+
+	for (const family of families) {
+		it(`${family} is named in NOTICE`, () => {
+			expect(notice, `${family} ships in static/fonts/ but NOTICE does not name it`).toContain(
+				family
+			);
+		});
+
+		it(`${family} is named in static/fonts/README.md`, () => {
+			expect(fontsReadme).toContain(family);
+		});
+
+		it(`${family} has a copyright line in the OFL.txt header`, () => {
+			const name = OFL_NAME[family] ?? family;
+			const lines = oflHeader
+				.split('\n')
+				.filter((l) => l.startsWith('Copyright') && l.includes(name));
+			expect(
+				lines,
+				`no Copyright line in static/fonts/OFL.txt names ${name}: the license text covers every file in that directory, so each family needs one`
+			).not.toEqual([]);
+		});
+	}
 });

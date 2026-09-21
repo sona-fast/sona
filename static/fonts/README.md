@@ -21,9 +21,21 @@ JetBrains Mono and Nunito do, so `JetBrainsMono-latin.woff2` and
 once over `400 700`. Per-weight names would put four identical binaries in the
 repo for every subset of those families.
 
-Geist is the exception. Its three files were placed here by hand and its
-`@font-face` blocks live in `src/app.css`, because it is the default theme's
-body font and applies whatever theme is selected.
+Geist is the one family that does not come from Google Fonts. It is one variable file,
+`Geist-variable.woff2`, placed here by hand with its `@font-face` block in
+`src/app.css`, because it is the default theme's body font and applies whatever
+theme is selected. The bytes are the official `Geist[wght].woff2` from the
+[vercel/geist-font](https://github.com/vercel/geist-font) v1.7.2 release, taken
+from `geist-font/Geist/webfonts/` inside `geist-font-v1.7.2.zip`. At 70 KB in one
+request it costs less than per-weight static cuts, which come to 138 KB across
+three. Its weight axis runs 100 to 900 and the `@font-face` exposes 400 to 600,
+which is what the app asks for.
+
+The fetch script does not manage this file, because it only speaks to Google's
+CSS2 API. Its sha256 therefore sits under `handPlaced` in `manifest.json` rather
+than `files`, which the script rewrites on every run. To replace it, download the
+new release asset, copy the digest in, and check the weight range still covers
+what the app uses.
 
 ## Licenses
 

@@ -200,8 +200,11 @@ graph TB
   scripts/fetch-fonts.mjs` asks Google's CSS2 API for the Latin woff2 slices. It
   writes into `static/fonts/` and records a sha256 per file in `manifest.json`,
   and the woff2 files are committed, so a normal build and every fork deploy
-  never run it. At runtime the browser fetches `/fonts/*` from the site's own
-  origin — see `static/fonts/README.md`.
+  never run it. Geist is the one family it does not fetch: that file comes from
+  the vercel/geist-font GitHub release and is placed by hand, so its digest sits
+  under `handPlaced` in the same manifest and the script carries it through
+  rather than rewriting it. At runtime the browser fetches `/fonts/*` from the
+  site's own origin — see `static/fonts/README.md`.
 - Forks are independent deployments of the same stack on their owners' own
   Cloudflare accounts. They adopt changes by pulling the tagged releases that
   `release.yml` publishes — see `UPDATING.md` — not by tracking `main`.

@@ -292,7 +292,7 @@
 	}
 
 	.success {
-		color: #4ade80;
+		color: var(--status-ok);
 		font-size: 14px;
 		margin-bottom: 16px;
 	}
@@ -407,20 +407,40 @@
 		font-size: 12px;
 		font-weight: 600;
 		text-transform: capitalize;
+		/* Transparent here so the confirmed chip's visible edge below costs it no
+		   extra width and the chips stay the same size as each other. */
+		border: 1px solid transparent;
 	}
 
+	/* 12%, not the 18% the other chips use: --status-ok on its own tint is the
+	   tightest pairing on terracotta light, where 12% measures 4.56:1 and 13%
+	   drops under the 4.5:1 floor. At 12% the fill nearly disappears on the light
+	   themes, so the chip keeps its shape with an edge instead of a heavier fill.
+	   All three chips draw that edge at 40% of their own ink, so the border is the
+	   shared chip language rather than a mark that singles out one status.
+	   Mixed over --background rather than transparent: a live row washes its cells
+	   in 8% --primary, and a translucent fill composites with that wash and drops
+	   to 4.12:1 on terracotta light. Opaque, the chip reads the same on a live row
+	   as off one. */
 	.status-confirmed {
-		background: color-mix(in srgb, #22c55e 18%, transparent);
-		color: #22c55e;
+		background: color-mix(in srgb, var(--status-ok) 12%, var(--background));
+		border-color: color-mix(in srgb, var(--status-ok) 40%, transparent);
+		color: var(--status-ok);
 	}
 
+	/* The label is --foreground, not --primary-text: --primary-text has 4.68:1 of
+	   headroom on a bare surface, so no percentage of its own tint clears 4.5:1 on
+	   terracotta light. The tint and the edge still carry the primary hue, the way
+	   Callout's .text and the mobile list's live meta do. */
 	.status-maybe {
 		background: color-mix(in srgb, var(--primary) 18%, transparent);
-		color: var(--primary-text);
+		border-color: color-mix(in srgb, var(--primary-text) 40%, transparent);
+		color: var(--foreground);
 	}
 
 	.status-considering {
 		background: var(--secondary);
+		border-color: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
 		color: var(--muted-foreground);
 	}
 

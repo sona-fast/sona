@@ -21,6 +21,7 @@ import { authHandle, handleError, decodePathname } from './hooks.server';
 import { makeD1 } from '$lib/server/test/d1';
 import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
 import { SESSION_COOKIE, VIEWER_TZ_COOKIE } from '$lib/config';
+import { clearSettingsCache } from '$lib/server/settings';
 
 function makeDb(): D1Database {
 	const sqlite = new Database(':memory:');
@@ -154,6 +155,94 @@ describe('authHandle — viewer timezone on locals', () => {
 		// Only the admin area displays dates in the operator's zone; a public hit
 		// should not spend an Intl construction per request.
 		expect(await resolveTz('/gallery', 'Asia/Tokyo')).toBe('UTC');
+	});
+});
+
+// SONA-227: the stored theme id is substituted into the data-theme-id attribute
+// in app.html. The settings form only offers the ids in the registry, but the
+// row is just a string in D1, so the hook re-checks it on the way out instead of
+// trusting whatever wrote it.
+// Runs the handler over `template` with `stored` as the themeId row, and hands
+// back both the transformed html and the response the header block stamped.
+async function renderPage(
+	stored: string,
+	template: string,
+	status = 200
+): Promise<{ html: string; response: Response }> {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+	sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)').run('themeId', stored);
+	// The settings read is memoized per isolate, so a previous case's value would
+	// otherwise answer this one.
+	clearSettingsCache();
+	vi.mocked(getSetupState).mockResolvedValue('complete');
+
+	let html = '';
+	const event = {
+		cookies: { get: () => undefined },
+		url: new URL('https://taro.surf/'),
+		request: new Request('https://taro.surf/'),
+		locals: {} as App.Locals,
+		platform: { env: { DB: makeD1(sqlite) } } as unknown as App.Platform
+	};
+	const response = (await authHandle({
+		event,
+		resolve: async (_e: unknown, opts: { transformPageChunk: (a: { html: string }) => string }) => {
+			html = opts.transformPageChunk({ html: template });
+			return new Response('ok', { status, headers: { 'content-type': 'text/html' } });
+		}
+	} as never)) as Response;
+	return { html, response };
+}
+
+describe('authHandle — the stored theme id is validated on read', () => {
+	async function renderedThemeId(stored: string): Promise<string> {
+		const { html } = await renderPage(
+			stored,
+			'<html data-theme-id="%theme%" data-theme="%mode%">'
+		);
+		return html.match(/data-theme-id="([^"]*)"/)?.[1] ?? '';
+	}
+
+	it('renders a theme the registry knows', async () => {
+		expect(await renderedThemeId('petal')).toBe('petal');
+	});
+
+	it('falls back to the default for a tampered value', async () => {
+		expect(await renderedThemeId('x" onload="')).toBe('default');
+	});
+
+	it('falls back to the default for an id no longer in the registry', async () => {
+		expect(await renderedThemeId('sunset')).toBe('default');
+	});
+});
+
+// A placeholder left unfilled ships to the browser verbatim, which is why these
+// assert on the rendered output rather than on the shape of the hook's source.
+describe('authHandle — the font preload', () => {
+	it('fills %preload% with the active theme face', async () => {
+		const { html } = await renderPage('petal', '<head>%preload%</head>');
+
+		expect(html).toContain('rel="preload"');
+		expect(html).toContain('href="/fonts/Nunito-latin.woff2"');
+		expect(html).not.toContain('%preload%');
+	});
+
+	it('also sends it as a Link header, for Early Hints', async () => {
+		const { response } = await renderPage('petal', '<head>%preload%</head>');
+
+		expect(response.headers.get('Link')).toContain(
+			'</fonts/Nunito-latin.woff2>; rel=preload; as=font'
+		);
+	});
+
+	it('spends no Early Hint on an HTML error page', async () => {
+		// The tag still goes in the markup; only the header is skipped, because a
+		// 404 or a 500 is a page the visitor is about to leave.
+		const { html, response } = await renderPage('petal', '<head>%preload%</head>', 404);
+
+		expect(html).toContain('href="/fonts/Nunito-latin.woff2"');
+		expect(response.headers.get('Link')).toBeNull();
 	});
 });
 

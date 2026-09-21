@@ -37,9 +37,14 @@
 		border-color: color-mix(in srgb, var(--primary) 25%, transparent);
 	}
 
+	/* --status-ok, not a baked-in #22c55e: the raw green is 1.9:1 as text on the
+	   light surfaces, and the token already carries a darkened value there. The
+	   ink is declared once on the container so the icon and the title inherit it;
+	   .text sets its own colour. */
 	.callout.success {
-		background: color-mix(in srgb, #22c55e 10%, transparent);
-		border-color: color-mix(in srgb, #22c55e 25%, transparent);
+		color: var(--status-ok);
+		background: color-mix(in srgb, var(--status-ok) 10%, transparent);
+		border-color: color-mix(in srgb, var(--status-ok) 25%, transparent);
 	}
 
 	.icon {
@@ -50,10 +55,6 @@
 
 	.primary .icon {
 		color: var(--primary);
-	}
-
-	.success .icon {
-		color: #22c55e;
 	}
 
 	.body {
@@ -72,14 +73,23 @@
 		color: var(--primary-text);
 	}
 
-	.success .title {
-		color: #22c55e;
-	}
-
+	/* --foreground, not --muted-foreground: the success variant tints the surface
+	   behind this text, and muted over that tint falls under 4.5:1 on the light
+	   palettes (3.94:1 on terracotta light). --foreground's worst block is 9.33:1
+	   on terracotta dark over a card, and src/lib/theme-contrast.test.ts pins it. */
 	.text {
 		font-family: var(--font-secondary);
 		font-size: 13px;
 		line-height: 1.5;
-		color: var(--muted-foreground);
+		color: var(--foreground);
+	}
+
+	/* Neutral ink on a green-tinted surface reads as an accident, so the success
+	   variant warms the body 15% toward the ink its own fill is mixed from. Both
+	   ends are tokens, so it still follows the palette, and the worst block only
+	   drops from 9.33:1 to 8.81:1 (terracotta dark over a card). The primary
+	   variant keeps plain --foreground: its fill is a different ink. */
+	.success .text {
+		color: color-mix(in srgb, var(--foreground) 85%, var(--status-ok));
 	}
 </style>

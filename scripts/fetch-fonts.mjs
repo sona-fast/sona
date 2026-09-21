@@ -133,23 +133,35 @@ export function missingFaces(entry, faces) {
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 /**
- * The recorded digests, from the manifest's text. Throws on anything that is not
- * the shape this script writes: a manifest that failed to parse used to read as
- * an empty one, which silently drops the baseline every later run checks against
- * — exactly the case the digests exist to catch.
+ * One digest map out of an already-parsed manifest. `files` is required and
+ * throws on anything that is not the shape this script writes: a manifest that
+ * failed to parse used to read as an empty one, which silently drops the
+ * baseline every later run checks against, exactly the case the digests exist to
+ * catch. `handPlaced` is optional, because a repo with no hand-placed font has
+ * no such key.
+ *
+ * `handPlaced` holds digests for files this script does NOT fetch: Geist, which
+ * comes from the vercel/geist-font GitHub release and is placed by hand
+ * (src/app.css declares it). Those live under their own key because `files` is
+ * rewritten from scratch on every run, so an entry parked there would disappear
+ * the next time anyone ran this. This script only carries them through; what
+ * checks them is src/lib/themes/fonts.test.ts.
  */
-export function parseManifest(text) {
-	const parsed = JSON.parse(text);
-	const files = parsed?.files;
-	if (files === null || typeof files !== 'object' || Array.isArray(files)) {
-		throw new Error('static/fonts/manifest.json has no `files` object');
+export function digestMap(parsed, key, required) {
+	const map = required ? parsed?.[key] : (parsed?.[key] ?? {});
+	if (map === null || typeof map !== 'object' || Array.isArray(map)) {
+		throw new Error(
+			required
+				? `static/fonts/manifest.json has no \`${key}\` object`
+				: `static/fonts/manifest.json has a \`${key}\` that is not an object`
+		);
 	}
-	for (const [name, digest] of Object.entries(files)) {
+	for (const [name, digest] of Object.entries(map)) {
 		if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
 			throw new Error(`static/fonts/manifest.json records a non-sha256 digest for ${name}`);
 		}
 	}
-	return files;
+	return map;
 }
 
 /**
@@ -162,10 +174,15 @@ export function readManifest(path = MANIFEST_PATH) {
 	try {
 		text = readFileSync(path, 'utf8');
 	} catch (err) {
-		if (err.code === 'ENOENT') return { present: false, files: {} };
+		if (err.code === 'ENOENT') return { present: false, files: {}, handPlaced: {} };
 		throw err;
 	}
-	return { present: true, files: parseManifest(text) };
+	const parsed = JSON.parse(text);
+	return {
+		present: true,
+		files: digestMap(parsed, 'files', true),
+		handPlaced: digestMap(parsed, 'handPlaced', false)
+	};
 }
 
 /**
@@ -243,6 +260,7 @@ export function refuseSymlink(path) {
 	}
 }
 
+/** Whether a non-empty file of that name is already in static/fonts/. */
 function existsOnDisk(name) {
 	try {
 		return statSync(OUT_DIR + name).size > 0;
@@ -251,11 +269,16 @@ function existsOnDisk(name) {
 	}
 }
 
+/**
+ * Fetches every missing (or, with --force, every) slice of every family in
+ * FAMILIES, verifies each against the manifest, prunes stale slices, and
+ * rewrites the manifest. Returns the process exit code.
+ */
 async function main() {
 	const force = argv.includes('--force');
 	mkdirSync(OUT_DIR, { recursive: true });
 	const existing = readdirSync(OUT_DIR);
-	const { present, files: recorded } = readManifest();
+	const { present, files: recorded, handPlaced } = readManifest();
 	const manifest = [];
 
 	for (const entry of FAMILIES) {
@@ -302,8 +325,9 @@ async function main() {
 		MANIFEST_PATH,
 		`${JSON.stringify(
 			{
-				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Each run checks every file against it and stops on a mismatch; see the script.',
-				files
+				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Each run checks every file against it and stops on a mismatch; see the script. `handPlaced` records files this script does not fetch; the script carries that key through untouched.',
+				files,
+				handPlaced
 			},
 			undefined,
 			'\t'

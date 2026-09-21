@@ -187,15 +187,25 @@
 	.activity-row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
 	.activity-slug { color: var(--foreground); font-variant-numeric: tabular-nums; }
 	.activity-status { font-size: 12px; }
-	.activity-status.migrated { color: #4ade80; }
-	.activity-status.failed { color: #f87171; }
-	.banner { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-radius: var(--radius-s); font-size: 14px; }
-	.banner.ok { background: rgba(74, 222, 128, 0.1); color: #4ade80; }
-	.banner.warn { background: rgba(245, 166, 35, 0.1); color: #f5a623; }
-	.banner.err { background: rgba(185, 28, 28, 0.12); color: #f87171; }
+	.activity-status.migrated { color: var(--status-ok); }
+	.activity-status.failed { color: var(--destructive); }
+	/* The transparent edge is what keeps every variant the same height: only the
+	   error banner draws a visible border, and without this the box grows by 2px
+	   when one replaces another in the same slot. */
+	.banner { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border: 1px solid transparent; border-radius: var(--radius-s); font-size: 14px; }
+	.banner.ok { background: color-mix(in srgb, var(--status-ok) 10%, transparent); color: var(--status-ok); }
+	.banner.warn { background: color-mix(in srgb, var(--status-warn) 10%, transparent); color: var(--status-warn); }
+	.banner.err {
+		background: color-mix(in srgb, var(--destructive) 20%, transparent);
+		border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+		color: var(--foreground);
+	}
+	/* The error banner reads louder than its warn sibling: a deeper fill, an edge,
+	   and the icon left in the destructive ink while the text stays --foreground. */
+	.banner.err :global(svg) { color: var(--destructive); }
 	.failures { font-size: 12px; color: var(--muted-foreground); display: flex; flex-direction: column; gap: 4px; padding-left: 18px; }
-	.success { color: #4ade80; font-size: 14px; }
-	.error { color: #f87171; font-size: 14px; }
+	.success { color: var(--status-ok); font-size: 14px; }
+	.error { color: var(--destructive); font-size: 14px; }
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 </style>

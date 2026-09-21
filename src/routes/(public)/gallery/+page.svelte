@@ -527,6 +527,19 @@
 		appearance: none;
 	}
 
+	/* These selects have no overlaid chevron of their own, they rely on the caret
+	   app.css paints as a background-image. Forced colors drops that image, and
+	   this scoped rule outranks the appearance:auto app.css hands back, so the
+	   field would read as a plain text input. Take the native caret here instead.
+	   The artist combobox is an input, not a select, and keeps its own chevron. */
+	@media (forced-colors: active) {
+		select.filter-select {
+			appearance: auto;
+			-webkit-appearance: auto;
+			padding-right: 16px;
+		}
+	}
+
 	/* Artist type-to-filter combobox */
 	.combobox-input {
 		cursor: text;
