@@ -261,17 +261,23 @@ input, select, textarea {
 	cursor: not-allowed;
 }
 
-/* A button that shares a row on a wide screen and takes the whole row on a
-   phone. Six pages had this scoped under their own action-row container. */
+/* Standalone, so it does not inherit .btn:focus-visible — same ring, declared
+   for itself. */
+.btn-compact:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
 @media (max-width: 768px) {
+	/* A button that shares a row on a wide screen and takes the whole row on a
+	   phone. Six pages had this scoped under their own action-row container. */
 	.btn-full-mobile {
 		width: 100%;
 	}
-}
 
-/* An admin header action that has a duplicate in the page's mobile list, so it
-   drops out of the header below the table breakpoint rather than showing twice. */
-@media (max-width: 768px) {
+	/* An admin header action that has a duplicate in the page's mobile list, so
+	   it drops out of the header below the table breakpoint rather than showing
+	   twice. */
 	.btn-desktop-only {
 		display: none;
 	}
@@ -378,7 +384,8 @@ select.input {
 	height: auto;
 }
 
-/* The wrapper takes the focus treatment for these. */
+/* The wrapper draws the ring instead: .social-field:focus-within on
+   /admin/artists and /admin/characters. */
 .input-plain:focus {
 	outline: none;
 }

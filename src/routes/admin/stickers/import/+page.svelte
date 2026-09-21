@@ -372,7 +372,7 @@
 			{:else}
 				<span class="bulk-count">{m.admin_pack_selected({ count: selected.size })}</span>
 				<div class="bulk-actions">
-					<select class="input" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
+					<select class="input input-sm" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
 						<option value="">{m.admin_pack_set_artist()}</option>
 						{#each artists as a}<option value={String(a.id)}>{a.name}</option>{/each}
 					</select>

@@ -113,38 +113,66 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	}
 
 	// Walks the <style> blocks of a component and returns every rule selector,
-	// including the ones nested inside @media and other at-rules.
+	// including the ones nested inside @media and other at-rules, and the ones
+	// nested inside another rule — CSS nesting puts `.btn { }` one level down,
+	// where it styles a button exactly as a top-level copy would.
 	function selectors(source: string): string[] {
 		const found: string[] = [];
-		for (const block of source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
-			const css = block[1].replace(/\/\*[\s\S]*?\*\//g, '');
+		const collect = (css: string) => {
 			let depth = 0;
 			let selectorStart = 0;
-			let selector = '';
-			let body = '';
+			let bodyStart = 0;
 			for (let i = 0; i < css.length; i++) {
 				const char = css[i];
 				if (char === '{') {
-					if (depth === 0) {
-						selector = css.slice(selectorStart, i).trim().replace(/\s+/g, ' ');
-						body = '';
-					} else body += char;
+					if (depth === 0) bodyStart = i + 1;
 					depth++;
 				} else if (char === '}') {
 					depth--;
 					if (depth === 0) {
-						if (selector.startsWith('@')) {
-							for (const nested of body.matchAll(/([^{}]+)\{[^{}]*\}/g)) {
-								found.push(nested[1].trim().replace(/\s+/g, ' '));
-							}
-						} else found.push(selector);
+						// Declarations can sit before a nested rule, so the selector is
+						// what follows the last one rather than the whole slice.
+						const selector = css
+							.slice(selectorStart, bodyStart - 1)
+							.split(';')
+							.pop()!
+							.trim()
+							.replace(/\s+/g, ' ');
+						// An at-rule is a container, not a rule: what it holds is found by
+						// the same walk one level down. A plain rule's body holds
+						// declarations, which have no braces, so the recursion is free.
+						if (!selector.startsWith('@')) found.push(selector);
+						collect(css.slice(bodyStart, i));
 						selectorStart = i + 1;
-					} else body += char;
-				} else if (depth > 0) body += char;
+					}
+				}
 			}
+		};
+		for (const block of source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+			collect(block[1].replace(/\/\*[\s\S]*?\*\//g, ''));
 		}
 		return found;
 	}
+
+	// No file uses CSS nesting today, so a fixture is the only thing holding the
+	// walk to it: a nested restatement would otherwise be invisible to all three
+	// counts below and drift exactly the way this suite exists to stop.
+	it('counts a control rule nested inside another rule', () => {
+		const nested = '<style>\n\t.card { padding: 4px; .btn { border: none; } }\n</style>';
+		expect(selectors(nested)).toContain('.btn');
+		expect(selectors(nested).filter(isControlSubject)).toEqual(['.btn']);
+	});
+
+	// The bulk-action bar on the sticker importer is a row of .btn-compact
+	// buttons with the artist select at its head. The select carried a scoped
+	// `sm` class that matched no rule, so it rendered full height next to them;
+	// .input-sm is the variant that actually makes it compact (SONA-209 r1).
+	it('the sticker importer bulk bar uses the compact input', () => {
+		const source = readFileSync(`${srcRoot}/routes/admin/stickers/import/+page.svelte`, 'utf8');
+		const select = source.match(/<select[^>]*bind:value=\{bulkArtist\}[^>]*>/)?.[0];
+		expect(select, 'the bulk-artist select moved or was renamed').toBeDefined();
+		expect(select).toContain('class="input input-sm"');
+	});
 
 	const scopedCount = (file: string) =>
 		selectors(readFileSync(`${srcRoot}${file}`, 'utf8')).filter(isControlSubject).length;

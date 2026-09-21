@@ -2172,12 +2172,31 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	// them carried the boundary, the outline appeared and disappeared as a visitor
 	// clicked between the tabs of one switch, so every copy is pinned here
 	// along with the view toggle that sits in the gallery's filter row.
+	// The social-URL rows in the artist and character edit modals are the same
+	// kind of boundary: the wrapper draws the pill and the input inside it is
+	// .input-plain, so the wrapper's edge is the whole control edge. Both pages
+	// restate the rule, so both are pinned (SONA-209 r1).
 	const componentRules: Array<{ file: string; selector: string }> = [
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.tabs' },
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.view-toggle' },
 		{ file: '../routes/(public)/stickers/+page.svelte', selector: '.tabs' },
-		{ file: '../routes/(public)/vr/+page.svelte', selector: '.tabs' }
+		{ file: '../routes/(public)/vr/+page.svelte', selector: '.tabs' },
+		{ file: '../routes/admin/artists/+page.svelte', selector: '.social-field' },
+		{ file: '../routes/admin/characters/+page.svelte', selector: '.social-field' }
 	];
+
+	// .input-plain sets `outline: none` — without this rule the social fields
+	// show no focus at all, which is where they sat until SONA-209 r1.
+	for (const file of [
+		'../routes/admin/artists/+page.svelte',
+		'../routes/admin/characters/+page.svelte'
+	]) {
+		it(`${file} .social-field rings on focus-within`, () => {
+			expect(ruleBody(file, '.social-field:focus-within')).toMatch(
+				/outline:\s*2px solid var\(--ring\)/
+			);
+		});
+	}
 
 	for (const { file, selector } of componentRules) {
 		it(`${file} ${selector} draws its border with --input`, () => {

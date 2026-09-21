@@ -696,10 +696,17 @@
 		align-items: center;
 		gap: 8px;
 		background: var(--background);
-		border: 1px solid var(--border);
+		border: 1px solid var(--input);
 		border-radius: var(--radius-pill);
 		padding: 0 12px;
 		height: 40px;
+	}
+
+	/* The input inside is .input-plain, which drops its own outline — this
+	   wrapper is the whole visible control, so the ring goes here. */
+	.social-field:focus-within {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
 	}
 
 	/* Layout only — the borderless treatment is .input-plain in app.css. */

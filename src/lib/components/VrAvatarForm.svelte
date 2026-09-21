@@ -1183,7 +1183,9 @@
 	   dims. Kept local, and named apart from the .btn-* namespace so the two
 	   don't collide on one element (SONA-209). */
 	.file-btn {
-		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
+		/* The <label> rule above sets flex-direction: column on every label in the
+		   form — this one lays its contents out in a row. */
+		display: inline-flex; flex-direction: row; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
 		border: 1px solid var(--border); border-radius: var(--radius-xs);
 		background: var(--secondary); color: var(--foreground); cursor: pointer;
 		transition: border-color 0.15s, background-color 0.15s;

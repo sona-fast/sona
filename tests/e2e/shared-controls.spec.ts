@@ -1,0 +1,89 @@
+import { test, expect, type Locator, type Page } from '@playwright/test';
+import { adminLogin, gotoAfterLogin } from './admin-login';
+
+// SONA-209 step 4: .btn-full-mobile and .btn-desktop-only moved behaviour out of
+// six pages' scoped CSS and into two markup classes. Both are keyed to a viewport
+// width, so a unit test can only read the rule text back — nothing proved a
+// BROWSER still lays the buttons out that way. A class dropped from one page, a
+// typo in its name, or the media block falling out of app.css leaves the whole
+// unit suite green and the phone layout broken.
+//
+// Read-only: every test here loads a page and measures it.
+
+// Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
+const PASSWORD = 'e2e-admin-password';
+const PHONE = { width: 375, height: 800 };
+const DESKTOP = { width: 1280, height: 800 };
+
+// "Takes the whole row" is measured, not read out of the cascade: the control is
+// as wide as the box it sits in. Sub-pixel layout rounding means the two widths
+// are compared with a 1px tolerance rather than for equality.
+async function expectFillsRow(control: Locator, container: Locator, what: string) {
+	const [box, row] = [await control.boundingBox(), await container.boundingBox()];
+	expect(box, `${what} has no box`).not.toBeNull();
+	expect(row, `${what}'s container has no box`).not.toBeNull();
+	expect(
+		Math.abs(box!.width - row!.width),
+		`${what} is ${box!.width}px in a ${row!.width}px row — it is not full width on a phone`
+	).toBeLessThan(1);
+}
+
+// The two rows below stack into a column at this width and stretch what they
+// hold, so a full-width button there is necessary but not sufficient — see the
+// settings test for the case that pins the class itself.
+async function eachFillsRow(page: Page, container: string, controls: string, count: number) {
+	const row = page.locator(container);
+	await expect(row).toBeVisible();
+	const items = row.locator(controls);
+	await expect(items).toHaveCount(count);
+	for (let i = 0; i < count; i++) {
+		await expectFillsRow(items.nth(i), row, `${container} ${controls} #${i + 1}`);
+	}
+}
+
+test('btn-full-mobile fills the row on a phone: the upload form actions', async ({ page }) => {
+	await page.setViewportSize(PHONE);
+	await adminLogin(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/upload');
+
+	await eachFillsRow(page, '.form-actions', '.btn', 2);
+});
+
+test('btn-full-mobile fills the row on a phone: the error page actions', async ({ page }) => {
+	await page.setViewportSize(PHONE);
+	// The root +error.svelte is what an unknown path renders.
+	const response = await page.goto('/no-such-page-exists');
+	expect(response?.status()).toBe(404);
+
+	await eachFillsRow(page, '.actions', '.btn', 2);
+});
+
+// Where the class is load-bearing: the two rows above stack into a column and
+// stretch their children, so the buttons would be full width even without it.
+// This button is not a flex item of the stacked card — it sits inside its own
+// <form> — so the width comes from .btn-full-mobile and nothing else. Drop the
+// class here and this test is the one that says so.
+test('btn-full-mobile fills the row on a phone: the settings export button', async ({ page }) => {
+	await page.setViewportSize(PHONE);
+	await adminLogin(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/settings?tab=account');
+
+	const form = page.locator('.export-card form');
+	await expect(form).toBeVisible();
+	await expectFillsRow(form.locator('.btn'), form, '.export-card form .btn');
+});
+
+test('btn-desktop-only drops out of the header on a phone and comes back wide', async ({
+	page
+}) => {
+	await page.setViewportSize(PHONE);
+	await adminLogin(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/tags');
+
+	const add = page.locator('.page-header .btn-desktop-only');
+	await expect(add).toHaveCount(1);
+	await expect(add).toBeHidden();
+
+	await page.setViewportSize(DESKTOP);
+	await expect(add).toBeVisible();
+});
