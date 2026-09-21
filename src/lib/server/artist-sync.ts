@@ -46,21 +46,36 @@ export interface SyncSummary {
 	 *  Each one fails soft, so without this count a run whose searches all silently
 	 *  failed reads exactly like "no matches". */
 	searchFailed: number;
+	/** Backfill searches answered with back-pressure (429/408). Counted apart from
+	 *  searchFailed because they never fail the run, but a run whose searches were all
+	 *  rate-limited still did no backfill and must not read as "no matches" either. */
+	rateLimited: number;
 	/** Delta-feed pages that failed soft the same way (5xx/network; a 4xx refusal is
 	 *  handled separately and fatally when it's 401/403). */
 	deltaFailed: number;
-	/** The last fail-soft reason seen, so the job log names it (one is enough: a run
-	 *  degrades for one cause at a time in practice). */
-	lastFailure?: string;
+	/** Reason for the last counted search failure. Each category keeps its own reason:
+	 *  one shared field printed a rate limit's "HTTP 429" next to the search-failure
+	 *  count (or next to the delta count), naming a cause that never happened there. */
+	lastSearchFailure?: string;
+	/** Reason for the last rate-limited search. */
+	lastRateLimit?: string;
+	/** Reason for the last failed delta page. */
+	lastDeltaFailure?: string;
 }
 
 /** One-line job-log detail for a completed run. Names degraded calls when there were
- *  any, so a partial run leaves a trace in the background-jobs panel. */
+ *  any, so a partial run leaves a trace in the background-jobs panel. Every clause
+ *  carries its OWN reason: a run can be rate-limited and broken at once, and pairing
+ *  a count with the wrong cause sends the reader after the wrong problem. */
 export function describeSync(s: SyncSummary): string {
+	const why = (reason?: string) => (reason ? ` (${reason})` : '');
 	let out = `refreshed ${s.refreshed}, linked ${s.linked}`;
-	if (s.searchFailed > 0) out += `, ${s.searchFailed} of ${s.scanned} searches failed`;
-	if (s.deltaFailed > 0) out += `, ${s.deltaFailed} delta page(s) failed`;
-	if (s.lastFailure) out += ` (${s.lastFailure})`;
+	if (s.searchFailed > 0)
+		out += `, ${s.searchFailed} of ${s.scanned} searches failed${why(s.lastSearchFailure)}`;
+	if (s.rateLimited > 0)
+		out += `, ${s.rateLimited} searches rate-limited${why(s.lastRateLimit)}`;
+	if (s.deltaFailed > 0)
+		out += `, ${s.deltaFailed} delta page(s) failed${why(s.lastDeltaFailure)}`;
 	return out;
 }
 
@@ -120,14 +135,25 @@ export async function syncArtists(
 	settings: SiteSettings
 ): Promise<SyncSummary> {
 	if (!isRegistryEnabled(env))
-		return { skipped: true, refreshed: 0, linked: 0, scanned: 0, searchFailed: 0, deltaFailed: 0 };
+		return {
+			skipped: true,
+			refreshed: 0,
+			linked: 0,
+			scanned: 0,
+			searchFailed: 0,
+			rateLimited: 0,
+			deltaFailed: 0
+		};
 
 	let refreshed = 0;
 	let linked = 0;
 	let scanned = 0;
 	let searchFailed = 0;
+	let rateLimited = 0;
 	let deltaFailed = 0;
-	let lastFailure: string | undefined;
+	let lastSearchFailure: string | undefined;
+	let lastRateLimit: string | undefined;
+	let lastDeltaFailure: string | undefined;
 
 	// ── 1. Refresh linked artists from the delta feed ──────────────────────────
 	const lastSync = (await getRawSetting(db, LAST_SYNC_KEY)) ?? undefined;
@@ -142,7 +168,7 @@ export async function syncArtists(
 			{
 				onFail: (why) => {
 					deltaFailed++;
-					lastFailure = why;
+					lastDeltaFailure = why;
 				}
 			}
 		);
@@ -162,7 +188,7 @@ export async function syncArtists(
 				// before `call`'s onFail hook, so without this the run would report zero
 				// failures and read exactly like a healthy empty feed.
 				deltaFailed++;
-				lastFailure = `HTTP ${feed.httpStatus}: ${feed.error}`;
+				lastDeltaFailure = `HTTP ${feed.httpStatus}: ${feed.error}`;
 				console.warn(
 					`registry delta refused: HTTP ${feed.httpStatus} — ${feed.error} (failing soft)`
 				);
@@ -255,8 +281,13 @@ export async function syncArtists(
 				// isFatalRefusal already treats those as non-fatal everywhere else. The
 				// registry's unauthenticated read limiter is shared by every fork, so a
 				// 429 sweep at the cron hour would otherwise fail every small fork at once.
-				if (httpStatus !== 429 && httpStatus !== 408) searchFailed++;
-				lastFailure = why;
+				if (httpStatus === 429 || httpStatus === 408) {
+					rateLimited++;
+					lastRateLimit = why;
+				} else {
+					searchFailed++;
+					lastSearchFailure = why;
+				}
 			}
 		});
 		// A handle search ranks candidates by similarity — it does NOT prove identity.
@@ -302,8 +333,18 @@ export async function syncArtists(
 	// never count toward searchFailed at all (see the onFail hook above), so a
 	// fleet-wide 429 leaves the run degraded rather than red.
 	if (scanned >= 3 && searchFailed === scanned) {
-		throw new RegistrySearchError(searchFailed, lastFailure ?? 'no response');
+		throw new RegistrySearchError(searchFailed, lastSearchFailure ?? 'no response');
 	}
 
-	return { refreshed, linked, scanned, searchFailed, deltaFailed, lastFailure };
+	return {
+		refreshed,
+		linked,
+		scanned,
+		searchFailed,
+		rateLimited,
+		deltaFailed,
+		lastSearchFailure,
+		lastRateLimit,
+		lastDeltaFailure
+	};
 }

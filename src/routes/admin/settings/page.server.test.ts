@@ -874,6 +874,32 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 		expect(result.data.error).toBeUndefined();
 	});
 
+	// The reason is an upstream string we don't control, and it lands on an admin screen
+	// (and in a screenshot, and in a support paste). It gets the same redaction the cron
+	// body gets.
+	it('redacts an email echoed back inside the registry reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'revoked-key' });
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists?')
+					? new Response(JSON.stringify({ error: 'no fork for owner@example.com' }), {
+							status: 401,
+							headers: { 'content-type': 'application/json' }
+						})
+					: new Response(JSON.stringify({ artists: [] }), { status: 200 })
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncRefusedReason?: string };
+		};
+
+		expect(result.data.syncRefusedReason).not.toContain('owner@example.com');
+		expect(result.data.syncRefusedReason).toContain('[redacted]');
+	});
+
 	it('400s when the shared registry is not configured', async () => {
 		const { platform } = makeDb();
 
@@ -895,11 +921,12 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			success: boolean;
-			syncMessage: string;
-			syncDegraded?: number;
+			syncCounts: { refreshed: number; linked: number };
+			syncDegraded?: { failed: number; rateLimited: number };
 		};
 		expect(result.success).toBe(true);
-		expect(result.syncMessage).toMatch(/Sync complete/);
+		// Counts, not a sentence: the toast wording is localized on the page.
+		expect(result.syncCounts).toEqual({ refreshed: 0, linked: 0 });
 		expect(result.syncDegraded).toBeUndefined();
 	});
 
@@ -932,10 +959,41 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			success: boolean;
-			syncDegraded?: number;
+			syncDegraded?: { failed: number; rateLimited: number };
 		};
 		expect(result.success).toBe(true);
-		expect(result.syncDegraded).toBe(1);
+		expect(result.syncDegraded).toEqual({ failed: 1, rateLimited: 0 });
+	});
+
+	// A rate limit never fails the run, but a run whose every search was 429'd did no
+	// backfill at all — reporting it as a clean "0 refreshed, 0 newly linked" is the
+	// silent empty result the rest of this change exists to prevent.
+	it('reports rate-limited calls separately on a run that was all back-pressure', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		const now = new Date().toISOString();
+		await db.insert(artists).values([
+			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
+			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now },
+			{ name: 'three', twitterUrl: 'https://twitter.com/three', createdAt: now }
+		]);
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists/search')
+					? new Response('slow down', { status: 429 })
+					: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+							status: 200,
+							headers: { 'content-type': 'application/json' }
+						})
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			success: boolean;
+			syncDegraded?: { failed: number; rateLimited: number };
+		};
+		expect(result.success).toBe(true);
+		expect(result.syncDegraded).toEqual({ failed: 0, rateLimited: 3 });
 	});
 });
 

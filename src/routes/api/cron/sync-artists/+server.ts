@@ -59,9 +59,14 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		throw e;
 	}
 	schedule(platform, recordJobRun(db, 'sync-artists', 'ok', describeSync(summary)));
-	// lastFailure quotes an upstream body verbatim; it belongs in the job_run detail
-	// (which redacts it) and not in a response the workflow log prints. The counters
+	// Every reason quotes an upstream body verbatim; they belong in the job_run detail
+	// (which redacts them) and not in a response the workflow log prints. The counters
 	// still say the run degraded.
-	const { lastFailure: _lastFailure, ...counters } = summary;
+	const {
+		lastSearchFailure: _lastSearchFailure,
+		lastRateLimit: _lastRateLimit,
+		lastDeltaFailure: _lastDeltaFailure,
+		...counters
+	} = summary;
 	return json({ ok: true, ...counters });
 };

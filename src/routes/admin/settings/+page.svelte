@@ -1342,13 +1342,26 @@
 			await update();
 			syncing = false;
 			if (result.type === 'success') {
-				const done = (result.data?.syncMessage as string) ?? m.admin_settings_sync_complete();
-				// A run that finished with failed registry calls did less than the counts
-				// suggest — say how much, rather than reporting a clean "0 and 0".
-				const degraded = result.data?.syncDegraded as number | undefined;
-				toast.success(
-					degraded ? `${done} ${m.admin_settings_sync_degraded({ failed: degraded })}` : done
-				);
+				// The whole toast is built from localized parts here: the action returns
+				// counts, not a sentence, so a ja operator doesn't get an English summary
+				// with a Japanese warning stapled to it.
+				const counts = result.data?.syncCounts as
+					| { refreshed: number; linked: number }
+					| undefined;
+				const parts = [
+					counts ? m.admin_settings_sync_summary(counts) : m.admin_settings_sync_complete()
+				];
+				// A run that finished with failed or rate-limited registry calls did less
+				// than the counts suggest — say how much, rather than reporting a clean
+				// "0 and 0". The two causes are separate: one is a fault, one is back-pressure.
+				const degraded = result.data?.syncDegraded as
+					| { failed: number; rateLimited: number }
+					| undefined;
+				if (degraded?.failed)
+					parts.push(m.admin_settings_sync_degraded({ failed: degraded.failed }));
+				if (degraded?.rateLimited)
+					parts.push(m.admin_settings_sync_rate_limited({ count: degraded.rateLimited }));
+				toast.success(parts.join(' '));
 			} else if (result.type === 'failure')
 				// A registry refusal comes back as a reason, not a message: the wording is
 				// localized here and only the registry's own text is interpolated. A refused

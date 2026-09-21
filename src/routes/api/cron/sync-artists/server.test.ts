@@ -113,7 +113,10 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		expect(res.status).toBe(200);
 		// The reason quotes an upstream body; it stays in job_run, out of the response
 		// the sync workflow prints into a public log.
-		expect((await res.json()) as Record<string, unknown>).not.toHaveProperty('lastFailure');
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body).not.toHaveProperty('lastDeltaFailure');
+		expect(body).not.toHaveProperty('lastSearchFailure');
+		expect(body).not.toHaveProperty('lastRateLimit');
 		await Promise.all(waits);
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -268,6 +271,52 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		const row = (sqlite as any).prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'").get();
 		expect(row?.status).toBe('ok');
 		expect(row?.detail).toMatch(/searches failed/);
+	});
+
+	// The other half of the 2026-09-17 shape: the delta feed was fine but every backfill
+	// search was challenged. That run linked nothing and used to answer "ok". It is a
+	// search failure, not a key refusal, so no upstreamStatus rides along.
+	it('502s naming the backfill when every search is challenged and the feed is healthy', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		const now = new Date().toISOString();
+		await db.insert(artists).values([
+			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
+			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now },
+			{ name: 'three', twitterUrl: 'https://twitter.com/three', createdAt: now }
+		]);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				Promise.resolve(
+					String(input).includes('/v1/artists/search')
+						? new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+						: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+				)
+			)
+		);
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as {
+			ok: boolean;
+			error: string;
+			upstreamStatus?: number;
+		};
+		expect(body.ok).toBe(false);
+		expect(body.error).toMatch(/all 3 backfill searches failed/);
+		// Only a refusal carries a status; this one came from the searches.
+		expect(body.upstreamStatus).toBeUndefined();
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any)
+			.prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'")
+			.get();
+		expect(row?.status).toBe('failed');
 	});
 
 	// A D1 failure is still our bug: it must keep propagating as a real 500, not be

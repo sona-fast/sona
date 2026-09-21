@@ -1156,8 +1156,38 @@
 	"admin_settings_sync_complete": "Sync complete",
 	"admin_settings_sync_failed": "Sync failed",
 	"admin_settings_sync_refused": "The shared registry refused this site's key. Check the registry connection below. ({reason})",
-	"admin_settings_sync_upstream_failed": "The registry could not be reached, so nothing was matched this run. ({reason})",
-	"admin_settings_sync_degraded": "{failed} registry calls failed this run.",
+	"admin_settings_sync_upstream_failed": "Could not reach the registry, so nothing was refreshed or linked this run. ({reason})",
+	"admin_settings_sync_summary": "Sync complete: {refreshed} refreshed, {linked} newly linked.",
+	"admin_settings_sync_degraded": [
+		{
+			"declarations": [
+				"input failed",
+				"local failedPlural = failed: plural"
+			],
+			"selectors": [
+				"failedPlural"
+			],
+			"match": {
+				"failedPlural=one": "{failed} registry call failed this run, so these counts are incomplete.",
+				"failedPlural=other": "{failed} registry calls failed this run, so these counts are incomplete."
+			}
+		}
+	],
+	"admin_settings_sync_rate_limited": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} registry call was rate limited this run, so these counts are incomplete.",
+				"countPlural=other": "{count} registry calls were rate limited this run, so these counts are incomplete."
+			}
+		}
+	],
 	"admin_settings_registry_sync": "Registry Sync",
 	"admin_settings_registry_sync_desc": "Pull artist updates from the shared registry now, and link any local artists already in it. (This also runs on a schedule via the sync cron.)",
 	"admin_settings_syncing": "Syncing…",

@@ -70,7 +70,7 @@ import {
 	storedImageSource
 } from '$lib/server/ref-image';
 import { isSameOriginUrl } from '$lib/server/image-proxy';
-import { isObservabilityEnabled } from '$lib/server/metrics';
+import { cleanMessage, isObservabilityEnabled } from '$lib/server/metrics';
 import {
 	verifySupporterKey,
 	supporterKeyDisplayRecord,
@@ -666,27 +666,34 @@ export const actions = {
 		} catch (e) {
 			// A registry refusal (401/403 on a bad/revoked fork key) throws — hand the
 			// registry's own reason back as data so the page renders a LOCALIZED message
-			// around it, instead of a bare 500 page or an untranslated internal string.
+			// around it, instead of a bare 500 page or an untranslated internal string. The
+			// reason quotes an upstream body we don't control, so it gets the same redaction
+			// the cron 502 body and job_run.detail get before it reaches a screen.
 			if (e instanceof RegistryRefusalError)
-				return fail(502, { syncRefusedReason: e.reason.slice(0, 300) });
+				return fail(502, { syncRefusedReason: cleanMessage(e.reason).slice(0, 300) });
 			// Any other upstream failure (every backfill search blocked, say) gets its own
 			// reason field: the refusal toast tells the operator to check this site's key,
 			// which is the wrong place to look when the key is fine and the registry is
 			// simply unreachable.
 			if (e instanceof RegistrySyncError)
-				return fail(502, { syncUpstreamReason: e.reason.slice(0, 300) });
+				return fail(502, { syncUpstreamReason: cleanMessage(e.reason).slice(0, 300) });
 			// Any other exception (a D1 error, say) must not be echoed verbatim to the
 			// operator: return no payload so the page shows its generic sync-failed toast.
 			return fail(500, {});
 		}
 		// A run can finish while most of its registry calls failed. "0 refreshed, 0 newly
-		// linked" reads as "nothing to do" in that case, so pass the failure count along
-		// and let the page say so.
-		const degraded = summary.searchFailed + summary.deltaFailed;
+		// linked" reads as "nothing to do" in that case, so pass the counts along and let
+		// the page say so. Rate-limited calls are reported too (they never fail the run,
+		// but a run whose every search was 429'd did no backfill either), and separately
+		// from real failures — the two point the operator at different things.
+		const failed = summary.searchFailed + summary.deltaFailed;
+		const rateLimited = summary.rateLimited;
+		// The counts go back as numbers, not a sentence: the toast is built from
+		// localized parts on the page, so a ja operator doesn't get English internals.
 		return {
 			success: true,
-			syncMessage: `Sync complete — ${summary.refreshed} refreshed, ${summary.linked} newly linked.`,
-			...(degraded > 0 ? { syncDegraded: degraded } : {})
+			syncCounts: { refreshed: summary.refreshed, linked: summary.linked },
+			...(failed > 0 || rateLimited > 0 ? { syncDegraded: { failed, rateLimited } } : {})
 		};
 	},
 
