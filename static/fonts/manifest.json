@@ -1,5 +1,5 @@
 {
-	"note": "sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Each run checks every file against it and stops on a mismatch; see the script.",
+	"note": "sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Each run checks every file against it and stops on a mismatch; see the script. `handPlaced` records files this script does not fetch; the script carries that key through untouched.",
 	"files": {
 		"ChakraPetch-400-latin-ext.woff2": "c2086b274b3c6e1597c9c1638e40be0220f406e7dd04247069d423f292ab8ec7",
 		"ChakraPetch-400-latin.woff2": "e592818029a919d578974df32686d415d6acd8401bc5420695de41a46eeae426",
@@ -26,5 +26,8 @@
 		"Nunito-latin-ext.woff2": "511ce967375fd2d924483d798f1086a533259fc675181f62944ec1176fe8786d",
 		"Nunito-latin.woff2": "20fc9b6fc618e7c3c68d3ac750a2a5dfbceb8521675458d2cea580b5693e4798",
 		"Nunito-vietnamese.woff2": "d107f72673f443b440185eea74262d7aecbe8fb70150e397334e2ab202c5d301"
+	},
+	"handPlaced": {
+		"Geist-variable.woff2": "a369fcf5628ea2aa4e1b9e2ec6a5b3624e365bda588e1f0f2f12b564f728fbb8"
 	}
 }

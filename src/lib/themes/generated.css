@@ -269,6 +269,7 @@
 	--sidebar-accent: #2a2a30;
 	--sidebar-foreground: #fafafa;
 	--sidebar-border: rgba(255, 255, 255, 0.1);
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%236A6A6A'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	--font-primary: 'JetBrains Mono', monospace;
 	--font-secondary: 'Geist', sans-serif;
@@ -303,6 +304,7 @@
 	--sidebar-accent: #CBCCC9;
 	--sidebar-foreground: #18181b;
 	--sidebar-border: #CBCCC9;
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23797B76'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	color-scheme: light;
 }
@@ -333,6 +335,7 @@
 	--sidebar-accent: #232544;
 	--sidebar-foreground: #f4f4ff;
 	--sidebar-border: rgba(255, 255, 255, 0.1);
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%236A6DA0'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	color-scheme: dark;
 }
@@ -362,6 +365,7 @@
 	--sidebar-accent: #d8d8ee;
 	--sidebar-foreground: #16172a;
 	--sidebar-border: #d8d8ee;
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%237D7FAA'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	color-scheme: light;
 }
@@ -391,6 +395,7 @@
 	--sidebar-accent: #2A2724;
 	--sidebar-foreground: #EADED6;
 	--sidebar-border: rgba(255, 255, 255, 0.1);
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%237A736C'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	--font-primary: 'Chakra Petch', 'IBM Plex Sans JP', sans-serif;
 	--font-secondary: 'IBM Plex Sans JP', sans-serif;
@@ -423,6 +428,7 @@
 	--sidebar-accent: #CBBEB3;
 	--sidebar-foreground: #1E1E1E;
 	--sidebar-border: #CBBEB3;
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%237E736A'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	color-scheme: light;
 }
@@ -455,6 +461,7 @@
 	--sidebar-accent: #372A31;
 	--sidebar-foreground: #F7EEF2;
 	--sidebar-border: rgba(255, 255, 255, 0.1);
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%2376676C'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	--font-primary: 'Nunito', sans-serif;
 	--font-secondary: 'Geist', sans-serif;
@@ -489,6 +496,7 @@
 	--sidebar-accent: #E4CFD9;
 	--sidebar-foreground: #221820;
 	--sidebar-border: #E4CFD9;
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%238A7C82'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	color-scheme: light;
 }
@@ -521,6 +529,7 @@
 	--sidebar-accent: #2A2F34;
 	--sidebar-foreground: #E6E8EA;
 	--sidebar-border: rgba(255, 255, 255, 0.1);
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23636D77'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	color-scheme: dark;
 }
@@ -552,6 +561,7 @@
 	--sidebar-accent: #C8CED4;
 	--sidebar-foreground: #1B1F23;
 	--sidebar-border: #C8CED4;
+	--select-caret: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%2377828C'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E");
 
 	color-scheme: light;
 }

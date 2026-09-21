@@ -261,16 +261,26 @@
 	.tag-field label { font-size: 12px; color: var(--muted-foreground); }
 	.tag-field .input { min-width: 280px; }
 	.hint { font-size: 11px; color: var(--muted-foreground); margin: -8px 0 16px; }
-	.banner { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
+	/* The transparent edge is what keeps every variant the same height: only the
+	   error banner draws a visible border, and without this the box grows by 2px
+	   when one replaces another in the same slot. */
+	.banner { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border: 1px solid transparent; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
 	.banner :global(svg) { flex: none; margin-top: 1px; }
 	.banner-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 	.banner.info { background: var(--secondary); color: var(--muted-foreground); }
-	.banner.ok { background: rgba(74,222,128,0.1); color: #4ade80; }
-	.banner.warn { background: rgba(245,166,35,0.1); color: #f5a623; }
-	.banner.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	.banner.ok { background: color-mix(in srgb, var(--status-ok) 10%, transparent); color: var(--status-ok); }
+	.banner.warn { background: color-mix(in srgb, var(--status-warn) 10%, transparent); color: var(--status-warn); }
+	.banner.err {
+		background: color-mix(in srgb, var(--destructive) 20%, transparent);
+		border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+		color: var(--foreground);
+	}
+	/* The error banner reads louder than its warn sibling: a deeper fill, an edge,
+	   and the icon left in the destructive ink while the text stays --foreground. */
+	.banner.err :global(svg) { color: var(--destructive); }
 	.hint-link {
 		flex-shrink: 0; background: none; border: none; padding: 0; cursor: pointer;
-		color: #f5a623; font-weight: 600; text-decoration: underline;
+		color: var(--status-warn); font-weight: 600; text-decoration: underline;
 		font: inherit; white-space: nowrap; align-self: center;
 	}
 
@@ -332,8 +342,8 @@
 	.status { font-size: 11px; padding: 2px 7px; border-radius: var(--radius-pill); }
 	.status.new { background: var(--primary, #f5a623); color: var(--background, #000); }
 	.status.imported { color: var(--muted-foreground); }
-	.status.excluded { color: #f87171; }
-	.reason { font-size: 10px; color: #f87171; margin-left: 4px; }
+	.status.excluded { color: var(--destructive); }
+	.reason { font-size: 10px; color: var(--destructive); margin-left: 4px; }
 	.grant-row {
 		display: flex;
 		align-items: center;
@@ -355,11 +365,11 @@
 	.badge.perm { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--primary-text); border-radius: var(--radius-s); color: var(--primary-text); font-size: 11px; cursor: help; }
 	.imp-row .cell.link a { color: var(--link); font-size: 12px; }
 	.btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-s); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
-	.btn-icon:hover { color: #f87171; border-color: #f87171; }
+	.btn-icon:hover { color: var(--destructive); border-color: var(--destructive); }
 	.cell.link a { color: var(--link); font-size: 12px; }
 	.actions { display: flex; gap: 12px; margin: 16px 0; }
 	.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px; color: var(--muted-foreground); text-align: center; }
-	.error { color: #f87171; font-size: 14px; margin-top: 12px; }
+	.error { color: var(--destructive); font-size: 14px; margin-top: 12px; }
 	code { background: var(--secondary); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }

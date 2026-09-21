@@ -5,26 +5,20 @@
    woff2 files are served from static/fonts/ (SONA-181). */
 @import './lib/themes/generated.css';
 
+/* Geist, the default theme's body face, as ONE variable file: 70 KB in one
+   request, against 138 KB across three for the per-weight static cuts it covers
+   (Regular, Medium, SemiBold). Same trade the JetBrains Mono and Nunito faces
+   make. The bytes are the official Geist[wght].woff2 from the vercel/geist-font
+   v1.7.2 release. Its weight axis runs 100 to 900; this exposes 400 to 600
+   because that is the range the app asks for. Widening it changes how anything
+   heavier renders, so widen it only on purpose.
+   Placed by hand rather than fetched by scripts/fetch-fonts.mjs, which only
+   speaks to Google's CSS2 API, so its digest lives under `handPlaced` in
+   static/fonts/manifest.json instead of `files`. */
 @font-face {
 	font-family: 'Geist';
-	src: url('/fonts/Geist-Regular.woff2') format('woff2');
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Geist';
-	src: url('/fonts/Geist-Medium.woff2') format('woff2');
-	font-weight: 500;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Geist';
-	src: url('/fonts/Geist-SemiBold.woff2') format('woff2');
-	font-weight: 600;
+	src: url('/fonts/Geist-variable.woff2') format('woff2');
+	font-weight: 400 600;
 	font-style: normal;
 	font-display: swap;
 }
@@ -285,16 +279,42 @@ textarea.input {
 	border-radius: var(--radius-s);
 }
 
-/* Select — replace the native arrow with a single CSS chevron with breathing room */
+/* Select: replace the native arrow with a caret drawn from theme tokens.
+   It used to be an SVG data URI with stroke='%239ca3af' baked in, and a data
+   URI cannot read a custom property, so that glyph stayed the same grey on
+   every palette and measured 1.92:1 on terracotta light, under the 3:1 WCAG
+   1.4.11 asks of the mark that says a field is a dropdown. The caret now comes
+   from --select-caret, which scripts/build-themes.ts bakes per block from that
+   block's own --input: the control-boundary token every theme raises past 3:1
+   on the page and on cards (SONA-126), so the glyph follows the palette. */
 select.input {
 	appearance: none;
 	-webkit-appearance: none;
 	-moz-appearance: none;
-	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	/* A stroked chevron, matching the icons around it. Gradient half-tiles drew
+	   the same shape filled, and stepped at 1x. */
+	/* The fallback only fires for a theme whose --input the generator could not
+	   bake into a caret (anything that is not a six-digit hex); without it that
+	   theme's selects would draw no caret at all. */
+	background-image: var(--select-caret, url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%236B6B6B'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E"));
 	background-repeat: no-repeat;
 	background-position: right 14px center;
 	background-size: 16px;
 	padding-right: 40px;
+}
+
+/* Forced colors drops background-image, so the caret would vanish and leave a
+   field that does not read as a dropdown. A select cannot carry a
+   pseudo-element and these selects have no wrapper element to hang one on, so
+   hand the arrow back to the platform: appearance:auto draws the native caret,
+   which forced colors paints in a system colour. */
+@media (forced-colors: active) {
+	select.input {
+		appearance: auto;
+		-webkit-appearance: auto;
+		background-image: none;
+		padding-right: 16px;
+	}
 }
 
 /* Card — matches Lunaris Card (radius-none, card fill, 1px border, shadow) */

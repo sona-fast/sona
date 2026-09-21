@@ -86,3 +86,22 @@ export const E2E_PLATFORM_PERSIST_TAGS = path.join(E2E_PERSIST_TO_TAGS, 'v3');
 // the lookup endpoint is intercepted, so no token or preload is needed.
 export const E2E_PERSIST_TO_SUGGEST = path.join(persistRoot, '.wrangler-e2e-suggest-tags');
 export const E2E_PLATFORM_PERSIST_SUGGEST = path.join(E2E_PERSIST_TO_SUGGEST, 'v3');
+
+// The theme-picker spec saves a theme through the settings form and then reads
+// it off a public page. That setting is global: while it is not the default,
+// EVERY page on the server renders in another palette and another headline face,
+// so on the shared server it would race the specs that read colours or measure
+// text. Its own throwaway DB + dev server, on the shared wrangler config (it
+// needs no token or preload). See playwright.config.ts (SONA-227).
+export const E2E_PERSIST_TO_THEME = path.join(persistRoot, '.wrangler-e2e-theme');
+export const E2E_PLATFORM_PERSIST_THEME = path.join(E2E_PERSIST_TO_THEME, 'v3');
+
+// The stickers-content spec needs what the shared fixture deliberately does not
+// have: a published sticker pack. nav-gating.spec.ts asserts the gated state
+// that ZERO packs produces, so the two cannot share a database. This server
+// seeds the shared fixture and then layers fixtures/stickers.sql on top
+// (SONA_E2E_SEED_OVERLAY, read by seed.ts). Shared wrangler config: it needs no
+// token or preload, and the spec only reads. See playwright.config.ts (SONA-227).
+export const E2E_STICKERS_OVERLAY = path.join(here, 'fixtures', 'stickers.sql');
+export const E2E_PERSIST_TO_STICKERS = path.join(persistRoot, '.wrangler-e2e-stickers');
+export const E2E_PLATFORM_PERSIST_STICKERS = path.join(E2E_PERSIST_TO_STICKERS, 'v3');

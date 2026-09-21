@@ -55,6 +55,19 @@ function seed(): void {
 	try {
 		wrangler(['d1', 'execute', ...target, `--file=${schemaPath}`]);
 		wrangler(['d1', 'execute', ...target, `--file=${path.join(repoRoot, 'tests/e2e/fixtures/seed.sql')}`]);
+		// An optional second fixture, layered on top for ONE server. A spec that
+		// needs rows the shared fixture deliberately lacks gets them here rather
+		// than in seed.sql, where they would change what every other spec sees:
+		// stickers-content needs a published pack, and nav-gating depends on there
+		// being none. The path is absolute and comes from tests/e2e/paths.ts, so a
+		// typo fails the seed rather than quietly seeding nothing.
+		const overlay = process.env.SONA_E2E_SEED_OVERLAY;
+		if (overlay) {
+			if (!existsSync(overlay)) {
+				throw new Error(`SONA_E2E_SEED_OVERLAY points at ${overlay}, which is not there`);
+			}
+			wrangler(['d1', 'execute', ...target, `--file=${overlay}`]);
+		}
 		// The seeded VR avatar's model must LOOK servable to the /vr/[slug] load
 		// (modelBytesServable HEADs the bucket key) so the View-in-3D control
 		// renders. Stub bytes only — the specs never enter the 3D view.

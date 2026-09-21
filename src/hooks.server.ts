@@ -23,6 +23,8 @@ import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { getTextDirection } from '$lib/paraglide/runtime';
 import { isAdminAuthExempt } from '$lib/admin-routes';
+import { DEFAULT_THEME_ID, isValidThemeId } from '$lib/themes';
+import { fontPreloadTag, fontPreloadLinkHeader } from '$lib/themes/preload.server';
 import { viewerTimeZone } from '$lib/server/supporter-key-expiry';
 
 // Resolve the request locale (cookie override → browser Accept-Language → en)
@@ -277,17 +279,43 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// it to the visitor's OS preference before first paint (see app.html).
 	const modeCookie = event.cookies.get(THEME_MODE_COOKIE);
 	const mode = modeCookie === 'light' || modeCookie === 'dark' ? modeCookie : 'auto';
-	let themeId = 'default';
+	let themeId: string = DEFAULT_THEME_ID;
 	if (event.platform?.env.DB && !isAsset && !isSecurityTxt && !path.startsWith('/api')) {
 		try {
-			themeId = (await getSettings(getDb(event.platform.env.DB))).themeId || 'default';
+			// Checked on READ, not trusted because the settings form checked it on
+			// write: this string is substituted straight into the data-theme-id
+			// attribute in app.html, so a row written before a theme was renamed,
+			// or written to D1 by anything other than the form, would otherwise
+			// reach the markup unexamined. An unknown id falls back to the default,
+			// which is what the page would render anyway.
+			const stored = (await getSettings(getDb(event.platform.env.DB))).themeId;
+			themeId = stored && isValidThemeId(stored) ? stored : DEFAULT_THEME_ID;
 		} catch {
-			themeId = 'default';
+			themeId = DEFAULT_THEME_ID;
 		}
 	}
+	// Built once, outside transformPageChunk: the callback runs per streamed
+	// chunk, and the tag depends only on the theme id.
+	const preloadTag = fontPreloadTag(themeId);
 	const response = await resolve(event, {
-		transformPageChunk: ({ html }) => html.replace('%theme%', themeId).replace('%mode%', mode)
+		transformPageChunk: ({ html }) =>
+			html.replace('%theme%', themeId).replace('%mode%', mode).replace('%preload%', preloadTag)
 	});
+
+	// The same preload as a response header. Browsers act on Link: rel=preload
+	// directly, so it starts the font before the parser reaches the tag;
+	// Cloudflare's Early Hints could replay it too, but only for cacheable
+	// responses, and these pages are private and no-cache. It goes on successful
+	// HTML responses only, the same limit transformPageChunk puts on the tag
+	// above, and it is appended rather than set so a Link header a handler
+	// already added survives.
+	// Successful responses only: an HTML error page would spend the hint on a
+	// font for a page the visitor is about to leave.
+	const preloadLink =
+		response.ok && response.headers.get('content-type')?.includes('text/html')
+			? fontPreloadLinkHeader(themeId)
+			: '';
+	if (preloadLink) response.headers.append('Link', preloadLink);
 
 	// Observability (issue #6): count one in-app request per non-asset path, keyed
 	// by coarse route class only (never the raw path). Fire-and-forget via

@@ -616,7 +616,7 @@
 			font-size: 10px;
 			font-weight: 600;
 			font-family: var(--font-primary);
-			color: #4ade80;
+			color: var(--status-ok);
 		}
 
 		.mobile-actions {
