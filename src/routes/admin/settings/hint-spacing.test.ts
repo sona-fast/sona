@@ -39,4 +39,14 @@ describe('settings hint spacing', () => {
 	it('still relies on the label-to-label rule for fields with no hint between them', () => {
 		expect(pageSrc).toContain('section > :is(label, .checkbox-row) + :is(label, .checkbox-row)');
 	});
+
+	// The two flex columns that hold a hint space it with their own gap, so the
+	// 20px must not stack on top of it there.
+	it('drops the bottom margin inside the feed-key and palette columns', () => {
+		const override = (pageSrc.match(/^\t\.feed-key \.hint,\n\t\.palette \.hint \{[\s\S]*?\}/m)?.[0] ?? '').replace(
+			/\/\*[\s\S]*?\*\//g,
+			''
+		);
+		expect(override, 'the flex-column hint override is missing').toContain('margin-bottom: 0');
+	});
 });

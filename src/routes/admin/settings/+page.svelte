@@ -2583,6 +2583,13 @@
 		margin: 8px 0 20px;
 		line-height: 1.5;
 	}
+	/* Inside a flex column the column's own gap already spaces the hint from the
+	   control below it, so the 20px would stack on top of that gap and push the
+	   button away. The margin is for section-level hints between stacked fields. */
+	.feed-key .hint,
+	.palette .hint {
+		margin-bottom: 0;
+	}
 
 	/* ── Supporter key (SONA-105) ─────────────────────────────── */
 	/* Theme-native section eyebrow (matches the observability dashboard's
