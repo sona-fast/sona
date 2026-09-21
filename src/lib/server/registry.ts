@@ -225,7 +225,11 @@ export class RegistrySearchError extends RegistrySyncError {
  *  a rate limit or a gateway timeout differently from a real outage needs to tell
  *  those apart. */
 export interface CallOptions {
-	onFail?: (reason: string, info: { httpStatus?: number }) => void;
+	/** `httpStatus` is undefined when nothing answered. `mitigated` is true when the
+	 *  answer carried a `cf-mitigated` header, i.e. a zone rule in front of the
+	 *  registry blocked or challenged the request: an outage from the caller's view,
+	 *  even though the status is a 4xx. */
+	onFail?: (reason: string, info: { httpStatus?: number; mitigated?: boolean }) => void;
 }
 
 /** Name what answered a 4xx that carried no registry error message. A challenge or
@@ -261,6 +265,10 @@ async function call<T, R = never>(
 	const headers: Record<string, string> = { 'content-type': 'application/json' };
 	if (init.auth) headers['authorization'] = `Bearer ${env.REGISTRY_API_KEY}`;
 	const { onFail, ...rest } = init;
+	// An authenticated call must not follow a redirect: fetch would replay the bearer
+	// header at whatever origin the 3xx names, and REGISTRY_URL is operator-set. A
+	// 3xx comes back as a plain non-ok response and fails soft like any other.
+	if (init.auth) rest.redirect = 'manual';
 	try {
 		// withTimeout folds a rejection into the same null as a timeout; keep the
 		// network error's own message so the two are told apart in the job log.
@@ -297,7 +305,10 @@ async function call<T, R = never>(
 				if (reason) return { error: reason, httpStatus: res.status } as R;
 				return { error: describeOpaqueRefusal(res), httpStatus: res.status, opaque: true } as R;
 			}
-			onFail?.(describeOpaqueRefusal(res), { httpStatus: res.status });
+			onFail?.(describeOpaqueRefusal(res), {
+				httpStatus: res.status,
+				mitigated: res.headers.has('cf-mitigated')
+			});
 			return fallback;
 		}
 		return (await res.json()) as T;

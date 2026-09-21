@@ -362,8 +362,7 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 			)
 		);
 		// Drop the table the backfill reads after the gate has passed.
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(platform as any).env.DB = {
+		(platform as { env: { DB: { prepare: () => never } } }).env.DB = {
 			prepare: () => {
 				throw new Error('D1_ERROR: table gone');
 			}

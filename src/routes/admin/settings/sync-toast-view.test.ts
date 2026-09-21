@@ -55,10 +55,12 @@ describe('syncFailureToast', () => {
 		expect(out).toContain('invalid fork key');
 	});
 
-	it('uses the lookup wording for an unreachable registry', () => {
+	// Phase-neutral on purpose: the same field carries a blocked delta feed (refreshes
+	// lost) and blocked lookups (links lost), so the wording claims neither.
+	it('uses the unreachable-registry wording, naming no phase', () => {
 		const out = syncFailureToast({ syncUpstreamReason: 'HTTP 403' });
-		expect(out).toContain('artist lookups');
-		expect(out).toContain("some artists weren't linked");
+		expect(out).toContain("Couldn't reach the shared registry");
+		expect(out).toContain('this run is incomplete');
 		expect(out).not.toContain("refused this site's key");
 	});
 

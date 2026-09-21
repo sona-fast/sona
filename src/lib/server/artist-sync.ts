@@ -152,6 +152,9 @@ export async function syncArtists(
 	let linked = 0;
 	let scanned = 0;
 	let searchFailed = 0;
+	// The subset of searchFailed that looked like an outage (see the onFail hook);
+	// only this feeds the all-searches-failed alarm, so it stays off the summary.
+	let searchOutages = 0;
 	let rateLimited = 0;
 	let deltaFailed = 0;
 	let lastSearchFailure: string | undefined;
@@ -292,7 +295,7 @@ export async function syncArtists(
 		if (!handle) continue;
 		scanned++;
 		const matches = await registrySearch(env, { handle }, {
-			onFail: (why, { httpStatus }) => {
+			onFail: (why, { httpStatus, mitigated }) => {
 				// A 429 is back-pressure, not an outage: the registry's unauthenticated read
 				// limiter is shared by every fork, so a sweep at the cron hour would
 				// otherwise fail every small fork at once. Only a 429 gets that treatment —
@@ -302,10 +305,17 @@ export async function syncArtists(
 				if (httpStatus === 429) {
 					rateLimited++;
 					lastRateLimit = why;
-				} else {
-					searchFailed++;
-					lastSearchFailure = why;
+					return;
 				}
+				searchFailed++;
+				lastSearchFailure = why;
+				// Only an outage-shaped failure feeds the alarm: nothing answered, a 5xx,
+				// a 408, or a zone rule blocking the request. A reachable registry
+				// answering a definitive 4xx (400/404/410) about the handle itself is a
+				// degraded run, not an unreachable registry, and the alarm's wording says
+				// "couldn't reach".
+				if (httpStatus === undefined || httpStatus >= 500 || httpStatus === 408 || mitigated)
+					searchOutages++;
 			}
 		});
 		// A handle search ranks candidates by similarity — it does NOT prove identity.
@@ -350,7 +360,7 @@ export async function syncArtists(
 	// artist and one timeout is not an outage — and rate limits never count toward
 	// searchFailed at all (see the onFail hook above), so a fleet-wide 429 leaves the
 	// run degraded rather than red.
-	if (scanned >= 3 && searchFailed === scanned) {
+	if (scanned >= 3 && searchOutages === scanned) {
 		throw new RegistrySearchError(searchFailed, lastSearchFailure ?? 'no response');
 	}
 

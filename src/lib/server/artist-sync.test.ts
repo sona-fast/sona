@@ -429,6 +429,39 @@ describe('syncArtists backfill — degraded searches are counted, and an all-fai
 		);
 	});
 
+	// A reachable registry answering a definitive 4xx about the handle is a degraded
+	// run, not an unreachable registry: it counts as failed but never trips the alarm,
+	// whose wording says "couldn't reach".
+	it.each([400, 404, 410])(
+		'does NOT throw when every search got a definitive %i from a reachable registry',
+		async (status) => {
+			const db = makeDb();
+			await seedUnlinked(db, 3);
+			stubSearch(
+				() =>
+					new Response(JSON.stringify({ error: 'no such handle' }), {
+						status,
+						headers: { 'content-type': 'application/json' }
+					})
+			);
+
+			const summary = await syncArtists(db, ENV, SETTINGS);
+			expect(summary).toMatchObject({ scanned: 3, searchFailed: 3, rateLimited: 0 });
+			expect(summary.lastSearchFailure).toMatch(new RegExp(`HTTP ${status}`));
+		}
+	);
+
+	it.each([
+		['a 5xx', () => new Response('bad gateway', { status: 502 })],
+		['a 408', () => new Response('', { status: 408 })]
+	])('still throws when every search hit %s', async (_label, search) => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearch(search);
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(/all 3 backfill searches failed/);
+	});
+
 	// "Every search failed" means nothing on a one-artist fork: a single timeout or
 	// 5xx would turn its daily run red forever. The run needs a sample first.
 	it('does not throw when only one or two searches existed to fail', async () => {

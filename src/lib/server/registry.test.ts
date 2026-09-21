@@ -199,6 +199,37 @@ describe('isFatalRefusal', () => {
 	});
 });
 
+describe('registry client — authenticated calls never follow a redirect', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
+
+	// REGISTRY_URL is operator-set, and fetch replays the bearer header at whatever
+	// origin a 3xx names. Manual redirect mode hands the 3xx back as a plain non-ok
+	// response, which fails soft like any other, and the key stays home.
+	it('sends the delta request with redirect: manual and treats a 302 as a soft failure', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(null, { status: 302, headers: { location: 'https://evil.example/steal' } })
+		);
+		vi.stubGlobal('fetch', fetchMock);
+		const onFail = vi.fn();
+
+		expect(await registryDelta(env, {}, { onFail })).toEqual({ artists: [], nextCursor: null });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBe('manual');
+		expect(onFail).toHaveBeenCalledTimes(1);
+		expect(onFail.mock.calls[0][0]).toMatch(/HTTP 302/);
+	});
+
+	it('leaves redirect mode alone on the public search call', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ artists: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+		);
+		vi.stubGlobal('fetch', fetchMock);
+		await registrySearch(env, { handle: 'x' });
+		expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBeUndefined();
+	});
+});
+
 describe('registryDelta', () => {
 	afterEach(() => vi.unstubAllGlobals());
 	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
