@@ -76,10 +76,9 @@ test('btn-desktop-only drops out of the header on a phone and comes back wide', 
 });
 
 // A stacking pin, not a class pin: the 404 page's action row restacks into a
-// full-width column at this size, which is exactly why .btn-full-mobile came off
-// its buttons (and three other pages') in step 4. Removing the class proves
-// nothing here. What this guards is the media query that makes the removal
-// safe, so the buttons don't go back to content width unnoticed.
+// full-width column at this size, so its links need no .btn-full-mobile. This
+// guards that media query, so the links can't quietly fall back to content
+// width.
 test('the 404 actions stack full width on a phone without btn-full-mobile', async ({ page }) => {
 	await page.setViewportSize(PHONE);
 	const response = await page.goto('/this-page-does-not-exist');

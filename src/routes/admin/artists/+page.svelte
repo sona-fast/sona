@@ -690,13 +690,6 @@
 		gap: 10px;
 	}
 
-	/* Layout only — the pill and the borderless input are .field-pill and
-	   .input-plain in app.css. */
-	.field-pill .input {
-		flex: 1;
-		min-width: 0;
-	}
-
 	.social-label {
 		font-family: var(--font-primary);
 		font-size: 11px;

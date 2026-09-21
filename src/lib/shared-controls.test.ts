@@ -60,10 +60,7 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		],
 		[
 			'/routes/admin/artists/+page.svelte',
-			[
-				'.field-pill .input — fills the rest of its icon row',
-				'.modal-actions .btn — the modal footer buttons split the row on a phone'
-			]
+			['.modal-actions .btn — the modal footer buttons split the row on a phone']
 		],
 		['/routes/admin/collections/+page.svelte', ['.add-form-actions .btn — add and cancel split the row once the form stacks']],
 		[

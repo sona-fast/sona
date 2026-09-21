@@ -245,9 +245,12 @@ input, select, textarea {
 	gap: 5px;
 	font-size: 12px;
 	padding: 5px 10px;
-	/* --input, the 3:1 control-boundary token (SONA-126), not the --border
-	   hairline this variant used to draw. */
+	/* --input, the 3:1 control-boundary token (SONA-126): this 1px edge is all
+	   that marks the button as a control. */
 	border: 1px solid var(--input);
+	/* Square corners on purpose: the compact tier reads as a smaller, denser
+	   control beside the pill-shaped .btn and .input, and the VR form's
+	   .file-btn shares the shape. */
 	border-radius: var(--radius-xs);
 	background: var(--secondary);
 	color: var(--foreground);
@@ -417,6 +420,13 @@ select.input {
 .field-pill:focus-within {
 	outline: 2px solid var(--ring);
 	outline-offset: -1px;
+}
+
+/* The input inside takes the rest of the row; min-width 0 lets it shrink past
+   its size attribute instead of pushing out of the pill on a phone. */
+.field-pill .input {
+	flex: 1;
+	min-width: 0;
 }
 
 /* A single-field add form at the top of an admin list: capped so one short name
