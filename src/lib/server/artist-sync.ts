@@ -23,6 +23,7 @@ import {
 	registrySearch,
 	firstHandle,
 	RegistryRefusalError,
+	RegistrySearchError,
 	SOCIAL_URL_KEYS,
 	type RegistryArtist,
 	type RegistryRefusal
@@ -40,6 +41,45 @@ export interface SyncSummary {
 	refreshed: number;
 	linked: number;
 	scanned: number;
+	/** Backfill searches that produced no usable answer (timeout, network, 5xx, or a
+	 *  block in front of the registry — but NOT a 429, which is back-pressure).
+	 *  Each one fails soft, so without this count a run whose searches all silently
+	 *  failed reads exactly like "no matches". */
+	searchFailed: number;
+	/** Registry calls answered with back-pressure (a 429, from a search or a delta
+	 *  page). Counted apart from searchFailed because they never fail the run, but a
+	 *  run whose calls were all rate-limited still did no backfill and must not read
+	 *  as "no matches" either. */
+	rateLimited: number;
+	/** Delta-feed pages that failed soft the same way (5xx/network, or a non-fatal
+	 *  4xx that isn't a rate limit; a 401/403 refusal is handled separately and
+	 *  fatally). */
+	deltaFailed: number;
+	/** Reason for the last counted search failure. Each category keeps its own reason:
+	 *  one shared field printed a rate limit's "HTTP 429" next to the search-failure
+	 *  count (or next to the delta count), naming a cause that never happened there. */
+	lastSearchFailure?: string;
+	/** Reason for the last rate-limited call. */
+	lastRateLimit?: string;
+	/** Reason for the last failed delta page. */
+	lastDeltaFailure?: string;
+}
+
+/** One-line job-log detail for a completed run. Names degraded calls when there were
+ *  any, so a partial run leaves a trace in the background-jobs panel. Every clause
+ *  carries its OWN reason: a run can be rate-limited and broken at once, and pairing
+ *  a count with the wrong cause sends the reader after the wrong problem. */
+export function describeSync(s: SyncSummary): string {
+	const why = (reason?: string) => (reason ? ` (${reason})` : '');
+	let out = `refreshed ${s.refreshed}, linked ${s.linked}`;
+	if (s.searchFailed > 0)
+		out += `, ${s.searchFailed} of ${s.scanned} searches failed${why(s.lastSearchFailure)}`;
+	if (s.rateLimited > 0)
+		// "calls", not "searches": a rate-limited delta page counts here too.
+		out += `, ${s.rateLimited} calls rate-limited${why(s.lastRateLimit)}`;
+	if (s.deltaFailed > 0)
+		out += `, ${s.deltaFailed} delta page(s) failed${why(s.lastDeltaFailure)}`;
+	return out;
 }
 
 // Map a registry record's socials onto the local artist *Url columns. The
@@ -97,11 +137,29 @@ export async function syncArtists(
 	env: Env | undefined,
 	settings: SiteSettings
 ): Promise<SyncSummary> {
-	if (!isRegistryEnabled(env)) return { skipped: true, refreshed: 0, linked: 0, scanned: 0 };
+	if (!isRegistryEnabled(env))
+		return {
+			skipped: true,
+			refreshed: 0,
+			linked: 0,
+			scanned: 0,
+			searchFailed: 0,
+			rateLimited: 0,
+			deltaFailed: 0
+		};
 
 	let refreshed = 0;
 	let linked = 0;
 	let scanned = 0;
+	let searchFailed = 0;
+	// The subset of searchFailed that looked like an outage (see the onFail hook);
+	// only this feeds the all-searches-failed alarm, so it stays off the summary.
+	let searchOutages = 0;
+	let rateLimited = 0;
+	let deltaFailed = 0;
+	let lastSearchFailure: string | undefined;
+	let lastRateLimit: string | undefined;
+	let lastDeltaFailure: string | undefined;
 
 	// ── 1. Refresh linked artists from the delta feed ──────────────────────────
 	const lastSync = (await getRawSetting(db, LAST_SYNC_KEY)) ?? undefined;
@@ -112,7 +170,13 @@ export async function syncArtists(
 	for (let page = 0; page < MAX_PAGES; page++) {
 		const feed = await registryDelta(
 			env,
-			cursor ? { cursor } : { updatedSince: lastSync, limit: 100 }
+			cursor ? { cursor } : { updatedSince: lastSync, limit: 100 },
+			{
+				onFail: (why) => {
+					deltaFailed++;
+					lastDeltaFailure = why;
+				}
+			}
 		);
 		// A 4xx refusal (e.g. 401 from a bad/missing fork key) is NOT "no new artists".
 		// Swallowing it would report a successful sync of zero artists on every run,
@@ -126,6 +190,24 @@ export async function syncArtists(
 			if (!isFatalRefusal(feed.httpStatus)) {
 				// Transient (429/408/400): degrade to a no-op like an outage, but leave a
 				// trace — a silently short sync is what this whole path exists to prevent.
+				// It counts for the same reason: a 4xx refusal returns before `call`'s
+				// onFail hook, so without this the run would report zero failures and read
+				// exactly like a healthy empty feed. A 429 is back-pressure, so it is
+				// counted as a rate limit rather than a fault — the admin toast sums
+				// deltaFailed into "failed", and a shared limiter is not a broken fork.
+				// describeOpaqueRefusal already prefixes its own "HTTP <status>"; prefixing
+				// again printed "HTTP 403: HTTP 403 (cf-ray …)". Decide by SOURCE, not by
+				// reading the text: a registry-authored message may itself start with
+				// "HTTP " and would otherwise be shown naming a status the response
+				// never had.
+				const why = feed.opaque ? feed.error : `HTTP ${feed.httpStatus}: ${feed.error}`;
+				if (feed.httpStatus === 429) {
+					rateLimited++;
+					lastRateLimit = why;
+				} else {
+					deltaFailed++;
+					lastDeltaFailure = why;
+				}
 				console.warn(
 					`registry delta refused: HTTP ${feed.httpStatus} — ${feed.error} (failing soft)`
 				);
@@ -212,7 +294,30 @@ export async function syncArtists(
 		const handle = firstHandle(a);
 		if (!handle) continue;
 		scanned++;
-		const matches = await registrySearch(env, { handle });
+		const matches = await registrySearch(env, { handle }, {
+			onFail: (why, { httpStatus, mitigated }) => {
+				// A 429 is back-pressure, not an outage: the registry's unauthenticated read
+				// limiter is shared by every fork, so a sweep at the cron hour would
+				// otherwise fail every small fork at once. Only a 429 gets that treatment —
+				// a 408 says our own request didn't arrive in time, which is a real failure,
+				// and grouping it here meant a persistently timing-out fork could never trip
+				// the all-searches-failed alarm below.
+				if (httpStatus === 429) {
+					rateLimited++;
+					lastRateLimit = why;
+					return;
+				}
+				searchFailed++;
+				lastSearchFailure = why;
+				// Only an outage-shaped failure feeds the alarm: nothing answered, a 5xx,
+				// a 408, or a zone rule blocking the request. A reachable registry
+				// answering a definitive 4xx (400/404/410) about the handle itself is a
+				// degraded run, not an unreachable registry, and the alarm's wording says
+				// "couldn't reach".
+				if (httpStatus === undefined || httpStatus >= 500 || httpStatus === 408 || mitigated)
+					searchOutages++;
+			}
+		});
 		// A handle search ranks candidates by similarity — it does NOT prove identity.
 		// Trusting matches[0] blindly let a same-string handle under a DIFFERENT platform
 		// (e.g. a Twitter URL pasted into a registry artist's Instagram field, indexed as
@@ -245,8 +350,29 @@ export async function syncArtists(
 	// "Sync now" action turns this into a form error. Only 401/403 gets here (see
 	// isFatalRefusal) — a rate-limit must not fail an otherwise healthy run.
 	if (refusal && isFatalRefusal(refusal.httpStatus)) {
-		throw new RegistryRefusalError(refusal.httpStatus, refusal.error);
+		throw new RegistryRefusalError(refusal.httpStatus, refusal.error, refusal.opaque === true);
+	}
+	// Same reasoning for the backfill: one failed search is noise, but a run in which
+	// EVERY search failed did nothing and must not read as a healthy "linked 0". (When
+	// a zone bot rule started challenging Worker fetches, this path ran empty for
+	// days with a green job.) Two rules keep this from crying wolf: a run needs a
+	// meaningful sample before "all of them failed" means anything — one unlinked
+	// artist and one timeout is not an outage — and rate limits never count toward
+	// searchFailed at all (see the onFail hook above), so a fleet-wide 429 leaves the
+	// run degraded rather than red.
+	if (scanned >= 3 && searchOutages === scanned) {
+		throw new RegistrySearchError(searchFailed, lastSearchFailure ?? 'no response');
 	}
 
-	return { refreshed, linked, scanned };
+	return {
+		refreshed,
+		linked,
+		scanned,
+		searchFailed,
+		rateLimited,
+		deltaFailed,
+		lastSearchFailure,
+		lastRateLimit,
+		lastDeltaFailure
+	};
 }

@@ -8,6 +8,7 @@ import {
 	isLocalNameAliasOf,
 	parseAliases,
 	registryDelta,
+	registrySearch,
 	registryRegisterFork,
 	registrySubmit,
 	resolveRegistryEnv,
@@ -198,6 +199,37 @@ describe('isFatalRefusal', () => {
 	});
 });
 
+describe('registry client — authenticated calls never follow a redirect', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
+
+	// REGISTRY_URL is operator-set, and fetch replays the bearer header at whatever
+	// origin a 3xx names. Manual redirect mode hands the 3xx back as a plain non-ok
+	// response, which fails soft like any other, and the key stays home.
+	it('sends the delta request with redirect: manual and treats a 302 as a soft failure', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(null, { status: 302, headers: { location: 'https://evil.example/steal' } })
+		);
+		vi.stubGlobal('fetch', fetchMock);
+		const onFail = vi.fn();
+
+		expect(await registryDelta(env, {}, { onFail })).toEqual({ artists: [], nextCursor: null });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBe('manual');
+		expect(onFail).toHaveBeenCalledTimes(1);
+		expect(onFail.mock.calls[0][0]).toMatch(/HTTP 302/);
+	});
+
+	it('leaves redirect mode alone on the public search call', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ artists: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+		);
+		vi.stubGlobal('fetch', fetchMock);
+		await registrySearch(env, { handle: 'x' });
+		expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBeUndefined();
+	});
+});
+
 describe('registryDelta', () => {
 	afterEach(() => vi.unstubAllGlobals());
 	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
@@ -252,7 +284,7 @@ describe('registryDelta', () => {
 		['a whitespace-only `error` string', 429, JSON.stringify({ error: '  \n' }), 'HTTP 429']
 	])('still reports a refusal for a 4xx with %s', async (_label, status, body, expected) => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status })));
-		expect(await registryDelta(env, {})).toEqual({ error: expected, httpStatus: status });
+		expect(await registryDelta(env, {})).toEqual({ error: expected, httpStatus: status, opaque: true });
 	});
 
 	it('returns an empty page (and sends nothing) when the registry is not configured', async () => {
@@ -379,5 +411,150 @@ describe('resolveRegistryEnv', () => {
 		const resolved = await resolveRegistryEnv(db, {} as App.Platform['env']);
 		expect(resolved?.REGISTRY_API_KEY).toBe('stored-key');
 		expect(resolved?.REGISTRY_URL).toBe('https://r.example');
+	});
+});
+
+describe('registry client — naming what answered instead of the registry', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
+
+	// A zone-level bot challenge (Bot Fight Mode, 2026-09-17) answers a Worker fetch
+	// with an HTML page, a 403, and `cf-mitigated: challenge`. Reporting that as a bare
+	// "HTTP 403" reads as a fork-key problem and sent the investigation the wrong way;
+	// the header names the actual product, and cf-ray points at the security event.
+	// The ray travels as "<id> <colo>", not as the raw "<id>-<colo>": job_run.detail
+	// redacts any token-like run of 20+ characters, and the joined form is exactly 20,
+	// so the panel used to show "(cf-ray [redacted])" — the one detail worth keeping.
+	it('names a Cloudflare mitigation (and its cf-ray) on an opaque 4xx refusal', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response('<html>Just a moment...</html>', {
+					status: 403,
+					headers: {
+						'content-type': 'text/html',
+						'cf-mitigated': 'challenge',
+						'cf-ray': 'a3e7bc522cbfa3c2-SEA'
+					}
+				})
+			)
+		);
+		expect(await registryDelta(env, {})).toEqual({
+			error:
+				'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray a3e7bc522cbfa3c2 SEA)',
+			httpStatus: 403,
+			opaque: true
+		});
+	});
+
+	// Neither header comes from the registry on this path — whatever blocked the call
+	// set them — so an off-shape value is dropped instead of being pasted into a job
+	// log and an operator toast.
+	it('ignores an off-shape cf-mitigated and cf-ray, falling back to the bare status', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response('<html/>', {
+					status: 403,
+					headers: {
+						'cf-mitigated': 'challenge'.repeat(20),
+						'cf-ray': 'not a real ray id at all'
+					}
+				})
+			)
+		);
+		expect(await registryDelta(env, {})).toEqual({ error: 'HTTP 403', httpStatus: 403, opaque: true });
+	});
+
+	it('keeps the registry\'s own reason when the body has one, even behind Cloudflare headers', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ error: 'invalid fork key' }), {
+					status: 401,
+					headers: { 'content-type': 'application/json', 'cf-ray': 'abc123-SEA' }
+				})
+			)
+		);
+		expect(await registryDelta(env, {})).toEqual({ error: 'invalid fork key', httpStatus: 401 });
+	});
+
+	// The search endpoint has always failed soft (empty list), which is right for one
+	// call and invisible across a whole run. The hook lets the caller count and name
+	// the failures without changing the empty-list contract.
+	// The status rides along so a caller can tell back-pressure (429/408) from an
+	// outage; it is undefined when nothing answered at all.
+	it.each([
+		['a 5xx', () => Promise.resolve(new Response('bad gateway', { status: 502 })), /HTTP 502/, 502],
+		[
+			'a challenge page',
+			() =>
+				Promise.resolve(
+					new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+				),
+			/blocked by a Cloudflare challenge/,
+			403
+		],
+		[
+			'a rate limit',
+			() => Promise.resolve(new Response('slow down', { status: 429 })),
+			/HTTP 429/,
+			429
+		],
+		['a network error', () => Promise.reject(new Error('offline')), /offline/, undefined]
+	])('registrySearch still returns [] on %s but reports the reason through onFail', async (_l, fetchImpl, expected, status) => {
+		vi.stubGlobal('fetch', vi.fn(fetchImpl));
+		const onFail = vi.fn();
+		expect(await registrySearch(env, { handle: 'x' }, { onFail })).toEqual([]);
+		expect(onFail).toHaveBeenCalledTimes(1);
+		expect(onFail.mock.calls[0][0]).toMatch(expected);
+		expect(onFail.mock.calls[0][1]?.httpStatus).toBe(status);
+	});
+
+	// The timeout arm: withTimeout resolves to null with nothing to report, so the
+	// reason has to be synthesized. Without this the slowest failure mode — the one
+	// an overloaded registry actually produces — would report no reason at all.
+	it('reports a timeout through onFail when nothing ever answers', async () => {
+		vi.useFakeTimers();
+		try {
+			vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+			const onFail = vi.fn();
+			const pending = registrySearch(env, { handle: 'x' }, { onFail });
+			await vi.advanceTimersByTimeAsync(5001);
+			expect(await pending).toEqual([]);
+			expect(onFail).toHaveBeenCalledTimes(1);
+			expect(onFail.mock.calls[0][0]).toMatch(/timed out/);
+			expect(onFail.mock.calls[0][1]?.httpStatus).toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	// The onFail metadata uses the same shape check as the message: an off-shape
+	// cf-mitigated value must not count as a zone block, or three definitive 4xx
+	// answers carrying junk in that header would trip the all-searches-failed alarm.
+	it.each([
+		['a well-formed value', 'challenge', true],
+		['an off-shape value', 'x'.repeat(40), false],
+		['no header', null, false]
+	])('reports mitigated only for %s', async (_l, value, expected) => {
+		const headers: Record<string, string> = {};
+		if (value) headers['cf-mitigated'] = value;
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html/>', { status: 403, headers })));
+		const onFail = vi.fn();
+		await registrySearch(env, { handle: 'x' }, { onFail });
+		expect(onFail.mock.calls[0][1]).toMatchObject({ httpStatus: 403, mitigated: expected });
+	});
+
+	it('does not call onFail on a healthy search', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ artists: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+			)
+		);
+		const onFail = vi.fn();
+		await registrySearch(env, { handle: 'x' }, { onFail });
+		expect(onFail).not.toHaveBeenCalled();
 	});
 });

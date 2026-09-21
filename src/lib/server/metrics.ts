@@ -236,7 +236,7 @@ function redactIps(s: string): string {
  * fake a boundary and stop the redaction early, while a genuine chain keeps its
  * wrapper segments readable after the redacted one.
  */
-function cleanMessage(message: string | string[]): string {
+export function cleanMessage(message: string | string[]): string {
 	// Empty segments (a whitespace-only wrapper message) are dropped so the
 	// stored text never carries a dangling ' ← ' separator.
 	const segments = Array.isArray(message) ? message : [message];
@@ -249,7 +249,18 @@ function cleanSegment(segment: string): string {
 	// RENDER a fake chain boundary. Defense-in-depth for readability only —
 	// redaction never keys on the arrow (boundaries travel as array elements)
 	// — and lossy: a genuine '←' in an error message becomes '<-'.
-	let s = (segment ?? '').replace(/←/g, '<-').replace(/\s+/g, ' ').trim();
+	// Control and format characters go FIRST: an upstream error body can carry ANSI
+	// escapes or zero-width characters, and a stored sample ends up printed in a
+	// public Actions log, where they could forge log lines or hide text. The
+	// whitespace-class control characters (tab, newline, CR, vertical tab, form feed,
+	// next line) are spared so the collapse below turns them into a space instead of
+	// fusing the words around them. U+0085 is listed in the collapse by hand because
+	// JavaScript's \s does not include it.
+	let s = (segment ?? '')
+		.replace(/(?![\n\r\t\v\f\u0085])[\p{Cc}\p{Cf}]/gu, '')
+		.replace(/←/g, '<-')
+		.replace(/[\s\u0085]+/g, ' ')
+		.trim();
 	// Pre-clamp (see REDACT_INPUT_MAX); also drop the partial trailing run the
 	// cut can strand (a sub-20-char secret/email fragment the rules below miss).
 	if (s.length > REDACT_INPUT_MAX) {

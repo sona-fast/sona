@@ -18,6 +18,12 @@
 	import { resolveTabId, visibleTabIds, type TabId } from './tabs';
 	import { showUtFileStat } from './ut-stat';
 	import { breakdownRows, sharePct, usageWarning } from './storage-breakdown-view';
+	import {
+		syncSuccessToast,
+		syncFailureToast,
+		type SyncSuccessData,
+		type SyncFailureData
+	} from './sync-toast-view';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
 	import { earlyAccessLabel, isFeatureEnabled } from '$lib/early-access';
 	import * as m from '$lib/paraglide/messages';
@@ -1345,15 +1351,10 @@
 		return async ({ result, update }) => {
 			await update();
 			syncing = false;
-			if (result.type === 'success') toast.success((result.data?.syncMessage as string) ?? m.admin_settings_sync_complete());
-			else if (result.type === 'failure')
-				// A registry refusal comes back as a reason, not a message: the wording is
-				// localized here and only the registry's own text is interpolated.
-				toast.error(
-					result.data?.syncRefusedReason
-						? m.admin_settings_sync_refused({ reason: result.data.syncRefusedReason as string })
-						: ((result.data?.error as string) ?? m.admin_settings_sync_failed())
-				);
+			// Both toasts are assembled in sync-toast-view.ts so the wording rules (which
+			// clause rides on which sentence, which reason wins) are unit-testable.
+			if (result.type === 'success') toast.success(syncSuccessToast(result.data as SyncSuccessData));
+			else if (result.type === 'failure') toast.error(syncFailureToast(result.data as SyncFailureData));
 		};
 	}}>
 		<section data-tab="connections">

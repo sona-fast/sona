@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './db/schema';
 import { artists, siteSettings } from './db/schema';
 import { eq } from 'drizzle-orm';
-import { pickRefreshedAvatar, syncArtists } from './artist-sync';
+import { describeSync, pickRefreshedAvatar, syncArtists } from './artist-sync';
 import type { SiteSettings } from './settings';
 
 const BSKY_OLD = 'https://cdn.bsky.app/img/avatar/plain/did:a/OLD@jpeg';
@@ -372,5 +372,365 @@ describe('syncArtists backfill — identity verification', () => {
 		expect(summary.linked).toBe(0);
 		const row = await db.select().from(artists).where(eq(artists.name, 'mlyeko')).get();
 		expect(row?.globalId).toBeNull();
+	});
+});
+
+describe('syncArtists backfill — degraded searches are counted, and an all-failed run is loud', () => {
+	async function seedUnlinked(db: ReturnType<typeof makeDb>, n: number) {
+		const now = new Date().toISOString();
+		for (let i = 0; i < n; i++)
+			await db
+				.insert(artists)
+				.values({ name: `artist${i}`, twitterUrl: `https://twitter.com/artist${i}`, createdAt: now });
+	}
+
+	// Delta feed healthy and empty; every search answered by whatever `search` returns.
+	// A factory (not a Response) so a test can vary the answer per call — a Response
+	// body can only be consumed once, and the interesting runs mix statuses.
+	function stubSearch(search: () => Response) {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string) =>
+				Promise.resolve(
+					String(url).includes('/v1/artists/search')
+						? search()
+						: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+				)
+			)
+		);
+	}
+
+	const JSON_HEADERS = { 'content-type': 'application/json' };
+	/** A healthy, empty search answer. */
+	const emptySearch = () => new Response(JSON.stringify({ artists: [] }), { status: 200, headers: JSON_HEADERS });
+	/** Serve `statuses` in call order, the last one repeating once exhausted. */
+	function searchStatuses(...statuses: number[]) {
+		let i = 0;
+		return () => {
+			const status = statuses[Math.min(i++, statuses.length - 1)];
+			return status === 200 ? emptySearch() : new Response('upstream said no', { status });
+		};
+	}
+
+	// For four days every search on every fork was challenged and every run reported
+	// "ok, linked 0". A run in which NO search got through did no backfill at all.
+	it('throws RegistrySearchError when every search in the run failed', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearch(
+			() => new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+		);
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(
+			/all 3 backfill searches failed.*blocked by a Cloudflare challenge/
+		);
+	});
+
+	// A reachable registry answering a definitive 4xx about the handle is a degraded
+	// run, not an unreachable registry: it counts as failed but never trips the alarm,
+	// whose wording says "couldn't reach".
+	it.each([400, 404, 410])(
+		'does NOT throw when every search got a definitive %i from a reachable registry',
+		async (status) => {
+			const db = makeDb();
+			await seedUnlinked(db, 3);
+			stubSearch(
+				() =>
+					new Response(JSON.stringify({ error: 'no such handle' }), {
+						status,
+						headers: { 'content-type': 'application/json' }
+					})
+			);
+
+			const summary = await syncArtists(db, ENV, SETTINGS);
+			expect(summary).toMatchObject({ scanned: 3, searchFailed: 3, rateLimited: 0 });
+			expect(summary.lastSearchFailure).toMatch(new RegExp(`HTTP ${status}`));
+		}
+	);
+
+	it.each([
+		['a 5xx', () => new Response('bad gateway', { status: 502 })],
+		['a 408', () => new Response('', { status: 408 })]
+	])('still throws when every search hit %s', async (_label, search) => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearch(search);
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(/all 3 backfill searches failed/);
+	});
+
+	// "Every search failed" means nothing on a one-artist fork: a single timeout or
+	// 5xx would turn its daily run red forever. The run needs a sample first.
+	it('does not throw when only one or two searches existed to fail', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 1);
+		stubSearch(searchStatuses(502));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 1, searchFailed: 1 });
+		expect(summary.lastSearchFailure).toMatch(/HTTP 502/);
+	});
+
+	// The registry's unauthenticated read limiter is shared by every fork, so one
+	// 06:30 UTC sweep rate-limits all of them at once. isFatalRefusal already calls a
+	// 429 non-fatal everywhere else; counting it here would contradict that.
+	it('does not count a rate-limited (429) search as a failure, but still names it', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearch(searchStatuses(429));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 3, searchFailed: 0, rateLimited: 3 });
+		expect(summary.lastRateLimit).toMatch(/HTTP 429/);
+		// The back-pressure reason must never be parked in the failure field: that is
+		// how a job detail came to read "2 searches failed (HTTP 429)".
+		expect(summary.lastSearchFailure).toBeUndefined();
+	});
+
+	// A 408 says OUR request never arrived in time — that is a failure, not the
+	// registry pushing back. Grouping it with 429 meant a fork that timed out on every
+	// search forever could never trip the all-searches-failed alarm.
+	it('counts a timed-out (408) search as a failure, so an all-408 run still throws', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearch(searchStatuses(408));
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(
+			/all 3 backfill searches failed.*HTTP 408/
+		);
+	});
+
+	it('names the 408 as a search failure, not back-pressure', async () => {
+		const db = makeDb();
+		// Two artists stays below the "enough of a sample to be an outage" floor, so the
+		// counters are observable without the throw.
+		await seedUnlinked(db, 2);
+		stubSearch(searchStatuses(408));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 2, searchFailed: 2, rateLimited: 0 });
+		expect(summary.lastSearchFailure).toMatch(/HTTP 408/);
+		expect(summary.lastRateLimit).toBeUndefined();
+	});
+
+	// The mixed run the single lastFailure field could not describe: two real failures
+	// and three rate limits, with the LAST call a 429. One shared reason meant the job
+	// detail read "2 of 5 searches failed (HTTP 429)" — a cause that never failed one.
+	it('keeps each count next to its own reason when failures and rate limits mix', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 5);
+		stubSearch(searchStatuses(502, 502, 429, 429, 429));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 5, searchFailed: 2, rateLimited: 3 });
+		expect(summary.lastSearchFailure).toMatch(/502/);
+		expect(summary.lastRateLimit).toMatch(/429/);
+		const detail = describeSync(summary);
+		expect(detail).toContain('2 of 5 searches failed (HTTP 502');
+		expect(detail).toContain('3 calls rate-limited (HTTP 429');
+	});
+
+	// Cross-category leak the other way: the 429 belongs to a search, so it must not be
+	// printed as the reason a delta page failed.
+	it('never prints a search rate limit as the delta page reason', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 1);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string) =>
+				Promise.resolve(
+					String(url).includes('/v1/artists/search')
+						? new Response('slow down', { status: 429 })
+						: new Response(JSON.stringify({ error: 'registry down' }), {
+								status: 503,
+								headers: JSON_HEADERS
+							})
+				)
+			)
+		);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ deltaFailed: 1, rateLimited: 1, searchFailed: 0 });
+		expect(summary.lastDeltaFailure).toMatch(/503/);
+		expect(summary.lastRateLimit).toMatch(/429/);
+		expect(describeSync(summary)).toContain('1 delta page(s) failed (HTTP 503');
+		expect(describeSync(summary)).not.toMatch(/delta page\(s\) failed \(HTTP 429/);
+	});
+
+	// A 4xx delta refusal returns before `call`'s onFail hook, so a non-fatal one used
+	// to leave every counter at zero — a rate-limited run read as a healthy empty feed.
+	// It counts as a rate limit, not a failure: the admin toast sums deltaFailed into
+	// "failed", and a shared limiter is not a broken fork.
+	it('counts a non-fatal delta refusal (429) as back-pressure and names it', async () => {
+		const db = makeDb();
+		stubDeltaResponse(429, { error: 'rate limited — slow down' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ rateLimited: 1, deltaFailed: 0 });
+		expect(summary.lastRateLimit).toMatch(/429/);
+		expect(summary.lastDeltaFailure).toBeUndefined();
+	});
+
+	// A non-fatal 4xx that is NOT back-pressure is still a failed page.
+	it('counts a non-fatal delta refusal (400) as a failed page', async () => {
+		const db = makeDb();
+		stubDeltaResponse(400, { error: 'bad cursor' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ rateLimited: 0, deltaFailed: 1 });
+		expect(summary.lastDeltaFailure).toMatch(/HTTP 400: bad cursor/);
+	});
+
+	// describeOpaqueRefusal already writes its own "HTTP <status>" prefix, so prefixing
+	// again printed "HTTP 403: HTTP 403 (cf-ray …)" in the job log.
+	it('does not double the status when the refusal reason already names it', async () => {
+		const db = makeDb();
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(new Response('<html/>', { status: 400, headers: { 'cf-ray': 'a3e7bc522cbfa3c2-SEA' } }))
+			)
+		);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ deltaFailed: 1 });
+		expect(summary.lastDeltaFailure).toBe('HTTP 400 (cf-ray a3e7bc522cbfa3c2 SEA)');
+	});
+
+	// The counterpart: deciding the prefix by TEXT let a registry-authored 400 whose
+	// message happens to start with "HTTP " be reported unprefixed, naming a status
+	// the response never had. The prefix follows the SOURCE of the message.
+	it('still prefixes the real status when the registry wrote a message starting with "HTTP "', async () => {
+		const db = makeDb();
+		stubDeltaResponse(400, { error: 'HTTP 429 too many requests from your fork' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ rateLimited: 0, deltaFailed: 1 });
+		expect(summary.lastDeltaFailure).toBe('HTTP 400: HTTP 429 too many requests from your fork');
+	});
+
+	it('does NOT throw when some searches got through, but counts and names the failures', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		// First search fails (5xx), the rest are healthy and empty.
+		stubSearch(searchStatuses(502, 200));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 3, searchFailed: 1, linked: 0 });
+		expect(summary.lastSearchFailure).toMatch(/HTTP 502/);
+	});
+
+	it('reports zero failures and no reason on a fully healthy run', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 2);
+		stubRegistry([]);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 2, searchFailed: 0, rateLimited: 0, deltaFailed: 0 });
+		expect(summary.lastSearchFailure).toBeUndefined();
+		expect(summary.lastRateLimit).toBeUndefined();
+		expect(summary.lastDeltaFailure).toBeUndefined();
+	});
+
+	// Nothing to judge: a fork with no unlinked artists never searches, so an outage
+	// elsewhere must not turn its run red.
+	it('does not throw when there was nothing to search, even if the registry is down', async () => {
+		const db = makeDb();
+		vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 0, searchFailed: 0, deltaFailed: 1 });
+		expect(summary.lastDeltaFailure).toBe('offline');
+	});
+
+	it('counts a delta page that failed soft (5xx) and names it', async () => {
+		const db = makeDb();
+		stubDeltaResponse(503, { error: 'registry down' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ deltaFailed: 1 });
+		expect(summary.lastDeltaFailure).toMatch(/HTTP 503/);
+	});
+});
+
+describe('describeSync', () => {
+	it('is the old two-number line when nothing degraded', () => {
+		expect(
+			describeSync({
+				refreshed: 2,
+				linked: 1,
+				scanned: 4,
+				searchFailed: 0,
+				rateLimited: 0,
+				deltaFailed: 0
+			})
+		).toBe('refreshed 2, linked 1');
+	});
+
+	it('names how many searches failed and why', () => {
+		expect(
+			describeSync({
+				refreshed: 0,
+				linked: 0,
+				scanned: 20,
+				searchFailed: 3,
+				rateLimited: 0,
+				deltaFailed: 0,
+				lastSearchFailure: 'HTTP 502 (cf-ray x-SEA)'
+			})
+		).toBe('refreshed 0, linked 0, 3 of 20 searches failed (HTTP 502 (cf-ray x-SEA))');
+	});
+
+	it('names failed delta pages', () => {
+		expect(
+			describeSync({
+				refreshed: 0,
+				linked: 0,
+				scanned: 0,
+				searchFailed: 0,
+				rateLimited: 0,
+				deltaFailed: 2,
+				lastDeltaFailure: 'HTTP 503: registry down'
+			})
+		).toBe('refreshed 0, linked 0, 2 delta page(s) failed (HTTP 503: registry down)');
+	});
+
+	// A rate-limited search never counts as a failure, so it needs a clause of its own —
+	// otherwise that run reports nothing at all.
+	it('names rate-limited searches in their own clause', () => {
+		expect(
+			describeSync({
+				refreshed: 0,
+				linked: 0,
+				scanned: 3,
+				searchFailed: 0,
+				rateLimited: 3,
+				deltaFailed: 0,
+				lastRateLimit: 'HTTP 429'
+			})
+		).toBe('refreshed 0, linked 0, 3 calls rate-limited (HTTP 429)');
+	});
+
+	// Each clause carries its own reason: the shared field used to print whichever
+	// failure happened last next to every count.
+	it('keeps three causes apart in one line', () => {
+		expect(
+			describeSync({
+				refreshed: 1,
+				linked: 0,
+				scanned: 5,
+				searchFailed: 2,
+				rateLimited: 3,
+				deltaFailed: 1,
+				lastSearchFailure: 'HTTP 502',
+				lastRateLimit: 'HTTP 429',
+				lastDeltaFailure: 'HTTP 503: registry down'
+			})
+		).toBe(
+			'refreshed 1, linked 0, 2 of 5 searches failed (HTTP 502), 3 calls rate-limited (HTTP 429), 1 delta page(s) failed (HTTP 503: registry down)'
+		);
 	});
 });

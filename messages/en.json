@@ -655,6 +655,7 @@
 	"admin_artists_registry_submitted": "Submitted to the registry for review",
 	"admin_artists_registry_failed": "Registry submit failed",
 	"admin_artists_registry_refused": "The shared registry refused this site's key, so sharing status below may be incomplete. Check the registry connection in Settings. Registry said: {reason}",
+	"admin_artists_registry_unreachable": "Couldn't reach the shared registry, so sharing status below may be incomplete. ({reason})",
 	"admin_artists_submit_registry": "Submit to shared registry",
 	"admin_artists_up_to_date": "Already up to date in the shared registry",
 	"admin_artists_alias_linked": "This entry is an AKA of {name} in the registry — sharing is disabled so it doesn't propose renaming that artist.",
@@ -1156,6 +1157,38 @@
 	"admin_settings_sync_complete": "Sync complete",
 	"admin_settings_sync_failed": "Sync failed",
 	"admin_settings_sync_refused": "The shared registry refused this site's key. Check the registry connection below. ({reason})",
+	"admin_settings_sync_upstream_failed": "Couldn't reach the shared registry, so this run is incomplete. ({reason})",
+	"admin_settings_sync_summary": "Sync complete: {refreshed} refreshed, {linked} newly linked.",
+	"admin_settings_sync_degraded": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} registry call failed this run, so these counts are incomplete.",
+				"countPlural=other": "{count} registry calls failed this run, so these counts are incomplete."
+			}
+		}
+	],
+	"admin_settings_sync_rate_limited": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} registry call was rate limited this run and did not complete.",
+				"countPlural=other": "{count} registry calls were rate limited this run and did not complete."
+			}
+		}
+	],
 	"admin_settings_registry_sync": "Registry Sync",
 	"admin_settings_registry_sync_desc": "Pull artist updates from the shared registry now, and link any local artists already in it. (This also runs on a schedule via the sync cron.)",
 	"admin_settings_syncing": "Syncing…",

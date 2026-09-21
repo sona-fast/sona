@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
-import { siteSettings } from '$lib/server/db/schema';
+import { artists, siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import { POST } from './+server';
 
@@ -36,6 +36,46 @@ function makeDb() {
 			context: { waitUntil: (p: Promise<unknown>) => waits.push(p) }
 		} as unknown as App.Platform
 	};
+}
+
+/** N local artists with a handle and no globalId — i.e. N backfill searches. */
+async function seedUnlinked(db: ReturnType<typeof drizzle>, n: number) {
+	const now = new Date().toISOString();
+	await db.insert(artists).values(
+		Array.from({ length: n }, (_, i) => ({
+			name: `a${i}`,
+			twitterUrl: `https://twitter.com/a${i}`,
+			createdAt: now
+		}))
+	);
+}
+
+const JSON_HEADERS = { 'content-type': 'application/json' };
+/** A healthy, empty delta page. */
+const emptyDelta = () =>
+	new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+		status: 200,
+		headers: JSON_HEADERS
+	});
+/** A healthy, empty search answer. */
+const emptySearch = () => new Response(JSON.stringify({ artists: [] }), { status: 200, headers: JSON_HEADERS });
+
+/**
+ * Route registry HTTP by endpoint: `search` answers /v1/artists/search, `delta`
+ * answers the feed. Either side defaults to a healthy empty answer, so a test only
+ * states the half it is about.
+ */
+function mockRegistry(opts: { search?: () => Response; delta?: () => Response }) {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists/search')
+					? (opts.search ?? emptySearch)()
+					: (opts.delta ?? emptyDelta)()
+			)
+		)
+	);
 }
 
 function postEvent(platform: App.Platform) {
@@ -111,6 +151,12 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 
 		const res = await POST(postEvent(platform));
 		expect(res.status).toBe(200);
+		// A 429 is back-pressure, so it counts as a rate limit rather than a failed page.
+		// The reason quotes an upstream body; it stays in job_run, out of the response the
+		// sync workflow prints into a public log.
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body).toMatchObject({ rateLimited: 1, deltaFailed: 0 });
+		expect(body).not.toHaveProperty('lastRateLimit');
 		await Promise.all(waits);
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -137,7 +183,15 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 			)
 		);
 
-		await expect(POST(postEvent(platform))).rejects.toThrow(/401.*invalid fork key/);
+		// Not a throw: rethrowing became SvelteKit's generic 500 "Internal Error", which
+		// is what the workflow log showed while the real reason sat unseen in job_run.
+		// The run must still go red (non-2xx), but the body has to name the cause.
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as { ok: boolean; error: string; upstreamStatus: number };
+		expect(body.ok).toBe(false);
+		expect(body.error).toMatch(/401.*invalid fork key/);
+		expect(body.upstreamStatus).toBe(401);
 		await Promise.all(waits);
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -147,5 +201,171 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		expect(row?.status).toBe('failed');
 		expect(row?.status).not.toBe('ok');
 		expect(row?.detail).toMatch(/401/);
+	});
+
+	// The 2026-09-17 shape: a zone bot rule challenged every Worker fetch to the
+	// registry. The delta feed came back 403 with an HTML challenge page, every search
+	// came back the same way, and the endpoint answered a bare "Internal Error".
+	it('502s with the Cloudflare mitigation named when a challenge page answers the delta feed', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(
+					new Response('<html>Just a moment...</html>', {
+						status: 403,
+						headers: {
+							'content-type': 'text/html',
+							'cf-mitigated': 'challenge',
+							'cf-ray': 'a3e7bc522cbfa3c2-SEA'
+						}
+					})
+				)
+			)
+		);
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as { error: string; upstreamStatus: number };
+		expect(body.error).toContain('blocked by a Cloudflare challenge in front of the registry');
+		expect(body.error).toContain('cf-ray a3e7bc522cbfa3c2 SEA');
+		// The opaque reason already names the status; it must not be doubled.
+		expect(body.error).not.toMatch(/HTTP 403.*HTTP 403/);
+		expect(body.upstreamStatus).toBe(403);
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any).prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'").get();
+		expect(row?.status).toBe('failed');
+		expect(row?.detail).toContain('Cloudflare challenge');
+		// The ray id survives the detail's 20-char token redaction, which is the whole
+		// reason it is stored as "<id> <colo>" rather than the raw header value.
+		expect(row?.detail).toContain('a3e7bc522cbfa3c2');
+	});
+
+	// The workflow prints this body into a PUBLIC Actions log, and the reason is an
+	// upstream string we don't control. It gets the same redaction as job_run.detail.
+	it('redacts an email or token echoed back inside the registry reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'revoked-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response(
+								JSON.stringify({
+									error: 'no fork for owner@example.com with key sk_live_0123456789abcdefghij'
+								}),
+								{ status: 401, headers: { 'content-type': 'application/json' } }
+							)
+						)
+					: Promise.reject(new Error('offline'))
+			)
+		);
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).not.toContain('owner@example.com');
+		expect(body.error).not.toContain('sk_live_0123456789abcdefghij');
+		expect(body.error).toContain('[redacted]');
+	});
+
+	// One bad search among several is a degraded run, not a failed one: the counters
+	// and the reason land in the job detail while the endpoint still answers 200.
+	it('stays 200 and names the degradation when only some searches failed', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await seedUnlinked(db, 2);
+		let searches = 0;
+		mockRegistry({
+			search: () => (searches++ === 0 ? new Response('bad gateway', { status: 502 }) : emptySearch())
+		});
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(200);
+		// The counters ride in the body so the workflow log shows a degraded run; the
+		// reasons behind them quote an upstream body and stay in job_run.
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body).toMatchObject({ searchFailed: 1, rateLimited: 0, deltaFailed: 0 });
+		expect(body).not.toHaveProperty('lastSearchFailure');
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any).prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'").get();
+		expect(row?.status).toBe('ok');
+		expect(row?.detail).toMatch(/searches failed/);
+	});
+
+	// The other half of the 2026-09-17 shape: the delta feed was fine but every backfill
+	// search was challenged. That run linked nothing and used to answer "ok". It is a
+	// search failure, not a key refusal, so no upstreamStatus rides along.
+	it('502s naming the backfill when every search is challenged and the feed is healthy', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await seedUnlinked(db, 3);
+		mockRegistry({
+			search: () => new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+		});
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as {
+			ok: boolean;
+			error: string;
+			upstreamStatus?: number;
+		};
+		expect(body.ok).toBe(false);
+		expect(body.error).toMatch(/all 3 backfill searches failed/);
+		// Only a refusal carries a status; this one came from the searches.
+		expect(body.upstreamStatus).toBeUndefined();
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any)
+			.prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'")
+			.get();
+		expect(row?.status).toBe('failed');
+	});
+
+	// Back-pressure is not a fault: a run whose every search was 429'd stays green, but
+	// it did no backfill, so the count has to reach the workflow log to say so.
+	it('stays 200 and counts a fully rate-limited backfill apart from failures', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await seedUnlinked(db, 3);
+		mockRegistry({ search: () => new Response('slow down', { status: 429 }) });
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body).toMatchObject({ rateLimited: 3, searchFailed: 0, deltaFailed: 0 });
+		expect(body).not.toHaveProperty('lastRateLimit');
+	});
+
+	// A D1 failure is still our bug: it must keep propagating as a real 500, not be
+	// dressed up as an upstream refusal.
+	it('still throws (500) on an unrelated exception such as a database error', async () => {
+		const { db, platform, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(
+					new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+						status: 200,
+						headers: { 'content-type': 'application/json' }
+					})
+				)
+			)
+		);
+		// Drop only the table the backfill reads: the registry gate (site_settings) still
+		// passes, so the failure happens INSIDE syncArtists and hits the catch boundary
+		// this test exists to pin. Replacing the whole binding would fail before it.
+		sqlite.exec('DROP TABLE artists');
+
+		await expect(POST(postEvent(platform))).rejects.toThrow(/Failed query/);
 	});
 });

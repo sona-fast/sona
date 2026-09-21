@@ -372,16 +372,48 @@ describe('admin artists load — catalog refusal is surfaced, not silently empty
 		};
 		// The registry's own words lead, the protocol status trails.
 		expect(result.registryError).toBe('invalid fork key (HTTP 401)');
+		expect((result as { registryOpaque?: boolean }).registryOpaque).toBe(false);
 		expect(result.artists).toHaveLength(1);
 	});
 
+	// An opaque refusal (a challenge page answered instead of the registry) already
+	// names its status, so the trailing "(HTTP 403)" would print it twice.
+	it('does not double the status when a challenge page answers the delta feed', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response('<html/>', {
+								status: 403,
+								headers: { 'cf-mitigated': 'challenge', 'cf-ray': 'a3e7bc522cbfa3c2-SEA' }
+							})
+						)
+					: Promise.resolve(new Response(JSON.stringify({ submissions: [] })))
+			)
+		);
+
+		const result = (await load(loadEvent(platform))) as {
+			registryError: string | null;
+			registryOpaque: boolean;
+		};
+		expect(result.registryError).toBe(
+			'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray a3e7bc522cbfa3c2 SEA)'
+		);
+		// Not a key problem: the page must not send the operator to rotate a fork key.
+		expect(result.registryOpaque).toBe(true);
+	});
+
 	// Registry text is untrusted cross-tenant input: a long message must not blow out
-	// the page's error line.
+	// the page's error line. (Short words, not one long token: a 20+ character run is
+	// what the redaction treats as a secret and replaces outright.)
 	it('caps the registry reason at 300 characters', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stale-key' });
 		await db.insert(schema.artists).values({ name: 'Nyx', globalId: 'g-1' });
-		const long = 'x'.repeat(1000);
+		const long = Array.from({ length: 200 }, () => 'word').join(' ');
 		vi.stubGlobal(
 			'fetch',
 			vi.fn((input: RequestInfo | URL) =>
@@ -392,7 +424,34 @@ describe('admin artists load — catalog refusal is surfaced, not silently empty
 		);
 
 		const result = (await load(loadEvent(platform))) as { registryError: string | null };
-		expect(result.registryError).toBe('x'.repeat(300) + ' (HTTP 401)');
+		expect(result.registryError).toMatch(/^(word ?){1,}\.?\.?\.? \(HTTP 401\)$/);
+		expect(result.registryError!.length).toBeLessThanOrEqual(300 + ' (HTTP 401)'.length);
+	});
+
+	// The reason is rendered on an admin screen; a refusal that echoes a key or an
+	// address must arrive redacted, the same as every other upstream-reason sink.
+	it('redacts an email and a token echoed in the registry reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stale-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response(
+								JSON.stringify({ error: 'key sk_live_AbCdEfGhIjKlMnOpQrStUv for owner@example.com rejected' }),
+								{ status: 401 }
+							)
+						)
+					: Promise.resolve(new Response(JSON.stringify({ submissions: [] })))
+			)
+		);
+
+		const result = (await load(loadEvent(platform))) as { registryError: string | null };
+		expect(result.registryError).toContain('[redacted]');
+		expect(result.registryError).not.toContain('owner@example.com');
+		expect(result.registryError).not.toContain('sk_live_');
+		expect(result.registryError).toMatch(/\(HTTP 401\)$/);
 	});
 
 	it('leaves registryError null on a transient outage (unchanged fail-soft behaviour)', async () => {

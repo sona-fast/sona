@@ -89,7 +89,11 @@
 <!-- The registry refused this fork's key: the sharing badges below are stale/blank,
      which would otherwise look like "nothing is shared yet". -->
 {#if data.registryError}
-	<p class="error">{m.admin_artists_registry_refused({ reason: data.registryError })}</p>
+	<p class="error">
+		{data.registryOpaque
+			? m.admin_artists_registry_unreachable({ reason: data.registryError })
+			: m.admin_artists_registry_refused({ reason: data.registryError })}
+	</p>
 {/if}
 
 {#if form?.avatarRefresh}

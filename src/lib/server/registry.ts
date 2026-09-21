@@ -140,6 +140,11 @@ function baseUrl(env: Env): string {
 export interface RegistryRefusal {
 	error: string;
 	httpStatus: number;
+	/** True when the body carried no usable message and `error` is our own
+	 *  describeOpaqueRefusal text, which already names the status. Lets a caller
+	 *  decide whether to prefix "HTTP <status>: " by SOURCE rather than by reading
+	 *  the text — a registry-authored message may itself start with "HTTP ". */
+	opaque?: boolean;
 }
 
 /** Narrow a registry result to a refusal. The body is untrusted wire data, so this
@@ -164,35 +169,133 @@ export function isFatalRefusal(status: number): boolean {
 	return status === 401 || status === 403;
 }
 
-/** A fatal registry refusal, thrown by syncArtists so callers can tell it apart from
- *  an unrelated exception (e.g. a D1 error) and show the registry's own reason. */
-export class RegistryRefusalError extends Error {
-	readonly httpStatus: number;
+/** Base for the errors syncArtists throws on purpose. Callers (the cron endpoint,
+ *  the admin "Sync now" action) catch THIS type to hand the reason back as data and
+ *  let any other exception (a D1 error, say) keep propagating as a real 500. */
+export class RegistrySyncError extends Error {
 	readonly reason: string;
-	constructor(httpStatus: number, reason: string) {
-		super(`registry delta refused: HTTP ${httpStatus} — ${reason}`);
-		this.name = 'RegistryRefusalError';
-		this.httpStatus = httpStatus;
+	constructor(message: string, reason: string) {
+		super(message);
+		this.name = 'RegistrySyncError';
 		this.reason = reason;
 	}
+}
+
+/** A fatal registry refusal, thrown by syncArtists so callers can tell it apart from
+ *  an unrelated exception (e.g. a D1 error) and show the registry's own reason.
+ *  `opaque` carries the refusal's flag through: a 403 from a challenge page in front
+ *  of the registry is fatal for this run (nothing gets through) but is NOT a key
+ *  problem, and the admin wording has to tell the two apart. */
+export class RegistryRefusalError extends RegistrySyncError {
+	readonly httpStatus: number;
+	readonly opaque: boolean;
+	constructor(httpStatus: number, reason: string, opaque = false) {
+		// An opaque reason already names the status; prefixing it again printed
+		// "HTTP 403 — HTTP 403: blocked by …" into the public Actions log.
+		super(
+			opaque
+				? `registry delta refused: ${reason}`
+				: `registry delta refused: HTTP ${httpStatus} — ${reason}`,
+			reason
+		);
+		this.name = 'RegistryRefusalError';
+		this.httpStatus = httpStatus;
+		this.opaque = opaque;
+	}
+}
+
+/** Every backfill search in a run failed. Each search fails soft on its own (an
+ *  outage must not abort a run that was doing useful work), but a run in which NONE
+ *  of them got through did no backfill at all, and reporting that as "ok, linked 0"
+ *  is the silent empty result this whole family of checks exists to prevent. */
+export class RegistrySearchError extends RegistrySyncError {
+	constructor(failed: number, lastReason: string) {
+		super(`all ${failed} backfill searches failed: ${lastReason}`, lastReason);
+		this.name = 'RegistrySearchError';
+	}
+}
+
+/** Optional hook for the fail-soft paths in `call`: invoked with a one-line reason
+ *  whenever a request produced NO usable result (timeout, network error, 5xx, or a
+ *  4xx the caller didn't opt to receive as a refusal). Lets a caller count how much
+ *  of a run silently degraded without changing the fallback contract.
+ *
+ *  `httpStatus` is the response's status when the failure came from a response, and
+ *  undefined when nothing answered (timeout or network error) — a caller that treats
+ *  a rate limit or a gateway timeout differently from a real outage needs to tell
+ *  those apart. */
+export interface CallOptions {
+	/** `httpStatus` is undefined when nothing answered. `mitigated` is true when the
+	 *  answer carried a `cf-mitigated` header, i.e. a zone rule in front of the
+	 *  registry blocked or challenged the request: an outage from the caller's view,
+	 *  even though the status is a 4xx. */
+	onFail?: (reason: string, info: { httpStatus?: number; mitigated?: boolean }) => void;
+}
+
+/** Name what answered a 4xx that carried no registry error message. A challenge or
+ *  block from the zone in front of the registry marks itself with `cf-mitigated`
+ *  (its value is the mitigation kind, e.g. "challenge"), and every Cloudflare
+ *  response carries a `cf-ray` id the security event log can be searched by. Naming
+ *  those turns "HTTP 403" — which reads as a registry key problem — into "blocked by
+ *  a Cloudflare challenge", which is a zone setting, and points at the log entry.
+ *
+ *  Both headers come from whatever answered, which on this path is by definition NOT
+ *  the registry — so each is used only if it matches its documented shape, and an
+ *  off-shape value is dropped rather than pasted into a job log and an operator toast.
+ *  The ray is split into id and colo because job_run.detail redacts any 20-character
+ *  token-like run, and the joined "<16 hex>-SEA" form is exactly 20. */
+/** The `cf-mitigated` value when it has the documented shape (a short lowercase
+ *  token such as "challenge" or "block"), else ''. One check shared by the message
+ *  builder and the onFail metadata, so an off-shape header can neither be pasted
+ *  into a toast nor count as an outage. */
+function mitigationKind(res: Response): string {
+	const v = res.headers.get('cf-mitigated');
+	return v && /^[a-z_-]{1,32}$/.test(v) ? v : '';
+}
+
+function describeOpaqueRefusal(res: Response): string {
+	const ray = res.headers.get('cf-ray');
+	const kind = mitigationKind(res);
+	const rayMatch = ray?.match(/^([0-9a-f]{16})-([A-Z]{3})$/);
+	const where = rayMatch ? ` (cf-ray ${rayMatch[1]} ${rayMatch[2]})` : '';
+	if (kind)
+		return `HTTP ${res.status}: blocked by a Cloudflare ${kind} in front of the registry${where}`;
+	return `HTTP ${res.status}${where}`;
 }
 
 async function call<T, R = never>(
 	env: Env | undefined,
 	path: string,
-	init: RequestInit & { auth?: boolean; errorBody?: boolean },
+	init: RequestInit & { auth?: boolean; errorBody?: boolean } & CallOptions,
 	fallback: T
 ): Promise<T | R> {
 	if (!env || !isRegistryEnabled(env)) return fallback;
 	const headers: Record<string, string> = { 'content-type': 'application/json' };
 	if (init.auth) headers['authorization'] = `Bearer ${env.REGISTRY_API_KEY}`;
+	const { onFail, ...rest } = init;
+	// An authenticated call must not follow a redirect: fetch would replay the bearer
+	// header at whatever origin the 3xx names, and REGISTRY_URL is operator-set. A
+	// 3xx comes back as a plain non-ok response and fails soft like any other.
+	if (init.auth) rest.redirect = 'manual';
 	try {
+		// withTimeout folds a rejection into the same null as a timeout; keep the
+		// network error's own message so the two are told apart in the job log.
+		let rejected: string | undefined;
 		const res = await withTimeout(
-			fetch(`${baseUrl(env)}${path}`, { ...init, headers: { ...headers, ...init.headers } }),
+			fetch(`${baseUrl(env)}${path}`, { ...rest, headers: { ...headers, ...rest.headers } }).catch(
+				(e: unknown) => {
+					rejected = e instanceof Error ? e.message : 'request failed';
+					return null;
+				}
+			),
 			TIMEOUT_MS,
 			null
 		);
-		if (!res) return fallback;
+		if (!res) {
+			// Nothing answered, so there is no status to report.
+			onFail?.(rejected ?? `timed out after ${TIMEOUT_MS}ms`, {});
+			return fallback;
+		}
 		if (!res.ok) {
 			// Opt-in: surface a 4xx refusal's body (it carries the registry's reason,
 			// e.g. "artist was removed from the registry") as a typed RegistryRefusal
@@ -207,20 +310,26 @@ async function call<T, R = never>(
 				// Blank counts as absent: `{"error":""}` would otherwise reach the operator
 				// as a refusal with nothing in it, which reads as a bug in our own UI.
 				const reason = typeof body?.error === 'string' ? body.error.trim() : '';
-				const error = reason || `HTTP ${res.status}`;
-				return { error, httpStatus: res.status } as R;
+				if (reason) return { error: reason, httpStatus: res.status } as R;
+				return { error: describeOpaqueRefusal(res), httpStatus: res.status, opaque: true } as R;
 			}
+			onFail?.(describeOpaqueRefusal(res), {
+				httpStatus: res.status,
+				mitigated: mitigationKind(res) !== ''
+			});
 			return fallback;
 		}
 		return (await res.json()) as T;
-	} catch {
+	} catch (e) {
+		onFail?.(e instanceof Error ? e.message : 'request failed', {});
 		return fallback;
 	}
 }
 
 export async function registrySearch(
 	env: Env | undefined,
-	params: { q?: string; handle?: string }
+	params: { q?: string; handle?: string },
+	opts: CallOptions = {}
 ): Promise<RegistryArtist[]> {
 	const qs = new URLSearchParams();
 	if (params.q) qs.set('q', params.q);
@@ -228,7 +337,7 @@ export async function registrySearch(
 	const out = await call<{ artists: RegistryArtist[] }>(
 		env,
 		`/v1/artists/search?${qs.toString()}`,
-		{ method: 'GET' },
+		{ method: 'GET', ...opts },
 		{ artists: [] }
 	);
 	return out.artists ?? [];
@@ -248,7 +357,8 @@ export async function registryGetArtist(
 
 export async function registryDelta(
 	env: Env | undefined,
-	params: { updatedSince?: string; cursor?: string; limit?: number }
+	params: { updatedSince?: string; cursor?: string; limit?: number },
+	opts: CallOptions = {}
 ): Promise<{ artists: RegistryArtist[]; nextCursor: string | null } | RegistryRefusal> {
 	const qs = new URLSearchParams();
 	if (params.cursor) qs.set('cursor', params.cursor);
@@ -262,7 +372,7 @@ export async function registryDelta(
 		// errorBody: a 4xx here (e.g. 401 from a bad/missing key) must NOT collapse
 		// into an empty page — that's indistinguishable from "no new artists" and
 		// would silently stop imports forever. 5xx/network still fail soft.
-		{ method: 'GET', auth: true, errorBody: true },
+		{ method: 'GET', auth: true, errorBody: true, ...opts },
 		{ artists: [], nextCursor: null }
 	);
 }

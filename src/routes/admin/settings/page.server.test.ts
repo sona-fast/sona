@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
-import { siteSettings } from '$lib/server/db/schema';
+import { artists, siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import {
 	FUZZYSEARCH_API_KEY_SETTING,
@@ -811,6 +811,44 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 		return { platform } as never;
 	}
 
+	/** N local artists with a handle and no globalId — i.e. N backfill searches. */
+	async function seedUnlinked(db: ReturnType<typeof makeDb>['db'], n: number) {
+		const now = new Date().toISOString();
+		await db.insert(artists).values(
+			Array.from({ length: n }, (_, i) => ({
+				name: `a${i}`,
+				twitterUrl: `https://twitter.com/a${i}`,
+				createdAt: now
+			}))
+		);
+	}
+
+	const JSON_HEADERS = { 'content-type': 'application/json' };
+	const emptyDelta = () =>
+		new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+			status: 200,
+			headers: JSON_HEADERS
+		});
+	const emptySearch = () =>
+		new Response(JSON.stringify({ artists: [] }), { status: 200, headers: JSON_HEADERS });
+
+	/**
+	 * Route registry HTTP by endpoint, so a test states only the half it is about.
+	 * Either side may answer with a rejection instead of a response.
+	 */
+	function mockRegistry(opts: {
+		search?: () => Response | Promise<Response>;
+		delta?: () => Response | Promise<Response>;
+	}) {
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists/search')
+					? (opts.search ?? emptySearch)()
+					: (opts.delta ?? emptyDelta)()
+			)
+		);
+	}
+
 	// The action must hand back a REASON, not the thrown message: the page wraps it in
 	// m.admin_settings_sync_refused so a Japanese operator doesn't get English internals.
 	it('502s with the registry reason (and no raw message) when the fork key is refused', async () => {
@@ -829,13 +867,109 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			status: number;
-			data: { syncRefusedReason?: string; error?: string };
+			data: { syncRefusedReason?: string; syncUpstreamReason?: string; error?: string };
 		};
 
 		expect(result.status).toBe(502);
 		expect(result.data.syncRefusedReason).toBe('invalid fork key');
+		// The key really is the problem here, so it takes the key-specific toast.
+		expect(result.data.syncUpstreamReason).toBeUndefined();
 		// No untranslated internals ("registry delta refused: HTTP 401 …") in the payload.
 		expect(result.data.error).toBeUndefined();
+	});
+
+	// A blocked search is not a key problem. Routing it through syncRefusedReason told
+	// the operator to "check the registry connection below" while the key was fine, so
+	// an unreachable registry gets its own reason field and its own wording.
+	it('502s with an upstream reason (not a key refusal) when every search is challenged', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		await seedUnlinked(db, 3);
+		mockRegistry({
+			search: () => new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+		});
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncRefusedReason?: string; syncUpstreamReason?: string; error?: string };
+		};
+
+		expect(result.status).toBe(502);
+		expect(result.data.syncUpstreamReason).toMatch(/blocked by a Cloudflare challenge/);
+		expect(result.data.syncRefusedReason).toBeUndefined();
+		expect(result.data.error).toBeUndefined();
+	});
+
+	// The 2026-09-17 incident on the admin surface: the delta feed itself answered with
+	// a challenge page. That refusal is fatal (nothing got through) but it is not a key
+	// problem, so it must NOT take the "check this site's key" wording.
+	it('502s with the unreachable-registry wording when a challenge page answers the delta feed', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(
+					new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+				)
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncRefusedReason?: string; syncUpstreamReason?: string };
+		};
+
+		expect(result.status).toBe(502);
+		expect(result.data.syncUpstreamReason).toMatch(/blocked by a Cloudflare challenge/);
+		expect(result.data.syncRefusedReason).toBeUndefined();
+	});
+
+	// The reason is an upstream string we don't control, and it lands on an admin screen
+	// (and in a screenshot, and in a support paste). It gets the same redaction the cron
+	// body gets.
+	it('redacts an email echoed back inside the registry reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'revoked-key' });
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists?')
+					? new Response(JSON.stringify({ error: 'no fork for owner@example.com' }), {
+							status: 401,
+							headers: { 'content-type': 'application/json' }
+						})
+					: new Response(JSON.stringify({ artists: [] }), { status: 200 })
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncRefusedReason?: string };
+		};
+
+		expect(result.data.syncRefusedReason).not.toContain('owner@example.com');
+		expect(result.data.syncRefusedReason).toContain('[redacted]');
+	});
+
+	// Same redaction on the OTHER reason field: a network error's message carries
+	// whatever the runtime put in it, and this one lands on an admin screen (and in a
+	// screenshot, and in a support paste).
+	it('redacts an email echoed back inside the search failure reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		await seedUnlinked(db, 3);
+		mockRegistry({
+			search: () => Promise.reject(new Error('connect ECONNREFUSED for owner@example.com'))
+		});
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncUpstreamReason?: string };
+		};
+
+		expect(result.status).toBe(502);
+		expect(result.data.syncUpstreamReason).not.toContain('owner@example.com');
+		expect(result.data.syncUpstreamReason).toContain('[redacted]');
 	});
 
 	it('400s when the shared registry is not configured', async () => {
@@ -859,10 +993,49 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			success: boolean;
-			syncMessage: string;
+			syncCounts: { refreshed: number; linked: number };
+			syncDegraded?: { failed: number; rateLimited: number };
 		};
 		expect(result.success).toBe(true);
-		expect(result.syncMessage).toMatch(/Sync complete/);
+		// Counts, not a sentence: the toast wording is localized on the page.
+		expect(result.syncCounts).toEqual({ refreshed: 0, linked: 0 });
+		expect(result.syncDegraded).toBeUndefined();
+	});
+
+	// "0 refreshed, 0 newly linked" is the same sentence whether there was nothing to
+	// do or nothing got through. Pass the failure count so the toast can say which.
+	it('reports how many registry calls failed on a partially degraded run', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		await seedUnlinked(db, 2);
+		let searches = 0;
+		mockRegistry({
+			search: () => (searches++ === 0 ? new Response('bad gateway', { status: 502 }) : emptySearch())
+		});
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			success: boolean;
+			syncDegraded?: { failed: number; rateLimited: number };
+		};
+		expect(result.success).toBe(true);
+		expect(result.syncDegraded).toEqual({ failed: 1, rateLimited: 0 });
+	});
+
+	// A rate limit never fails the run, but a run whose every search was 429'd did no
+	// backfill at all — reporting it as a clean "0 refreshed, 0 newly linked" is the
+	// silent empty result the rest of this change exists to prevent.
+	it('reports rate-limited calls separately on a run that was all back-pressure', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		await seedUnlinked(db, 3);
+		mockRegistry({ search: () => new Response('slow down', { status: 429 }) });
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			success: boolean;
+			syncDegraded?: { failed: number; rateLimited: number };
+		};
+		expect(result.success).toBe(true);
+		expect(result.syncDegraded).toEqual({ failed: 0, rateLimited: 3 });
 	});
 });
 

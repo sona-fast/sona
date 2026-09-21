@@ -134,6 +134,36 @@ describe('recordError — capped ring', () => {
 		expect(rows[0].message.length).toBeLessThanOrEqual(300);
 	});
 
+	// An upstream body can carry ANSI escapes or invisible characters, and samples get
+	// printed into a public Actions log — where they could colour-forge a log line.
+	it('strips control and zero-width characters, keeping the words around them', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		const esc = String.fromCharCode(27);
+		await recordError(db, {
+			route: 'x',
+			status: 502,
+			message: `up${esc}[31mstream​ failed line one\nline two`
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain(esc);
+		expect(row.message).not.toContain('​');
+		expect(row.message).not.toContain('');
+		// Words survive: the escape's payload is inert text and the newline still
+		// becomes a space rather than fusing "one" and "line".
+		expect(row.message).toBe('up[31mstream failed line one line two');
+	});
+
+	it('keeps form feed, vertical tab and next-line as word separators', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, { route: 'x', status: 502, message: 'one\ftwo\vthreefour' });
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('one two three four');
+	});
+
 	it('redacts email addresses and long token-like runs (no PII/secrets stored)', async () => {
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));

@@ -25,6 +25,7 @@ import { fetchRegistryCatalog } from '$lib/server/registry-import';
 import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
 import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registry-submissions';
 import { getRawSetting, setRawSetting, getSettings } from '$lib/server/settings';
+import { cleanMessage } from '$lib/server/metrics';
 import { parseDismissed, addDismissed } from '$lib/server/registry-dismissals';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -110,6 +111,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// shared yet". Null on an outage or a transient refusal (429): those still degrade
 	// silently as they always have — see isFatalRefusal.
 	let registryError: string | null = null;
+	// True when what answered was not the registry (a challenge page): the page then
+	// says the registry was unreachable rather than telling the operator to check a
+	// fork key that is fine.
+	let registryOpaque = false;
 	if (registryEnabled) {
 		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
 		// A dismissed rejection is acknowledged locally — drop it so it stops showing.
@@ -119,10 +124,17 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// (just below) and to compute per-artist up-to-date state (further down).
 		const catalogResult = await fetchRegistryCatalog(renv);
 		if (isRegistryRefusal(catalogResult)) {
-			// Registry text is untrusted input — cap it so a long message can't blow out
-			// the page's error line. The registry's own words lead and the protocol status
-			// trails in parens (same shape as admin_artists_rejected_note).
-			registryError = `${catalogResult.error.slice(0, 300)} (HTTP ${catalogResult.httpStatus})`;
+			// Registry text is untrusted input: it gets the same redaction (emails, tokens,
+			// control characters) and 300-char clamp as every other place an upstream
+			// reason lands, so a refusal that echoes a key can't reach the screen. The
+			// registry's own words lead and the protocol status trails in parens (same
+			// shape as admin_artists_rejected_note). An opaque refusal's text already names
+			// the status, so it gets no second one.
+			registryOpaque = catalogResult.opaque === true;
+			const reason = cleanMessage(catalogResult.error);
+			registryError = catalogResult.opaque
+				? reason
+				: `${reason} (HTTP ${catalogResult.httpStatus})`;
 		}
 		const catalog = isRegistryRefusal(catalogResult) ? [] : catalogResult;
 		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
@@ -206,6 +218,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		q,
 		registryEnabled,
 		registryError,
+		registryOpaque,
 		registryStatus,
 		upToDate,
 		aliasLinked
