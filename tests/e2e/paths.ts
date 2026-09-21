@@ -105,3 +105,17 @@ export const E2E_PLATFORM_PERSIST_THEME = path.join(E2E_PERSIST_TO_THEME, 'v3');
 export const E2E_STICKERS_OVERLAY = path.join(here, 'fixtures', 'stickers.sql');
 export const E2E_PERSIST_TO_STICKERS = path.join(persistRoot, '.wrangler-e2e-stickers');
 export const E2E_PLATFORM_PERSIST_STICKERS = path.join(E2E_PERSIST_TO_STICKERS, 'v3');
+
+// The registry-sync spec clicks the admin "Sync now" button with the shared
+// registry turned ON (REGISTRY_API_KEY + REGISTRY_URL in
+// wrangler.e2e-registry.toml), which makes the settings and artists loads call
+// the registry server-side. That can't run on the shared server (no key there,
+// on purpose), so it gets its OWN wrangler config, throwaway DB and dev server,
+// with the registry interceptor preloaded. The spec steers the interceptor by
+// writing a scenario file it reads on every request; it lives under the persist
+// dir so seed.ts's wipe clears it before each run.
+export const E2E_WRANGLER_CONFIG_REGISTRY = path.join(here, 'wrangler.e2e-registry.toml');
+export const E2E_PERSIST_TO_REGISTRY = path.join(persistRoot, '.wrangler-e2e-registry');
+export const E2E_PLATFORM_PERSIST_REGISTRY = path.join(E2E_PERSIST_TO_REGISTRY, 'v3');
+export const E2E_REGISTRY_MOCK = path.join(here, 'registry-mock.mjs');
+export const E2E_REGISTRY_SCENARIO = path.join(E2E_PERSIST_TO_REGISTRY, 'registry-scenario.json');
