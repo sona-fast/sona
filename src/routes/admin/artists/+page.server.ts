@@ -121,8 +121,11 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		if (isRegistryRefusal(catalogResult)) {
 			// Registry text is untrusted input — cap it so a long message can't blow out
 			// the page's error line. The registry's own words lead and the protocol status
-			// trails in parens (same shape as admin_artists_rejected_note).
-			registryError = `${catalogResult.error.slice(0, 300)} (HTTP ${catalogResult.httpStatus})`;
+			// trails in parens (same shape as admin_artists_rejected_note). An opaque
+			// refusal's text already names the status, so it gets no second one.
+			registryError = catalogResult.opaque
+				? catalogResult.error.slice(0, 300)
+				: `${catalogResult.error.slice(0, 300)} (HTTP ${catalogResult.httpStatus})`;
 		}
 		const catalog = isRegistryRefusal(catalogResult) ? [] : catalogResult;
 		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));

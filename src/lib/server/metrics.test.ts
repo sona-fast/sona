@@ -155,6 +155,15 @@ describe('recordError — capped ring', () => {
 		expect(row.message).toBe('up[31mstream failed line one line two');
 	});
 
+	it('keeps form feed, vertical tab and next-line as word separators', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, { route: 'x', status: 502, message: 'one\ftwo\vthreefour' });
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('one two three four');
+	});
+
 	it('redacts email addresses and long token-like runs (no PII/secrets stored)', async () => {
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));

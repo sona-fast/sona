@@ -668,15 +668,17 @@ export const actions = {
 			// registry's own reason back as data so the page renders a LOCALIZED message
 			// around it, instead of a bare 500 page or an untranslated internal string. The
 			// reason quotes an upstream body we don't control, so it gets the same redaction
-			// the cron 502 body and job_run.detail get before it reaches a screen.
-			if (e instanceof RegistryRefusalError)
-				return fail(502, { syncRefusedReason: cleanMessage(e.reason).slice(0, 300) });
+			// (and 300-char clamp) the cron 502 body and job_run.detail get.
+			// An OPAQUE refusal (a challenge page answered instead of the registry) is not
+			// a key problem, however fatal: it takes the unreachable-registry wording.
+			if (e instanceof RegistryRefusalError && !e.opaque)
+				return fail(502, { syncRefusedReason: cleanMessage(e.reason) });
 			// Any other upstream failure (every backfill search blocked, say) gets its own
 			// reason field: the refusal toast tells the operator to check this site's key,
 			// which is the wrong place to look when the key is fine and the registry is
 			// simply unreachable.
 			if (e instanceof RegistrySyncError)
-				return fail(502, { syncUpstreamReason: cleanMessage(e.reason).slice(0, 300) });
+				return fail(502, { syncUpstreamReason: cleanMessage(e.reason) });
 			// Any other exception (a D1 error, say) must not be echoed verbatim to the
 			// operator: return no payload so the page shows its generic sync-failed toast.
 			return fail(500, {});

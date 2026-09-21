@@ -251,13 +251,15 @@ function cleanSegment(segment: string): string {
 	// — and lossy: a genuine '←' in an error message becomes '<-'.
 	// Control and format characters go FIRST: an upstream error body can carry ANSI
 	// escapes or zero-width characters, and a stored sample ends up printed in a
-	// public Actions log, where they could forge log lines or hide text. Tab, newline
-	// and carriage return are spared so the whitespace collapse below turns them into
-	// a space instead of fusing the words around them.
+	// public Actions log, where they could forge log lines or hide text. The
+	// whitespace-class control characters (tab, newline, CR, vertical tab, form feed,
+	// next line) are spared so the collapse below turns them into a space instead of
+	// fusing the words around them. U+0085 is listed in the collapse by hand because
+	// JavaScript's \s does not include it.
 	let s = (segment ?? '')
-		.replace(/(?![\n\r\t])[\p{Cc}\p{Cf}]/gu, '')
+		.replace(/(?![\n\r\t\v\f])[\p{Cc}\p{Cf}]/gu, '')
 		.replace(/←/g, '<-')
-		.replace(/\s+/g, ' ')
+		.replace(/[\s]+/g, ' ')
 		.trim();
 	// Pre-clamp (see REDACT_INPUT_MAX); also drop the partial trailing run the
 	// cut can strand (a sub-20-char secret/email fragment the rules below miss).

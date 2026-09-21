@@ -375,6 +375,31 @@ describe('admin artists load — catalog refusal is surfaced, not silently empty
 		expect(result.artists).toHaveLength(1);
 	});
 
+	// An opaque refusal (a challenge page answered instead of the registry) already
+	// names its status, so the trailing "(HTTP 403)" would print it twice.
+	it('does not double the status when a challenge page answers the delta feed', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response('<html/>', {
+								status: 403,
+								headers: { 'cf-mitigated': 'challenge', 'cf-ray': 'a3e7bc522cbfa3c2-SEA' }
+							})
+						)
+					: Promise.resolve(new Response(JSON.stringify({ submissions: [] })))
+			)
+		);
+
+		const result = (await load(loadEvent(platform))) as { registryError: string | null };
+		expect(result.registryError).toBe(
+			'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray a3e7bc522cbfa3c2 SEA)'
+		);
+	});
+
 	// Registry text is untrusted cross-tenant input: a long message must not blow out
 	// the page's error line.
 	it('caps the registry reason at 300 characters', async () => {

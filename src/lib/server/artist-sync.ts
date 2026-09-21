@@ -340,7 +340,7 @@ export async function syncArtists(
 	// "Sync now" action turns this into a form error. Only 401/403 gets here (see
 	// isFatalRefusal) — a rate-limit must not fail an otherwise healthy run.
 	if (refusal && isFatalRefusal(refusal.httpStatus)) {
-		throw new RegistryRefusalError(refusal.httpStatus, refusal.error);
+		throw new RegistryRefusalError(refusal.httpStatus, refusal.error, refusal.opaque === true);
 	}
 	// Same reasoning for the backfill: one failed search is noise, but a run in which
 	// EVERY search failed did nothing and must not read as a healthy "linked 0". (When

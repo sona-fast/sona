@@ -900,6 +900,31 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 		expect(result.data.error).toBeUndefined();
 	});
 
+	// The 2026-09-17 incident on the admin surface: the delta feed itself answered with
+	// a challenge page. That refusal is fatal (nothing got through) but it is not a key
+	// problem, so it must NOT take the "check this site's key" wording.
+	it('502s with the unreachable-registry wording when a challenge page answers the delta feed', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(
+					new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+				)
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncRefusedReason?: string; syncUpstreamReason?: string };
+		};
+
+		expect(result.status).toBe(502);
+		expect(result.data.syncUpstreamReason).toMatch(/blocked by a Cloudflare challenge/);
+		expect(result.data.syncRefusedReason).toBeUndefined();
+	});
+
 	// The reason is an upstream string we don't control, and it lands on an admin screen
 	// (and in a screenshot, and in a support paste). It gets the same redaction the cron
 	// body gets.

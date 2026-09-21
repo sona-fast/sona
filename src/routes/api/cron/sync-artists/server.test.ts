@@ -230,6 +230,8 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		const body = (await res.json()) as { error: string; upstreamStatus: number };
 		expect(body.error).toContain('blocked by a Cloudflare challenge in front of the registry');
 		expect(body.error).toContain('cf-ray a3e7bc522cbfa3c2 SEA');
+		// The opaque reason already names the status; it must not be doubled.
+		expect(body.error).not.toMatch(/HTTP 403.*HTTP 403/);
 		expect(body.upstreamStatus).toBe(403);
 		await Promise.all(waits);
 

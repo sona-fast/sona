@@ -182,13 +182,25 @@ export class RegistrySyncError extends Error {
 }
 
 /** A fatal registry refusal, thrown by syncArtists so callers can tell it apart from
- *  an unrelated exception (e.g. a D1 error) and show the registry's own reason. */
+ *  an unrelated exception (e.g. a D1 error) and show the registry's own reason.
+ *  `opaque` carries the refusal's flag through: a 403 from a challenge page in front
+ *  of the registry is fatal for this run (nothing gets through) but is NOT a key
+ *  problem, and the admin wording has to tell the two apart. */
 export class RegistryRefusalError extends RegistrySyncError {
 	readonly httpStatus: number;
-	constructor(httpStatus: number, reason: string) {
-		super(`registry delta refused: HTTP ${httpStatus} — ${reason}`, reason);
+	readonly opaque: boolean;
+	constructor(httpStatus: number, reason: string, opaque = false) {
+		// An opaque reason already names the status; prefixing it again printed
+		// "HTTP 403 — HTTP 403: blocked by …" into the public Actions log.
+		super(
+			opaque
+				? `registry delta refused: ${reason}`
+				: `registry delta refused: HTTP ${httpStatus} — ${reason}`,
+			reason
+		);
 		this.name = 'RegistryRefusalError';
 		this.httpStatus = httpStatus;
+		this.opaque = opaque;
 	}
 }
 
