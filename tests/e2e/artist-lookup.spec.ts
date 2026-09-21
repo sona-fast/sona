@@ -692,13 +692,25 @@ test.describe('with a key saved', () => {
 		// One line each, not just one row. The note wrapped "entail.dev." onto a
 		// second line for an 8px shortfall, which the row's own gap pays for: three
 		// gaps at 4px instead of 8px buys back 12px (SONA-220).
+		// Measured against the space each item got, not a fixed height: Chromium
+		// positions glyphs at subpixel offsets on macOS but rounds every advance to
+		// a whole pixel on Linux at 1x, so the same text is about 6% wider on the
+		// CI runner and the 600px column has a few pixels of slack. A pill that
+		// wraps because the column is too narrow for its platform's text is not
+		// what this test is about; a pill that wraps with room to spare is.
 		const button = await page.locator('.tag-check-row .btn').boundingBox();
 		if (!button) throw new Error('the button has no box');
 		expect(button.height).toBeLessThan(44);
 		for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
-			const box = await page.locator(selector).boundingBox();
-			if (!box) throw new Error(`${selector} has no box`);
-			expect(box.height).toBeLessThan(24);
+			const fit = await page.locator(selector).evaluate((el) => {
+				const box = el.getBoundingClientRect();
+				const row = el.parentElement?.getBoundingClientRect();
+				// scrollWidth is the width the content wants on one line.
+				return { height: box.height, wants: el.scrollWidth, row: row?.width ?? 0 };
+			});
+			expect(fit.row).toBeGreaterThan(0);
+			// Wrapped while the row could have held it on one line: a real defect.
+			if (fit.wants <= fit.row) expect(fit.height).toBeLessThan(24);
 		}
 		await expect(page.locator('.tag-check-row')).toHaveCSS('gap', '4px');
 		// The 4px is between the two rating items, which report the same kind of
