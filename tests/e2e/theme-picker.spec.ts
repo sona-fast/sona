@@ -73,9 +73,13 @@ test('the seeded fork starts on the default theme', async ({ page }) => {
 test('saving Petal repaints the public page', async ({ page }) => {
 	await chooseTheme(page, 'Petal — soft pink');
 
-	await page.goto('/');
-	// SSR writes the id, so this is the server's answer rather than anything the
-	// client did after load.
+	const response = await page.goto('/');
+	// The server's own HTML, before hydration: SSR writes the id and the preload,
+	// and a client that set them after load would still leave this body wrong.
+	const serverHtml = (await response?.text()) ?? '';
+	expect(serverHtml).toContain('data-theme-id="petal"');
+	expect(serverHtml).toContain('href="/fonts/Nunito-latin.woff2"');
+	expect(serverHtml).not.toContain('%preload%');
 	await expect(page.locator('html')).toHaveAttribute('data-theme-id', 'petal');
 	expect(await background(page), 'petal leaves --background at the default value').not.toBe(
 		stockBackground
@@ -94,7 +98,10 @@ test('saving Petal repaints the public page', async ({ page }) => {
 test('choosing the default again puts the fork back', async ({ page }) => {
 	await chooseTheme(page, 'Ember — warm orange (default)');
 
-	await page.goto('/');
+	const response = await page.goto('/');
+	const serverHtml = (await response?.text()) ?? '';
+	expect(serverHtml).toContain('data-theme-id="default"');
+	expect(serverHtml).toContain('href="/fonts/JetBrainsMono-latin.woff2"');
 	await expect(page.locator('html')).toHaveAttribute('data-theme-id', 'default');
 	expect(await background(page)).toBe(stockBackground);
 	await expect(page.locator('head link[rel="preload"][as="font"]')).toHaveAttribute(
