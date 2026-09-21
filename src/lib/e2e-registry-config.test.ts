@@ -12,7 +12,9 @@ describe('the registry e2e config and the interceptor agree on the host', () => 
 	const toml = readFileSync(E2E_WRANGLER_CONFIG_REGISTRY, 'utf8');
 
 	it('names the same registry URL', () => {
-		expect(toml).toMatch(new RegExp(`^REGISTRY_URL = "${E2E_REGISTRY_URL}"$`, 'm'));
+		// Whole-line match, not a regular expression built from the URL: its dots
+		// would otherwise match any character and let a misspelt host through.
+		expect(toml.split('\n')).toContain(`REGISTRY_URL = "${E2E_REGISTRY_URL}"`);
 	});
 
 	it('turns the registry on with a throwaway key', () => {
