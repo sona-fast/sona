@@ -200,6 +200,20 @@ INSERT OR REPLACE INTO vr_avatars
 VALUES
   (4, 'e2e-textured', 'E2E Textured Avatar', 1, '/img/vr-models/e2e-textured.vrm', 'vrm', 3224, 1,
    NULL, NULL, NULL, 0, 0, 1, NULL, '2026-06-29T00:00:00.000Z');
+
+-- Avatar 5 is the only seeded avatar the detail page offers a download for:
+-- permissive license + downloadable + a recorded permission source + a model
+-- key the R2 stub serves, which is every leg of the loader's downloadAllowed
+-- predicate. It reuses avatar 1's stub key (no second R2 object needed) and is
+-- kept separate from avatar 1, whose restrictive license is the point of the
+-- refusal specs. The shared-controls spec measures its download button.
+INSERT OR REPLACE INTO vr_avatars
+  (id, slug, name, character_id, model_url, model_format, model_size_bytes, poster_image_id,
+   external_url, license, permission_source, downloadable, nsfw, published, description, created_at)
+VALUES
+  (5, 'e2e-downloadable', 'E2E Downloadable Avatar', 1, '/img/vr-models/e2e-avatar.vrm', 'vrm', 1234567, 1,
+   NULL, 'cc-by', 'e2e fixture grant', 1, 0, 1, NULL, '2026-06-28T00:00:00.000Z');
+
 INSERT OR REPLACE INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat');
 
 -- Showcase media for avatar 1 (SONA-124 SP1): one image + one clip so the

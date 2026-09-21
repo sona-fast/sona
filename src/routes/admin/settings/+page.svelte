@@ -1659,7 +1659,7 @@
 				}
 			};
 		}}>
-			<button type="submit" class="btn btn-outline" disabled={runningAction === 'export'}>
+			<button type="submit" class="btn btn-outline btn-full-mobile" disabled={runningAction === 'export'}>
 				{runningAction === 'export' ? m.admin_settings_exporting() : m.admin_settings_export()}
 			</button>
 		</form>
@@ -1676,7 +1676,7 @@
 				runningAction = null;
 			};
 		}}>
-			<button type="button" class="btn btn-destructive" disabled={runningAction === 'deleteAll'} onclick={() => (confirmingAction = 'deleteAll')}>
+			<button type="button" class="btn btn-destructive btn-full-mobile" disabled={runningAction === 'deleteAll'} onclick={() => (confirmingAction = 'deleteAll')}>
 				{runningAction === 'deleteAll' ? m.admin_migrate_deleting() : m.admin_settings_delete_all()}
 			</button>
 		</form>
@@ -1693,7 +1693,7 @@
 				runningAction = null;
 			};
 		}}>
-			<button type="button" class="btn btn-destructive" disabled={runningAction === 'clearCache'} onclick={() => (confirmingAction = 'clearCache')}>
+			<button type="button" class="btn btn-destructive btn-full-mobile" disabled={runningAction === 'clearCache'} onclick={() => (confirmingAction = 'clearCache')}>
 				{runningAction === 'clearCache' ? m.admin_settings_clearing() : m.admin_settings_clear_cache_confirm()}
 			</button>
 		</form>
@@ -1710,7 +1710,7 @@
 				runningAction = null;
 			};
 		}}>
-			<button type="button" class="btn btn-destructive" disabled={runningAction === 'resetTags'} onclick={() => (confirmingAction = 'resetTags')}>
+			<button type="button" class="btn btn-destructive btn-full-mobile" disabled={runningAction === 'resetTags'} onclick={() => (confirmingAction = 'resetTags')}>
 				{runningAction === 'resetTags' ? m.admin_settings_resetting() : m.admin_settings_reset_tags_confirm()}
 			</button>
 		</form>
@@ -2535,11 +2535,6 @@
 			flex-direction: column;
 			align-items: stretch;
 			gap: 12px;
-		}
-
-		.export-card .btn,
-		.danger-card .btn {
-			width: 100%;
 		}
 	}
 

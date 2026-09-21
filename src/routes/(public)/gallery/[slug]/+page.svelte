@@ -567,10 +567,6 @@
 		.actions {
 			flex-direction: column;
 		}
-
-		.actions .btn {
-			width: 100%;
-		}
 	}
 
 	.variant-strip {

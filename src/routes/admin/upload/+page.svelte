@@ -2448,9 +2448,5 @@
 		.form-actions {
 			flex-direction: column-reverse;
 		}
-
-		.form-actions .btn {
-			width: 100%;
-		}
 	}
 </style>

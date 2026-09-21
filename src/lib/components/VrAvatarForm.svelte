@@ -579,7 +579,7 @@
 						<label>
 							<span>{m.admin_field_artist()}</span>
 							<div class="artist-pick">
-								<select class="input sm" name="credit[{i}][artistId]" bind:value={credit.artistId} required>
+								<select class="input input-sm" name="credit[{i}][artistId]" bind:value={credit.artistId} required>
 									<option value="">{m.admin_upload_select_artist()}</option>
 									{#each artistList as a}
 										<option value={String(a.id)}>{a.name}</option>
@@ -598,7 +598,7 @@
 						</label>
 						<label>
 							<span>{m.admin_vr_field_role()}</span>
-							<select class="input sm" name="credit[{i}][role]" bind:value={credit.role}>
+							<select class="input input-sm" name="credit[{i}][role]" bind:value={credit.role}>
 								{#each ROLES as role}
 									<option value={role}>{creditRoleLabel(role)}</option>
 								{/each}
@@ -609,7 +609,7 @@
 								<span>{m.admin_vr_field_role_label()}</span>
 								<input
 									type="text"
-									class="input sm"
+									class="input input-sm"
 									name="credit[{i}][roleLabel]"
 									bind:value={credit.roleLabel}
 									required
@@ -652,14 +652,16 @@
 				</div>
 				<div class="model-actions">
 					<label
-						class="btn-sm"
+						class="file-btn"
 						class:disabled={saving}
 						{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped, disabled: () => saving })}
 					>
 						{m.admin_vr_upload_replace()}
 						<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} disabled={saving} class="sr-file" aria-describedby="vr-model-hint" />
 					</label>
-					<button type="button" class="btn-sm" onclick={removeModel} disabled={saving}>{m.admin_vr_upload_remove()}</button>
+					<!-- class:disabled as well as the attribute, so this dims the same way
+					     as its <label> twin, which has no :disabled state to dim. -->
+					<button type="button" class="file-btn" class:disabled={saving} onclick={removeModel} disabled={saving}>{m.admin_vr_upload_remove()}</button>
 				</div>
 			</div>
 			{#if modelUrl !== (avatar?.modelUrl ?? '')}
@@ -1073,7 +1075,6 @@
 	.field-hint { font-size: 11px; color: var(--muted-foreground); }
 	.field-label { font-size: 12px; color: var(--muted-foreground); }
 	.muted { color: var(--muted-foreground); font-size: 13px; }
-	.input.sm { font-size: 12px; padding: 5px 8px; }
 
 	.chip-field { display: flex; flex-direction: column; gap: 6px; border: none; padding: 0; margin: 0; }
 	.chip-field legend { padding: 0; margin-bottom: 6px; }
@@ -1145,7 +1146,10 @@
 	/* The hidden file inputs stay keyboard-focusable — surface focus on their
 	   visible hosts (same :has pattern as .platform-chip). */
 	.upload-zone:has(.sr-file:focus-visible),
-	.btn-sm:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+	.file-btn:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+	/* The "remove" twin is a real <button> with no hidden input inside it, so the
+	   :has rule above never reaches it — it rings for itself. */
+	.file-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 	/* Guide link under the model-format hint (mock frame 1, SONA-162). Grouped
 	   with the hint; 12px so it doesn't outrank the field labels. The
@@ -1178,17 +1182,28 @@
 		font-family: var(--font-primary); font-variant-numeric: tabular-nums;
 	}
 	.model-actions { display: flex; gap: 8px; flex-shrink: 0; }
-	.btn-sm {
-		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
-		border: 1px solid var(--border); border-radius: var(--radius-xs);
-		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
+	/* Same size and fill as the shared .btn-compact, but these are the
+	   file-picker controls: one is a <label> that takes a drop, and "busy" has
+	   to dim through a .disabled class, because the <label> half has no
+	   :disabled state; both halves take the class and only the <button> also
+	   takes the attribute. They dim to 0.55 like the upload zone beside them,
+	   not .btn-compact's 0.45. Kept local, and named apart from the .btn-*
+	   namespace so the two don't collide on one element (SONA-209). */
+	.file-btn {
+		/* The <label> rule above sets flex-direction: column on every label in the
+		   form — this one lays its contents out in a row. */
+		display: inline-flex; flex-direction: row; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
+		/* --input, the 3:1 control-boundary token the other control edges use
+		   (SONA-126), not the --border hairline. */
+		border: 1px solid var(--input); border-radius: var(--radius-xs);
+		background: var(--secondary); color: var(--foreground); cursor: pointer;
 		transition: border-color 0.15s, background-color 0.15s;
 	}
-	.btn-sm:hover { border-color: var(--primary-text); }
+	.file-btn:hover { border-color: var(--primary-text); }
 	/* Same busy treatment as the zones: dimmed, and no hover invitation. */
-	.btn-sm.disabled { opacity: 0.55; cursor: not-allowed; }
-	.btn-sm.disabled:hover { border-color: var(--border); }
-	.btn-sm:global(.drag-over) { border-color: var(--primary-text); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
+	.file-btn.disabled { opacity: 0.55; cursor: not-allowed; }
+	.file-btn.disabled:hover { border-color: var(--input); }
+	.file-btn:global(.drag-over) { border-color: var(--primary-text); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
 
 	/* Showcase media rows (same row chrome as the credit list). */
 	.media-list { display: flex; flex-direction: column; gap: 10px; }

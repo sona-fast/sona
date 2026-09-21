@@ -1286,12 +1286,6 @@
 			flex-direction: column-reverse;
 		}
 
-		.form-actions .btn,
-		.form-actions a {
-			width: 100%;
-			text-align: center;
-		}
-
 		.reference-btn {
 			align-self: stretch;
 		}

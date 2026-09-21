@@ -389,7 +389,7 @@
 					     viewer can't render) it IS the view's primary and takes the fill. -->
 					<a
 						href="/vr/{avatar.slug}/download"
-						class="btn {data.viewerPath ? 'btn-outline' : ''}"
+						class="btn btn-full-mobile {data.viewerPath ? 'btn-outline' : ''}"
 						download
 						aria-describedby={ccByAttribution ? 'ccby-attribution' : undefined}
 					>
@@ -812,10 +812,6 @@
 
 		.avatar-meta {
 			gap: 16px;
-		}
-
-		.actions .btn {
-			width: 100%;
 		}
 	}
 </style>

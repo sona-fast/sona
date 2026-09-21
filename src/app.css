@@ -234,6 +234,61 @@ input, select, textarea {
 	padding: 12px 24px;
 }
 
+/* Compact toolbar button for bulk-action rows above a table or grid. Standalone,
+   NOT a size modifier for .btn: it carries its own border, fill and radius, so
+   write class="btn-compact" on its own. Was an identical copy scoped into both
+   the sticker pack form and the sticker importer (SONA-209). The VR form's
+   file-picker pair keeps its own .file-btn — see the comment there. */
+.btn-compact {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+	padding: 5px 10px;
+	/* --input, the 3:1 control-boundary token (SONA-126): this 1px edge is all
+	   that marks the button as a control. */
+	border: 1px solid var(--input);
+	/* Square corners on purpose: the compact tier reads as a smaller, denser
+	   control beside the pill-shaped .btn and .input, and the VR form's
+	   .file-btn shares the shape. */
+	border-radius: var(--radius-xs);
+	background: var(--secondary);
+	color: var(--foreground);
+	cursor: pointer;
+}
+
+.btn-compact:hover:not(:disabled) {
+	border-color: var(--primary-text);
+}
+
+.btn-compact:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+/* Standalone, so it does not inherit .btn:focus-visible — same ring, declared
+   for itself. */
+.btn-compact:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+	/* A button that shares a row on a wide screen and takes the whole row on a
+	   phone. Only for rows that stay a row at this width: a row that stacks into
+	   a column already stretches its buttons, so the class does nothing there. */
+	.btn-full-mobile {
+		width: 100%;
+	}
+
+	/* An admin header action that has a duplicate in the page's mobile list, so
+	   it drops out of the header below the table breakpoint rather than showing
+	   twice. */
+	.btn-desktop-only {
+		display: none;
+	}
+}
+
 /* Tags / Labels — matches Icon Label/Secondary */
 .tag {
 	display: inline-flex;
@@ -314,6 +369,89 @@ select.input {
 		-webkit-appearance: auto;
 		background-image: none;
 		padding-right: 16px;
+	}
+}
+
+/* Compact input for dense admin rows (bulk-action bars, per-sticker fields).
+   Written as .input.input-sm so it also outranks select.input's padding — the
+   scoped .input.sm copies it replaces did the same by being scoped. A compact
+   select keeps the caret gutter select.input reserves, or the value's tail
+   renders under the chevron. */
+.input.input-sm {
+	font-size: 12px;
+	padding: 5px 8px;
+}
+
+select.input.input-sm {
+	padding-right: 40px;
+}
+
+@media (forced-colors: active) {
+	select.input.input-sm {
+		padding-right: 16px;
+	}
+}
+
+/* An input that sits inside its own bordered wrapper (the social rows on
+   /admin/artists and /admin/characters draw the pill and the icon, the input
+   only carries the text), so the control's own chrome is handed to the wrapper. */
+.input-plain {
+	border: none;
+	background: none;
+	padding: 0;
+	height: auto;
+}
+
+/* The wrapper draws the ring instead: .field-pill:focus-within below. */
+.input-plain:focus {
+	outline: none;
+}
+
+/* The wrapper an .input-plain sits in: a pill that carries the icon, the border
+   and the focus ring for the field inside it. The social-URL rows on
+   /admin/artists and /admin/characters had a byte-identical copy each
+   (SONA-209). `!important` because both pages style their <label>s into a
+   column and this label is a row.
+   --input, not --border: it is the whole visible edge of a control (SONA-126). */
+.field-pill {
+	display: flex;
+	flex-direction: row !important;
+	align-items: center;
+	/* Today's consumers sit under a `.modal-form label` rule that outranks this
+	   and sets 6px; this is the same value, so the class stands on its own
+	   anywhere else. */
+	gap: 6px;
+	background: var(--background);
+	border: 1px solid var(--input);
+	border-radius: var(--radius-pill);
+	padding: 0 12px;
+	height: 40px;
+}
+
+/* The input inside drops its own outline, so the ring goes on the pill. Inset
+   like .input:focus: a field focuses as one stroke on its own edge, not as a
+   second ring outside the border (SONA-209 r2). */
+.field-pill:focus-within {
+	outline: 2px solid var(--ring);
+	outline-offset: -1px;
+}
+
+/* The input inside takes the rest of the row; min-width 0 lets it shrink past
+   its size attribute instead of pushing out of the pill on a phone. */
+.field-pill .input {
+	flex: 1;
+	min-width: 0;
+}
+
+/* A single-field add form at the top of an admin list: capped so one short name
+   field doesn't stretch the full table width, full width once the form stacks. */
+.input-form-width {
+	max-width: 300px;
+}
+
+@media (max-width: 768px) {
+	.input-form-width {
+		max-width: 100%;
 	}
 }
 

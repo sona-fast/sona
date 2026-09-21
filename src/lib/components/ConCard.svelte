@@ -524,9 +524,9 @@
 		flex-wrap: wrap;
 		gap: 10px;
 	}
+	/* One pixel wider than the shared 6px gap: the two labels here sit beside
+	   16px icons in a card that is otherwise on a 7px rhythm. */
 	.actions .btn {
-		display: inline-flex;
-		align-items: center;
 		gap: 7px;
 	}
 	/* On a phone the two buttons wrap to a ragged pair of half-rows. Stack them
@@ -543,9 +543,6 @@
 			/* .controls packs its children to the start, so the row has to claim the
 			   width before the buttons can fill it. */
 			justify-self: stretch;
-		}
-		.actions .btn {
-			justify-content: center;
 		}
 		.actions .btn-primary {
 			order: -1;

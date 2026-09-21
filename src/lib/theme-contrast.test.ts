@@ -35,15 +35,29 @@ function blockBody(selector: string): string {
 	return body;
 }
 
+// The last declaration of a property across every top-level block with this
+// selector: a second block later in the file wins, so a pin on the first one
+// alone would keep passing after the override.
+function lastDeclaration(selector: string, property: string): string | undefined {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const bodies = [...css.matchAll(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'gm'))].map((m) => m[1]);
+	if (bodies.length === 0) throw new Error(`${selector} block not found in app.css`);
+	return bodies.flatMap((b) => b.match(new RegExp(`(?<![\\w-])${property}:\\s*[^;]+`, 'g')) ?? []).at(-1);
+}
+
 // The same read against a component source file: the describes below parse the
 // tint rules out of the components that paint them, so a rule that moves or
 // stops matching fails here instead of dropping silently out of a sweep.
-function ruleBody(file: string, selector: string): string {
+function ruleBodies(file: string, selector: string): string[] {
 	const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
 	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-	if (!body) throw new Error(`${selector} rule not found in ${file}`);
-	return body;
+	const bodies = [...source.matchAll(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'gm'))].map((m) => m[1]);
+	if (bodies.length === 0) throw new Error(`${selector} rule not found in ${file}`);
+	return bodies;
+}
+
+function ruleBody(file: string, selector: string): string {
+	return ruleBodies(file, selector)[0];
 }
 
 // One self-tint rule: `background: color-mix(in srgb, var(--<ink>) N%,
@@ -658,12 +672,16 @@ describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121
 // (The DownloadMenu row ring is NOT covered here: it sits on the menu's LIFTED
 // card-toward-white surface, where --ring fails on ember dark — it uses
 // --foreground instead, asserted in the SONA-123 describe at the bottom.)
+// .btn-compact is standalone rather than a .btn modifier, so it does not inherit
+// the ring above — it declares its own copy, and both are pinned here (SONA-209
+// r2). One token, so the per-theme measurement below covers both rings.
 describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SONA-123)', () => {
-	it('the ring uses var(--ring) (not var(--primary), which fails 3:1 on Ember light)', () => {
-		const rule = css.match(/^\.btn:focus-visible\s*\{([^}]*)\}/m)?.[1];
-		if (!rule) throw new Error('.btn:focus-visible rule not found in app.css');
-		expect(rule).toMatch(/outline:[^;]*var\(--ring\)/);
-	});
+	for (const selector of ['.btn', '.btn-compact'] as const) {
+		it(`the ${selector} ring uses var(--ring) (not var(--primary), which fails 3:1 on Ember light)`, () => {
+			expect(lastDeclaration(`${selector}:focus-visible`, 'outline')).toMatch(/outline:\s*2px solid var\(--ring\)/);
+			expect(lastDeclaration(`${selector}:focus-visible`, 'outline-offset')).toMatch(/outline-offset:\s*2px/);
+		});
+	}
 
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
@@ -2147,7 +2165,8 @@ describe('no text rule paints with raw --primary (SONA-126)', () => {
 describe('control boundaries use --input, not --border (SONA-126)', () => {
 	const rules = {
 		'.btn-outline': "the outline button's 1px edge is the only thing marking it as a control",
-		'.input': 'the form-field boundary'
+		'.input': 'the form-field boundary',
+		'.btn-compact': "the compact toolbar button's 1px edge is all that marks it as a control"
 	};
 
 	for (const [selector, why] of Object.entries(rules)) {
@@ -2172,12 +2191,52 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	// them carried the boundary, the outline appeared and disappeared as a visitor
 	// clicked between the tabs of one switch, so every copy is pinned here
 	// along with the view toggle that sits in the gallery's filter row.
+	// The VR form's file-picker buttons are a control edge too: the same size and
+	// fill as .btn-compact, kept local because one of them is a drop target
+	// (SONA-209 r2).
 	const componentRules: Array<{ file: string; selector: string }> = [
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.tabs' },
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.view-toggle' },
 		{ file: '../routes/(public)/stickers/+page.svelte', selector: '.tabs' },
-		{ file: '../routes/(public)/vr/+page.svelte', selector: '.tabs' }
+		{ file: '../routes/(public)/vr/+page.svelte', selector: '.tabs' },
+		{ file: './components/VrAvatarForm.svelte', selector: '.file-btn' }
 	];
+
+	// .input.input-sm resets padding on all four sides and outranks select.input,
+	// so without its own gutter a compact select paints the caret over the value.
+	it('select.input.input-sm keeps the caret gutter', () => {
+		expect(blockBody('select.input.input-sm')).toMatch(/padding-right:\s*40px/);
+		const forced = css.match(/@media \(forced-colors: active\) \{\s*select\.input\.input-sm \{([^}]*)\}/)?.[1];
+		expect(forced, 'no forced-colors gutter for the compact select').toMatch(/padding-right:\s*16px/);
+	});
+
+	// The social-URL rows in the artist and character edit modals are the same
+	// kind of boundary: the pill draws the edge and the input inside it is
+	// .input-plain, so the pill's edge is the whole control edge. Both pages ran
+	// a byte-identical copy until the shared .field-pill in app.css (SONA-209
+	// r2), so one assertion now covers both. .input-plain sets `outline: none`,
+	// so without the focus-within ring the fields show no focus at all.
+	it('.field-pill draws its border with --input and rings on focus-within', () => {
+		expect(blockBody('.field-pill')).toMatch(/border:\s*1px solid var\(--input\)/);
+		// !important is load-bearing: both modal pages scope `.modal-form label`
+		// into a column, which outranks this rule, and a stacked pill hides the
+		// edge the assertion above pins.
+		expect(blockBody('.field-pill')).toMatch(/flex-direction:\s*row\s*!important/);
+		// Inset like .input:focus, so the pill focuses the way the fields above it do.
+		expect(blockBody('.field-pill:focus-within')).toMatch(/outline:\s*2px solid var\(--ring\)/);
+		expect(blockBody('.field-pill:focus-within')).toMatch(/outline-offset:\s*-1px/);
+	});
+
+	// The "remove model" twin holds no hidden input, so the form's :has() ring
+	// never reaches it — it needs a :focus-visible of its own (SONA-209 r2).
+	// A second rule with the same selector later in the file would win, so the
+	// last outline the file declares for it is the one that counts.
+	it('.file-btn rings on focus-visible', () => {
+		const outlines = ruleBodies('./components/VrAvatarForm.svelte', '.file-btn:focus-visible').flatMap(
+			(body) => body.match(/outline:\s*[^;]+/g) ?? []
+		);
+		expect(outlines.at(-1)).toMatch(/outline:\s*2px solid var\(--ring\)/);
+	});
 
 	for (const { file, selector } of componentRules) {
 		it(`${file} ${selector} draws its border with --input`, () => {

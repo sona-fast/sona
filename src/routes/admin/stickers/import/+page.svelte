@@ -372,17 +372,17 @@
 			{:else}
 				<span class="bulk-count">{m.admin_pack_selected({ count: selected.size })}</span>
 				<div class="bulk-actions">
-					<select class="input sm" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
+					<select class="input input-sm" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
 						<option value="">{m.admin_pack_set_artist()}</option>
 						{#each artists as a}<option value={String(a.id)}>{a.name}</option>{/each}
 					</select>
-					<button type="button" class="btn-sm" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>{m.admin_pack_apply()}</button>
-					<button type="button" class="btn-sm" onclick={() => applyArtistToSelected('')}>{m.admin_pack_unassign()}</button>
-					<button type="button" class="btn-sm" onclick={() => openNewArtist('bulk')}><UserPlus size={13} /> {m.admin_import_new()}</button>
+					<button type="button" class="btn-compact" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>{m.admin_pack_apply()}</button>
+					<button type="button" class="btn-compact" onclick={() => applyArtistToSelected('')}>{m.admin_pack_unassign()}</button>
+					<button type="button" class="btn-compact" onclick={() => openNewArtist('bulk')}><UserPlus size={13} /> {m.admin_import_new()}</button>
 					<span class="bulk-div"></span>
-					<button type="button" class="btn-sm" onclick={() => bulkSetExcluded(true)}>{m.admin_import_exclude()}</button>
-					<button type="button" class="btn-sm" onclick={() => bulkSetExcluded(false)}>{m.admin_import_include()}</button>
-					<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(true)}>NSFW</button>
+					<button type="button" class="btn-compact" onclick={() => bulkSetExcluded(true)}>{m.admin_import_exclude()}</button>
+					<button type="button" class="btn-compact" onclick={() => bulkSetExcluded(false)}>{m.admin_import_include()}</button>
+					<button type="button" class="btn-compact" onclick={() => bulkSetNsfw(true)}>NSFW</button>
 				</div>
 				<button type="button" class="link-btn" onclick={clearSelection}>{m.admin_pack_clear()}</button>
 			{/if}
@@ -437,7 +437,7 @@
 								disabled={ps.excluded}
 							/>
 						</div>
-						<select class="input sm artist-select" bind:value={ps.artistId} disabled={ps.excluded}>
+						<select class="input input-sm" bind:value={ps.artistId} disabled={ps.excluded}>
 							<option value="">{m.admin_import_unassigned()}</option>
 							{#each artists as a}
 								<option value={String(a.id)}>{a.name}</option>
@@ -699,9 +699,6 @@
 	.bulk-hint { font-size: 12px; color: var(--muted-foreground); }
 	.bulk-count { font-size: 13px; font-weight: 600; }
 	.bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-	.btn-sm { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--secondary); color: var(--foreground); cursor: pointer; }
-	.btn-sm:hover:not(:disabled) { border-color: var(--primary-text); }
-	.btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
 	.bulk-div { width: 1px; height: 20px; background: var(--border); }
 	.bulk-bar .link-btn { margin-left: auto; }
 	.sticker-card.selected { border-color: var(--primary-text); box-shadow: 0 0 0 2px var(--primary-text); }
@@ -720,7 +717,6 @@
 	.emoji-row { display: flex; align-items: center; gap: 6px; }
 	.emoji-chip { font-size: 20px; flex-shrink: 0; }
 	.emoji-input { flex: 1; font-size: 12px; padding: 4px 8px; min-width: 0; }
-	.artist-select.input.sm { font-size: 12px; padding: 5px 8px; width: 100%; }
 	.ctx-new-artist {
 		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 10px;
 		border-radius: var(--radius-pill); border: 1px dashed var(--input); background: none;

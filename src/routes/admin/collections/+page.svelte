@@ -31,7 +31,7 @@
 
 <div class="page-header">
 	<h1>{m.admin_nav_collections()} <span class="count">{m.admin_count_collections({ count: data.collections.length })}</span></h1>
-	<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_collections_new()}</button>
+	<button class="btn btn-primary btn-desktop-only" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_collections_new()}</button>
 </div>
 
 {#if form?.error}
@@ -47,7 +47,7 @@
 			showAdd = false;
 		};
 	}} class="add-form">
-		<input type="text" class="input" name="name" placeholder={m.admin_collections_name_placeholder()} autofocus />
+		<input type="text" class="input input-form-width" name="name" placeholder={m.admin_collections_name_placeholder()} autofocus />
 		<div class="add-form-actions">
 			<button type="submit" class="btn btn-primary" disabled={creating}>
 				{#if creating}<Loader2 size={16} class="spin" /> {m.admin_creating()}{:else}{m.admin_create()}{/if}
@@ -240,10 +240,6 @@
 		gap: 8px;
 		margin-bottom: 20px;
 		align-items: center;
-	}
-
-	.add-form .input {
-		max-width: 300px;
 	}
 
 	.add-form-actions {
@@ -489,10 +485,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.page-header .btn {
-			display: none;
-		}
-
 		.grid {
 			display: none;
 		}
@@ -569,10 +561,6 @@
 		.add-form {
 			flex-direction: column;
 			align-items: stretch;
-		}
-
-		.add-form .input {
-			max-width: 100%;
 		}
 
 		.add-form-actions .btn {

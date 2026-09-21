@@ -75,9 +75,5 @@
 			flex-direction: column;
 			width: 100%;
 		}
-
-		.actions .btn {
-			width: 100%;
-		}
 	}
 </style>
