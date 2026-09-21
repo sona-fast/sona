@@ -8,6 +8,7 @@ import {
 	isLocalNameAliasOf,
 	parseAliases,
 	registryDelta,
+	registrySearch,
 	registryRegisterFork,
 	registrySubmit,
 	resolveRegistryEnv,
@@ -379,5 +380,77 @@ describe('resolveRegistryEnv', () => {
 		const resolved = await resolveRegistryEnv(db, {} as App.Platform['env']);
 		expect(resolved?.REGISTRY_API_KEY).toBe('stored-key');
 		expect(resolved?.REGISTRY_URL).toBe('https://r.example');
+	});
+});
+
+describe('registry client — naming what answered instead of the registry', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
+
+	// A zone-level bot challenge (Bot Fight Mode, 2026-09-17) answers a Worker fetch
+	// with an HTML page, a 403, and `cf-mitigated: challenge`. Reporting that as a bare
+	// "HTTP 403" reads as a fork-key problem and sent the investigation the wrong way;
+	// the header names the actual product, and cf-ray points at the security event.
+	it('names a Cloudflare mitigation (and its cf-ray) on an opaque 4xx refusal', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response('<html>Just a moment...</html>', {
+					status: 403,
+					headers: { 'content-type': 'text/html', 'cf-mitigated': 'challenge', 'cf-ray': 'abc123-SEA' }
+				})
+			)
+		);
+		expect(await registryDelta(env, {})).toEqual({
+			error: 'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray abc123-SEA)',
+			httpStatus: 403
+		});
+	});
+
+	it('keeps the registry\'s own reason when the body has one, even behind Cloudflare headers', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ error: 'invalid fork key' }), {
+					status: 401,
+					headers: { 'content-type': 'application/json', 'cf-ray': 'abc123-SEA' }
+				})
+			)
+		);
+		expect(await registryDelta(env, {})).toEqual({ error: 'invalid fork key', httpStatus: 401 });
+	});
+
+	// The search endpoint has always failed soft (empty list), which is right for one
+	// call and invisible across a whole run. The hook lets the caller count and name
+	// the failures without changing the empty-list contract.
+	it.each([
+		['a 5xx', () => Promise.resolve(new Response('bad gateway', { status: 502 })), /HTTP 502/],
+		[
+			'a challenge page',
+			() =>
+				Promise.resolve(
+					new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+				),
+			/blocked by a Cloudflare challenge/
+		],
+		['a network error', () => Promise.reject(new Error('offline')), /offline/]
+	])('registrySearch still returns [] on %s but reports the reason through onFail', async (_l, fetchImpl, expected) => {
+		vi.stubGlobal('fetch', vi.fn(fetchImpl));
+		const onFail = vi.fn();
+		expect(await registrySearch(env, { handle: 'x' }, { onFail })).toEqual([]);
+		expect(onFail).toHaveBeenCalledTimes(1);
+		expect(onFail.mock.calls[0][0]).toMatch(expected);
+	});
+
+	it('does not call onFail on a healthy search', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ artists: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+			)
+		);
+		const onFail = vi.fn();
+		await registrySearch(env, { handle: 'x' }, { onFail });
+		expect(onFail).not.toHaveBeenCalled();
 	});
 });

@@ -137,7 +137,15 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 			)
 		);
 
-		await expect(POST(postEvent(platform))).rejects.toThrow(/401.*invalid fork key/);
+		// Not a throw: rethrowing became SvelteKit's generic 500 "Internal Error", which
+		// is what the workflow log showed while the real reason sat unseen in job_run.
+		// The run must still go red (non-2xx), but the body has to name the cause.
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as { ok: boolean; error: string; upstreamStatus: number };
+		expect(body.ok).toBe(false);
+		expect(body.error).toMatch(/401.*invalid fork key/);
+		expect(body.upstreamStatus).toBe(401);
 		await Promise.all(waits);
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -147,5 +155,68 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		expect(row?.status).toBe('failed');
 		expect(row?.status).not.toBe('ok');
 		expect(row?.detail).toMatch(/401/);
+	});
+
+	// The 2026-09-17 shape: a zone bot rule challenged every Worker fetch to the
+	// registry. The delta feed came back 403 with an HTML challenge page, every search
+	// came back the same way, and the endpoint answered a bare "Internal Error".
+	it('502s with the Cloudflare mitigation named when a challenge page answers the delta feed', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(
+					new Response('<html>Just a moment...</html>', {
+						status: 403,
+						headers: {
+							'content-type': 'text/html',
+							'cf-mitigated': 'challenge',
+							'cf-ray': 'a3e7bc522cbfa3c2-SEA'
+						}
+					})
+				)
+			)
+		);
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(502);
+		const body = (await res.json()) as { error: string; upstreamStatus: number };
+		expect(body.error).toContain('blocked by a Cloudflare challenge in front of the registry');
+		expect(body.error).toContain('cf-ray a3e7bc522cbfa3c2-SEA');
+		expect(body.upstreamStatus).toBe(403);
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any).prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'").get();
+		expect(row?.status).toBe('failed');
+		expect(row?.detail).toContain('Cloudflare challenge');
+	});
+
+	// A D1 failure is still our bug: it must keep propagating as a real 500, not be
+	// dressed up as an upstream refusal.
+	it('still throws (500) on an unrelated exception such as a database error', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(
+					new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+						status: 200,
+						headers: { 'content-type': 'application/json' }
+					})
+				)
+			)
+		);
+		// Drop the table the backfill reads after the gate has passed.
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(platform as any).env.DB = {
+			prepare: () => {
+				throw new Error('D1_ERROR: table gone');
+			}
+		};
+
+		await expect(POST(postEvent(platform))).rejects.toThrow(/D1_ERROR/);
 	});
 });

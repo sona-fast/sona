@@ -23,6 +23,7 @@ import {
 	registrySearch,
 	firstHandle,
 	RegistryRefusalError,
+	RegistrySearchError,
 	SOCIAL_URL_KEYS,
 	type RegistryArtist,
 	type RegistryRefusal
@@ -40,6 +41,26 @@ export interface SyncSummary {
 	refreshed: number;
 	linked: number;
 	scanned: number;
+	/** Backfill searches that produced no usable answer (timeout, network, 5xx, or a
+	 *  block in front of the registry). Each one fails soft, so without this count a
+	 *  run whose searches all silently failed reads exactly like "no matches". */
+	searchFailed: number;
+	/** Delta-feed pages that failed soft the same way (5xx/network; a 4xx refusal is
+	 *  handled separately and fatally when it's 401/403). */
+	deltaFailed: number;
+	/** The last fail-soft reason seen, so the job log names it (one is enough: a run
+	 *  degrades for one cause at a time in practice). */
+	lastFailure?: string;
+}
+
+/** One-line job-log detail for a completed run. Names degraded calls when there were
+ *  any, so a partial run leaves a trace in the background-jobs panel. */
+export function describeSync(s: SyncSummary): string {
+	let out = `refreshed ${s.refreshed}, linked ${s.linked}`;
+	if (s.searchFailed > 0) out += `, ${s.searchFailed} of ${s.scanned} searches failed`;
+	if (s.deltaFailed > 0) out += `, ${s.deltaFailed} delta page(s) failed`;
+	if (s.lastFailure && (s.searchFailed > 0 || s.deltaFailed > 0)) out += ` (${s.lastFailure})`;
+	return out;
 }
 
 // Map a registry record's socials onto the local artist *Url columns. The
@@ -97,11 +118,15 @@ export async function syncArtists(
 	env: Env | undefined,
 	settings: SiteSettings
 ): Promise<SyncSummary> {
-	if (!isRegistryEnabled(env)) return { skipped: true, refreshed: 0, linked: 0, scanned: 0 };
+	if (!isRegistryEnabled(env))
+		return { skipped: true, refreshed: 0, linked: 0, scanned: 0, searchFailed: 0, deltaFailed: 0 };
 
 	let refreshed = 0;
 	let linked = 0;
 	let scanned = 0;
+	let searchFailed = 0;
+	let deltaFailed = 0;
+	let lastFailure: string | undefined;
 
 	// ── 1. Refresh linked artists from the delta feed ──────────────────────────
 	const lastSync = (await getRawSetting(db, LAST_SYNC_KEY)) ?? undefined;
@@ -112,7 +137,13 @@ export async function syncArtists(
 	for (let page = 0; page < MAX_PAGES; page++) {
 		const feed = await registryDelta(
 			env,
-			cursor ? { cursor } : { updatedSince: lastSync, limit: 100 }
+			cursor ? { cursor } : { updatedSince: lastSync, limit: 100 },
+			{
+				onFail: (why) => {
+					deltaFailed++;
+					lastFailure = why;
+				}
+			}
 		);
 		// A 4xx refusal (e.g. 401 from a bad/missing fork key) is NOT "no new artists".
 		// Swallowing it would report a successful sync of zero artists on every run,
@@ -212,7 +243,12 @@ export async function syncArtists(
 		const handle = firstHandle(a);
 		if (!handle) continue;
 		scanned++;
-		const matches = await registrySearch(env, { handle });
+		const matches = await registrySearch(env, { handle }, {
+			onFail: (why) => {
+				searchFailed++;
+				lastFailure = why;
+			}
+		});
 		// A handle search ranks candidates by similarity — it does NOT prove identity.
 		// Trusting matches[0] blindly let a same-string handle under a DIFFERENT platform
 		// (e.g. a Twitter URL pasted into a registry artist's Instagram field, indexed as
@@ -247,6 +283,13 @@ export async function syncArtists(
 	if (refusal && isFatalRefusal(refusal.httpStatus)) {
 		throw new RegistryRefusalError(refusal.httpStatus, refusal.error);
 	}
+	// Same reasoning for the backfill: one failed search is noise, but a run in which
+	// EVERY search failed did nothing and must not read as a healthy "linked 0". (When
+	// a zone bot rule started challenging Worker fetches, this path ran empty for
+	// days with a green job.) A run with no searches at all has nothing to judge.
+	if (scanned > 0 && searchFailed === scanned) {
+		throw new RegistrySearchError(searchFailed, lastFailure ?? 'no response');
+	}
 
-	return { refreshed, linked, scanned };
+	return { refreshed, linked, scanned, searchFailed, deltaFailed, lastFailure };
 }

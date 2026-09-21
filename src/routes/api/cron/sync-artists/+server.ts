@@ -1,8 +1,13 @@
 import { json, error } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
-import { syncArtists } from '$lib/server/artist-sync';
+import {
+	isRegistryEnabled,
+	resolveRegistryEnv,
+	RegistryRefusalError,
+	RegistrySyncError
+} from '$lib/server/registry';
+import { syncArtists, describeSync } from '$lib/server/artist-sync';
 import { requireCronSecret } from '$lib/server/cron-auth';
 import { recordJobRun, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
@@ -32,9 +37,24 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	} catch (e) {
 		schedule(platform, recordJobRun(db, 'sync-artists', 'failed',
 			e instanceof Error ? e.message : 'sync failed'));
+		// A refusal from (or in front of) the registry is an upstream fault with a
+		// known reason. Rethrowing it turned into SvelteKit's generic 500 "Internal
+		// Error", so the workflow log showed nothing to act on and the real cause
+		// only lived in job_run — for five days, once. Hand the reason back as JSON
+		// instead: the workflow prints the body, and 502 keeps the run red. Anything
+		// else (a D1 failure) is still our bug and still propagates as a 500.
+		if (e instanceof RegistrySyncError) {
+			return json(
+				{
+					ok: false,
+					error: e.message,
+					...(e instanceof RegistryRefusalError ? { upstreamStatus: e.httpStatus } : {})
+				},
+				{ status: 502 }
+			);
+		}
 		throw e;
 	}
-	schedule(platform, recordJobRun(db, 'sync-artists', 'ok',
-		`refreshed ${summary.refreshed}, linked ${summary.linked}`));
+	schedule(platform, recordJobRun(db, 'sync-artists', 'ok', describeSync(summary)));
 	return json({ ok: true, ...summary });
 };

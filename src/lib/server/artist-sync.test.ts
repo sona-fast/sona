@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './db/schema';
 import { artists, siteSettings } from './db/schema';
 import { eq } from 'drizzle-orm';
-import { pickRefreshedAvatar, syncArtists } from './artist-sync';
+import { describeSync, pickRefreshedAvatar, syncArtists } from './artist-sync';
 import type { SiteSettings } from './settings';
 
 const BSKY_OLD = 'https://cdn.bsky.app/img/avatar/plain/did:a/OLD@jpeg';
@@ -372,5 +372,126 @@ describe('syncArtists backfill — identity verification', () => {
 		expect(summary.linked).toBe(0);
 		const row = await db.select().from(artists).where(eq(artists.name, 'mlyeko')).get();
 		expect(row?.globalId).toBeNull();
+	});
+});
+
+describe('syncArtists backfill — degraded searches are counted, and an all-failed run is loud', () => {
+	async function seedUnlinked(db: ReturnType<typeof makeDb>, n: number) {
+		const now = new Date().toISOString();
+		for (let i = 0; i < n; i++)
+			await db
+				.insert(artists)
+				.values({ name: `artist${i}`, twitterUrl: `https://twitter.com/artist${i}`, createdAt: now });
+	}
+
+	// Delta feed healthy and empty; every search answered by a zone challenge page.
+	function stubSearchBlocked() {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string) =>
+				Promise.resolve(
+					String(url).includes('/v1/artists/search')
+						? new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+						: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+				)
+			)
+		);
+	}
+
+	// For four days every search on every fork was challenged and every run reported
+	// "ok, linked 0". A run in which NO search got through did no backfill at all.
+	it('throws RegistrySearchError when every search in the run failed', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearchBlocked();
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(
+			/every backfill search failed \(3 of 3\).*blocked by a Cloudflare challenge/
+		);
+	});
+
+	it('does NOT throw when some searches got through, but counts and names the failures', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		let calls = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string) => {
+				if (!String(url).includes('/v1/artists/search'))
+					return Promise.resolve(
+						new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+							status: 200,
+							headers: { 'content-type': 'application/json' }
+						})
+					);
+				// First search fails (5xx), the rest are healthy and empty.
+				return Promise.resolve(
+					calls++ === 0
+						? new Response('bad gateway', { status: 502 })
+						: new Response(JSON.stringify({ artists: [] }), {
+								status: 200,
+								headers: { 'content-type': 'application/json' }
+							})
+				);
+			})
+		);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 3, searchFailed: 1, linked: 0 });
+		expect(summary.lastFailure).toMatch(/HTTP 502/);
+	});
+
+	it('reports zero failures and no reason on a fully healthy run', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 2);
+		stubRegistry([]);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 2, searchFailed: 0, deltaFailed: 0 });
+		expect(summary.lastFailure).toBeUndefined();
+	});
+
+	// Nothing to judge: a fork with no unlinked artists never searches, so an outage
+	// elsewhere must not turn its run red.
+	it('does not throw when there was nothing to search, even if the registry is down', async () => {
+		const db = makeDb();
+		vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 0, searchFailed: 0, deltaFailed: 1 });
+		expect(summary.lastFailure).toBe('offline');
+	});
+
+	it('counts a delta page that failed soft (5xx) and names it', async () => {
+		const db = makeDb();
+		stubDeltaResponse(503, { error: 'registry down' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ deltaFailed: 1 });
+		expect(summary.lastFailure).toMatch(/HTTP 503/);
+	});
+});
+
+describe('describeSync', () => {
+	it('is the old two-number line when nothing degraded', () => {
+		expect(describeSync({ refreshed: 2, linked: 1, scanned: 4, searchFailed: 0, deltaFailed: 0 })).toBe(
+			'refreshed 2, linked 1'
+		);
+	});
+
+	it('names how many searches failed and why', () => {
+		expect(
+			describeSync({
+				refreshed: 0,
+				linked: 0,
+				scanned: 20,
+				searchFailed: 3,
+				deltaFailed: 0,
+				lastFailure: 'HTTP 502 (cf-ray x-SEA)'
+			})
+		).toBe('refreshed 0, linked 0, 3 of 20 searches failed (HTTP 502 (cf-ray x-SEA))');
 	});
 });
