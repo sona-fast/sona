@@ -103,7 +103,12 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	// The subject of a selector is its last compound — `.input-group .tag-pill`
 	// styles a pill, not an input. A compound counts when it names one of the
 	// shared controls: `.btn`, `.input`, any `.btn-*`/`.input-*` variant, or a
-	// bare `select`/`textarea` element.
+	// bare `select`/`textarea` element. The match is by name, so a control
+	// rebuilt under another name (`.file-btn`, `.icon-btn`, a bare `button`
+	// rule) is invisible to it; widening to `*-btn` and `button` trips 18
+	// files today, nearly all of them icon and link buttons that are their own
+	// controls rather than copies of `.btn`. Those belong to a later SONA-209
+	// step, and the pattern grows when that step gives them shared names.
 	const CONTROL_CLASS = /^\.(?:btn|input)(?:-[A-Za-z0-9_-]+)?$/;
 
 	function isControlSubject(selector: string): boolean {

@@ -374,10 +374,22 @@ select.input {
 
 /* Compact input for dense admin rows (bulk-action bars, per-sticker fields).
    Written as .input.input-sm so it also outranks select.input's padding — the
-   scoped .input.sm copies it replaces did the same by being scoped. */
+   scoped .input.sm copies it replaces did the same by being scoped. A compact
+   select keeps the caret gutter select.input reserves, or the value's tail
+   renders under the chevron. */
 .input.input-sm {
 	font-size: 12px;
 	padding: 5px 8px;
+}
+
+select.input.input-sm {
+	padding-right: 40px;
+}
+
+@media (forced-colors: active) {
+	select.input.input-sm {
+		padding-right: 16px;
+	}
 }
 
 /* An input that sits inside its own bordered wrapper (the social rows on

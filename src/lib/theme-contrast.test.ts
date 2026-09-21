@@ -2191,6 +2191,14 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		{ file: './components/VrAvatarForm.svelte', selector: '.file-btn' }
 	];
 
+	// .input.input-sm resets padding on all four sides and outranks select.input,
+	// so without its own gutter a compact select paints the caret over the value.
+	it('select.input.input-sm keeps the caret gutter', () => {
+		expect(blockBody('select.input.input-sm')).toMatch(/padding-right:\s*40px/);
+		const forced = css.match(/@media \(forced-colors: active\) \{\s*select\.input\.input-sm \{([^}]*)\}/)?.[1];
+		expect(forced, 'no forced-colors gutter for the compact select').toMatch(/padding-right:\s*16px/);
+	});
+
 	// The social-URL rows in the artist and character edit modals are the same
 	// kind of boundary: the pill draws the edge and the input inside it is
 	// .input-plain, so the pill's edge is the whole control edge. Both pages ran
