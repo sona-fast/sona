@@ -18,6 +18,12 @@
 	import { resolveTabId, visibleTabIds, type TabId } from './tabs';
 	import { showUtFileStat } from './ut-stat';
 	import { breakdownRows, sharePct, usageWarning } from './storage-breakdown-view';
+	import {
+		syncSuccessToast,
+		syncFailureToast,
+		type SyncSuccessData,
+		type SyncFailureData
+	} from './sync-toast-view';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
 	import { earlyAccessLabel, isFeatureEnabled } from '$lib/early-access';
 	import * as m from '$lib/paraglide/messages';
@@ -1341,41 +1347,10 @@
 		return async ({ result, update }) => {
 			await update();
 			syncing = false;
-			if (result.type === 'success') {
-				// The whole toast is built from localized parts here: the action returns
-				// counts, not a sentence, so a ja operator doesn't get an English summary
-				// with a Japanese warning stapled to it.
-				const counts = result.data?.syncCounts as
-					| { refreshed: number; linked: number }
-					| undefined;
-				const parts = [
-					counts ? m.admin_settings_sync_summary(counts) : m.admin_settings_sync_complete()
-				];
-				// A run that finished with failed or rate-limited registry calls did less
-				// than the counts suggest — say how much, rather than reporting a clean
-				// "0 and 0". The two causes are separate: one is a fault, one is back-pressure.
-				const degraded = result.data?.syncDegraded as
-					| { failed: number; rateLimited: number }
-					| undefined;
-				if (degraded?.failed)
-					parts.push(m.admin_settings_sync_degraded({ failed: degraded.failed }));
-				if (degraded?.rateLimited)
-					parts.push(m.admin_settings_sync_rate_limited({ count: degraded.rateLimited }));
-				toast.success(parts.join(' '));
-			} else if (result.type === 'failure')
-				// A registry refusal comes back as a reason, not a message: the wording is
-				// localized here and only the registry's own text is interpolated. A refused
-				// KEY and an unreachable registry get different wording — the first points
-				// at this site's connection, the second at nothing the operator can fix.
-				toast.error(
-					result.data?.syncRefusedReason
-						? m.admin_settings_sync_refused({ reason: result.data.syncRefusedReason as string })
-						: result.data?.syncUpstreamReason
-							? m.admin_settings_sync_upstream_failed({
-									reason: result.data.syncUpstreamReason as string
-								})
-							: ((result.data?.error as string) ?? m.admin_settings_sync_failed())
-				);
+			// Both toasts are assembled in sync-toast-view.ts so the wording rules (which
+			// clause rides on which sentence, which reason wins) are unit-testable.
+			if (result.type === 'success') toast.success(syncSuccessToast(result.data as SyncSuccessData));
+			else if (result.type === 'failure') toast.error(syncFailureToast(result.data as SyncFailureData));
 		};
 	}}>
 		<section data-tab="connections">

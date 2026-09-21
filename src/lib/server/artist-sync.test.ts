@@ -444,21 +444,44 @@ describe('syncArtists backfill — degraded searches are counted, and an all-fai
 	// The registry's unauthenticated read limiter is shared by every fork, so one
 	// 06:30 UTC sweep rate-limits all of them at once. isFatalRefusal already calls a
 	// 429 non-fatal everywhere else; counting it here would contradict that.
-	it.each([429, 408])(
-		'does not count a back-pressure (%i) search as a failure, but still names it',
-		async (status) => {
-			const db = makeDb();
-			await seedUnlinked(db, 3);
-			stubSearch(searchStatuses(status));
+	it('does not count a rate-limited (429) search as a failure, but still names it', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearch(searchStatuses(429));
 
-			const summary = await syncArtists(db, ENV, SETTINGS);
-			expect(summary).toMatchObject({ scanned: 3, searchFailed: 0, rateLimited: 3 });
-			expect(summary.lastRateLimit).toMatch(new RegExp(`HTTP ${status}`));
-			// The back-pressure reason must never be parked in the failure field: that is
-			// how a job detail came to read "2 searches failed (HTTP 429)".
-			expect(summary.lastSearchFailure).toBeUndefined();
-		}
-	);
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 3, searchFailed: 0, rateLimited: 3 });
+		expect(summary.lastRateLimit).toMatch(/HTTP 429/);
+		// The back-pressure reason must never be parked in the failure field: that is
+		// how a job detail came to read "2 searches failed (HTTP 429)".
+		expect(summary.lastSearchFailure).toBeUndefined();
+	});
+
+	// A 408 says OUR request never arrived in time — that is a failure, not the
+	// registry pushing back. Grouping it with 429 meant a fork that timed out on every
+	// search forever could never trip the all-searches-failed alarm.
+	it('counts a timed-out (408) search as a failure, so an all-408 run still throws', async () => {
+		const db = makeDb();
+		await seedUnlinked(db, 3);
+		stubSearch(searchStatuses(408));
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(
+			/all 3 backfill searches failed.*HTTP 408/
+		);
+	});
+
+	it('names the 408 as a search failure, not back-pressure', async () => {
+		const db = makeDb();
+		// Two artists stays below the "enough of a sample to be an outage" floor, so the
+		// counters are observable without the throw.
+		await seedUnlinked(db, 2);
+		stubSearch(searchStatuses(408));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ scanned: 2, searchFailed: 2, rateLimited: 0 });
+		expect(summary.lastSearchFailure).toMatch(/HTTP 408/);
+		expect(summary.lastRateLimit).toBeUndefined();
+	});
 
 	// The mixed run the single lastFailure field could not describe: two real failures
 	// and three rate limits, with the LAST call a 429. One shared reason meant the job
@@ -474,7 +497,7 @@ describe('syncArtists backfill — degraded searches are counted, and an all-fai
 		expect(summary.lastRateLimit).toMatch(/429/);
 		const detail = describeSync(summary);
 		expect(detail).toContain('2 of 5 searches failed (HTTP 502');
-		expect(detail).toContain('3 searches rate-limited (HTTP 429');
+		expect(detail).toContain('3 calls rate-limited (HTTP 429');
 	});
 
 	// Cross-category leak the other way: the 429 belongs to a search, so it must not be
@@ -506,13 +529,42 @@ describe('syncArtists backfill — degraded searches are counted, and an all-fai
 
 	// A 4xx delta refusal returns before `call`'s onFail hook, so a non-fatal one used
 	// to leave every counter at zero — a rate-limited run read as a healthy empty feed.
-	it('counts a non-fatal delta refusal (429) and names it', async () => {
+	// It counts as a rate limit, not a failure: the admin toast sums deltaFailed into
+	// "failed", and a shared limiter is not a broken fork.
+	it('counts a non-fatal delta refusal (429) as back-pressure and names it', async () => {
 		const db = makeDb();
 		stubDeltaResponse(429, { error: 'rate limited — slow down' });
 
 		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ rateLimited: 1, deltaFailed: 0 });
+		expect(summary.lastRateLimit).toMatch(/429/);
+		expect(summary.lastDeltaFailure).toBeUndefined();
+	});
+
+	// A non-fatal 4xx that is NOT back-pressure is still a failed page.
+	it('counts a non-fatal delta refusal (400) as a failed page', async () => {
+		const db = makeDb();
+		stubDeltaResponse(400, { error: 'bad cursor' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ rateLimited: 0, deltaFailed: 1 });
+		expect(summary.lastDeltaFailure).toMatch(/HTTP 400: bad cursor/);
+	});
+
+	// describeOpaqueRefusal already writes its own "HTTP <status>" prefix, so prefixing
+	// again printed "HTTP 403: HTTP 403 (cf-ray …)" in the job log.
+	it('does not double the status when the refusal reason already names it', async () => {
+		const db = makeDb();
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() =>
+				Promise.resolve(new Response('<html/>', { status: 400, headers: { 'cf-ray': 'a3e7bc522cbfa3c2-SEA' } }))
+			)
+		);
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
 		expect(summary).toMatchObject({ deltaFailed: 1 });
-		expect(summary.lastDeltaFailure).toMatch(/429/);
+		expect(summary.lastDeltaFailure).toBe('HTTP 400 (cf-ray a3e7bc522cbfa3c2 SEA)');
 	});
 
 	it('does NOT throw when some searches got through, but counts and names the failures', async () => {
@@ -614,7 +666,7 @@ describe('describeSync', () => {
 				deltaFailed: 0,
 				lastRateLimit: 'HTTP 429'
 			})
-		).toBe('refreshed 0, linked 0, 3 searches rate-limited (HTTP 429)');
+		).toBe('refreshed 0, linked 0, 3 calls rate-limited (HTTP 429)');
 	});
 
 	// Each clause carries its own reason: the shared field used to print whichever
@@ -633,7 +685,7 @@ describe('describeSync', () => {
 				lastDeltaFailure: 'HTTP 503: registry down'
 			})
 		).toBe(
-			'refreshed 1, linked 0, 2 of 5 searches failed (HTTP 502), 3 searches rate-limited (HTTP 429), 1 delta page(s) failed (HTTP 503: registry down)'
+			'refreshed 1, linked 0, 2 of 5 searches failed (HTTP 502), 3 calls rate-limited (HTTP 429), 1 delta page(s) failed (HTTP 503: registry down)'
 		);
 	});
 });

@@ -59,14 +59,20 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		throw e;
 	}
 	schedule(platform, recordJobRun(db, 'sync-artists', 'ok', describeSync(summary)));
-	// Every reason quotes an upstream body verbatim; they belong in the job_run detail
-	// (which redacts them) and not in a response the workflow log prints. The counters
-	// still say the run degraded.
-	const {
-		lastSearchFailure: _lastSearchFailure,
-		lastRateLimit: _lastRateLimit,
-		lastDeltaFailure: _lastDeltaFailure,
-		...counters
-	} = summary;
-	return json({ ok: true, ...counters });
+	// Named field by field, not spread: every last* reason quotes an upstream body
+	// verbatim, and those belong in the job_run detail (which redacts them) rather
+	// than in a response the workflow log prints. An allowlist keeps a field added to
+	// SyncSummary later out of the body until someone puts it here on purpose. The
+	// counters still say the run degraded. (json() drops undefined, so a run that
+	// wasn't skipped has no `skipped` key.)
+	return json({
+		ok: true,
+		skipped: summary.skipped,
+		refreshed: summary.refreshed,
+		linked: summary.linked,
+		scanned: summary.scanned,
+		searchFailed: summary.searchFailed,
+		rateLimited: summary.rateLimited,
+		deltaFailed: summary.deltaFailed
+	});
 };

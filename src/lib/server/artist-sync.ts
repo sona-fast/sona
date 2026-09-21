@@ -42,22 +42,24 @@ export interface SyncSummary {
 	linked: number;
 	scanned: number;
 	/** Backfill searches that produced no usable answer (timeout, network, 5xx, or a
-	 *  block in front of the registry — but NOT a 429/408, which is back-pressure).
+	 *  block in front of the registry — but NOT a 429, which is back-pressure).
 	 *  Each one fails soft, so without this count a run whose searches all silently
 	 *  failed reads exactly like "no matches". */
 	searchFailed: number;
-	/** Backfill searches answered with back-pressure (429/408). Counted apart from
-	 *  searchFailed because they never fail the run, but a run whose searches were all
-	 *  rate-limited still did no backfill and must not read as "no matches" either. */
+	/** Registry calls answered with back-pressure (a 429, from a search or a delta
+	 *  page). Counted apart from searchFailed because they never fail the run, but a
+	 *  run whose calls were all rate-limited still did no backfill and must not read
+	 *  as "no matches" either. */
 	rateLimited: number;
-	/** Delta-feed pages that failed soft the same way (5xx/network; a 4xx refusal is
-	 *  handled separately and fatally when it's 401/403). */
+	/** Delta-feed pages that failed soft the same way (5xx/network, or a non-fatal
+	 *  4xx that isn't a rate limit; a 401/403 refusal is handled separately and
+	 *  fatally). */
 	deltaFailed: number;
 	/** Reason for the last counted search failure. Each category keeps its own reason:
 	 *  one shared field printed a rate limit's "HTTP 429" next to the search-failure
 	 *  count (or next to the delta count), naming a cause that never happened there. */
 	lastSearchFailure?: string;
-	/** Reason for the last rate-limited search. */
+	/** Reason for the last rate-limited call. */
 	lastRateLimit?: string;
 	/** Reason for the last failed delta page. */
 	lastDeltaFailure?: string;
@@ -73,7 +75,8 @@ export function describeSync(s: SyncSummary): string {
 	if (s.searchFailed > 0)
 		out += `, ${s.searchFailed} of ${s.scanned} searches failed${why(s.lastSearchFailure)}`;
 	if (s.rateLimited > 0)
-		out += `, ${s.rateLimited} searches rate-limited${why(s.lastRateLimit)}`;
+		// "calls", not "searches": a rate-limited delta page counts here too.
+		out += `, ${s.rateLimited} calls rate-limited${why(s.lastRateLimit)}`;
 	if (s.deltaFailed > 0)
 		out += `, ${s.deltaFailed} delta page(s) failed${why(s.lastDeltaFailure)}`;
 	return out;
@@ -184,11 +187,23 @@ export async function syncArtists(
 			if (!isFatalRefusal(feed.httpStatus)) {
 				// Transient (429/408/400): degrade to a no-op like an outage, but leave a
 				// trace — a silently short sync is what this whole path exists to prevent.
-				// It counts as a failed page for the same reason: a 4xx refusal returns
-				// before `call`'s onFail hook, so without this the run would report zero
-				// failures and read exactly like a healthy empty feed.
-				deltaFailed++;
-				lastDeltaFailure = `HTTP ${feed.httpStatus}: ${feed.error}`;
+				// It counts for the same reason: a 4xx refusal returns before `call`'s
+				// onFail hook, so without this the run would report zero failures and read
+				// exactly like a healthy empty feed. A 429 is back-pressure, so it is
+				// counted as a rate limit rather than a fault — the admin toast sums
+				// deltaFailed into "failed", and a shared limiter is not a broken fork.
+				// describeOpaqueRefusal already prefixes its own "HTTP <status>"; prefixing
+				// again printed "HTTP 403: HTTP 403 (cf-ray …)".
+				const why = feed.error.startsWith('HTTP ')
+					? feed.error
+					: `HTTP ${feed.httpStatus}: ${feed.error}`;
+				if (feed.httpStatus === 429) {
+					rateLimited++;
+					lastRateLimit = why;
+				} else {
+					deltaFailed++;
+					lastDeltaFailure = why;
+				}
 				console.warn(
 					`registry delta refused: HTTP ${feed.httpStatus} — ${feed.error} (failing soft)`
 				);
@@ -277,11 +292,13 @@ export async function syncArtists(
 		scanned++;
 		const matches = await registrySearch(env, { handle }, {
 			onFail: (why, { httpStatus }) => {
-				// A rate limit or a gateway timeout is back-pressure, not an outage, and
-				// isFatalRefusal already treats those as non-fatal everywhere else. The
-				// registry's unauthenticated read limiter is shared by every fork, so a
-				// 429 sweep at the cron hour would otherwise fail every small fork at once.
-				if (httpStatus === 429 || httpStatus === 408) {
+				// A 429 is back-pressure, not an outage: the registry's unauthenticated read
+				// limiter is shared by every fork, so a sweep at the cron hour would
+				// otherwise fail every small fork at once. Only a 429 gets that treatment —
+				// a 408 says our own request didn't arrive in time, which is a real failure,
+				// and grouping it here meant a persistently timing-out fork could never trip
+				// the all-searches-failed alarm below.
+				if (httpStatus === 429) {
 					rateLimited++;
 					lastRateLimit = why;
 				} else {
@@ -329,9 +346,9 @@ export async function syncArtists(
 	// a zone bot rule started challenging Worker fetches, this path ran empty for
 	// days with a green job.) Two rules keep this from crying wolf: a run needs a
 	// meaningful sample before "all of them failed" means anything — one unlinked
-	// artist and one timeout is not an outage — and rate limits and gateway timeouts
-	// never count toward searchFailed at all (see the onFail hook above), so a
-	// fleet-wide 429 leaves the run degraded rather than red.
+	// artist and one timeout is not an outage — and rate limits never count toward
+	// searchFailed at all (see the onFail hook above), so a fleet-wide 429 leaves the
+	// run degraded rather than red.
 	if (scanned >= 3 && searchFailed === scanned) {
 		throw new RegistrySearchError(searchFailed, lastSearchFailure ?? 'no response');
 	}

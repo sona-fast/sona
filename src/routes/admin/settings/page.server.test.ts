@@ -811,6 +811,44 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 		return { platform } as never;
 	}
 
+	/** N local artists with a handle and no globalId — i.e. N backfill searches. */
+	async function seedUnlinked(db: ReturnType<typeof makeDb>['db'], n: number) {
+		const now = new Date().toISOString();
+		await db.insert(artists).values(
+			Array.from({ length: n }, (_, i) => ({
+				name: `a${i}`,
+				twitterUrl: `https://twitter.com/a${i}`,
+				createdAt: now
+			}))
+		);
+	}
+
+	const JSON_HEADERS = { 'content-type': 'application/json' };
+	const emptyDelta = () =>
+		new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+			status: 200,
+			headers: JSON_HEADERS
+		});
+	const emptySearch = () =>
+		new Response(JSON.stringify({ artists: [] }), { status: 200, headers: JSON_HEADERS });
+
+	/**
+	 * Route registry HTTP by endpoint, so a test states only the half it is about.
+	 * Either side may answer with a rejection instead of a response.
+	 */
+	function mockRegistry(opts: {
+		search?: () => Response | Promise<Response>;
+		delta?: () => Response | Promise<Response>;
+	}) {
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists/search')
+					? (opts.search ?? emptySearch)()
+					: (opts.delta ?? emptyDelta)()
+			)
+		);
+	}
+
 	// The action must hand back a REASON, not the thrown message: the page wraps it in
 	// m.admin_settings_sync_refused so a Japanese operator doesn't get English internals.
 	it('502s with the registry reason (and no raw message) when the fork key is refused', async () => {
@@ -846,22 +884,10 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 	it('502s with an upstream reason (not a key refusal) when every search is challenged', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
-		const now = new Date().toISOString();
-		await db.insert(artists).values([
-			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
-			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now },
-			{ name: 'three', twitterUrl: 'https://twitter.com/three', createdAt: now }
-		]);
-		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
-			Promise.resolve(
-				String(input).includes('/v1/artists/search')
-					? new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
-					: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
-							status: 200,
-							headers: { 'content-type': 'application/json' }
-						})
-			)
-		);
+		await seedUnlinked(db, 3);
+		mockRegistry({
+			search: () => new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+		});
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			status: number;
@@ -900,6 +926,27 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 		expect(result.data.syncRefusedReason).toContain('[redacted]');
 	});
 
+	// Same redaction on the OTHER reason field: a network error's message carries
+	// whatever the runtime put in it, and this one lands on an admin screen (and in a
+	// screenshot, and in a support paste).
+	it('redacts an email echoed back inside the search failure reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		await seedUnlinked(db, 3);
+		mockRegistry({
+			search: () => Promise.reject(new Error('connect ECONNREFUSED for owner@example.com'))
+		});
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncUpstreamReason?: string };
+		};
+
+		expect(result.status).toBe(502);
+		expect(result.data.syncUpstreamReason).not.toContain('owner@example.com');
+		expect(result.data.syncUpstreamReason).toContain('[redacted]');
+	});
+
 	it('400s when the shared registry is not configured', async () => {
 		const { platform } = makeDb();
 
@@ -935,27 +982,11 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 	it('reports how many registry calls failed on a partially degraded run', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
-		const now = new Date().toISOString();
-		await db.insert(artists).values([
-			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
-			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now }
-		]);
+		await seedUnlinked(db, 2);
 		let searches = 0;
-		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
-			Promise.resolve(
-				!String(input).includes('/v1/artists/search')
-					? new Response(JSON.stringify({ artists: [], nextCursor: null }), {
-							status: 200,
-							headers: { 'content-type': 'application/json' }
-						})
-					: searches++ === 0
-						? new Response('bad gateway', { status: 502 })
-						: new Response(JSON.stringify({ artists: [] }), {
-								status: 200,
-								headers: { 'content-type': 'application/json' }
-							})
-			)
-		);
+		mockRegistry({
+			search: () => (searches++ === 0 ? new Response('bad gateway', { status: 502 }) : emptySearch())
+		});
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			success: boolean;
@@ -971,22 +1002,8 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 	it('reports rate-limited calls separately on a run that was all back-pressure', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
-		const now = new Date().toISOString();
-		await db.insert(artists).values([
-			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
-			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now },
-			{ name: 'three', twitterUrl: 'https://twitter.com/three', createdAt: now }
-		]);
-		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
-			Promise.resolve(
-				String(input).includes('/v1/artists/search')
-					? new Response('slow down', { status: 429 })
-					: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
-							status: 200,
-							headers: { 'content-type': 'application/json' }
-						})
-			)
-		);
+		await seedUnlinked(db, 3);
+		mockRegistry({ search: () => new Response('slow down', { status: 429 }) });
 
 		const result = (await actions.syncNow(syncEvent(platform))) as {
 			success: boolean;

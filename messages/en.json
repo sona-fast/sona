@@ -1156,20 +1156,20 @@
 	"admin_settings_sync_complete": "Sync complete",
 	"admin_settings_sync_failed": "Sync failed",
 	"admin_settings_sync_refused": "The shared registry refused this site's key. Check the registry connection below. ({reason})",
-	"admin_settings_sync_upstream_failed": "Could not reach the registry, so nothing was refreshed or linked this run. ({reason})",
+	"admin_settings_sync_upstream_failed": "Could not reach the registry for the artist lookups, so this run is incomplete and some artists were not linked. ({reason})",
 	"admin_settings_sync_summary": "Sync complete: {refreshed} refreshed, {linked} newly linked.",
 	"admin_settings_sync_degraded": [
 		{
 			"declarations": [
-				"input failed",
-				"local failedPlural = failed: plural"
+				"input count",
+				"local countPlural = count: plural"
 			],
 			"selectors": [
-				"failedPlural"
+				"countPlural"
 			],
 			"match": {
-				"failedPlural=one": "{failed} registry call failed this run, so these counts are incomplete.",
-				"failedPlural=other": "{failed} registry calls failed this run, so these counts are incomplete."
+				"countPlural=one": "{count} registry call failed this run, so these counts are incomplete.",
+				"countPlural=other": "{count} registry calls failed this run, so these counts are incomplete."
 			}
 		}
 	],

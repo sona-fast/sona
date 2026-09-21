@@ -38,6 +38,46 @@ function makeDb() {
 	};
 }
 
+/** N local artists with a handle and no globalId — i.e. N backfill searches. */
+async function seedUnlinked(db: ReturnType<typeof drizzle>, n: number) {
+	const now = new Date().toISOString();
+	await db.insert(artists).values(
+		Array.from({ length: n }, (_, i) => ({
+			name: `a${i}`,
+			twitterUrl: `https://twitter.com/a${i}`,
+			createdAt: now
+		}))
+	);
+}
+
+const JSON_HEADERS = { 'content-type': 'application/json' };
+/** A healthy, empty delta page. */
+const emptyDelta = () =>
+	new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+		status: 200,
+		headers: JSON_HEADERS
+	});
+/** A healthy, empty search answer. */
+const emptySearch = () => new Response(JSON.stringify({ artists: [] }), { status: 200, headers: JSON_HEADERS });
+
+/**
+ * Route registry HTTP by endpoint: `search` answers /v1/artists/search, `delta`
+ * answers the feed. Either side defaults to a healthy empty answer, so a test only
+ * states the half it is about.
+ */
+function mockRegistry(opts: { search?: () => Response; delta?: () => Response }) {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists/search')
+					? (opts.search ?? emptySearch)()
+					: (opts.delta ?? emptyDelta)()
+			)
+		)
+	);
+}
+
 function postEvent(platform: App.Platform) {
 	const request = new Request('http://localhost/api/cron/sync-artists', {
 		method: 'POST',
@@ -111,11 +151,11 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 
 		const res = await POST(postEvent(platform));
 		expect(res.status).toBe(200);
-		// The reason quotes an upstream body; it stays in job_run, out of the response
-		// the sync workflow prints into a public log.
+		// A 429 is back-pressure, so it counts as a rate limit rather than a failed page.
+		// The reason quotes an upstream body; it stays in job_run, out of the response the
+		// sync workflow prints into a public log.
 		const body = (await res.json()) as Record<string, unknown>;
-		expect(body).not.toHaveProperty('lastDeltaFailure');
-		expect(body).not.toHaveProperty('lastSearchFailure');
+		expect(body).toMatchObject({ rateLimited: 1, deltaFailed: 0 });
 		expect(body).not.toHaveProperty('lastRateLimit');
 		await Promise.all(waits);
 
@@ -236,35 +276,19 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 	it('stays 200 and names the degradation when only some searches failed', async () => {
 		const { db, platform, waits, sqlite } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
-		const now = new Date().toISOString();
-		await db.insert(artists).values([
-			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
-			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now }
-		]);
+		await seedUnlinked(db, 2);
 		let searches = 0;
-		vi.stubGlobal(
-			'fetch',
-			vi.fn((input: RequestInfo | URL) => {
-				if (!String(input).includes('/v1/artists/search'))
-					return Promise.resolve(
-						new Response(JSON.stringify({ artists: [], nextCursor: null }), {
-							status: 200,
-							headers: { 'content-type': 'application/json' }
-						})
-					);
-				return Promise.resolve(
-					searches++ === 0
-						? new Response('bad gateway', { status: 502 })
-						: new Response(JSON.stringify({ artists: [] }), {
-								status: 200,
-								headers: { 'content-type': 'application/json' }
-							})
-				);
-			})
-		);
+		mockRegistry({
+			search: () => (searches++ === 0 ? new Response('bad gateway', { status: 502 }) : emptySearch())
+		});
 
 		const res = await POST(postEvent(platform));
 		expect(res.status).toBe(200);
+		// The counters ride in the body so the workflow log shows a degraded run; the
+		// reasons behind them quote an upstream body and stay in job_run.
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body).toMatchObject({ searchFailed: 1, rateLimited: 0, deltaFailed: 0 });
+		expect(body).not.toHaveProperty('lastSearchFailure');
 		await Promise.all(waits);
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -279,25 +303,10 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 	it('502s naming the backfill when every search is challenged and the feed is healthy', async () => {
 		const { db, platform, waits, sqlite } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
-		const now = new Date().toISOString();
-		await db.insert(artists).values([
-			{ name: 'one', twitterUrl: 'https://twitter.com/one', createdAt: now },
-			{ name: 'two', twitterUrl: 'https://twitter.com/two', createdAt: now },
-			{ name: 'three', twitterUrl: 'https://twitter.com/three', createdAt: now }
-		]);
-		vi.stubGlobal(
-			'fetch',
-			vi.fn((input: RequestInfo | URL) =>
-				Promise.resolve(
-					String(input).includes('/v1/artists/search')
-						? new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
-						: new Response(JSON.stringify({ artists: [], nextCursor: null }), {
-								status: 200,
-								headers: { 'content-type': 'application/json' }
-							})
-				)
-			)
-		);
+		await seedUnlinked(db, 3);
+		mockRegistry({
+			search: () => new Response('<html/>', { status: 403, headers: { 'cf-mitigated': 'challenge' } })
+		});
 
 		const res = await POST(postEvent(platform));
 		expect(res.status).toBe(502);
@@ -317,6 +326,21 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 			.prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'")
 			.get();
 		expect(row?.status).toBe('failed');
+	});
+
+	// Back-pressure is not a fault: a run whose every search was 429'd stays green, but
+	// it did no backfill, so the count has to reach the workflow log to say so.
+	it('stays 200 and counts a fully rate-limited backfill apart from failures', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await seedUnlinked(db, 3);
+		mockRegistry({ search: () => new Response('slow down', { status: 429 }) });
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body).toMatchObject({ rateLimited: 3, searchFailed: 0, deltaFailed: 0 });
+		expect(body).not.toHaveProperty('lastRateLimit');
 	});
 
 	// A D1 failure is still our bug: it must keep propagating as a real 500, not be
