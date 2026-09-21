@@ -659,7 +659,9 @@
 						{m.admin_vr_upload_replace()}
 						<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} disabled={saving} class="sr-file" aria-describedby="vr-model-hint" />
 					</label>
-					<button type="button" class="file-btn" onclick={removeModel} disabled={saving}>{m.admin_vr_upload_remove()}</button>
+					<!-- class:disabled as well as the attribute, so this dims the same way
+					     as its <label> twin, which has no :disabled state to dim. -->
+					<button type="button" class="file-btn" class:disabled={saving} onclick={removeModel} disabled={saving}>{m.admin_vr_upload_remove()}</button>
 				</div>
 			</div>
 			{#if modelUrl !== (avatar?.modelUrl ?? '')}
@@ -1180,11 +1182,11 @@
 		font-family: var(--font-primary); font-variant-numeric: tabular-nums;
 	}
 	.model-actions { display: flex; gap: 8px; flex-shrink: 0; }
-	/* Same chrome as the shared .btn-compact, but these are the file-picker
-	   controls: one is a <label> that takes a drop, and "busy" arrives as a
-	   .disabled class rather than the :disabled attribute the shared variant
-	   dims. Kept local, and named apart from the .btn-* namespace so the two
-	   don't collide on one element (SONA-209). */
+	/* Same size and fill as the shared .btn-compact, but these are the
+	   file-picker controls: one is a <label> that takes a drop, and "busy"
+	   arrives as a .disabled class rather than the :disabled attribute the
+	   shared variant dims. Kept local, and named apart from the .btn-*
+	   namespace so the two don't collide on one element (SONA-209). */
 	.file-btn {
 		/* The <label> rule above sets flex-direction: column on every label in the
 		   form — this one lays its contents out in a row. */

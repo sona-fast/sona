@@ -245,7 +245,9 @@ input, select, textarea {
 	gap: 5px;
 	font-size: 12px;
 	padding: 5px 10px;
-	border: 1px solid var(--border);
+	/* --input, the 3:1 control-boundary token (SONA-126), not the --border
+	   hairline this variant used to draw. */
+	border: 1px solid var(--input);
 	border-radius: var(--radius-xs);
 	background: var(--secondary);
 	color: var(--foreground);
@@ -400,7 +402,8 @@ select.input {
 	display: flex;
 	flex-direction: row !important;
 	align-items: center;
-	gap: 8px;
+	/* No gap here: both consumers are labels under a `.modal-form label` rule
+	   that outranks this one and sets the gap. */
 	background: var(--background);
 	border: 1px solid var(--input);
 	border-radius: var(--radius-pill);

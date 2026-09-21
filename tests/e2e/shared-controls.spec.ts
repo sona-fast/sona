@@ -42,7 +42,8 @@ test('btn-full-mobile fills the row on a phone: the VR download button', async (
 	// permission source + a model key the R2 stub serves.
 	await page.goto('/vr/e2e-downloadable');
 
-	const row = page.locator('.actions');
+	// ConCard also uses .actions, so scope to the row holding the download anchor.
+	const row = page.locator('.actions').filter({ has: page.locator('a[download]') });
 	await expect(row).toBeVisible();
 	await expectFillsRow(row.locator('.btn'), row, '.actions .btn');
 });
@@ -72,4 +73,23 @@ test('btn-desktop-only drops out of the header on a phone and comes back wide', 
 
 	await page.setViewportSize(DESKTOP);
 	await expect(add).toBeVisible();
+});
+
+// A stacking pin, not a class pin: the 404 page's action row restacks into a
+// full-width column at this size, which is exactly why .btn-full-mobile came off
+// its buttons (and three other pages') in step 4. Removing the class proves
+// nothing here. What this guards is the media query that makes the removal
+// safe, so the buttons don't go back to content width unnoticed.
+test('the 404 actions stack full width on a phone without btn-full-mobile', async ({ page }) => {
+	await page.setViewportSize(PHONE);
+	const response = await page.goto('/this-page-does-not-exist');
+	expect(response?.status()).toBe(404);
+
+	const row = page.locator('.error-page .actions');
+	await expect(row).toBeVisible();
+	const buttons = row.locator('.btn');
+	await expect(buttons).toHaveCount(2);
+	for (let i = 0; i < 2; i++) {
+		await expectFillsRow(buttons.nth(i), row, `.error-page .actions .btn #${i + 1}`);
+	}
 });

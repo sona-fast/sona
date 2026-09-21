@@ -2154,7 +2154,8 @@ describe('no text rule paints with raw --primary (SONA-126)', () => {
 describe('control boundaries use --input, not --border (SONA-126)', () => {
 	const rules = {
 		'.btn-outline': "the outline button's 1px edge is the only thing marking it as a control",
-		'.input': 'the form-field boundary'
+		'.input': 'the form-field boundary',
+		'.btn-compact': "the compact toolbar button's 1px edge is all that marks it as a control"
 	};
 
 	for (const [selector, why] of Object.entries(rules)) {
@@ -2179,8 +2180,9 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	// them carried the boundary, the outline appeared and disappeared as a visitor
 	// clicked between the tabs of one switch, so every copy is pinned here
 	// along with the view toggle that sits in the gallery's filter row.
-	// The VR form's file-picker buttons are a control edge too: same chrome as
-	// .btn-compact, kept local because one of them is a drop target (SONA-209 r2).
+	// The VR form's file-picker buttons are a control edge too: the same size and
+	// fill as .btn-compact, kept local because one of them is a drop target
+	// (SONA-209 r2).
 	const componentRules: Array<{ file: string; selector: string }> = [
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.tabs' },
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.view-toggle' },
@@ -2197,6 +2199,10 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	// so without the focus-within ring the fields show no focus at all.
 	it('.field-pill draws its border with --input and rings on focus-within', () => {
 		expect(blockBody('.field-pill')).toMatch(/border:\s*1px solid var\(--input\)/);
+		// !important is load-bearing: both modal pages scope `.modal-form label`
+		// into a column, which outranks this rule, and a stacked pill hides the
+		// edge the assertion above pins.
+		expect(blockBody('.field-pill')).toMatch(/flex-direction:\s*row\s*!important/);
 		// Inset like .input:focus, so the pill focuses the way the fields above it do.
 		expect(blockBody('.field-pill:focus-within')).toMatch(/outline:\s*2px solid var\(--ring\)/);
 		expect(blockBody('.field-pill:focus-within')).toMatch(/outline-offset:\s*-1px/);

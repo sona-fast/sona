@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 //
 // A page that restates `.btn` or `.input` drifts from the shared class the
 // moment the shared class changes, and the drift is invisible until someone
-// opens that one page. Sixty-six scoped rules had accumulated across the app by
-// 2026-09-14; the restatements are gone, the differences that repeated are named
-// variants in app.css (.btn-compact, .btn-full-mobile, .btn-desktop-only,
+// opens that one page. The restatements that had accumulated across the app are
+// gone, the differences that repeated are named variants in app.css
+// (.btn-compact, .btn-full-mobile, .btn-desktop-only,
 // .input-sm, .input-plain, .input-form-width), and what is left is listed below
 // with the reason it stays scoped.
 //
@@ -187,6 +187,17 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		const rule = source.match(/^\s*\.file-btn\s*\{([^}]*)\}/m)?.[1];
 		expect(rule, '.file-btn rule not found in VrAvatarForm.svelte').toBeDefined();
 		expect(rule).toMatch(/flex-direction:\s*row/);
+	});
+
+	// The pair goes inert together during a save, so it has to dim together too:
+	// the <label> has no :disabled state, so .file-btn.disabled carries the
+	// dimming and the <button> twin takes the class as well as the attribute
+	// (SONA-209 r3).
+	it('both VR file-picker buttons take the disabled class while saving', () => {
+		const source = readFileSync(`${srcRoot}/lib/components/VrAvatarForm.svelte`, 'utf8');
+		const remove = source.match(/<button[^>]*onclick=\{removeModel\}[^>]*>/)?.[0];
+		expect(remove, 'the remove-model button moved or was renamed').toBeDefined();
+		expect(remove).toContain('class:disabled={saving}');
 	});
 
 	const scopedCount = (file: string) =>

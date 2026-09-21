@@ -324,11 +324,11 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	expect(await dropOn(page, '.model-card', [{ name: 'x.vrm', type: '' }])).toBe(true);
 	expect(uploads).toBe(beforeCard);
 	// The Replace button is a drop target too, and paints its own highlight.
-	await expectDragOverHighlight(page, 'label.btn-sm');
+	await expectDragOverHighlight(page, 'label.file-btn');
 	hold = new Promise<void>((resolve) => (release = resolve));
 	const url = page.url();
 	const during = uploads;
-	await dropOn(page, 'label.btn-sm', [{ name: 'c.vrm', type: '' }]);
+	await dropOn(page, 'label.file-btn', [{ name: 'c.vrm', type: '' }]);
 	await expect(page.locator('.upload-progress')).toBeVisible();
 	expect(await dropOn(page, '.upload-progress', [{ name: 'd.vrm', type: '' }])).toBe(true);
 	expect(uploads).toBe(during + 1);
@@ -353,12 +353,12 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	await page.selectOption('select[name="characterId"]', { label: 'Taro' });
 	await page.getByRole('button', { name: 'Create avatar' }).click();
 	await expect(page.locator('form.form button[type="submit"]')).toBeDisabled();
-	const replace = page.locator('label.btn-sm');
+	const replace = page.locator('label.file-btn');
 	await expect(replace).toHaveClass(/disabled/);
 	// Remove mutates modelUrl the same way a replace does, so it waits too.
 	await expect(page.locator('.model-actions button')).toBeDisabled();
 	const beforeSave = uploads;
-	await dropOn(page, 'label.btn-sm', [{ name: 'e.vrm', type: '' }]);
+	await dropOn(page, 'label.file-btn', [{ name: 'e.vrm', type: '' }]);
 	await page.waitForTimeout(300);
 	expect(uploads).toBe(beforeSave);
 	await expect(page.locator('.model-name')).toHaveText('c.vrm');
