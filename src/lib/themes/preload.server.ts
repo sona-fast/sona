@@ -36,6 +36,10 @@ function covers600(weight: number | string): boolean {
 	return Number.isFinite(hi) ? lo <= 600 && 600 <= hi : lo === 600;
 }
 
+/**
+ * The Latin face file of a theme's primary family that covers the heading
+ * weight, or null when the primary family has no self-hosted Latin face.
+ */
 function latinSrcOf(theme: ThemeDefinition): string | null {
 	const family = firstFamily(theme.fonts?.primary ?? '');
 	if (!family) return null;

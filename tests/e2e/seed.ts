@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import { E2E_DB_NAME, E2E_PERSIST_TO, E2E_WRANGLER_CONFIG } from './paths';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+/** Runs one wrangler command from the repo root, streaming its output. */
 function wrangler(args: string[]): void {
 	execFileSync('npx', ['wrangler', ...args], {
 		cwd: repoRoot,
@@ -60,11 +61,17 @@ function seed(): void {
 		// than in seed.sql, where they would change what every other spec sees:
 		// stickers-content needs a published pack, and nav-gating depends on there
 		// being none. The path is absolute and comes from tests/e2e/paths.ts, so a
-		// typo fails the seed rather than quietly seeding nothing.
+		// typo fails the seed rather than quietly seeding nothing. It has to be a
+		// regular file, not a symlink, the same rule scripts/fetch-fonts.mjs
+		// applies to what it writes.
 		const overlay = process.env.SONA_E2E_SEED_OVERLAY;
 		if (overlay) {
 			if (!existsSync(overlay)) {
 				throw new Error(`SONA_E2E_SEED_OVERLAY points at ${overlay}, which is not there`);
+			}
+			const overlayStat = lstatSync(overlay);
+			if (overlayStat.isSymbolicLink() || !overlayStat.isFile()) {
+				throw new Error(`SONA_E2E_SEED_OVERLAY must be a regular file, got ${overlay}`);
 			}
 			wrangler(['d1', 'execute', ...target, `--file=${overlay}`]);
 		}

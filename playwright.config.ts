@@ -178,6 +178,7 @@ const TAG_SUGGESTION_SPEC = '**/tag-suggestions.spec.ts';
 // here (not in globalSetup) guarantees it finishes before the server reads the
 // DB — playwright starts webServer before globalSetup. reuseExistingServer:false
 // + --strictPort: never reuse a squatter on the port (stale data) — fail loudly.
+/** One seeded dev server entry for Playwright's webServer list. */
 const webServer = (port: number, env: Record<string, string>) => ({
 	command: `npm run test:e2e:seed && npm run dev -- --port ${port} --strictPort`,
 	url: `http://localhost:${port}`,

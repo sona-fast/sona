@@ -49,6 +49,7 @@ function rule(selector: string, declarations: string[]): string {
 	return `${selector} {\n${declarations.map((d) => (d === '' ? '' : `\t${d}`)).join('\n')}\n}\n`;
 }
 
+/** The `--token: value;` lines for one mode's palette, in declaration order. */
 function tokenDeclarations(tokens: ThemeDefinition['dark']): string[] {
 	const out: string[] = [];
 	for (const key of Object.keys(TOKEN_CSS_NAMES) as TokenKey[]) {
@@ -80,6 +81,10 @@ function selectCaret(stroke: string): string {
 	return `url("data:image/svg+xml,${encoded}")`;
 }
 
+/**
+ * One CSS rule for a theme in one mode: its selector, its token declarations,
+ * the caret baked from its resolved --input, and (dark block only) its fonts.
+ */
 function block(
 	themes: ThemeDefinition[],
 	theme: ThemeDefinition,
@@ -286,6 +291,10 @@ function validateUnicodeRange(id: string, range: string): void {
 	}
 }
 
+/**
+ * The whole generated stylesheet: every theme's dark and light blocks in the
+ * order given (the default first), followed by the @font-face section.
+ */
 export function renderThemesCss(themes: ThemeDefinition[]): string {
 	for (const theme of themes) validateTheme(theme);
 	// Emission order is source order and the default theme is the fallback floor,

@@ -260,6 +260,7 @@ export function refuseSymlink(path) {
 	}
 }
 
+/** Whether a non-empty file of that name is already in static/fonts/. */
 function existsOnDisk(name) {
 	try {
 		return statSync(OUT_DIR + name).size > 0;
@@ -268,6 +269,11 @@ function existsOnDisk(name) {
 	}
 }
 
+/**
+ * Fetches every missing (or, with --force, every) slice of every family in
+ * FAMILIES, verifies each against the manifest, prunes stale slices, and
+ * rewrites the manifest. Returns the process exit code.
+ */
 async function main() {
 	const force = argv.includes('--force');
 	mkdirSync(OUT_DIR, { recursive: true });
