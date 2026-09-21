@@ -661,6 +661,17 @@ test.describe('with a key saved', () => {
 		// difference instead and wrap their own text (SONA-220).
 		await expect(page.locator('#lookup-rating-tag')).toBeVisible();
 		await expect(page.locator('#tags-rating')).toBeVisible();
+		// Every width below is measured in the theme's own face, so wait for the
+		// self-hosted JetBrains Mono to load before reading a box (SONA-181).
+		await page.evaluate(() => document.fonts.ready);
+		// And say so if it did not: fonts.ready resolves on a failed fetch too, and
+		// a missing face would otherwise fail below as an unexplained wrap. load()
+		// returns the faces that matched, so a declaration that went missing
+		// returns none; check() would say true for a fallback.
+		const faces = await page.evaluate(async () =>
+			(await document.fonts.load('11px "JetBrains Mono"')).map((face) => face.status)
+		);
+		expect(faces, 'no loaded JetBrains Mono face matched the pills').toContain('loaded');
 		// Compared by centre, not by top: the row centres its items, and the button
 		// is 36px tall beside an 18px label, so equal tops would be the wrong test
 		// for "same row" — they were never equal, even before the button wrapped.
@@ -680,19 +691,25 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('.tag-check-row .btn')).toHaveText('Mark it NSFW');
 		// One line each, not just one row. The note wrapped "entail.dev." onto a
 		// second line for an 8px shortfall, which the row's own gap pays for: three
-		// gaps at 4px instead of 8px buys back 12px (SONA-220). How much the four
-		// items want depends on the font the pills are drawn in, and the theme's
-		// primary face is not self-hosted yet, so a machine without it draws them
-		// in whatever monospace it has (the CI runner's is wider than a Mac's).
-		// Measured, then: when the items fit unwrapped, each holds one line, and
-		// when they do not, the pills give up their width and the button keeps it.
-		const fits = await page.evaluate(() => {
-			const row = document.querySelector('.tag-check-row');
-			if (!(row instanceof HTMLElement)) throw new Error('no row');
+		// gaps at 4px instead of 8px buys back 12px (SONA-220).
+		// Measured against the space each item got, not a fixed height: Chromium
+		// positions glyphs at subpixel offsets on macOS but rounds every advance to
+		// a whole pixel on Linux at 1x, so the same text is about 6% wider on the
+		// CI runner and the 600px column has a few pixels of slack. A pill that
+		// wraps because the column is too narrow for its platform's text is not
+		// what this test is about; a pill that wraps with room to spare is.
+		const button = await page.locator('.tag-check-row .btn').boundingBox();
+		if (!button) throw new Error('the button has no box');
+		expect(button.height).toBeLessThan(44);
+		// The row's items all want a width on one line; the sum, plus the gaps, is
+		// what the row would need to hold every item unwrapped. Each item's want is
+		// read from a nowrap clone at max-content, because a wrapped element's own
+		// scrollWidth reports the width it was given, not the width it needs.
+		const fit = await page.locator('.tag-check-row').evaluate((row) => {
 			const items = Array.from(row.children).filter(
 				(el): el is HTMLElement => el instanceof HTMLElement
 			);
-			const want = items.reduce((sum, el) => {
+			const wants = items.map((el) => {
 				const probe = el.cloneNode(true) as HTMLElement;
 				probe.style.position = 'absolute';
 				probe.style.width = 'max-content';
@@ -704,15 +721,16 @@ test.describe('with a key saved', () => {
 					parseFloat(style.marginLeft) +
 					parseFloat(style.marginRight);
 				probe.remove();
-				return sum + width;
-			}, 0);
+				return width;
+			});
 			const gap = parseFloat(getComputedStyle(row).columnGap) * (items.length - 1);
-			return want + gap <= row.clientWidth;
+			return { need: wants.reduce((a, b) => a + b, 0) + gap, have: row.clientWidth };
 		});
-		const button = await page.locator('.tag-check-row .btn').boundingBox();
-		if (!button) throw new Error('the button has no box');
-		expect(button.height).toBeLessThan(44);
-		if (fits) {
+		expect(fit.have).toBeGreaterThan(0);
+		// The row could hold every item on one line, so a wrapped pill is a real
+		// defect. When it could not (Linux at 1x, or a longer locale), the wrap is
+		// the platform's text, not the layout's fault, and the height is not judged.
+		if (fit.need <= fit.have) {
 			for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
 				const box = await page.locator(selector).boundingBox();
 				if (!box) throw new Error(`${selector} has no box`);
