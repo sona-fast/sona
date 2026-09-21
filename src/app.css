@@ -270,7 +270,8 @@ input, select, textarea {
 
 @media (max-width: 768px) {
 	/* A button that shares a row on a wide screen and takes the whole row on a
-	   phone. Six pages had this scoped under their own action-row container. */
+	   phone. Only for rows that stay a row at this width: a row that stacks into
+	   a column already stretches its buttons, so the class does nothing there. */
 	.btn-full-mobile {
 		width: 100%;
 	}
@@ -384,10 +385,35 @@ select.input {
 	height: auto;
 }
 
-/* The wrapper draws the ring instead: .social-field:focus-within on
-   /admin/artists and /admin/characters. */
+/* The wrapper draws the ring instead: .field-pill:focus-within below. */
 .input-plain:focus {
 	outline: none;
+}
+
+/* The wrapper an .input-plain sits in: a pill that carries the icon, the border
+   and the focus ring for the field inside it. The social-URL rows on
+   /admin/artists and /admin/characters had a byte-identical copy each
+   (SONA-209). `!important` because both pages style their <label>s into a
+   column and this label is a row.
+   --input, not --border: it is the whole visible edge of a control (SONA-126). */
+.field-pill {
+	display: flex;
+	flex-direction: row !important;
+	align-items: center;
+	gap: 8px;
+	background: var(--background);
+	border: 1px solid var(--input);
+	border-radius: var(--radius-pill);
+	padding: 0 12px;
+	height: 40px;
+}
+
+/* The input inside drops its own outline, so the ring goes on the pill. Inset
+   like .input:focus: a field focuses as one stroke on its own edge, not as a
+   second ring outside the border (SONA-209 r2). */
+.field-pill:focus-within {
+	outline: 2px solid var(--ring);
+	outline-offset: -1px;
 }
 
 /* A single-field add form at the top of an admin list: capped so one short name

@@ -13,8 +13,8 @@
 		<p class="message">{page.error?.message ?? m.error_generic_fallback()}</p>
 	{/if}
 	<div class="actions">
-		<a href="/" class="btn btn-outline btn-full-mobile">{m.error_back_home()}</a>
-		<a href="/gallery" class="btn btn-primary btn-full-mobile">{m.error_browse_gallery()}</a>
+		<a href="/" class="btn btn-outline">{m.error_back_home()}</a>
+		<a href="/gallery" class="btn btn-primary">{m.error_browse_gallery()}</a>
 	</div>
 </div>
 

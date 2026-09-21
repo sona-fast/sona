@@ -202,31 +202,31 @@
 				<div class="social-section">
 					<h3>{m.admin_artists_col_social()}</h3>
 					<div class="social-grid">
-						<label class="social-field">
+						<label class="field-pill">
 							<TwitterIcon size={14} /><span class="sr-only">Twitter</span>
 							<input type="text" class="input input-plain" name="twitter" value={editingChar.twitterUrl || ''} placeholder="@handle" />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<BlueskyIcon size={14} /><span class="sr-only">Bluesky</span>
 							<input type="text" class="input input-plain" name="bluesky" value={editingChar.blueskyUrl || ''} placeholder="bsky.app/profile/..." />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<TelegramIcon size={14} /><span class="sr-only">Telegram</span>
 							<input type="text" class="input input-plain" name="telegram" value={editingChar.telegramUrl || ''} placeholder="t.me/..." />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span>
 							<input type="text" class="input input-plain" name="furaffinity" value={editingChar.furAffinityUrl || ''} placeholder="furaffinity.net/user/..." />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span>
 							<input type="text" class="input input-plain" name="deviantart" value={editingChar.deviantArtUrl || ''} placeholder="deviantart.com/..." />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<PatreonIcon size={14} /><span class="sr-only">Patreon</span>
 							<input type="text" class="input input-plain" name="patreon" value={editingChar.patreonUrl || ''} placeholder="patreon.com/..." />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<InstagramIcon size={14} /><span class="sr-only">Instagram</span>
 							<input type="text" class="input input-plain" name="instagram" value={editingChar.instagramUrl || ''} placeholder="instagram.com/..." />
 						</label>
@@ -353,25 +353,6 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 10px;
-	}
-
-	.social-field {
-		display: flex;
-		flex-direction: row !important;
-		align-items: center;
-		gap: 8px;
-		background: var(--background);
-		border: 1px solid var(--input);
-		border-radius: var(--radius-pill);
-		padding: 0 12px;
-		height: 40px;
-	}
-
-	/* The input inside is .input-plain, which drops its own outline — this
-	   wrapper is the whole visible control, so the ring goes here. */
-	.social-field:focus-within {
-		outline: 2px solid var(--ring);
-		outline-offset: 2px;
 	}
 
 	.empty {

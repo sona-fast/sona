@@ -1,12 +1,16 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import { adminLogin, gotoAfterLogin } from './admin-login';
 
 // SONA-209 step 4: .btn-full-mobile and .btn-desktop-only moved behaviour out of
-// six pages' scoped CSS and into two markup classes. Both are keyed to a viewport
+// the pages' scoped CSS and into two markup classes. Both are keyed to a viewport
 // width, so a unit test can only read the rule text back — nothing proved a
 // BROWSER still lays the buttons out that way. A class dropped from one page, a
 // typo in its name, or the media block falling out of app.css leaves the whole
 // unit suite green and the phone layout broken.
+//
+// Only the pages where the class DECIDES the width are measured here. A row that
+// stacks into a column at 375px stretches its buttons on its own, so a test
+// there passes with the class removed and proves nothing.
 //
 // Read-only: every test here loads a page and measures it.
 
@@ -28,41 +32,23 @@ async function expectFillsRow(control: Locator, container: Locator, what: string
 	).toBeLessThan(1);
 }
 
-// The two rows below stack into a column at this width and stretch what they
-// hold, so a full-width button there is necessary but not sufficient — see the
-// settings test for the case that pins the class itself.
-async function eachFillsRow(page: Page, container: string, controls: string, count: number) {
-	const row = page.locator(container);
+// The VR download anchor's .actions stays a flex ROW at every width — no media
+// query restacks it — so the anchor is as wide as its content unless
+// .btn-full-mobile says otherwise. Drop the class there and this test says so.
+test('btn-full-mobile fills the row on a phone: the VR download button', async ({ page }) => {
+	await page.setViewportSize(PHONE);
+	// Avatar 5 (tests/e2e/fixtures/seed.sql) is the seeded avatar the loader
+	// offers a download for: permissive license + downloadable + a recorded
+	// permission source + a model key the R2 stub serves.
+	await page.goto('/vr/e2e-downloadable');
+
+	const row = page.locator('.actions');
 	await expect(row).toBeVisible();
-	const items = row.locator(controls);
-	await expect(items).toHaveCount(count);
-	for (let i = 0; i < count; i++) {
-		await expectFillsRow(items.nth(i), row, `${container} ${controls} #${i + 1}`);
-	}
-}
-
-test('btn-full-mobile fills the row on a phone: the upload form actions', async ({ page }) => {
-	await page.setViewportSize(PHONE);
-	await adminLogin(page, PASSWORD);
-	await gotoAfterLogin(page, '/admin/upload');
-
-	await eachFillsRow(page, '.form-actions', '.btn', 2);
+	await expectFillsRow(row.locator('.btn'), row, '.actions .btn');
 });
 
-test('btn-full-mobile fills the row on a phone: the error page actions', async ({ page }) => {
-	await page.setViewportSize(PHONE);
-	// The root +error.svelte is what an unknown path renders.
-	const response = await page.goto('/no-such-page-exists');
-	expect(response?.status()).toBe(404);
-
-	await eachFillsRow(page, '.actions', '.btn', 2);
-});
-
-// Where the class is load-bearing: the two rows above stack into a column and
-// stretch their children, so the buttons would be full width even without it.
-// This button is not a flex item of the stacked card — it sits inside its own
-// <form> — so the width comes from .btn-full-mobile and nothing else. Drop the
-// class here and this test is the one that says so.
+// The settings buttons are not flex items of the stacked card — each sits inside
+// its own <form> — so the width comes from .btn-full-mobile and nothing else.
 test('btn-full-mobile fills the row on a phone: the settings export button', async ({ page }) => {
 	await page.setViewportSize(PHONE);
 	await adminLogin(page, PASSWORD);

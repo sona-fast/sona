@@ -1825,8 +1825,8 @@
 	</div>
 
 	<div class="form-actions">
-		<a href="/admin/images" class="btn btn-secondary btn-full-mobile">{m.admin_cancel()}</a>
-		<button type="submit" class="btn btn-primary btn-full-mobile" disabled={!allUploaded || isUploading || saving}>
+		<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
+		<button type="submit" class="btn btn-primary" disabled={!allUploaded || isUploading || saving}>
 			{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_upload_submit()}{/if}
 		</button>
 	</div>

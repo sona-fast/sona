@@ -355,31 +355,31 @@
 				<div class="social-section">
 					<h3>{m.admin_artists_col_social()}</h3>
 					<div class="social-grid">
-						<label class="social-field">
+						<label class="field-pill">
 							<TwitterIcon size={14} /><span class="sr-only">Twitter</span>
 							<input type="text" class="input input-plain" name="twitter" value={editingArtist.twitterUrl || ''} placeholder="@handle" disabled={saving} />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<BlueskyIcon size={14} /><span class="sr-only">Bluesky</span>
 							<input type="text" class="input input-plain" name="bluesky" value={editingArtist.blueskyUrl || ''} placeholder="lunarpaws.bsky.social" disabled={saving} />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<TelegramIcon size={14} /><span class="sr-only">Telegram</span>
 							<input type="text" class="input input-plain" name="telegram" value={editingArtist.telegramUrl || ''} placeholder="t.me/lunarpaws" disabled={saving} />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span>
 							<input type="text" class="input input-plain" name="furaffinity" value={editingArtist.furAffinityUrl || ''} placeholder="furaffinity.net/user/lunarpaws" disabled={saving} />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span>
 							<input type="text" class="input input-plain" name="deviantart" value={editingArtist.deviantArtUrl || ''} placeholder="deviantart.com/..." disabled={saving} />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<PatreonIcon size={14} /><span class="sr-only">Patreon</span>
 							<input type="text" class="input input-plain" name="patreon" value={editingArtist.patreonUrl || ''} placeholder="patreon.com/lunarpaws" disabled={saving} />
 						</label>
-						<label class="social-field">
+						<label class="field-pill">
 							<InstagramIcon size={14} /><span class="sr-only">Instagram</span>
 							<input type="text" class="input input-plain" name="instagram" value={editingArtist.instagramUrl || ''} placeholder="instagram.com/..." disabled={saving} />
 						</label>
@@ -690,27 +690,9 @@
 		gap: 10px;
 	}
 
-	.social-field {
-		display: flex;
-		flex-direction: row !important;
-		align-items: center;
-		gap: 8px;
-		background: var(--background);
-		border: 1px solid var(--input);
-		border-radius: var(--radius-pill);
-		padding: 0 12px;
-		height: 40px;
-	}
-
-	/* The input inside is .input-plain, which drops its own outline — this
-	   wrapper is the whole visible control, so the ring goes here. */
-	.social-field:focus-within {
-		outline: 2px solid var(--ring);
-		outline-offset: 2px;
-	}
-
-	/* Layout only — the borderless treatment is .input-plain in app.css. */
-	.social-field .input {
+	/* Layout only — the pill and the borderless input are .field-pill and
+	   .input-plain in app.css. */
+	.field-pill .input {
 		flex: 1;
 		min-width: 0;
 	}

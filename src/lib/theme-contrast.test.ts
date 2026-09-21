@@ -658,12 +658,19 @@ describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121
 // (The DownloadMenu row ring is NOT covered here: it sits on the menu's LIFTED
 // card-toward-white surface, where --ring fails on ember dark — it uses
 // --foreground instead, asserted in the SONA-123 describe at the bottom.)
+// .btn-compact is standalone rather than a .btn modifier, so it does not inherit
+// the ring above — it declares its own copy, and both are pinned here (SONA-209
+// r2). One token, so the per-theme measurement below covers both rings.
 describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SONA-123)', () => {
-	it('the ring uses var(--ring) (not var(--primary), which fails 3:1 on Ember light)', () => {
-		const rule = css.match(/^\.btn:focus-visible\s*\{([^}]*)\}/m)?.[1];
-		if (!rule) throw new Error('.btn:focus-visible rule not found in app.css');
-		expect(rule).toMatch(/outline:[^;]*var\(--ring\)/);
-	});
+	for (const selector of ['.btn', '.btn-compact'] as const) {
+		it(`the ${selector} ring uses var(--ring) (not var(--primary), which fails 3:1 on Ember light)`, () => {
+			const escaped = selector.replace('.', '\\.');
+			const rule = css.match(new RegExp(`^${escaped}:focus-visible\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+			if (!rule) throw new Error(`${selector}:focus-visible rule not found in app.css`);
+			expect(rule).toMatch(/outline:\s*2px solid var\(--ring\)/);
+			expect(rule).toMatch(/outline-offset:\s*2px/);
+		});
+	}
 
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
@@ -2172,31 +2179,36 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	// them carried the boundary, the outline appeared and disappeared as a visitor
 	// clicked between the tabs of one switch, so every copy is pinned here
 	// along with the view toggle that sits in the gallery's filter row.
-	// The social-URL rows in the artist and character edit modals are the same
-	// kind of boundary: the wrapper draws the pill and the input inside it is
-	// .input-plain, so the wrapper's edge is the whole control edge. Both pages
-	// restate the rule, so both are pinned (SONA-209 r1).
+	// The VR form's file-picker buttons are a control edge too: same chrome as
+	// .btn-compact, kept local because one of them is a drop target (SONA-209 r2).
 	const componentRules: Array<{ file: string; selector: string }> = [
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.tabs' },
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.view-toggle' },
 		{ file: '../routes/(public)/stickers/+page.svelte', selector: '.tabs' },
 		{ file: '../routes/(public)/vr/+page.svelte', selector: '.tabs' },
-		{ file: '../routes/admin/artists/+page.svelte', selector: '.social-field' },
-		{ file: '../routes/admin/characters/+page.svelte', selector: '.social-field' }
+		{ file: './components/VrAvatarForm.svelte', selector: '.file-btn' }
 	];
 
-	// .input-plain sets `outline: none` — without this rule the social fields
-	// show no focus at all, which is where they sat until SONA-209 r1.
-	for (const file of [
-		'../routes/admin/artists/+page.svelte',
-		'../routes/admin/characters/+page.svelte'
-	]) {
-		it(`${file} .social-field rings on focus-within`, () => {
-			expect(ruleBody(file, '.social-field:focus-within')).toMatch(
-				/outline:\s*2px solid var\(--ring\)/
-			);
-		});
-	}
+	// The social-URL rows in the artist and character edit modals are the same
+	// kind of boundary: the pill draws the edge and the input inside it is
+	// .input-plain, so the pill's edge is the whole control edge. Both pages ran
+	// a byte-identical copy until the shared .field-pill in app.css (SONA-209
+	// r2), so one assertion now covers both. .input-plain sets `outline: none`,
+	// so without the focus-within ring the fields show no focus at all.
+	it('.field-pill draws its border with --input and rings on focus-within', () => {
+		expect(blockBody('.field-pill')).toMatch(/border:\s*1px solid var\(--input\)/);
+		// Inset like .input:focus, so the pill focuses the way the fields above it do.
+		expect(blockBody('.field-pill:focus-within')).toMatch(/outline:\s*2px solid var\(--ring\)/);
+		expect(blockBody('.field-pill:focus-within')).toMatch(/outline-offset:\s*-1px/);
+	});
+
+	// The "remove model" twin holds no hidden input, so the form's :has() ring
+	// never reaches it — it needs a :focus-visible of its own (SONA-209 r2).
+	it('.file-btn rings on focus-visible', () => {
+		expect(ruleBody('./components/VrAvatarForm.svelte', '.file-btn:focus-visible')).toMatch(
+			/outline:\s*2px solid var\(--ring\)/
+		);
+	});
 
 	for (const { file, selector } of componentRules) {
 		it(`${file} ${selector} draws its border with --input`, () => {

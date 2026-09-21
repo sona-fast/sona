@@ -1145,6 +1145,9 @@
 	   visible hosts (same :has pattern as .platform-chip). */
 	.upload-zone:has(.sr-file:focus-visible),
 	.file-btn:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+	/* The "remove" twin is a real <button> with no hidden input inside it, so the
+	   :has rule above never reaches it — it rings for itself. */
+	.file-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 	/* Guide link under the model-format hint (mock frame 1, SONA-162). Grouped
 	   with the hint; 12px so it doesn't outrank the field labels. The
@@ -1186,14 +1189,16 @@
 		/* The <label> rule above sets flex-direction: column on every label in the
 		   form — this one lays its contents out in a row. */
 		display: inline-flex; flex-direction: row; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
-		border: 1px solid var(--border); border-radius: var(--radius-xs);
+		/* --input, the 3:1 control-boundary token the other control edges use
+		   (SONA-126), not the --border hairline. */
+		border: 1px solid var(--input); border-radius: var(--radius-xs);
 		background: var(--secondary); color: var(--foreground); cursor: pointer;
 		transition: border-color 0.15s, background-color 0.15s;
 	}
 	.file-btn:hover { border-color: var(--primary-text); }
 	/* Same busy treatment as the zones: dimmed, and no hover invitation. */
 	.file-btn.disabled { opacity: 0.55; cursor: not-allowed; }
-	.file-btn.disabled:hover { border-color: var(--border); }
+	.file-btn.disabled:hover { border-color: var(--input); }
 	.file-btn:global(.drag-over) { border-color: var(--primary-text); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
 
 	/* Showcase media rows (same row chrome as the credit list). */

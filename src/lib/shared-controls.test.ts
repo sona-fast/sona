@@ -61,7 +61,7 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		[
 			'/routes/admin/artists/+page.svelte',
 			[
-				'.social-field .input — fills the rest of its icon row',
+				'.field-pill .input — fills the rest of its icon row',
 				'.modal-actions .btn — the modal footer buttons split the row on a phone'
 			]
 		],
@@ -165,13 +165,28 @@ describe('control styling lives in app.css (SONA-209)', () => {
 
 	// The bulk-action bar on the sticker importer is a row of .btn-compact
 	// buttons with the artist select at its head. The select carried a scoped
-	// `sm` class that matched no rule, so it rendered full height next to them;
-	// .input-sm is the variant that actually makes it compact (SONA-209 r1).
+	// `sm` class that matched no rule; .input-sm is the variant that matches.
+	// It sets font-size and padding only — .input's 40px height still applies —
+	// so what this fixes is the select matching its twin in StickerPackForm's
+	// bulk bar rather than rendering a size the app declares nowhere.
 	it('the sticker importer bulk bar uses the compact input', () => {
 		const source = readFileSync(`${srcRoot}/routes/admin/stickers/import/+page.svelte`, 'utf8');
 		const select = source.match(/<select[^>]*bind:value=\{bulkArtist\}[^>]*>/)?.[0];
 		expect(select, 'the bulk-artist select moved or was renamed').toBeDefined();
 		expect(select).toContain('class="input input-sm"');
+	});
+
+	// .file-btn is the VR form's file-picker pair, kept local rather than folded
+	// into .btn-compact. Pinned HERE, beside the variant it resembles, because no
+	// other suite reads that component's layout CSS: the rule sits under a
+	// `label { flex-direction: column }` that would stack the picker's label and
+	// its icon, so `flex-direction: row` is what keeps the pair on one line
+	// (SONA-209 r2).
+	it('the VR file-picker buttons lay their contents out in a row', () => {
+		const source = readFileSync(`${srcRoot}/lib/components/VrAvatarForm.svelte`, 'utf8');
+		const rule = source.match(/^\s*\.file-btn\s*\{([^}]*)\}/m)?.[1];
+		expect(rule, '.file-btn rule not found in VrAvatarForm.svelte').toBeDefined();
+		expect(rule).toMatch(/flex-direction:\s*row/);
 	});
 
 	const scopedCount = (file: string) =>
