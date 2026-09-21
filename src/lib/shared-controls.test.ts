@@ -133,7 +133,18 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	// where it styles a button exactly as a top-level copy would.
 	function selectors(source: string): string[] {
 		const found: string[] = [];
-		const collect = (css: string) => {
+		// A nested rule's selector is relative to its parent: `&:hover` inside
+		// `.btn` is `.btn:hover`, and a bare `.icon` inside it is `.btn .icon`.
+		const resolve = (selector: string, parent: string): string =>
+			selector
+				.split(',')
+				.map((part) => {
+					const p = part.trim();
+					if (!parent) return p;
+					return p.includes('&') ? p.replace(/&/g, parent) : `${parent} ${p}`;
+				})
+				.join(', ');
+		const collect = (css: string, parent = '') => {
 			let depth = 0;
 			let selectorStart = 0;
 			let bodyStart = 0;
@@ -156,8 +167,9 @@ describe('control styling lives in app.css (SONA-209)', () => {
 						// An at-rule is a container, not a rule: what it holds is found by
 						// the same walk one level down. A plain rule's body holds
 						// declarations, which have no braces, so the recursion is free.
-						if (!selector.startsWith('@')) found.push(selector);
-						collect(css.slice(bodyStart, i));
+						const resolved = selector.startsWith('@') ? parent : resolve(selector, parent);
+						if (!selector.startsWith('@')) found.push(resolved);
+						collect(css.slice(bodyStart, i), resolved);
 						selectorStart = i + 1;
 					}
 				}
@@ -183,8 +195,12 @@ describe('control styling lives in app.css (SONA-209)', () => {
 
 	it('counts a control rule nested inside another rule', () => {
 		const nested = '<style>\n\t.card { padding: 4px; .btn { border: none; } }\n</style>';
-		expect(selectors(nested)).toContain('.btn');
-		expect(selectors(nested).filter(isControlSubject)).toEqual(['.btn']);
+		expect(selectors(nested)).toContain('.card .btn');
+		expect(selectors(nested).filter(isControlSubject)).toEqual(['.card .btn']);
+		const amp = '<style>\n\t.btn { color: red; &:hover { color: blue; } .icon { size: 1; } }\n</style>';
+		expect(selectors(amp).filter(isControlSubject)).toEqual(['.btn', '.btn:hover']);
+		const media = '<style>\n\t.row { @media (max-width: 640px) { .btn { width: 100%; } } }\n</style>';
+		expect(selectors(media).filter(isControlSubject)).toEqual(['.row .btn']);
 	});
 
 	// The bulk-action bar on the sticker importer is a row of .btn-compact
