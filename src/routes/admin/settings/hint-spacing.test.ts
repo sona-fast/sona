@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 
 // Source-pin for the settings hints, per the cover-picker-square precedent.
 // A `.hint` paragraph belongs to the field above it, and it is also what breaks
@@ -9,7 +9,16 @@ import { readFileSync } from 'node:fs';
 // a hint and the field under it, and a revert to `margin: 8px 0 0` puts the next
 // label flush against text that describes a different field.
 
-const pageSrc = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+/** Reads the page source this test pins, refusing a symlink or a non-file. */
+function readSource(url: URL): string {
+	const stat = lstatSync(url);
+	if (stat.isSymbolicLink() || !stat.isFile()) {
+		throw new Error(`${url.pathname} is not a regular file`);
+	}
+	return readFileSync(url, 'utf8');
+}
+
+const pageSrc = readSource(new URL('./+page.svelte', import.meta.url));
 
 describe('settings hint spacing', () => {
 	const hintRule = (pageSrc.match(/^\t\.hint \{[\s\S]*?\}/m)?.[0] ?? '').replace(

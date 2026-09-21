@@ -1,12 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 
 // The phone-width admin tab strip hides its scrollbar, so without an edge fade
 // nothing says there are more tabs past either edge. The fades and the padding
 // that keeps the first and last tab off the edges live inside the same media
 // query as the scroll, and re-enabling the scrollbar is not the fix we want.
 
-const src = readFileSync(new URL('./AdminTabs.svelte', import.meta.url), 'utf8');
+/** Reads a source file this test pins, refusing a symlink or a non-file. */
+function readSource(url: URL): string {
+	const stat = lstatSync(url);
+	if (stat.isSymbolicLink() || !stat.isFile()) {
+		throw new Error(`${url.pathname} is not a regular file`);
+	}
+	return readFileSync(url, 'utf8');
+}
+
+const src = readSource(new URL('./AdminTabs.svelte', import.meta.url));
 
 describe('AdminTabs overflow affordance', () => {
 	const rule = (src.match(/^\t\t\.admin-tabs \{[\s\S]*?\}/m)?.[0] ?? '').replace(
@@ -62,10 +71,7 @@ describe('AdminTabs overflow affordance', () => {
 // and pads the same way. It lives in the settings page rather than a component,
 // which is why it is read out of that file here.
 describe('settings sub-tab strip overflow affordance', () => {
-	const settings = readFileSync(
-		new URL('../../routes/admin/settings/+page.svelte', import.meta.url),
-		'utf8'
-	);
+	const settings = readSource(new URL('../../routes/admin/settings/+page.svelte', import.meta.url));
 	const rule = (settings.match(/^\t\t\.settings-tabnav \{[\s\S]*?\}/m)?.[0] ?? '').replace(
 		/\/\*[\s\S]*?\*\//g,
 		''
@@ -93,10 +99,7 @@ describe('settings sub-tab strip overflow affordance', () => {
 // which checks the rendered page carries exactly one of each, is in
 // tests/e2e/settings-tabs.spec.ts.
 describe('the admin navs mark the current page for assistive tech', () => {
-	const layout = readFileSync(
-		new URL('../../routes/admin/+layout.svelte', import.meta.url),
-		'utf8'
-	);
+	const layout = readSource(new URL('../../routes/admin/+layout.svelte', import.meta.url));
 
 	// `class:active={EXPR}` and `aria-current={EXPR ? 'page' : undefined}` on the
 	// same element, with EXPR captured so the two can be compared.

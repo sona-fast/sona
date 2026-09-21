@@ -33,6 +33,18 @@ describe('the preloaded face matches the theme data', () => {
 		expect(ALL_THEMES.map((t) => t.id).sort()).toEqual(Object.keys(EXPECTED).sort());
 	});
 
+	// The literals above are written out on purpose, so a face that goes missing
+	// or a weight pick that drifts fails here instead of being read back from the
+	// same data the function under test reads. This ties each literal to the
+	// theme data the other way round: every expected file is a face some theme
+	// declares, so a typo in the expectation cannot pass either.
+	it('expects only files that a theme declares as a face', () => {
+		const declared = new Set(ALL_THEMES.flatMap((t) => (t.fonts?.faces ?? []).map((f) => f.src)));
+		for (const src of Object.values(EXPECTED)) {
+			if (src !== null) expect(declared.has(src), `${src} is not a declared face`).toBe(true);
+		}
+	});
+
 	for (const [id, src] of Object.entries(EXPECTED)) {
 		it(`${id} preloads ${src}`, () => {
 			expect(primaryLatinFontSrc(id)).toBe(src);
