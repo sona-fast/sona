@@ -530,6 +530,22 @@ describe('registry client — naming what answered instead of the registry', () 
 		}
 	});
 
+	// The onFail metadata uses the same shape check as the message: an off-shape
+	// cf-mitigated value must not count as a zone block, or three definitive 4xx
+	// answers carrying junk in that header would trip the all-searches-failed alarm.
+	it.each([
+		['a well-formed value', 'challenge', true],
+		['an off-shape value', 'x'.repeat(40), false],
+		['no header', null, false]
+	])('reports mitigated only for %s', async (_l, value, expected) => {
+		const headers: Record<string, string> = {};
+		if (value) headers['cf-mitigated'] = value;
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html/>', { status: 403, headers })));
+		const onFail = vi.fn();
+		await registrySearch(env, { handle: 'x' }, { onFail });
+		expect(onFail.mock.calls[0][1]).toMatchObject({ httpStatus: 403, mitigated: expected });
+	});
+
 	it('does not call onFail on a healthy search', async () => {
 		vi.stubGlobal(
 			'fetch',

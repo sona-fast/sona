@@ -244,10 +244,18 @@ export interface CallOptions {
  *  off-shape value is dropped rather than pasted into a job log and an operator toast.
  *  The ray is split into id and colo because job_run.detail redacts any 20-character
  *  token-like run, and the joined "<16 hex>-SEA" form is exactly 20. */
+/** The `cf-mitigated` value when it has the documented shape (a short lowercase
+ *  token such as "challenge" or "block"), else ''. One check shared by the message
+ *  builder and the onFail metadata, so an off-shape header can neither be pasted
+ *  into a toast nor count as an outage. */
+function mitigationKind(res: Response): string {
+	const v = res.headers.get('cf-mitigated');
+	return v && /^[a-z_-]{1,32}$/.test(v) ? v : '';
+}
+
 function describeOpaqueRefusal(res: Response): string {
-	const mitigated = res.headers.get('cf-mitigated');
 	const ray = res.headers.get('cf-ray');
-	const kind = mitigated && /^[a-z_-]{1,32}$/.test(mitigated) ? mitigated : '';
+	const kind = mitigationKind(res);
 	const rayMatch = ray?.match(/^([0-9a-f]{16})-([A-Z]{3})$/);
 	const where = rayMatch ? ` (cf-ray ${rayMatch[1]} ${rayMatch[2]})` : '';
 	if (kind)
@@ -307,7 +315,7 @@ async function call<T, R = never>(
 			}
 			onFail?.(describeOpaqueRefusal(res), {
 				httpStatus: res.status,
-				mitigated: res.headers.has('cf-mitigated')
+				mitigated: mitigationKind(res) !== ''
 			});
 			return fallback;
 		}
