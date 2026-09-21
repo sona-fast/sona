@@ -405,8 +405,10 @@ select.input {
 	display: flex;
 	flex-direction: row !important;
 	align-items: center;
-	/* No gap here: both consumers are labels under a `.modal-form label` rule
-	   that outranks this one and sets the gap. */
+	/* Today's consumers sit under a `.modal-form label` rule that outranks this
+	   and sets 6px; this is the same value, so the class stands on its own
+	   anywhere else. */
+	gap: 6px;
 	background: var(--background);
 	border: 1px solid var(--input);
 	border-radius: var(--radius-pill);

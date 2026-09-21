@@ -443,13 +443,6 @@
 		margin-bottom: 16px;
 	}
 
-	.add-form {
-		display: flex;
-		gap: 8px;
-		margin-bottom: 20px;
-		align-items: center;
-	}
-
 	.toolbar {
 		margin-bottom: 20px;
 	}
@@ -798,10 +791,6 @@
 			font-family: var(--font-primary);
 			font-weight: 500;
 			cursor: pointer;
-		}
-
-		.add-form {
-			flex-direction: column;
 		}
 
 		.modal {
