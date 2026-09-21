@@ -114,7 +114,7 @@ describe('control styling lives in app.css (SONA-209)', () => {
 	// `:global(select)` and `:where(textarea)` style the element they wrap, so
 	// the wrapper comes off before the subject is read.
 	const unwrap = (part: string): string => {
-		const inner = part.replace(/:(?:global|where|is)\(([^()]*)\)/g, ' $1 ');
+		const inner = part.replace(/:(?:global|where|is)\(([^()]*)\)/g, '$1');
 		return inner === part ? part : unwrap(inner);
 	};
 
@@ -176,6 +176,8 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		expect(isControlSubject(':global(select)')).toBe(true);
 		expect(isControlSubject('.row :where(textarea)')).toBe(true);
 		expect(isControlSubject(':is(.card .btn)')).toBe(true);
+		expect(isControlSubject(':global(select):focus')).toBe(true);
+		expect(isControlSubject(':global(.btn).danger')).toBe(true);
 		expect(isControlSubject(':global(.card) .tag-pill')).toBe(false);
 	});
 

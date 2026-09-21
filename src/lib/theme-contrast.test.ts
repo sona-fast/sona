@@ -35,6 +35,16 @@ function blockBody(selector: string): string {
 	return body;
 }
 
+// The last declaration of a property across every top-level block with this
+// selector: a second block later in the file wins, so a pin on the first one
+// alone would keep passing after the override.
+function lastDeclaration(selector: string, property: string): string | undefined {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const bodies = [...css.matchAll(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'gm'))].map((m) => m[1]);
+	if (bodies.length === 0) throw new Error(`${selector} block not found in app.css`);
+	return bodies.flatMap((b) => b.match(new RegExp(`(?<![\\w-])${property}:\\s*[^;]+`, 'g')) ?? []).at(-1);
+}
+
 // The same read against a component source file: the describes below parse the
 // tint rules out of the components that paint them, so a rule that moves or
 // stops matching fails here instead of dropping silently out of a sweep.
@@ -668,11 +678,8 @@ describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121
 describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SONA-123)', () => {
 	for (const selector of ['.btn', '.btn-compact'] as const) {
 		it(`the ${selector} ring uses var(--ring) (not var(--primary), which fails 3:1 on Ember light)`, () => {
-			const escaped = selector.replace('.', '\\.');
-			const rule = css.match(new RegExp(`^${escaped}:focus-visible\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-			if (!rule) throw new Error(`${selector}:focus-visible rule not found in app.css`);
-			expect(rule).toMatch(/outline:\s*2px solid var\(--ring\)/);
-			expect(rule).toMatch(/outline-offset:\s*2px/);
+			expect(lastDeclaration(`${selector}:focus-visible`, 'outline')).toMatch(/outline:\s*2px solid var\(--ring\)/);
+			expect(lastDeclaration(`${selector}:focus-visible`, 'outline-offset')).toMatch(/outline-offset:\s*2px/);
 		});
 	}
 
