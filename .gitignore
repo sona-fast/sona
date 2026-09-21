@@ -37,6 +37,7 @@ vite.config.ts.timestamp-*
 .wrangler-e2e-suggest-tags
 .wrangler-e2e-theme
 .wrangler-e2e-stickers
+.wrangler-e2e-registry
 
 # Playwright
 /test-results

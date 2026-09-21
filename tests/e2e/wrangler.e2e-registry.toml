@@ -1,0 +1,49 @@
+# Wrangler config used ONLY by the registry-sync E2E spec's dedicated dev server.
+#
+# Identical to wrangler.e2e.toml EXCEPT it also sets REGISTRY_API_KEY and
+# REGISTRY_URL, which turn the shared-registry features on, and it leaves
+# OBSERVABILITY_ENABLED out (that flag exists for the observability spec on the
+# shared server; nothing here reads the dashboard). The registry values can't
+# live in the shared wrangler.e2e.toml: with a key present, the admin artists
+# page load and the sync call the registry server-side, and the shared server
+# does not preload the registry mock, so the other specs would make real
+# network attempts. Hence this spec gets its own server + seeded DB (see
+# playwright.config.ts), the registry-mock.mjs preload, and this config. Keep the
+# bindings in sync with wrangler.e2e.toml. Everything here is a throwaway local
+# value; the URL is a reserved .invalid name that the preload answers before any
+# DNS lookup could happen.
+
+name = "sona-e2e"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".svelte-kit/cloudflare"
+
+[vars]
+FURTRACK_MODE = "off"
+# Legacy env credential path: lets specs log in to /admin without seeding a
+# PBKDF2 hash. Throwaway local value — never a real secret.
+ADMIN_PASSWORD = "e2e-admin-password"
+# Gates the password-recovery feature on (requestPasswordReset is inert without a
+# key). Throwaway local value — the forgot-reset spec intercepts the Resend send
+# (tests/e2e/resend-mock.mjs), so this key never reaches api.resend.com.
+RESEND_API_KEY = "e2e-resend-key"
+# Cloudflare's official Turnstile TEST keys: the site key auto-solves the widget
+# and the secret verifies ANY token as success — so admin login runs enforced
+# (TURNSTILE_SECRET present) yet passes deterministically under Playwright. Not
+# real secrets; safe to commit.
+TURNSTILE_SITEKEY = "1x00000000000000000000AA"
+TURNSTILE_SECRET = "1x0000000000000000000000000000000AA"
+# Turns the registry features on. The registry-mock.mjs preload answers every
+# request to this host, so the key never reaches a real registry.
+REGISTRY_API_KEY = "e2e-registry-key"
+REGISTRY_URL = "https://registry.e2e.invalid"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sona-e2e-db"
+database_id = "e2e-local-placeholder"
+migrations_dir = "drizzle"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "sona-e2e-images"

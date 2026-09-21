@@ -20,18 +20,25 @@ import {
 	E2E_PERSIST_TO_THEME,
 	E2E_PLATFORM_PERSIST_STICKERS,
 	E2E_PERSIST_TO_STICKERS,
-	E2E_STICKERS_OVERLAY
+	E2E_STICKERS_OVERLAY,
+	E2E_WRANGLER_CONFIG_REGISTRY,
+	E2E_PLATFORM_PERSIST_REGISTRY,
+	E2E_PERSIST_TO_REGISTRY,
+	E2E_REGISTRY_MOCK,
+	E2E_REGISTRY_SCENARIO,
+	E2E_REGISTRY_URL
 } from './tests/e2e/paths';
 
 // The shared read-only DB/server (gallery, palette), an isolated one for the
 // session-mutating password-recovery spec, an isolated one for the ut-stat
 // spec (needs UPLOADTHING_TOKEN + the UT interceptor, which would perturb the
 // shared specs), an isolated one for the upload spec, and isolated ones for the
-// serial tag-suggestions and suggest-tags specs — see below.
+// serial tag-suggestions and suggest-tags specs, and one for the registry-sync
+// spec (registry features on, registry interceptor preloaded) — see below.
 //
-// The eight ports are derived from one base so a concurrent run can take a
-// private block: set SONA_E2E_BASE_PORT and this run binds base..base+7 instead
-// of 4179-4186. Without it, every checkout and every agent binds the same eight
+// The nine ports are derived from one base so a concurrent run can take a
+// private block: set SONA_E2E_BASE_PORT and this run binds base..base+8 instead
+// of 4179-4187. Without it, every checkout and every agent binds the same nine
 // ports, and a second run either dies on --strictPort or (worse) gets its
 // servers killed by whoever assumes the listener is their own stray (SONA-164).
 // `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
@@ -39,9 +46,9 @@ import {
 // explicitly invalid port still trips the check below rather than silently
 // falling back.)
 const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
-if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_528) {
+if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_527) {
 	throw new Error(
-		`SONA_E2E_BASE_PORT must be an integer in 1024-65528 (needs 8 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
+		`SONA_E2E_BASE_PORT must be an integer in 1024-65527 (needs 9 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
 	);
 }
 const PORT = BASE_PORT;
@@ -52,6 +59,7 @@ const TAGS_PORT = BASE_PORT + 4;
 const SUGGEST_TAGS_PORT = BASE_PORT + 5;
 const THEME_PORT = BASE_PORT + 6;
 const STICKERS_PORT = BASE_PORT + 7;
+const REGISTRY_PORT = BASE_PORT + 8;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -149,6 +157,19 @@ const stickersServerEnv = {
 	SONA_E2E_SEED_OVERLAY: E2E_STICKERS_OVERLAY
 };
 
+// The registry-sync spec turns the shared registry ON for its server (key + URL
+// in wrangler.e2e-registry.toml) and steers the preloaded registry interceptor
+// per test through a scenario file. Its own seeded DB + server, serial: the
+// tests share one scenario file and one "Sync now" button.
+const registryServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG_REGISTRY,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_REGISTRY,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_REGISTRY,
+	SONA_E2E_REGISTRY_SCENARIO: E2E_REGISTRY_SCENARIO,
+	SONA_E2E_REGISTRY_URL: E2E_REGISTRY_URL,
+	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_REGISTRY_MOCK}`.trim()
+};
+
 const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 // storage-breakdown rides the ut-stat server: it also flips the storage
 // provider, which would race the shared server's specs (SONA-192).
@@ -167,6 +188,8 @@ const UPLOAD_SPECS = [
 // suggest-tags writes tag rows through its Save, so it takes neither the shared
 // server (read-only by convention) nor the upload one (SONA-220).
 const SUGGEST_TAGS_SPEC = '**/suggest-tags.spec.ts';
+// registry-sync needs the registry turned on, which no other server has.
+const REGISTRY_SPEC = '**/registry-sync.spec.ts';
 // tag-suggestions reads the two admin forms with the lookup endpoint
 // intercepted and writes no rows, but it cannot take the parallel project: its
 // tests log in and then navigate, and a SvelteKit client navigation landing
@@ -221,7 +244,8 @@ export default defineConfig({
 				TAG_SUGGESTION_SPEC,
 				SUGGEST_TAGS_SPEC,
 				THEME_SPEC,
-				STICKERS_SPEC
+				STICKERS_SPEC,
+				REGISTRY_SPEC
 			],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
@@ -249,6 +273,13 @@ export default defineConfig({
 			testMatch: THEME_SPEC,
 			workers: 1,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${THEME_PORT}` }
+		},
+		{
+			name: 'registry-sync',
+			testMatch: REGISTRY_SPEC,
+			// One scenario file steers the whole server, so the tests take turns.
+			workers: 1,
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${REGISTRY_PORT}` }
 		},
 		{
 			name: 'recovery',
@@ -280,6 +311,7 @@ export default defineConfig({
 		webServer(TAGS_PORT, tagsServerEnv),
 		webServer(SUGGEST_TAGS_PORT, suggestServerEnv),
 		webServer(THEME_PORT, themeServerEnv),
-		webServer(STICKERS_PORT, stickersServerEnv)
+		webServer(STICKERS_PORT, stickersServerEnv),
+		webServer(REGISTRY_PORT, registryServerEnv)
 	]
 });
