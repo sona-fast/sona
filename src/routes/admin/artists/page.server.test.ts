@@ -407,12 +407,13 @@ describe('admin artists load — catalog refusal is surfaced, not silently empty
 	});
 
 	// Registry text is untrusted cross-tenant input: a long message must not blow out
-	// the page's error line.
+	// the page's error line. (Short words, not one long token: a 20+ character run is
+	// what the redaction treats as a secret and replaces outright.)
 	it('caps the registry reason at 300 characters', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stale-key' });
 		await db.insert(schema.artists).values({ name: 'Nyx', globalId: 'g-1' });
-		const long = 'x'.repeat(1000);
+		const long = Array.from({ length: 200 }, () => 'word').join(' ');
 		vi.stubGlobal(
 			'fetch',
 			vi.fn((input: RequestInfo | URL) =>
@@ -423,7 +424,34 @@ describe('admin artists load — catalog refusal is surfaced, not silently empty
 		);
 
 		const result = (await load(loadEvent(platform))) as { registryError: string | null };
-		expect(result.registryError).toBe('x'.repeat(300) + ' (HTTP 401)');
+		expect(result.registryError).toMatch(/^(word ?){1,}\.?\.?\.? \(HTTP 401\)$/);
+		expect(result.registryError!.length).toBeLessThanOrEqual(300 + ' (HTTP 401)'.length);
+	});
+
+	// The reason is rendered on an admin screen; a refusal that echoes a key or an
+	// address must arrive redacted, the same as every other upstream-reason sink.
+	it('redacts an email and a token echoed in the registry reason', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stale-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response(
+								JSON.stringify({ error: 'key sk_live_AbCdEfGhIjKlMnOpQrStUv for owner@example.com rejected' }),
+								{ status: 401 }
+							)
+						)
+					: Promise.resolve(new Response(JSON.stringify({ submissions: [] })))
+			)
+		);
+
+		const result = (await load(loadEvent(platform))) as { registryError: string | null };
+		expect(result.registryError).toContain('[redacted]');
+		expect(result.registryError).not.toContain('owner@example.com');
+		expect(result.registryError).not.toContain('sk_live_');
+		expect(result.registryError).toMatch(/\(HTTP 401\)$/);
 	});
 
 	it('leaves registryError null on a transient outage (unchanged fail-soft behaviour)', async () => {

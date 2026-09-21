@@ -348,7 +348,7 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 	// A D1 failure is still our bug: it must keep propagating as a real 500, not be
 	// dressed up as an upstream refusal.
 	it('still throws (500) on an unrelated exception such as a database error', async () => {
-		const { db, platform } = makeDb();
+		const { db, platform, sqlite } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
 		vi.stubGlobal(
 			'fetch',
@@ -361,13 +361,11 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 				)
 			)
 		);
-		// Drop the table the backfill reads after the gate has passed.
-		(platform as { env: { DB: { prepare: () => never } } }).env.DB = {
-			prepare: () => {
-				throw new Error('D1_ERROR: table gone');
-			}
-		};
+		// Drop only the table the backfill reads: the registry gate (site_settings) still
+		// passes, so the failure happens INSIDE syncArtists and hits the catch boundary
+		// this test exists to pin. Replacing the whole binding would fail before it.
+		sqlite.exec('DROP TABLE artists');
 
-		await expect(POST(postEvent(platform))).rejects.toThrow(/D1_ERROR/);
+		await expect(POST(postEvent(platform))).rejects.toThrow(/Failed query/);
 	});
 });
