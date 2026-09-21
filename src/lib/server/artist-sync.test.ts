@@ -567,6 +567,18 @@ describe('syncArtists backfill — degraded searches are counted, and an all-fai
 		expect(summary.lastDeltaFailure).toBe('HTTP 400 (cf-ray a3e7bc522cbfa3c2 SEA)');
 	});
 
+	// The counterpart: deciding the prefix by TEXT let a registry-authored 400 whose
+	// message happens to start with "HTTP " be reported unprefixed, naming a status
+	// the response never had. The prefix follows the SOURCE of the message.
+	it('still prefixes the real status when the registry wrote a message starting with "HTTP "', async () => {
+		const db = makeDb();
+		stubDeltaResponse(400, { error: 'HTTP 429 too many requests from your fork' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ rateLimited: 0, deltaFailed: 1 });
+		expect(summary.lastDeltaFailure).toBe('HTTP 400: HTTP 429 too many requests from your fork');
+	});
+
 	it('does NOT throw when some searches got through, but counts and names the failures', async () => {
 		const db = makeDb();
 		await seedUnlinked(db, 3);

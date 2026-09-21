@@ -249,7 +249,16 @@ function cleanSegment(segment: string): string {
 	// RENDER a fake chain boundary. Defense-in-depth for readability only —
 	// redaction never keys on the arrow (boundaries travel as array elements)
 	// — and lossy: a genuine '←' in an error message becomes '<-'.
-	let s = (segment ?? '').replace(/←/g, '<-').replace(/\s+/g, ' ').trim();
+	// Control and format characters go FIRST: an upstream error body can carry ANSI
+	// escapes or zero-width characters, and a stored sample ends up printed in a
+	// public Actions log, where they could forge log lines or hide text. Tab, newline
+	// and carriage return are spared so the whitespace collapse below turns them into
+	// a space instead of fusing the words around them.
+	let s = (segment ?? '')
+		.replace(/(?![\n\r\t])[\p{Cc}\p{Cf}]/gu, '')
+		.replace(/←/g, '<-')
+		.replace(/\s+/g, ' ')
+		.trim();
 	// Pre-clamp (see REDACT_INPUT_MAX); also drop the partial trailing run the
 	// cut can strand (a sub-20-char secret/email fragment the rules below miss).
 	if (s.length > REDACT_INPUT_MAX) {

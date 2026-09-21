@@ -32,7 +32,7 @@ describe('syncSuccessToast', () => {
 			syncDegraded: { failed: 2, rateLimited: 5 }
 		});
 		expect(out).toBe(
-			'Sync complete: 0 refreshed, 0 newly linked. 2 registry calls failed this run, so these counts are incomplete. 5 registry calls were rate limited this run, so these counts are incomplete.'
+			'Sync complete: 0 refreshed, 0 newly linked. 2 registry calls failed this run, so these counts are incomplete. 5 registry calls were rate limited this run and did not complete.'
 		);
 	});
 
@@ -58,7 +58,7 @@ describe('syncFailureToast', () => {
 	it('uses the lookup wording for an unreachable registry', () => {
 		const out = syncFailureToast({ syncUpstreamReason: 'HTTP 403' });
 		expect(out).toContain('artist lookups');
-		expect(out).toContain('some artists were not linked');
+		expect(out).toContain("some artists weren't linked");
 		expect(out).not.toContain("refused this site's key");
 	});
 
@@ -90,7 +90,7 @@ describe('the degraded and rate-limited plurals', () => {
 
 	it('pluralizes the rate-limited count', () => {
 		expect(m.admin_settings_sync_rate_limited({ count: 1 })).toBe(
-			'1 registry call was rate limited this run, so these counts are incomplete.'
+			'1 registry call was rate limited this run and did not complete.'
 		);
 		expect(m.admin_settings_sync_rate_limited({ count: 5 })).toContain('calls were rate limited');
 	});

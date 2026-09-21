@@ -253,7 +253,7 @@ describe('registryDelta', () => {
 		['a whitespace-only `error` string', 429, JSON.stringify({ error: '  \n' }), 'HTTP 429']
 	])('still reports a refusal for a 4xx with %s', async (_label, status, body, expected) => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status })));
-		expect(await registryDelta(env, {})).toEqual({ error: expected, httpStatus: status });
+		expect(await registryDelta(env, {})).toEqual({ error: expected, httpStatus: status, opaque: true });
 	});
 
 	it('returns an empty page (and sends nothing) when the registry is not configured', async () => {
@@ -411,7 +411,8 @@ describe('registry client — naming what answered instead of the registry', () 
 		expect(await registryDelta(env, {})).toEqual({
 			error:
 				'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray a3e7bc522cbfa3c2 SEA)',
-			httpStatus: 403
+			httpStatus: 403,
+			opaque: true
 		});
 	});
 
@@ -431,7 +432,7 @@ describe('registry client — naming what answered instead of the registry', () 
 				})
 			)
 		);
-		expect(await registryDelta(env, {})).toEqual({ error: 'HTTP 403', httpStatus: 403 });
+		expect(await registryDelta(env, {})).toEqual({ error: 'HTTP 403', httpStatus: 403, opaque: true });
 	});
 
 	it('keeps the registry\'s own reason when the body has one, even behind Cloudflare headers', async () => {

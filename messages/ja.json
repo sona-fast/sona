@@ -879,7 +879,7 @@
 	"admin_settings_sync_upstream_failed": "アーティストの照会でレジストリに接続できなかったため、今回の実行は不完全で、一部のアーティストは連携されませんでした。({reason})",
 	"admin_settings_sync_summary": "同期が完了しました：更新 {refreshed}件、新規連携 {linked}件。",
 	"admin_settings_sync_degraded": "今回の実行ではレジストリへの呼び出しが{count}件失敗したため、これらの件数は不完全です。",
-	"admin_settings_sync_rate_limited": "今回の実行ではレジストリへの呼び出しが{count}件レート制限されたため、これらの件数は不完全です。",
+	"admin_settings_sync_rate_limited": "今回の実行ではレジストリへの呼び出しが{count}件レート制限され、完了しませんでした。",
 	"admin_settings_registry_sync": "レジストリ同期",
 	"admin_settings_registry_sync_desc": "共有レジストリからアーティストの更新を今すぐ取得し、すでに登録済みのローカルアーティストを連携します。（同期cronによって定期的にも実行されます。）",
 	"admin_settings_syncing": "同期中…",

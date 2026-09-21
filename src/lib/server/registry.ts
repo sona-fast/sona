@@ -140,6 +140,11 @@ function baseUrl(env: Env): string {
 export interface RegistryRefusal {
 	error: string;
 	httpStatus: number;
+	/** True when the body carried no usable message and `error` is our own
+	 *  describeOpaqueRefusal text, which already names the status. Lets a caller
+	 *  decide whether to prefix "HTTP <status>: " by SOURCE rather than by reading
+	 *  the text — a registry-authored message may itself start with "HTTP ". */
+	opaque?: boolean;
 }
 
 /** Narrow a registry result to a refusal. The body is untrusted wire data, so this
@@ -277,8 +282,8 @@ async function call<T, R = never>(
 				// Blank counts as absent: `{"error":""}` would otherwise reach the operator
 				// as a refusal with nothing in it, which reads as a bug in our own UI.
 				const reason = typeof body?.error === 'string' ? body.error.trim() : '';
-				const error = reason || describeOpaqueRefusal(res);
-				return { error, httpStatus: res.status } as R;
+				if (reason) return { error: reason, httpStatus: res.status } as R;
+				return { error: describeOpaqueRefusal(res), httpStatus: res.status, opaque: true } as R;
 			}
 			onFail?.(describeOpaqueRefusal(res), { httpStatus: res.status });
 			return fallback;

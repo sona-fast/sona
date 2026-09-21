@@ -193,10 +193,11 @@ export async function syncArtists(
 				// counted as a rate limit rather than a fault — the admin toast sums
 				// deltaFailed into "failed", and a shared limiter is not a broken fork.
 				// describeOpaqueRefusal already prefixes its own "HTTP <status>"; prefixing
-				// again printed "HTTP 403: HTTP 403 (cf-ray …)".
-				const why = feed.error.startsWith('HTTP ')
-					? feed.error
-					: `HTTP ${feed.httpStatus}: ${feed.error}`;
+				// again printed "HTTP 403: HTTP 403 (cf-ray …)". Decide by SOURCE, not by
+				// reading the text: a registry-authored message may itself start with
+				// "HTTP " and would otherwise be shown naming a status the response
+				// never had.
+				const why = feed.opaque ? feed.error : `HTTP ${feed.httpStatus}: ${feed.error}`;
 				if (feed.httpStatus === 429) {
 					rateLimited++;
 					lastRateLimit = why;
