@@ -28,7 +28,7 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		[
 			'/routes/(public)/gallery/+page.svelte',
 			[
-				"select.filter-select under forced-colors — hands the native caret back where the page's own appearance:none outranks app.css's forced-colors rule; not expressible as a variant (SONA-209 #446)"
+				"select.filter-select — under forced colors, hands the native caret back where the page's own appearance:none outranks app.css's forced-colors rule; not expressible as a variant (SONA-209 #446)"
 			]
 		],
 		[
@@ -208,21 +208,33 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		expect(remove).toContain('class:disabled={saving}');
 	});
 
-	const scopedCount = (file: string) =>
-		selectors(readFileSync(`${srcRoot}${file}`, 'utf8')).filter(isControlSubject).length;
+	const scopedSelectors = (file: string) =>
+		selectors(readFileSync(`${srcRoot}${file}`, 'utf8')).filter(isControlSubject).sort();
+	const scopedCount = (file: string) => scopedSelectors(file).length;
+	// Each reason opens with the selector it excuses, so the allowlist names the
+	// rules themselves and not only how many there are. A count alone lets a
+	// wrapper rule such as `.input-group` (matched by name, styled as layout)
+	// come and go in the same edit that adds a real restatement.
+	const allowedSelectors = (reasons: string[]) => reasons.map((r) => r.split(' — ')[0].trim()).sort();
 
 	it('has no allowlist entry for a file that no longer scopes a control rule', () => {
 		const stale = [...ALLOWED.keys()].filter((f) => !pages.includes(f) || scopedCount(f) === 0);
 		expect(stale, 'these files stopped scoping control rules — drop them from ALLOWED').toEqual([]);
 	});
 
-	it('allows exactly as many scoped control rules per file as it has reasons', () => {
+	it('allows exactly the scoped control rules each file lists, one reason per rule', () => {
 		const drifted = [...ALLOWED]
-			.filter(([file, reasons]) => pages.includes(file) && scopedCount(file) !== reasons.length)
-			.map(([file, reasons]) => `${file}: ${scopedCount(file)} rules, ${reasons.length} reasons`);
+			.filter(([file]) => pages.includes(file))
+			.map(([file, reasons]) => ({ file, actual: scopedSelectors(file), listed: allowedSelectors(reasons) }))
+			.filter(({ actual, listed }) => JSON.stringify(actual) !== JSON.stringify(listed))
+			.map(({ file, actual, listed }) => {
+				const added = actual.filter((s) => !listed.includes(s));
+				const gone = listed.filter((s) => !actual.includes(s));
+				return `${file}: unlisted [${added.join(' | ')}] missing [${gone.join(' | ')}]`;
+			});
 		expect(
 			drifted,
-			'a scoped .btn/.input/select/textarea rule was added to or removed from an allowlisted file — use a variant from app.css, or list the rule above with the reason it cannot be one.'
+			'a scoped .btn/.input/select/textarea rule was added to or removed from an allowlisted file — use a variant from app.css, or list the rule above (selector, then the reason it cannot be one).'
 		).toEqual([]);
 	});
 
