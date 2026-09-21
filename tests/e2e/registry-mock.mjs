@@ -21,10 +21,16 @@
 // page instead; `mitigated` adds a cf-mitigated header (a zone block in front of
 // the registry, the 2026-09-17 incident shape); `ray` adds a cf-ray header.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
-const REGISTRY_URL = (process.env.REGISTRY_URL || 'https://registry.e2e.invalid').replace(/\/+$/, '');
+// Both come from playwright.config.ts (tests/e2e/paths.ts holds the values).
+// Without the host this preload would silently answer nothing and the sync
+// would send the throwaway key wherever wrangler.e2e-registry.toml points.
+const REGISTRY_URL = process.env.SONA_E2E_REGISTRY_URL;
 const SCENARIO = process.env.SONA_E2E_REGISTRY_SCENARIO;
+if (!REGISTRY_URL || !SCENARIO) {
+	throw new Error('registry-mock.mjs needs SONA_E2E_REGISTRY_URL and SONA_E2E_REGISTRY_SCENARIO');
+}
 
 const HEALTHY = {
 	delta: { status: 200, json: { artists: [], nextCursor: null } },
@@ -41,13 +47,12 @@ function urlOf(input) {
 }
 
 function scenario() {
-	if (!SCENARIO) return HEALTHY;
-	try {
-		return { ...HEALTHY, ...JSON.parse(readFileSync(SCENARIO, 'utf8')) };
-	} catch {
-		// Missing (not written yet) or half-written: behave as a healthy registry.
-		return HEALTHY;
-	}
+	// Not written yet (a test that never called setRegistry): a healthy registry.
+	if (!existsSync(SCENARIO)) return HEALTHY;
+	// Present but unparseable is a harness bug, not a mood: the spec renames the
+	// file into place whole, so this can't be a torn read. Throwing here keeps the
+	// healthy-registry test from passing for the wrong reason.
+	return { ...HEALTHY, ...JSON.parse(readFileSync(SCENARIO, 'utf8')) };
 }
 
 function answer(spec) {
@@ -59,17 +64,22 @@ function answer(spec) {
 		return new Response('<html><body>Just a moment...</body></html>', { status: spec.status, headers });
 	}
 	headers['content-type'] = 'application/json';
-	return new Response(JSON.stringify(spec.json ?? {}), { status: spec.status, headers });
+	// `'json' in spec`, not `??`: a scenario that says json: null means "answer
+	// null" (the single-artist lookup's not-found shape), not "answer {}".
+	return new Response(JSON.stringify('json' in spec ? spec.json : {}), { status: spec.status, headers });
 }
 
 globalThis.fetch = async function patchedFetch(input, init) {
 	const url = urlOf(input);
 	if (url.startsWith(REGISTRY_URL + '/')) {
-		const path = url.slice(REGISTRY_URL.length);
+		const { pathname } = new URL(url);
 		const s = scenario();
-		// The delta feed is GET /v1/artists?…; the handle search is /v1/artists/search.
-		if (path.startsWith('/v1/artists/search')) return answer(s.search);
-		if (path.startsWith('/v1/artists')) return answer(s.delta);
+		// The delta feed is GET /v1/artists (with a query); the handle search is
+		// /v1/artists/search; a single lookup is /v1/artists/<globalId>, whose
+		// client expects an artist or null, never a page.
+		if (pathname === '/v1/artists/search') return answer(s.search);
+		if (pathname === '/v1/artists') return answer(s.delta);
+		if (pathname.startsWith('/v1/artists/')) return answer({ status: 200, json: null });
 		// Anything else on the registry (submissions list, fork registration): an
 		// empty success, so unrelated admin loads on this server stay quiet.
 		return new Response(JSON.stringify({ submissions: [] }), {

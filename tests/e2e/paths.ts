@@ -118,4 +118,9 @@ export const E2E_WRANGLER_CONFIG_REGISTRY = path.join(here, 'wrangler.e2e-regist
 export const E2E_PERSIST_TO_REGISTRY = path.join(persistRoot, '.wrangler-e2e-registry');
 export const E2E_PLATFORM_PERSIST_REGISTRY = path.join(E2E_PERSIST_TO_REGISTRY, 'v3');
 export const E2E_REGISTRY_MOCK = path.join(here, 'registry-mock.mjs');
+// The registry host the interceptor answers. wrangler.e2e-registry.toml has to
+// carry the same value as REGISTRY_URL (wrangler vars can't read this file);
+// src/lib/e2e-registry-config.test.ts holds the two together. A reserved
+// .invalid name: it can never resolve, so a missed interception fails fast.
+export const E2E_REGISTRY_URL = 'https://registry.e2e.invalid';
 export const E2E_REGISTRY_SCENARIO = path.join(E2E_PERSIST_TO_REGISTRY, 'registry-scenario.json');

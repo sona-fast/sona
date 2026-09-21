@@ -1,11 +1,13 @@
 # Wrangler config used ONLY by the registry-sync E2E spec's dedicated dev server.
 #
 # Identical to wrangler.e2e.toml EXCEPT it also sets REGISTRY_API_KEY and
-# REGISTRY_URL, which turn the shared-registry features on. They can't live in
-# the shared wrangler.e2e.toml: with a key present, every admin settings and
-# artists page load calls the registry server-side, and the shared server does
-# not preload the registry mock, so the other specs would make real network
-# attempts on each load. Hence this spec gets its own server + seeded DB (see
+# REGISTRY_URL, which turn the shared-registry features on, and it leaves
+# OBSERVABILITY_ENABLED out (that flag exists for the observability spec on the
+# shared server; nothing here reads the dashboard). The registry values can't
+# live in the shared wrangler.e2e.toml: with a key present, the admin artists
+# page load and the sync call the registry server-side, and the shared server
+# does not preload the registry mock, so the other specs would make real
+# network attempts. Hence this spec gets its own server + seeded DB (see
 # playwright.config.ts), the registry-mock.mjs preload, and this config. Keep the
 # bindings in sync with wrangler.e2e.toml. Everything here is a throwaway local
 # value; the URL is a reserved .invalid name that the preload answers before any
@@ -25,13 +27,6 @@ ADMIN_PASSWORD = "e2e-admin-password"
 # key). Throwaway local value — the forgot-reset spec intercepts the Resend send
 # (tests/e2e/resend-mock.mjs), so this key never reaches api.resend.com.
 RESEND_API_KEY = "e2e-resend-key"
-# Turns the /admin/observability dashboard on (it 302s to /admin when off) so
-# the observability spec can assert the seeded visitor bars actually paint.
-# Intentional side effects on the shared e2e server: every spec's page loads
-# also write metric_rollup counters, and the admin gains an Observability nav
-# item/settings tab — checked against the other shared-server specs (name-based
-# selectors, isolated tables) and harmless.
-OBSERVABILITY_ENABLED = "true"
 # Cloudflare's official Turnstile TEST keys: the site key auto-solves the widget
 # and the secret verifies ANY token as success — so admin login runs enforced
 # (TURNSTILE_SECRET present) yet passes deterministically under Playwright. Not

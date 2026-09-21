@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { adminLogin } from './admin-login';
+import { loginRetrying } from './admin-login';
 import { E2E_REGISTRY_SCENARIO } from './paths';
 
 // The admin "Sync now" toast, driven in a real browser (sona#447 follow-up).
@@ -15,7 +15,7 @@ import { E2E_REGISTRY_SCENARIO } from './paths';
 // The registry is answered by tests/e2e/registry-mock.mjs, preloaded into this
 // spec's dedicated dev server (playwright.config.ts). Each test writes the
 // scenario file that interceptor reads on every request, so one server serves
-// all four registry moods. The scenarios drive the DELTA feed: that is what a
+// all five registry moods. The scenarios drive the DELTA feed: that is what a
 // zone rule blocked on 2026-09-17, and it needs no seeded artists (the seed has
 // no unlinked artists with handles, so the backfill search never runs here).
 //
@@ -34,7 +34,12 @@ type Answer = {
 
 function setRegistry(scenario: { delta?: Answer; search?: Answer }) {
 	mkdirSync(path.dirname(E2E_REGISTRY_SCENARIO), { recursive: true });
-	writeFileSync(E2E_REGISTRY_SCENARIO, JSON.stringify(scenario));
+	// Written whole, then renamed into place: the interceptor re-reads this file
+	// on every request and treats an unparseable one as a healthy registry, so a
+	// torn read would turn a failure scenario into a passing-looking success.
+	const tmp = `${E2E_REGISTRY_SCENARIO}.tmp`;
+	writeFileSync(tmp, JSON.stringify(scenario));
+	renameSync(tmp, E2E_REGISTRY_SCENARIO);
 }
 
 const syncButton = (page: Page) => page.locator('form[action="?/syncNow"] button[type="submit"]');
@@ -49,23 +54,33 @@ const toast = (page: Page) => page.locator('.toaster .alert-message').last();
 // whole sequence retries from a fresh load until the enhanced path answers with
 // a toast. (A retry that posted natively ran a sync against the throwaway DB,
 // which is harmless: the scenario file still says what the registry answers.)
-async function syncNow(page: Page) {
-	test.setTimeout(120_000);
+//
+// Returns the toast's TEXT, read once while it is on screen: a success toast
+// dismisses itself after a few seconds, so asserting against the live locator
+// afterwards would race that timer on a slow machine.
+async function syncNow(page: Page): Promise<string> {
+	let text = '';
 	await expect(async () => {
 		await page.goto('/admin/settings');
 		await expect(async () => {
 			await page.getByRole('tab', { name: 'Connections', exact: true }).click();
 			await expect(syncButton(page)).toBeVisible({ timeout: 1500 });
-		}).toPass();
+			// Bounded, so a page that never hydrates hands control back to the outer
+			// loop for a fresh load instead of spinning until the test deadline.
+		}).toPass({ timeout: 15_000 });
 		await syncButton(page).click();
 		await expect(toast(page)).toBeVisible({ timeout: 10_000 });
+		text = (await toast(page).textContent()) ?? '';
 	}).toPass({ timeout: 90_000 });
-	return toast(page);
+	return text;
 }
 
 test.describe('admin Sync now toast', () => {
+	// loginRetrying raises the per-test timeout itself, which also covers the
+	// retry budget in syncNow: this is the ninth server to boot, and a cold login
+	// on a loaded machine is the documented bounce every other serial spec hits.
 	test.beforeEach(async ({ page }) => {
-		await adminLogin(page, PASSWORD);
+		await loginRetrying(page, PASSWORD);
 	});
 
 	// The 2026-09-17 shape: a zone bot rule answered the delta feed with an HTML
@@ -79,33 +94,34 @@ test.describe('admin Sync now toast', () => {
 		});
 
 		const t = await syncNow(page);
-		await expect(t).toContainText("Couldn't reach the shared registry");
-		await expect(t).toContainText('blocked by a Cloudflare challenge');
-		await expect(t).not.toContainText("refused this site's key");
+		expect(t).toContain("Couldn't reach the shared registry");
+		expect(t).toContain('blocked by a Cloudflare challenge');
+		expect(t).not.toContain("refused this site's key");
 	});
 
 	test('a refused fork key says so, with the registry\'s own reason', async ({ page }) => {
 		setRegistry({ delta: { status: 401, json: { error: 'invalid fork key' } } });
 
 		const t = await syncNow(page);
-		await expect(t).toContainText("refused this site's key");
-		await expect(t).toContainText('invalid fork key');
-		await expect(t).not.toContainText("Couldn't reach");
+		expect(t).toContain("refused this site's key");
+		expect(t).toContain('invalid fork key');
+		expect(t).not.toContain("Couldn't reach");
 	});
 
 	test('a healthy registry reports the counts and nothing else', async ({ page }) => {
 		setRegistry({});
 
 		const t = await syncNow(page);
-		await expect(t).toHaveText('Sync complete: 0 refreshed, 0 newly linked.');
+		expect(t).toBe('Sync complete: 0 refreshed, 0 newly linked.');
 	});
 
 	test('a failed delta page is reported as a degraded run', async ({ page }) => {
 		setRegistry({ delta: { status: 503, json: { error: 'registry down' } } });
 
 		const t = await syncNow(page);
-		await expect(t).toContainText('Sync complete: 0 refreshed, 0 newly linked.');
-		await expect(t).toContainText('1 registry call failed this run, so these counts are incomplete.');
+		expect(t).toContain('Sync complete: 0 refreshed, 0 newly linked.');
+		expect(t).toContain('1 registry call failed this run, so these counts are incomplete.');
+		expect(t).not.toContain('rate limited');
 	});
 
 	test('a rate-limited delta page is reported as back-pressure, not a failure', async ({
@@ -114,8 +130,8 @@ test.describe('admin Sync now toast', () => {
 		setRegistry({ delta: { status: 429, json: { error: 'rate limited — slow down' } } });
 
 		const t = await syncNow(page);
-		await expect(t).toContainText('Sync complete: 0 refreshed, 0 newly linked.');
-		await expect(t).toContainText('1 registry call was rate limited this run and did not complete.');
-		await expect(t).not.toContainText('registry call failed');
+		expect(t).toContain('Sync complete: 0 refreshed, 0 newly linked.');
+		expect(t).toContain('1 registry call was rate limited this run and did not complete.');
+		expect(t).not.toContain('registry call failed');
 	});
 });
