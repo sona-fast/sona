@@ -110,6 +110,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// shared yet". Null on an outage or a transient refusal (429): those still degrade
 	// silently as they always have — see isFatalRefusal.
 	let registryError: string | null = null;
+	// True when what answered was not the registry (a challenge page): the page then
+	// says the registry was unreachable rather than telling the operator to check a
+	// fork key that is fine.
+	let registryOpaque = false;
 	if (registryEnabled) {
 		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
 		// A dismissed rejection is acknowledged locally — drop it so it stops showing.
@@ -123,6 +127,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			// the page's error line. The registry's own words lead and the protocol status
 			// trails in parens (same shape as admin_artists_rejected_note). An opaque
 			// refusal's text already names the status, so it gets no second one.
+			registryOpaque = catalogResult.opaque === true;
 			registryError = catalogResult.opaque
 				? catalogResult.error.slice(0, 300)
 				: `${catalogResult.error.slice(0, 300)} (HTTP ${catalogResult.httpStatus})`;
@@ -209,6 +214,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		q,
 		registryEnabled,
 		registryError,
+		registryOpaque,
 		registryStatus,
 		upToDate,
 		aliasLinked

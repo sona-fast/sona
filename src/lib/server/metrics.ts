@@ -257,9 +257,9 @@ function cleanSegment(segment: string): string {
 	// fusing the words around them. U+0085 is listed in the collapse by hand because
 	// JavaScript's \s does not include it.
 	let s = (segment ?? '')
-		.replace(/(?![\n\r\t\v\f])[\p{Cc}\p{Cf}]/gu, '')
+		.replace(/(?![\n\r\t\v\f\u0085])[\p{Cc}\p{Cf}]/gu, '')
 		.replace(/←/g, '<-')
-		.replace(/[\s]+/g, ' ')
+		.replace(/[\s\u0085]+/g, ' ')
 		.trim();
 	// Pre-clamp (see REDACT_INPUT_MAX); also drop the partial trailing run the
 	// cut can strand (a sub-20-char secret/email fragment the rules below miss).

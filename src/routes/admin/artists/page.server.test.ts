@@ -372,6 +372,7 @@ describe('admin artists load — catalog refusal is surfaced, not silently empty
 		};
 		// The registry's own words lead, the protocol status trails.
 		expect(result.registryError).toBe('invalid fork key (HTTP 401)');
+		expect((result as { registryOpaque?: boolean }).registryOpaque).toBe(false);
 		expect(result.artists).toHaveLength(1);
 	});
 
@@ -394,10 +395,15 @@ describe('admin artists load — catalog refusal is surfaced, not silently empty
 			)
 		);
 
-		const result = (await load(loadEvent(platform))) as { registryError: string | null };
+		const result = (await load(loadEvent(platform))) as {
+			registryError: string | null;
+			registryOpaque: boolean;
+		};
 		expect(result.registryError).toBe(
 			'HTTP 403: blocked by a Cloudflare challenge in front of the registry (cf-ray a3e7bc522cbfa3c2 SEA)'
 		);
+		// Not a key problem: the page must not send the operator to rotate a fork key.
+		expect(result.registryOpaque).toBe(true);
 	});
 
 	// Registry text is untrusted cross-tenant input: a long message must not blow out
