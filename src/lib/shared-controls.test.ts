@@ -123,7 +123,10 @@ describe('control styling lives in app.css (SONA-209)', () => {
 			const compound = unwrap(part).trim().split(/[\s>+~]+/).filter(Boolean).pop();
 			if (!compound) return false;
 			if (/^(?:select|textarea)\b/.test(compound)) return true;
-			return (compound.match(/\.[A-Za-z][A-Za-z0-9_-]*/g) ?? []).some((c) => CONTROL_CLASS.test(c));
+			// `.card:has(.btn)` and `.card:not(.btn)` style the card, so what a
+			// remaining pseudo-class takes as its argument is not the subject.
+			const subject = compound.replace(/:[a-z-]+\([^()]*\)/g, '');
+			return (subject.match(/\.[A-Za-z][A-Za-z0-9_-]*/g) ?? []).some((c) => CONTROL_CLASS.test(c));
 		});
 	}
 
@@ -190,6 +193,13 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		expect(isControlSubject(':is(.card .btn)')).toBe(true);
 		expect(isControlSubject(':global(select):focus')).toBe(true);
 		expect(isControlSubject(':global(.btn).danger')).toBe(true);
+	});
+
+	it('does not read a pseudo-class argument as the subject', () => {
+		expect(isControlSubject('.card:has(.btn)')).toBe(false);
+		expect(isControlSubject('.card:not(.btn)')).toBe(false);
+		expect(isControlSubject('.btn:not(.disabled)')).toBe(true);
+		expect(isControlSubject('.btn:has(.icon)')).toBe(true);
 		expect(isControlSubject(':global(.card) .tag-pill')).toBe(false);
 	});
 
