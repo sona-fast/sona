@@ -11,6 +11,7 @@ import {
 	type PassportCounts,
 	type PassportStamps
 } from './passport';
+import { LANDING_LAYOUTS } from './index';
 
 const NOW = new Date('2026-10-17T18:00:00Z');
 
@@ -73,11 +74,23 @@ describe('passport feature stamps', () => {
 		}
 	});
 
-	it('shows About for socials or sona details, or for an upcoming or live convention', () => {
+	it('shows About for socials, sona details, or a convention /about lists', () => {
 		expect(build().features.map((f) => f.kind)).not.toContain('about');
 		expect(build({ about: { ...NO_ABOUT, details: true } }).features.map((f) => f.kind)).toContain('about');
-		const upcoming = build({ conventions: [con({ id: 1, startDate: '2027-03-01' })] });
+		const upcoming = build({ about: { ...NO_ABOUT, conventions: true } });
 		expect(upcoming.features.map((f) => f.kind)).toEqual(['about']);
+	});
+
+	// /about filters by today's UTC date, so on a live con's last evening in its
+	// own zone it can already have dropped the row that still reads Here now.
+	// Only /about's own read may promise conventions there.
+	it('never promises conventions on About from the live or next row alone', () => {
+		const live = con({ id: 1, startDate: '2026-10-16', endDate: '2026-10-17', timezone: 'America/Los_Angeles' });
+		const next = con({ id: 2, startDate: '2027-03-01' });
+		const stamps = build({ conventions: [live, next], about: { ...NO_ABOUT, links: true } });
+		expect(stamps.live).not.toBeNull();
+		expect(stamps.features.find((f) => f.kind === 'about')?.about).toBe('links');
+		expect(build({ conventions: [live, next] }).features.map((f) => f.kind)).not.toContain('about');
 	});
 
 	// The line names what /about has, so a site with socials alone never
@@ -87,9 +100,8 @@ describe('passport feature stamps', () => {
 			build(over).features.find((f) => f.kind === 'about')?.about;
 		expect(line({ about: { ...NO_ABOUT, links: true } })).toBe('links');
 		expect(line({ about: { ...NO_ABOUT, conventions: true } })).toBe('conventions');
-		expect(line({ conventions: [con({ id: 1, startDate: '2027-03-01' })] })).toBe('conventions');
 		expect(line({ about: { links: true, details: true, conventions: true } })).toBe('both');
-		expect(line({ about: { ...NO_ABOUT, links: true }, conventions: [con({ id: 1, startDate: '2027-03-01' })] })).toBe('both');
+		expect(line({ about: { ...NO_ABOUT, links: true, conventions: true } })).toBe('both');
 		expect(line({ about: { ...NO_ABOUT, details: true } })).toBe('details');
 		expect(line({ about: { ...NO_ABOUT, details: true, links: true } })).toBe('links');
 	});
@@ -187,6 +199,23 @@ describe('passport convention stamps', () => {
 		]);
 	});
 
+	// Date rolls an impossible day over into the next month instead of failing,
+	// so only a round trip tells "2026-02-30" from a real date.
+	it('treats an impossible day as undated and keeps a real leap day', () => {
+		const month = (takenAt: string) => {
+			const [stamp] = pastEventStamps([{ event: 'Con', takenAt }]);
+			return stamp.kind === 'past' ? stamp.month : undefined;
+		};
+		expect(month('2026-02-30')).toBeNull();
+		expect(month('2026-04-31')).toBeNull();
+		expect(month('2025-02-29')).toBeNull();
+		expect(month('2024-02-29')).toBe('2024-02');
+		expect(month('2026-02')).toBe('2026-02');
+		const next = (startDate: string) => build({ conventions: [con({ id: 1, startDate })] }).conventions[0];
+		expect(next('2027-02-30')).toMatchObject({ kind: 'next', startDate: null });
+		expect(next('2028-02-29')).toMatchObject({ kind: 'next', startDate: '2028-02-29' });
+	});
+
 	// The gallery's event filter compares the stored value exactly, so the
 	// stamp groups and links by it; only an all-whitespace event is skipped.
 	it('groups and links past stamps by the stored event value, trailing space included', () => {
@@ -268,5 +297,13 @@ describe('passport machine-readable line', () => {
 		expect(a).toHaveLength(MRZ_WIDTH);
 		expect(mrzField('Émile d’Arc')).toBe('EMILE<DARC');
 		expect(mrzField('たろう')).toBe('');
+	});
+});
+
+// The settings action and the setup wizard accept only ids in LANDING_LAYOUTS,
+// so dropping this entry would silently coerce a saved 'passport' to mosaic.
+describe('passport landing layout registry', () => {
+	it('lists passport as a landing layout', () => {
+		expect(LANDING_LAYOUTS.map((l) => l.id)).toContain('passport');
 	});
 });

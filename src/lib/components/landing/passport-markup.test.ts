@@ -19,9 +19,17 @@ const rule = (source: string, selector: string) => {
 };
 
 describe('passport markup', () => {
+	// Both pictures (the avatar and the piece) render the one <img> in the art
+	// snippet, so its attributes hold for each.
+	it('renders both pictures from the one art snippet', () => {
+		const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
+		expect(imgs.length).toBe(1);
+		expect(passport).toMatch(/\{#snippet art\(imageUrl: string, alt: string, blurred: boolean\)\}\s*<img\b/);
+		expect([...passport.matchAll(/\{@render art\(picture\.imageUrl,/g)].length).toBe(2);
+	});
+
 	it('loads every first-screen picture eagerly at high priority', () => {
 		const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
-		expect(imgs.length).toBe(2);
 		for (const img of imgs) {
 			expect(img).toContain('loading="eager"');
 			expect(img).toContain('fetchpriority="high"');
@@ -33,8 +41,8 @@ describe('passport markup', () => {
 	it('routes every picture through the image transform, sized to its column', () => {
 		const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
 		for (const img of imgs) {
-			expect(img).toContain('src={cdnImage(picture.imageUrl, 480)}');
-			expect(img).toContain('use:rawFallback={picture.imageUrl}');
+			expect(img).toContain('src={cdnImage(imageUrl, 480)}');
+			expect(img).toContain('use:rawFallback={imageUrl}');
 			expect(img).toContain('sizes={PICTURE_SIZES}');
 		}
 		expect(passport).toMatch(/const PICTURE_SIZES =\s*'\(max-width: 22rem\) 10rem, \(max-width: 34\.5rem\) 7\.5rem,/);
@@ -55,7 +63,8 @@ describe('passport markup', () => {
 
 	it('puts no button inside the picture link: the piece page has its own NSFW gate', () => {
 		expect(passport).not.toMatch(/<button\b/);
-		expect(passport).toMatch(/class:blurred=\{picture\.nsfw\}/);
+		expect(passport).toMatch(/class:blurred\b/);
+		expect(passport).toContain('{@render art(picture.imageUrl, pictureAlt, picture.nsfw)}');
 		expect(passport).toMatch(/<span class="gate">NSFW<\/span>/);
 	});
 
@@ -64,6 +73,21 @@ describe('passport markup', () => {
 	it('lays the NSFW label on a 60% scrim, the same as the gallery card', () => {
 		expect(rule(passport, '.gate')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
 		expect(rule(artworkCard, '.nsfw-overlay')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
+	});
+
+	// Japanese joins with its own full-width colon and 読点, and runs on after 。
+	// with no space.
+	it('punctuates the accessible names and the caption for Japanese', () => {
+		expect(stamp).toContain("`${kicker}${ja ? '：' : ': '}`");
+		expect(stamp).toContain(".join(ja ? '、' : ', ')");
+		expect(passport).toContain("`${pictureAlt}${ja ? '、' : ', '}NSFW`");
+		expect(passport).toMatch(/captionTitle\(picture\.title\)\}\{ja\s*\?\s*''\s*:\s*' '\}\{#if picture\.artistName\}/);
+	});
+
+	// Text zoom scales em but not px, so an em bottom padding keeps the folio
+	// clear of the last stamp at 200%.
+	it('reserves em space for the folio under each page', () => {
+		expect(rule(passport, '.page')).toMatch(/padding:\s*28px 40px 3em/);
 	});
 
 	it('keeps list semantics on the unstyled stamp and social lists', () => {

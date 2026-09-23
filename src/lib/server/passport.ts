@@ -163,6 +163,9 @@ export async function loadPassport(opts: {
 	// hides instead of counting zero. Only the columns the counts, the event
 	// stamps and the displayable filter read; no row limit, because the counts
 	// need every row, and no order, because the stamps sort by date themselves.
+	// Every row crosses the wire, which is fine at personal-library sizes; if
+	// libraries grow into the thousands, the next step is counting and grouping
+	// by event in SQL (GROUP BY) with the license filter moved into the query.
 	const photosRead: Promise<(PassportPhoto & { photographer: string })[] | null> = furtrackOn
 		? withTimeout(
 				db

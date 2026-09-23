@@ -82,7 +82,7 @@ test.describe('populated passport', () => {
 		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
 		await expect(fursuit).toHaveClass(/stamp--rect/);
 		await expect(site.getByRole('link', { name: 'VR avatars, 4 avatars' })).toHaveAttribute('href', '/vr');
-		await expect(site.getByRole('link', { name: 'About, Links and conventions' })).toHaveAttribute('href', '/about');
+		await expect(site.getByRole('link', { name: 'About, Links and upcoming conventions' })).toHaveAttribute('href', '/about');
 
 		// No sticker pack and no collection in this fixture: those stamps are
 		// absent, never shown with a zero.

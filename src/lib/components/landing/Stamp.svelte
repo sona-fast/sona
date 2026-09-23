@@ -2,6 +2,8 @@
      with punctuation between the lines ("Gallery, 3 pieces by 1 artist"). The
      tilt is static: nothing on the page moves on its own. -->
 <script lang="ts">
+	import { getLocale } from '$lib/paraglide/runtime';
+
 	interface Props {
 		href: string;
 		shape: 'oval' | 'rect' | 'round' | 'past' | 'next' | 'live';
@@ -25,8 +27,11 @@
 	// aria-label rather than visually hidden commas, because Chrome pads each
 	// hidden span with spaces ("Gallery , 3 pieces"). It carries every visible
 	// word in order, so the spoken name still matches what a voice user reads.
+	// Japanese takes its own full-width colon and 読点 rather than ASCII ": ", ", ".
+	const ja = $derived(getLocale() === 'ja');
 	const label = $derived(
-		(kicker ? `${kicker}: ` : '') + [name, date, lines.join(' ')].filter(Boolean).join(', ')
+		(kicker ? `${kicker}${ja ? '：' : ': '}` : '') +
+			[name, date, lines.join(' ')].filter(Boolean).join(ja ? '、' : ', ')
 	);
 </script>
 
@@ -63,7 +68,11 @@
 		transform: rotate(calc(var(--tilt, 0deg) / 2));
 	}
 
-	.stamp:hover {
+	/* Not on Next: its --primary-text kicker only just clears 4.5:1 on the bare
+	   card (4.57:1 in terracotta dark), and the tint drops it to 3.92:1. The
+	   name underline below is Next's hover cue. :where keeps the selector at
+	   .stamp:hover's weight, so .stamp--live:hover, later, still wins. */
+	.stamp:where(:not(.stamp--next)):hover {
 		background: color-mix(in srgb, var(--foreground) 6%, transparent);
 	}
 

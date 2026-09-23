@@ -74,14 +74,18 @@ export interface PassportPhoto {
 const positive = (n: number | null): n is number => n !== null && n > 0;
 
 /**
- * A stored date as a strict YYYY-MM-DD or YYYY-MM with a real month, else
+ * A stored date as a strict YYYY-MM-DD or YYYY-MM naming a real day, else
  * null. Intl.DateTimeFormat throws on an Invalid Date, so a value like
  * "0000-00-00" or "2025-13-05" reaching the page would 500 the homepage during
- * SSR; treating it as missing drops the date line instead.
+ * SSR; treating it as missing drops the date line instead. The round trip
+ * through toISOString catches an impossible day ("2026-02-30"), which Date
+ * rolls over into the next month rather than rejecting.
  */
 function calendarDate(value: string | null | undefined): string | null {
 	if (!value || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(value)) return null;
-	return Number.isNaN(Date.parse(value)) ? null : value;
+	const date = new Date(`${value.length === 7 ? `${value}-01` : value}T00:00:00Z`);
+	if (Number.isNaN(date.getTime())) return null;
+	return date.toISOString().slice(0, value.length) === value ? value : null;
 }
 
 /** The gallery's fursuit view, filtered to one event. The same URL the
@@ -149,9 +153,10 @@ export function pastEventStamps(photos: PassportPhoto[]): ConventionStamp[] {
  * the fursuit photos, see pastEventStamps.
  *
  * `about` is what /about has that the passport doesn't already show: a social
- * link, any /art sona detail, or an upcoming convention of any status (/about
- * lists maybe and considering rows too). A live or next confirmed row counts as
- * a convention as well. Which of them exist picks the stamp's line.
+ * link, any /art sona detail, or a convention /about itself lists (any status,
+ * against today's UTC date). Only that read decides the conventions line, not
+ * the live or next row: on a live con's last evening in its own zone, /about
+ * may already have dropped it. Which of them exist picks the stamp's line.
  */
 export function buildStamps(input: {
 	counts: PassportCounts;
@@ -189,7 +194,7 @@ export function buildStamps(input: {
 		features.push({ kind: 'collections', href: '/collections', counts: [counts.collections] });
 	}
 	const links = input.about.links;
-	const cons = input.about.conventions || Boolean(liveRow || nextRow);
+	const cons = input.about.conventions;
 	if (links || cons || input.about.details) {
 		const about: AboutLine = links && cons ? 'both' : links ? 'links' : cons ? 'conventions' : 'details';
 		features.push({ kind: 'about', href: '/about', counts: [], about });

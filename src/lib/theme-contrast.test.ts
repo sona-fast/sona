@@ -947,6 +947,36 @@ describe('passport live stamp hover WCAG AA contrast, every theme × mode', () =
 	}
 });
 
+// The Next stamp's kicker and edge are --primary-text on the card. The shared
+// stamp hover tints the card with 6% --foreground, which drops that kicker to
+// 3.92:1 in terracotta dark, so the tint skips Next. Read the rule's selector:
+// if it applies to Next again (or Next gains its own fill), measure the kicker
+// on that fill.
+describe('passport Next stamp hover WCAG AA contrast, every theme × mode', () => {
+	const stampCss = readFileSync(
+		fileURLToPath(new URL('./components/landing/Stamp.svelte', import.meta.url)),
+		'utf8'
+	);
+	const m = stampCss.match(
+		/\n\t(\.stamp(?::where\(:not\(\.stamp--next\)\))?):hover\s*\{\s*background:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*transparent\)/
+	);
+	if (!m) throw new Error('Stamp.svelte has no .stamp hover tint to measure');
+	const tintsNext = m[1] === '.stamp';
+	const pct = Number(m[2]);
+
+	it('gives Next no hover fill of its own', () => {
+		expect(stampCss).not.toMatch(/\.stamp--next:hover\s*\{[^}]*background/);
+	});
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: Next kicker on the hovered stamp meets 4.5:1`, () => {
+			const card = blockToken(sel, 'card');
+			const fill = tintsNext ? mix2(blockToken(sel, 'foreground'), pct, card) : card;
+			expect(contrast(blockToken(sel, 'primary-text'), fill)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
 describe('public chip text (foreground on secondary) WCAG AA contrast (SONA-124)', () => {
 	// The VR pages' chips (platform/format/role) render --foreground on
 	// --secondary: the --muted-foreground pairing they replaced was 3.96:1 on

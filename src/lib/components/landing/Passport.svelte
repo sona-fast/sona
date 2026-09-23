@@ -101,6 +101,22 @@
 	const live = $derived(stamps.live);
 </script>
 
+<!-- The avatar and the piece render the same picture element; only the alt and
+     the NSFW blur differ. -->
+{#snippet art(imageUrl: string, alt: string, blurred: boolean)}
+	<img
+		class="art"
+		class:blurred
+		src={cdnImage(imageUrl, 480)}
+		srcset="{cdnImage(imageUrl, 480)} 480w, {cdnImage(imageUrl, 960)} 960w"
+		sizes={PICTURE_SIZES}
+		use:rawFallback={imageUrl}
+		{alt}
+		loading="eager"
+		fetchpriority="high"
+	/>
+{/snippet}
+
 <div class="book" class:book--single={!passport.hasStamps}>
 	<section class="page page--data" aria-labelledby="pp-name">
 		<p class="page-label" aria-hidden="true">{m.passport_label()}</p>
@@ -109,16 +125,7 @@
 				<figure class="photo">
 					{#if picture.kind === 'avatar'}
 						<div class="photo-frame photo-frame--square">
-							<img
-								class="art"
-								src={cdnImage(picture.imageUrl, 480)}
-								srcset="{cdnImage(picture.imageUrl, 480)} 480w, {cdnImage(picture.imageUrl, 960)} 960w"
-								sizes={PICTURE_SIZES}
-								use:rawFallback={picture.imageUrl}
-								alt={m.passport_alt_avatar({ name: passport.name })}
-								loading="eager"
-								fetchpriority="high"
-							/>
+							{@render art(picture.imageUrl, m.passport_alt_avatar({ name: passport.name }), false)}
 						</div>
 						<figcaption>{m.passport_caption_avatar()}</figcaption>
 					{:else}
@@ -129,29 +136,20 @@
 						<a
 							class="photo-frame"
 							href="/gallery/{picture.slug}"
-							aria-label={picture.nsfw ? `${pictureAlt}, NSFW` : undefined}
+							aria-label={picture.nsfw ? `${pictureAlt}${ja ? '、' : ', '}NSFW` : undefined}
 						>
-							<img
-								class="art"
-								class:blurred={picture.nsfw}
-								src={cdnImage(picture.imageUrl, 480)}
-								srcset="{cdnImage(picture.imageUrl, 480)} 480w, {cdnImage(picture.imageUrl, 960)} 960w"
-								sizes={PICTURE_SIZES}
-								use:rawFallback={picture.imageUrl}
-								alt={pictureAlt}
-								loading="eager"
-								fetchpriority="high"
-							/>
+							{@render art(picture.imageUrl, pictureAlt, picture.nsfw)}
 							{#if picture.nsfw}<span class="gate">NSFW</span>{/if}
 						</a>
+						<!-- No template whitespace between the sentences: Japanese runs on
+						     after 。 with no space, so the space is rendered for other
+						     locales only. -->
 						<figcaption>
-							{picture.kind === 'ref' ? m.passport_caption_ref() : captionTitle(picture.title)}
-							{#if picture.artistName}
-								{m.passport_art_by()}
-								<a href="/gallery?artist={encodeURIComponent(picture.artistName)}">{picture.artistName}</a>
-							{:else}
-								{m.passport_unattributed()}
-							{/if}
+							{picture.kind === 'ref' ? m.passport_caption_ref() : captionTitle(picture.title)}{ja
+								? ''
+								: ' '}{#if picture.artistName}{m.passport_art_by()}
+								<a href="/gallery?artist={encodeURIComponent(picture.artistName)}">{picture.artistName}</a
+								>{:else}{m.passport_unattributed()}{/if}
 						</figcaption>
 					{/if}
 				</figure>
@@ -303,11 +301,13 @@
 		border-radius: var(--radius-m);
 	}
 
+	/* The bottom padding is in em, the same 48px at 100%, so it grows with text
+	   zoom and the folio never overlaps the last stamp or the machine line. */
 	.page {
 		position: relative;
 		container-type: inline-size;
 		min-width: 0;
-		padding: 28px 40px 48px;
+		padding: 28px 40px 3em;
 	}
 
 	.page + .page {
@@ -357,7 +357,7 @@
 	.book--single .page + .page {
 		border-inline-start: 0;
 		border-top: 1px solid var(--border);
-		padding-bottom: 40px;
+		padding-bottom: 2.5em;
 	}
 
 	.book--single .page--data::after,
@@ -391,7 +391,7 @@
 
 	@media (max-width: 768px) {
 		.page {
-			padding: 20px 20px 40px;
+			padding: 20px 20px 2.5em;
 		}
 	}
 

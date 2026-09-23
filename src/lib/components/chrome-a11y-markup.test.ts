@@ -13,11 +13,15 @@ const mobileNavSrc = read('./MobileNav.svelte');
 const langSrc = read('./LanguageToggle.svelte');
 
 describe('shared chrome accessibility markup', () => {
-	it('marks the current page with aria-current on the mobile tab and the header logo', () => {
+	it('marks the current page with aria-current on the mobile tab, the header logo and the header links', () => {
 		expect(mobileNavSrc).toMatch(/aria-current=\{active \? 'page' : undefined\}/);
 		expect(mobileNavSrc).toMatch(/\{@const active = isActive\(tab\.href, \$page\.url\.pathname\)\}/);
 		expect(headerSrc).toMatch(
 			/<a href="\/" class="logo" aria-current=\{\$page\.url\.pathname === '\/' \? 'page' : undefined\}>/
+		);
+		expect(headerSrc).toMatch(/\{@const\s+active\s*=\s*\$page\.url\.pathname\.startsWith\(item\.href\)\}/);
+		expect(headerSrc).toMatch(
+			/<a\s+href=\{item\.href\}\s+class="nav-link"\s+class:active\s+aria-current=\{active\s*\?\s*'page'\s*:\s*undefined\}/
 		);
 	});
 
@@ -27,11 +31,20 @@ describe('shared chrome accessibility markup', () => {
 	});
 
 	it('gives the language buttons an inset focus ring and a pressed state beyond the fill', () => {
-		expect(langSrc).toMatch(
-			/\.lang-toggle button:focus-visible\s*\{\s*outline:\s*2px solid var\(--foreground\);\s*outline-offset:\s*-2px;/
-		);
-		const active = langSrc.match(/\.lang-toggle button\.active\s*\{([^}]*)\}/)?.[1] ?? '';
+		const rule = (sel: string) =>
+			langSrc.match(new RegExp(`\\.lang-toggle\\s+button${sel}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+		const focus = rule(':focus-visible');
+		expect(focus).toMatch(/outline:\s*2px\s+solid\s+var\(--foreground\)\s*;/);
+		expect(focus).toMatch(/outline-offset:\s*-2px\s*;/);
+		const active = rule('\\.active');
 		expect(active).toMatch(/font-weight:\s*700/);
 		expect(active).toMatch(/text-decoration:\s*underline/);
+		// The end buttons round with the pill, so the inset ring follows its curve.
+		const first = rule(':first-child');
+		expect(first).toMatch(/border-start-start-radius:\s*var\(--radius-pill\)/);
+		expect(first).toMatch(/border-end-start-radius:\s*var\(--radius-pill\)/);
+		const last = rule(':last-child');
+		expect(last).toMatch(/border-start-end-radius:\s*var\(--radius-pill\)/);
+		expect(last).toMatch(/border-end-end-radius:\s*var\(--radius-pill\)/);
 	});
 });
