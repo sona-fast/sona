@@ -9,7 +9,8 @@ export interface LandingLayoutOption {
 
 export const LANDING_LAYOUTS: LandingLayoutOption[] = [
 	{ id: 'mosaic', label: 'Mosaic hero — tilted wall of artwork' },
-	{ id: 'threePath', label: 'Three paths — splash hub routing to /art, /connect and /share' }
+	{ id: 'threePath', label: 'Three paths — splash hub routing to /art, /connect and /share' },
+	{ id: 'passport', label: 'Passport: a data page and one stamp per section' }
 ];
 
 export const DEFAULT_LANDING_LAYOUT = 'mosaic';
