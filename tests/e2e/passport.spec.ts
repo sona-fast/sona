@@ -232,6 +232,9 @@ test.describe('populated passport', () => {
 		await artist.press('Escape');
 		await expect(page.getByRole('searchbox', { name: 'Search artworks', exact: true })).toBeVisible();
 		await expect(page.locator('.filters :is(input, select):not([aria-label])')).toHaveCount(0);
+		// The search and artist-chevron icons are decorative, so they stay out of
+		// the accessibility tree instead of reading as unnamed images.
+		await expect(page.locator('.filters :is(.search-wrapper, .combobox)').getByRole('img')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Grid view' })).toHaveAttribute('aria-pressed', 'true');
 		await expect(page.getByRole('button', { name: 'List view' })).toHaveAttribute('aria-pressed', 'false');
 		// The toggle is a client action: retry until the click lands after

@@ -219,7 +219,7 @@
 	{/if}
 	<div class="filters">
 		<div class="search-wrapper">
-			<Search size={16} class="search-icon" />
+			<Search size={16} class="search-icon" aria-hidden="true" />
 			<input
 				type="search"
 				class="input search"
@@ -266,7 +266,7 @@
 				aria-controls="artist-combobox-list"
 				autocomplete="off"
 			/>
-			<ChevronDown size={16} class="select-chevron" />
+			<ChevronDown size={16} class="select-chevron" aria-hidden="true" />
 			{#if artistOpen}
 				<ul class="combobox-list" id="artist-combobox-list" role="listbox" aria-label={m.gallery_filter_artist()}>
 					<li role="presentation">
