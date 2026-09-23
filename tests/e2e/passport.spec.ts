@@ -16,11 +16,12 @@ import { test, expect, type Page } from '@playwright/test';
 // pixels, apart from the card's offset below the header, which the mock fixes.
 
 // The artist list opens on client input, so retry until hydration has wired it.
+// The listbox shares the combobox's label, so the lookup fails if it loses its name.
 async function expectArtistEmptyState(page: Page, label: string, expectedText: string) {
 	const artist = page.getByRole('combobox', { name: label, exact: true });
 	await expect(async () => {
 		await artist.fill('zzqx no such artist');
-		await expect(page.getByRole('listbox')).toContainText(expectedText, { timeout: 1000 });
+		await expect(page.getByRole('listbox', { name: label, exact: true })).toContainText(expectedText, { timeout: 1000 });
 	}).toPass();
 	return artist;
 }

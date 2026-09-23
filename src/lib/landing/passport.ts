@@ -180,7 +180,9 @@ export function buildStamps(input: {
 		.filter((c) => c.status === 'confirmed')
 		.sort((a, b) => (startOf(a) < startOf(b) ? -1 : startOf(a) > startOf(b) ? 1 : 0));
 
-	const liveRow = confirmed.find((c) => isLiveNow(c, now)) ?? null;
+	const liveRows = confirmed.filter((c) => isLiveNow(c, now));
+	const liveRow = liveRows[0] ?? null;
+	const liveNames = new Set(liveRows.map((c) => c.name));
 	// Not "not the live row": a second convention running at the same time is
 	// live too, and must never read as Next.
 	const nextRow = confirmed.find((c) => !isLiveNow(c, now) && !hasEnded(c, now)) ?? null;
@@ -210,7 +212,6 @@ export function buildStamps(input: {
 	if (nextRow) {
 		conventions.push({ kind: 'next', name: nextRow.name, startDate: calendarDate(nextRow.startDate), href: '/connect' });
 	}
-	const liveNames = new Set(confirmed.filter((c) => isLiveNow(c, now)).map((c) => c.name));
 	conventions.push(...pastEventStamps(input.photos, liveNames));
 
 	return {

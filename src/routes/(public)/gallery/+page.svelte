@@ -268,7 +268,7 @@
 			/>
 			<ChevronDown size={16} class="select-chevron" />
 			{#if artistOpen}
-				<ul class="combobox-list" id="artist-combobox-list" role="listbox">
+				<ul class="combobox-list" id="artist-combobox-list" role="listbox" aria-label={m.gallery_filter_artist()}>
 					<li role="presentation">
 						<button
 							type="button"
