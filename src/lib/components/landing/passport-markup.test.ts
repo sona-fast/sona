@@ -9,7 +9,17 @@ const passport = readFileSync(new URL('./Passport.svelte', import.meta.url), 'ut
 const stamp = readFileSync(new URL('./Stamp.svelte', import.meta.url), 'utf8');
 const home = readFileSync(new URL('../../../routes/(public)/+page@.svelte', import.meta.url), 'utf8');
 const artworkCard = readFileSync(new URL('../ArtworkCard.svelte', import.meta.url), 'utf8');
+const gallery = readFileSync(new URL('../../../routes/(public)/gallery/+page.svelte', import.meta.url), 'utf8');
+const collection = readFileSync(
+	new URL('../../../routes/(public)/collections/[slug]/+page.svelte', import.meta.url),
+	'utf8'
+);
 const ja = JSON.parse(readFileSync(new URL('../../../../messages/ja.json', import.meta.url), 'utf8'));
+
+// Both pictures (the avatar and the piece) render the one <img> in the art
+// snippet, so its attributes hold for each.
+const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
+const img = imgs[0] ?? '';
 
 // Comments stripped: a comment explaining why --ring is avoided must not count as a use.
 const styleOf = (source: string) =>
@@ -20,32 +30,23 @@ const rule = (source: string, selector: string) => {
 };
 
 describe('passport markup', () => {
-	// Both pictures (the avatar and the piece) render the one <img> in the art
-	// snippet, so its attributes hold for each.
 	it('renders both pictures from the one art snippet', () => {
-		const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
 		expect(imgs.length).toBe(1);
 		expect(passport).toMatch(/\{#snippet art\(imageUrl: string, alt: string, blurred: boolean\)\}\s*<img\b/);
 		expect([...passport.matchAll(/\{@render art\(picture\.imageUrl,/g)].length).toBe(2);
 	});
 
 	it('loads every first-screen picture eagerly at high priority', () => {
-		const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
-		for (const img of imgs) {
-			expect(img).toContain('loading="eager"');
-			expect(img).toContain('fetchpriority="high"');
-		}
+		expect(img).toContain('loading="eager"');
+		expect(img).toContain('fetchpriority="high"');
 	});
 
 	// The avatar used to skip the transform, and a fixed "13rem" sizes made a
 	// phone fetch the 960w file for a 7.5rem column.
 	it('routes every picture through the image transform, sized to its column', () => {
-		const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
-		for (const img of imgs) {
-			expect(img).toContain('src={cdnImage(imageUrl, 480)}');
-			expect(img).toContain('use:rawFallback={imageUrl}');
-			expect(img).toContain('sizes={PICTURE_SIZES}');
-		}
+		expect(img).toContain('src={cdnImage(imageUrl, 480)}');
+		expect(img).toContain('use:rawFallback={imageUrl}');
+		expect(img).toContain('sizes={PICTURE_SIZES}');
 		expect(passport).toMatch(/const PICTURE_SIZES =\s*'\(max-width: 22rem\) 10rem, \(max-width: 34\.5rem\) 7\.5rem,/);
 	});
 
@@ -76,6 +77,18 @@ describe('passport markup', () => {
 		expect(rule(artworkCard, '.nsfw-overlay')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
 	});
 
+	// The card's title was a fixed h3, so /gallery and a collection page jumped
+	// from the h1 straight to h3. Other callers (the homepage, under its h2)
+	// keep the h3 default.
+	it('lets the page pick the card title level: h2 straight under an h1', () => {
+		expect(artworkCard).toContain("headingLevel = 'h3'");
+		expect(artworkCard).toContain('<svelte:element this={headingLevel} class="card-title">');
+		expect(artworkCard).not.toMatch(/<h3\b/);
+		for (const source of [gallery, collection]) expect(source).toMatch(/<ArtworkCard\b[^>]*headingLevel="h2"/);
+		expect(gallery).toContain('<h2 class="list-title">');
+		expect(home).not.toContain('headingLevel=');
+	});
+
 	// Japanese joins with its own full-width colon and 読点, and runs on after 。
 	// with no space.
 	it('punctuates the accessible names and the caption for Japanese', () => {
@@ -84,6 +97,11 @@ describe('passport markup', () => {
 		expect(stamp).toContain("lines.join(ja ? '、' : ' ')");
 		expect(passport).toContain("`${pictureAlt}${ja ? '、' : ', '}NSFW`");
 		expect(passport).toMatch(/captionTitle\(picture\.title\)\}\{ja\s*\?\s*''\s*:\s*' '\}\{#if picture\.artistName\}/);
+		// The place carries its own ASCII comma ("Denver, CO"), so a 読点 after
+		// it would mix the two; a space joins it to the date.
+		expect(ja.passport_live_line).toBe('{place} {date}まで');
+		// A zero-width space in a message is a visual break point, never spoken.
+		expect(stamp).toContain(".replace(/\\u200b/g, '')");
 	});
 
 	// Japanese has no spaces, so without keep-all the browser splits words
@@ -98,6 +116,11 @@ describe('passport markup', () => {
 			expect(body).toMatch(/overflow-wrap:\s*anywhere/);
 		}
 		expect(rule(passport, '.stamps-note:lang(ja)')).toMatch(/text-wrap:\s*pretty/);
+		// The name too, and strict so no line starts with ー ("ギャラリ / ー").
+		const name = rule(stamp, '.name:lang(ja)');
+		expect(name).toMatch(/word-break:\s*keep-all/);
+		expect(name).toMatch(/overflow-wrap:\s*anywhere/);
+		expect(name).toMatch(/line-break:\s*strict/);
 		// keep-all leaves no break inside the About line, so its zero-width space
 		// after と is the one place it may wrap in the round stamp.
 		expect(ja.passport_about_links_cons).toBe('リンクと\u200b参加予定のコン');

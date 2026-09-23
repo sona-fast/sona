@@ -119,10 +119,35 @@ test.describe('populated passport', () => {
 		).toHaveAttribute('href', '/gallery');
 		const next = stamps.locator('a.stamp--next');
 		await expect(next).toHaveAccessibleName(/^次回：E2E Next Con、\d{4}年\d{1,2}月$/);
+		// The place keeps its own ASCII comma, so a space, not a 読点, joins it to
+		// the date.
+		await expect(stamps.locator('a.stamp--live')).toHaveAccessibleName(
+			/^参加中：E2E Live Con、Denver, CO \d{1,2}月\d{1,2}日\(.\)まで$/
+		);
+		// The About line's zero-width space is a visual break point only: the
+		// visible text keeps it, the spoken name drops it.
+		const about = stamps.locator('a[href="/about"]');
+		await expect(about).toHaveAccessibleName('サイトについて、リンクと参加予定のコン');
+		await expect(about.locator('.line')).toHaveText('リンクと\u200b参加予定のコン');
 
 		const data = page.getByRole('region', { name: 'E2E', exact: true });
 		await expect(data.locator('a.photo-frame')).toHaveAccessibleName(/、NSFW$/);
 		await expect(data.locator('figcaption')).toContainText('設定画。作者');
+	});
+
+	// The header and the phone tab bar say which page this is ("page") on the
+	// Gallery itself, and only which section ("true") on a piece inside it.
+	test('marks the Gallery nav links as the current page or the current section', async ({ page }) => {
+		const links = () => [page.locator('header a.nav-link[href="/gallery"]'), page.locator('nav.mobile-nav a[href="/gallery"]')];
+
+		await page.goto('/gallery');
+		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'page');
+		// The card titles sit straight under the page h1, so they are h2s.
+		await expect(page.locator('a.card h2.card-title').first()).toBeVisible();
+		await expect(page.locator('a.card h3')).toHaveCount(0);
+
+		await page.goto('/gallery/mature-ref-sheet');
+		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'true');
 	});
 });
 

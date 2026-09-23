@@ -9,9 +9,12 @@
 		imageUrl: string;
 		tag?: string;
 		nsfw?: boolean;
+		/** The title's heading level: h2 where the card sits directly under the
+		 *  page h1 (the gallery, a collection), so the outline skips no level. */
+		headingLevel?: 'h2' | 'h3';
 	}
 
-	let { slug, title, artistName, imageUrl, tag, nsfw = false }: Props = $props();
+	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3' }: Props = $props();
 
 	let revealed = $state(false);
 </script>
@@ -30,7 +33,7 @@
 		{/if}
 	</div>
 	<div class="card-body">
-		<h3 class="card-title">{title}</h3>
+		<svelte:element this={headingLevel} class="card-title">{title}</svelte:element>
 		<p class="card-artist">{m.card_by_artist({ artistName })}</p>
 		{#if tag}
 			<span class="tag">{tag}</span>

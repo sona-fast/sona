@@ -1685,6 +1685,6 @@
 	"passport_in_packs": "{count}パック",
 	"passport_avatars": "アバター {count}体",
 	"passport_collections": "コレクション {count}件",
-	"passport_live_line": "{place}、{date}まで",
+	"passport_live_line": "{place} {date}まで",
 	"passport_live_until": "{date}まで"
 }

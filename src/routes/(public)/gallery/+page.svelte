@@ -331,6 +331,7 @@
 					imageUrl={image.thumbnailUrl || image.imageUrl}
 					tag={image.tag}
 					nsfw={image.nsfw}
+					headingLevel="h2"
 				/>
 			{:else}
 				<a href="/gallery/{image.slug}" class="list-item">
@@ -338,10 +339,10 @@
 						<img src={cdnImage(image.thumbnailUrl || image.imageUrl, 200)} alt={image.title} loading="lazy" use:rawFallback={image.thumbnailUrl || image.imageUrl} />
 					</div>
 					<div class="list-info">
-						<h3 class="list-title">
+						<h2 class="list-title">
 							{image.title}
 							{#if image.nsfw}<span class="nsfw-badge">NSFW</span>{/if}
-						</h3>
+						</h2>
 						<p class="list-artist">{m.card_by_artist({ artistName: image.artistName || m.common_unknown() })}</p>
 					</div>
 					{#if image.tag}

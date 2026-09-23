@@ -3,7 +3,7 @@ import { getDb } from '$lib/server/db';
 import { images, artists } from '$lib/server/db/schema';
 import { getSettings } from '$lib/server/settings';
 import { sonaDetails, artHasContent, loadRefSheet } from '$lib/server/presence';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
