@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 // The passport homepage (landingLayout = 'passport'), end to end. This file runs
 // under two projects, each on its own seeded server (see playwright.config.ts):
@@ -14,6 +14,16 @@ import { test, expect } from '@playwright/test';
 //
 // Read-only throughout: no login and no writes. This asserts markup, not
 // pixels, apart from the card's offset below the header, which the mock fixes.
+
+// The artist list opens on client input, so retry until hydration has wired it.
+async function expectArtistEmptyState(page: Page, label: string, expectedText: string) {
+	const artist = page.getByRole('combobox', { name: label, exact: true });
+	await expect(async () => {
+		await artist.fill('zzqx no such artist');
+		await expect(page.getByRole('listbox')).toContainText(expectedText, { timeout: 1000 });
+	}).toPass();
+	return artist;
+}
 
 test.describe('populated passport', () => {
 	test.beforeEach(({}, info) => {
@@ -93,9 +103,11 @@ test.describe('populated passport', () => {
 				noteSize: getComputedStyle(document.querySelector('.stamps-note')!).fontSize,
 				noteLine: getComputedStyle(document.querySelector('.stamps-note')!).lineHeight,
 				kicker: getComputedStyle(document.querySelector('.stamp .kicker')!).lineHeight,
-				date: getComputedStyle(document.querySelector('.stamp .date')!).lineHeight
+				date: getComputedStyle(document.querySelector('.stamp .date')!).lineHeight,
+				// The mock's font shorthand resets the Elsewhere rows to normal.
+				socials: getComputedStyle(document.querySelector('.socials')!).lineHeight
 			}));
-		const lines = { noteSize: '14px', noteLine: '21px', kicker: '18px', date: '21px' };
+		const lines = { noteSize: '14px', noteLine: '21px', kicker: '18px', date: '21px', socials: 'normal' };
 
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/');
@@ -206,13 +218,16 @@ test.describe('populated passport', () => {
 		for (const name of ['Tag', 'Artist', 'Character', 'Sort by']) {
 			await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
 		}
-		// The artist list's empty state is a translated message. The list opens
-		// on client input, so retry until hydration has wired it.
-		const artist = page.getByRole('combobox', { name: 'Artist', exact: true });
-		await expect(async () => {
-			await artist.fill('zzqx no such artist');
-			await expect(page.getByRole('listbox')).toContainText('No matching artists', { timeout: 1000 });
-		}).toPass();
+		// The artist list's empty state is a translated message.
+		const artist = await expectArtistEmptyState(page, 'Artist', 'No matching artists');
+		// The listbox's children are options: the empty state is one that can't be
+		// picked, and no bare list item sits between the listbox and its options.
+		const empty = page.getByRole('option', { name: 'No matching artists' });
+		await expect(empty).toBeVisible();
+		await expect(empty).toHaveAttribute('aria-disabled', 'true');
+		await artist.fill('');
+		await expect(page.getByRole('listbox').getByRole('option').first()).toBeVisible();
+		await expect(page.getByRole('listbox').getByRole('listitem')).toHaveCount(0);
 		await artist.press('Escape');
 		await expect(page.getByRole('searchbox', { name: 'Search artworks', exact: true })).toBeVisible();
 		await expect(page.locator('.filters :is(input, select):not([aria-label])')).toHaveCount(0);
@@ -241,11 +256,7 @@ test.describe('populated passport', () => {
 		// Japanese gets its own empty-state message, not the English one.
 		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
 		await page.goto('/gallery');
-		const artistJa = page.getByRole('combobox', { name: 'アーティスト', exact: true });
-		await expect(async () => {
-			await artistJa.fill('zzqx no such artist');
-			await expect(page.getByRole('listbox')).toContainText('一致するアーティストはいません', { timeout: 1000 });
-		}).toPass();
+		await expectArtistEmptyState(page, 'アーティスト', '一致するアーティストはいません');
 	});
 
 	// Strict line-break gives way when a word cannot fit its box, so at 320px
@@ -299,6 +310,9 @@ test.describe('fresh-site passport', () => {
 
 		const stamps = page.getByRole('region', { name: 'Stamps', exact: true });
 		await expect(stamps.getByText('This passport has no stamps yet.')).toBeVisible();
+		// The mock's body line height, 1.5 of 16px.
+		await expect(stamps.locator('.stamps-empty')).toHaveCSS('font-size', '16px');
+		await expect(stamps.locator('.stamps-empty')).toHaveCSS('line-height', '24px');
 		await expect(stamps.getByRole('link')).toHaveCount(0);
 		await expect(stamps.getByRole('heading', { level: 3 })).toHaveCount(0);
 		await expect(page.locator('.book')).toHaveClass(/book--single/);

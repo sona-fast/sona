@@ -466,6 +466,12 @@
 			gap: 18px;
 		}
 
+		/* Restated: the rule above would otherwise put a pictureless page's
+		   fields in the 7.5rem column. */
+		.data--solo {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
 		.name {
 			font-size: 1.75rem;
 		}
@@ -608,6 +614,7 @@
 		font-family: var(--font-secondary);
 		font-weight: 500;
 		font-size: 0.9375rem;
+		line-height: normal;
 	}
 
 	.ext {
@@ -662,6 +669,7 @@
 
 	.stamps-empty {
 		font-size: 1rem;
+		line-height: 1.5;
 		color: var(--muted-foreground);
 	}
 

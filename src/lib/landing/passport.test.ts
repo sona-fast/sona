@@ -236,6 +236,28 @@ describe('passport convention stamps', () => {
 		expect(past.map((p) => p.name)).toEqual(['Aspen Howl', 'Cedar Con', 'Maple Den']);
 	});
 
+	// Photos tagged during the event would otherwise add a past stamp for the
+	// convention that reads Here now: a running event shown as over, twice.
+	it('leaves the live convention out of the past stamps, matched on the exact event name', () => {
+		const live = con({ id: 1, name: 'Cinder Valley Con', startDate: '2026-10-16', endDate: '2026-10-19' });
+		const stamps = build({
+			conventions: [live],
+			photos: [
+				{ event: 'Cinder Valley Con', takenAt: '2026-10-17' },
+				{ event: 'Cinder Valley Con', takenAt: '2026-10-16' },
+				{ event: 'Harbourfur 2025', takenAt: '2025-11-08' }
+			]
+		});
+		expect(stamps.live?.name).toBe('Cinder Valley Con');
+		expect(stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025' }
+		]);
+		// The cap still fills with other events.
+		const many = Array.from({ length: MAX_PAST_STAMPS }, (_, i) => ({ event: `Con ${i}`, takenAt: `202${i}-05-01` }));
+		const capped = pastEventStamps([{ event: 'Live', takenAt: '2030-01-01' }, ...many], 'Live');
+		expect(capped.map((p) => p.name)).toEqual(many.map((p) => p.event).reverse());
+	});
+
 	it('puts Next before the past stamps', () => {
 		const stamps = build({
 			conventions: [con({ id: 1, name: 'Lakeshore Den', startDate: '2027-03-05' })],

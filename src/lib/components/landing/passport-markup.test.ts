@@ -137,6 +137,14 @@ describe('passport markup', () => {
 		expect(rule(passport, '.book--single .page + .page')).toMatch(/padding-bottom:\s*2\.5em/);
 	});
 
+	// With no picture the lone .fields child must fill the row. The phone rule
+	// for .data comes after .data--solo at the same specificity, so without the
+	// restatement inside the 30rem block it put the fields in a 7.5rem column.
+	it('keeps the pictureless data page one column at phone widths', () => {
+		const phone = styleOf(passport).match(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\t\}/)?.[1] ?? '';
+		expect(phone).toMatch(/\.data\s*\{[^}]*\}\s*\.data--solo\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\);\s*\}/);
+	});
+
 	it('keeps list semantics on the unstyled stamp and social lists', () => {
 		const lists = [...passport.matchAll(/<ul\b[^>]*>/g)].map((m) => m[0]);
 		expect(lists.length).toBe(3);

@@ -269,7 +269,7 @@
 			<ChevronDown size={16} class="select-chevron" />
 			{#if artistOpen}
 				<ul class="combobox-list" id="artist-combobox-list" role="listbox">
-					<li>
+					<li role="presentation">
 						<button
 							type="button"
 							class="combobox-option"
@@ -280,7 +280,7 @@
 						>{m.gallery_all_artists()}</button>
 					</li>
 					{#each artistMatches as artist}
-						<li>
+						<li role="presentation">
 							<button
 								type="button"
 								class="combobox-option"
@@ -291,7 +291,7 @@
 							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
 						</li>
 					{:else}
-						<li class="combobox-empty">{m.gallery_filter_no_artists()}</li>
+						<li role="option" aria-disabled="true" aria-selected="false" class="combobox-empty">{m.gallery_filter_no_artists()}</li>
 					{/each}
 				</ul>
 			{/if}
