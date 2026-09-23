@@ -130,6 +130,7 @@
 	.kicker {
 		font-weight: 700;
 		font-size: 0.75rem;
+		line-height: 1.5;
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		color: var(--primary-text);
@@ -138,6 +139,7 @@
 	.date {
 		font-weight: 700;
 		font-size: 0.875rem;
+		line-height: 1.5;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		margin-block: 2px;

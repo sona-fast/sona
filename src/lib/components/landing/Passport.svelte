@@ -450,6 +450,16 @@
 		grid-template-columns: minmax(0, 1fr);
 	}
 
+	.name {
+		font-family: var(--font-primary);
+		font-weight: 700;
+		font-size: 2.25rem;
+		line-height: 1.05;
+		letter-spacing: -0.02em;
+		overflow-wrap: anywhere;
+		color: var(--foreground);
+	}
+
 	@container (max-width: 30rem) {
 		.data {
 			grid-template-columns: 7.5rem minmax(0, 1fr);
@@ -577,16 +587,6 @@
 		margin: 0;
 	}
 
-	.name {
-		font-family: var(--font-primary);
-		font-weight: 700;
-		font-size: 2.25rem;
-		line-height: 1.05;
-		letter-spacing: -0.02em;
-		overflow-wrap: anywhere;
-		color: var(--foreground);
-	}
-
 	.f-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(min(100%, 7.5rem), 1fr));
@@ -648,6 +648,7 @@
 		margin-top: -8px;
 		margin-bottom: 20px;
 		font-size: 0.875rem;
+		line-height: 1.5;
 		color: var(--muted-foreground);
 	}
 

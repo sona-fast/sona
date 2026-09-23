@@ -291,7 +291,7 @@
 							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
 						</li>
 					{:else}
-						<li class="combobox-empty">No matching artists</li>
+						<li class="combobox-empty">{m.gallery_filter_no_artists()}</li>
 					{/each}
 				</ul>
 			{/if}

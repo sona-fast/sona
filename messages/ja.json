@@ -104,6 +104,7 @@
 	"gallery_filter_tag": "タグ",
 	"gallery_filter_search": "作品を検索",
 	"gallery_filter_artist": "アーティスト",
+	"gallery_filter_no_artists": "一致するアーティストはいません",
 	"gallery_previous": "前へ",
 	"gallery_next": "次へ",
 	"gallery_fursuit_capped": "最新の写真を表示しています — 古い写真はまだ読み込まれていません。",

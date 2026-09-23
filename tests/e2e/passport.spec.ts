@@ -83,6 +83,29 @@ test.describe('populated passport', () => {
 		expect(top).toBe(16);
 	});
 
+	// The name steps down from 36px to the mock's 28px on a phone-width page,
+	// and the stamps note, a stamp's kicker and its date keep the mock's 1.5
+	// line height (14px text on 21px, 12px on 18px).
+	test('sizes the name and the stamps note as the mock does', async ({ page }) => {
+		const measure = () =>
+			page.evaluate(() => ({
+				name: getComputedStyle(document.querySelector('h1.name')!).fontSize,
+				noteSize: getComputedStyle(document.querySelector('.stamps-note')!).fontSize,
+				noteLine: getComputedStyle(document.querySelector('.stamps-note')!).lineHeight,
+				kicker: getComputedStyle(document.querySelector('.stamp .kicker')!).lineHeight,
+				date: getComputedStyle(document.querySelector('.stamp .date')!).lineHeight
+			}));
+		const lines = { noteSize: '14px', noteLine: '21px', kicker: '18px', date: '21px' };
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/');
+		expect(await measure()).toEqual({ name: '28px', ...lines });
+
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.goto('/');
+		expect(await measure()).toEqual({ name: '36px', ...lines });
+	});
+
 	test('renders every stamp as a link named for its feature and count', async ({ page }) => {
 		await page.goto('/');
 
@@ -183,6 +206,14 @@ test.describe('populated passport', () => {
 		for (const name of ['Tag', 'Artist', 'Character', 'Sort by']) {
 			await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
 		}
+		// The artist list's empty state is a translated message. The list opens
+		// on client input, so retry until hydration has wired it.
+		const artist = page.getByRole('combobox', { name: 'Artist', exact: true });
+		await expect(async () => {
+			await artist.fill('zzqx no such artist');
+			await expect(page.getByRole('listbox')).toContainText('No matching artists', { timeout: 1000 });
+		}).toPass();
+		await artist.press('Escape');
 		await expect(page.getByRole('searchbox', { name: 'Search artworks', exact: true })).toBeVisible();
 		await expect(page.locator('.filters :is(input, select):not([aria-label])')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Grid view' })).toHaveAttribute('aria-pressed', 'true');
@@ -206,6 +237,15 @@ test.describe('populated passport', () => {
 		for (const name of ['Photographer', 'Event']) {
 			await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
 		}
+
+		// Japanese gets its own empty-state message, not the English one.
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+		await page.goto('/gallery');
+		const artistJa = page.getByRole('combobox', { name: 'アーティスト', exact: true });
+		await expect(async () => {
+			await artistJa.fill('zzqx no such artist');
+			await expect(page.getByRole('listbox')).toContainText('一致するアーティストはいません', { timeout: 1000 });
+		}).toPass();
 	});
 
 	// Strict line-break gives way when a word cannot fit its box, so at 320px
