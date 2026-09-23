@@ -112,14 +112,15 @@
 
 	<!-- Suppressed when only Artwork would show (fresh fork, every other section
 	     gated off): a lone-pill segmented control reads as broken, and there is
-	     nothing to switch to. -->
+	     nothing to switch to. Not a tablist: Stickers and VR are links to other
+	     pages and there are no tabpanels, so the current view is marked the way
+	     the nav marks it. -->
 	{#if data.fursuitEnabled || data.stickersEnabled || data.vrEnabled}
-		<div class="tabs" role="tablist">
+		<div class="tabs">
 			<button
 				class="tab"
 				class:active={!isFursuit}
-				role="tab"
-				aria-selected={!isFursuit}
+				aria-current={!isFursuit ? 'page' : undefined}
 				onclick={() => updateFilter('view', '')}
 			>
 				{m.gallery_view_artwork()}
@@ -128,8 +129,7 @@
 				<button
 					class="tab"
 					class:active={isFursuit}
-					role="tab"
-					aria-selected={isFursuit}
+					aria-current={isFursuit ? 'page' : undefined}
 					onclick={() => updateFilter('view', 'fursuit')}
 				>
 					{m.gallery_view_fursuit()}
@@ -150,6 +150,7 @@
 				<div class="select-wrapper">
 					<select
 						class="input filter-select"
+						aria-label={m.gallery_filter_photographer()}
 						value={data.fursuitFilters.photographer}
 						onchange={(e) => updateFilter('photographer', e.currentTarget.value)}
 					>
@@ -162,6 +163,7 @@
 				<div class="select-wrapper">
 					<select
 						class="input filter-select"
+						aria-label={m.gallery_filter_event()}
 						value={data.fursuitFilters.event}
 						onchange={(e) => updateFilter('event', e.currentTarget.value)}
 					>
@@ -229,6 +231,7 @@
 		<div class="select-wrapper">
 			<select
 				class="input filter-select"
+				aria-label={m.gallery_tags()}
 				value={data.filters.tag}
 				onchange={(e) => updateFilter('tag', e.currentTarget.value)}
 			>
@@ -294,6 +297,7 @@
 		<div class="select-wrapper">
 			<select
 				class="input filter-select"
+				aria-label={m.gallery_filter_character()}
 				value={data.filters.character}
 				onchange={(e) => updateFilter('character', e.currentTarget.value)}
 			>
@@ -306,6 +310,7 @@
 		<div class="select-wrapper">
 			<select
 				class="input filter-select"
+				aria-label={m.gallery_filter_sort()}
 				value={data.filters.sort}
 				onchange={(e) => updateFilter('sort', e.currentTarget.value)}
 			>
@@ -316,8 +321,8 @@
 			</select>
 		</div>
 		<div class="view-toggle">
-			<button class="view-btn" class:active={view === 'grid'} onclick={() => (view = 'grid')} aria-label={m.gallery_grid_view()}><LayoutGrid size={18} /></button>
-			<button class="view-btn" class:active={view === 'list'} onclick={() => (view = 'list')} aria-label={m.gallery_list_view()}><List size={18} /></button>
+			<button class="view-btn" class:active={view === 'grid'} aria-pressed={view === 'grid'} onclick={() => (view = 'grid')} aria-label={m.gallery_grid_view()}><LayoutGrid size={18} /></button>
+			<button class="view-btn" class:active={view === 'list'} aria-pressed={view === 'list'} onclick={() => (view = 'list')} aria-label={m.gallery_list_view()}><List size={18} /></button>
 		</div>
 	</div>
 

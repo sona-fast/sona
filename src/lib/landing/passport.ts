@@ -27,7 +27,7 @@ export interface PassportCounts {
 export type FeatureKind = 'gallery' | 'fursuit' | 'stickers' | 'vr' | 'collections' | 'about';
 
 /** What /about holds beyond the passport, which picks the About stamp's line. */
-export type AboutLine = 'links' | 'conventions' | 'both' | 'details';
+export type AboutLine = 'links' | 'conventions' | 'both';
 
 export interface FeatureStamp {
 	kind: FeatureKind;
@@ -152,8 +152,10 @@ export function pastEventStamps(photos: PassportPhoto[]): ConventionStamp[] {
  * the fursuit photos, see pastEventStamps.
  *
  * `about` is what /about has that the passport doesn't already show: a social
- * link, any /art sona detail, or a convention /about itself lists (any status,
- * against today's UTC date). Only that read decides the conventions line, not
+ * link or a convention /about itself lists (any status, against today's UTC
+ * date). Sona details (build, key features, colours, dos and don'ts) are not a
+ * reason: they live on /art, not /about, and /art already has its own stamps
+ * through the gallery and the ref sheet. Only that read decides the conventions line, not
  * the live or next row: on a live con's last evening in its own zone, /about
  * may already have dropped it. Which of them exist picks the stamp's line.
  */
@@ -161,7 +163,7 @@ export function buildStamps(input: {
 	counts: PassportCounts;
 	conventions: PassportConvention[];
 	photos: PassportPhoto[];
-	about: { links: boolean; details: boolean; conventions: boolean };
+	about: { links: boolean; conventions: boolean };
 	now: Date;
 }): PassportStamps {
 	const { counts, now } = input;
@@ -194,8 +196,8 @@ export function buildStamps(input: {
 	}
 	const links = input.about.links;
 	const cons = input.about.conventions;
-	if (links || cons || input.about.details) {
-		const about: AboutLine = links && cons ? 'both' : links ? 'links' : cons ? 'conventions' : 'details';
+	if (links || cons) {
+		const about: AboutLine = links && cons ? 'both' : links ? 'links' : 'conventions';
 		features.push({ kind: 'about', href: '/about', counts: [], about });
 	}
 

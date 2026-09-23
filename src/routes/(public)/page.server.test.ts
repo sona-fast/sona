@@ -602,6 +602,23 @@ describe('passport load — empty site and degraded reads', () => {
 		expect(kinds(data)).toEqual(['about']);
 	});
 
+	// Sona details live on /art, not /about, so they alone never earn the
+	// About stamp: it would open a page with none of them.
+	it('gives no About stamp for sona details alone, with no socials and no conventions', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite.exec(`
+			INSERT INTO site_settings (key, value) VALUES
+				('sonaBuild', 'Lanky'),
+				('sonaKeyFeatures', 'A white tail tip'),
+				('sonaColors', '[{"name":"Rust","hex":"#b7410e"}]'),
+				('sonaDos', 'Blue jacket'),
+				('sonaDonts', 'No hat');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(kinds(data)).not.toContain('about');
+	});
+
 	it('degrades to no feature stamps and the avatar when the batch never answers', async () => {
 		const { db, sqlite } = makePassportDb();
 		await db.insert(artists).values({ id: 1, name: 'A' });

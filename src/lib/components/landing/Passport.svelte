@@ -62,8 +62,7 @@
 	const ABOUT_LINES = {
 		links: m.passport_about_links,
 		conventions: m.passport_about_cons,
-		both: m.passport_about_links_cons,
-		details: m.passport_about_details
+		both: m.passport_about_links_cons
 	};
 
 	// The caption ends in a full stop unless the title already ends in its own

@@ -125,10 +125,17 @@ test.describe('populated passport', () => {
 			/^参加中：E2E Live Con、Denver, CO \d{1,2}月\d{1,2}日\(.\)まで$/
 		);
 		// The About line's zero-width space is a visual break point only: the
-		// visible text keeps it, the spoken name drops it.
+		// visible text keeps it, the spoken name drops it. toHaveAccessibleName
+		// and toHaveText strip U+200B before comparing, so the raw attribute and
+		// textContent are what show the strip happened.
 		const about = stamps.locator('a[href="/about"]');
-		await expect(about).toHaveAccessibleName('サイトについて、リンクと参加予定のコン');
-		await expect(about.locator('.line')).toHaveText('リンクと\u200b参加予定のコン');
+		await expect(about).toHaveAttribute('aria-label', 'サイトについて、リンクと参加予定のコン');
+		const raw = await about.evaluate((el) => ({
+			label: el.getAttribute('aria-label') ?? '',
+			line: el.querySelector('.line')?.textContent ?? ''
+		}));
+		expect(raw.label).not.toContain('\u200b');
+		expect(raw.line).toBe('リンクと\u200b参加予定のコン');
 
 		const data = page.getByRole('region', { name: 'E2E', exact: true });
 		await expect(data.locator('a.photo-frame')).toHaveAccessibleName(/、NSFW$/);
@@ -148,6 +155,64 @@ test.describe('populated passport', () => {
 
 		await page.goto('/gallery/mature-ref-sheet');
 		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'true');
+	});
+
+	// The gallery's filter row: every select has a name, the view toggle says
+	// which view is on without colour, and the view switch is plain buttons and
+	// links marked like the nav, not a tablist with no tabpanels.
+	test('names the gallery filters and marks the current view and layout', async ({ page }) => {
+		await page.goto('/gallery');
+		for (const name of ['Tags', 'Character', 'Sort by']) {
+			await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
+		}
+		await expect(page.locator('select:not([aria-label])')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Grid view' })).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.getByRole('button', { name: 'List view' })).toHaveAttribute('aria-pressed', 'false');
+		// The toggle is a client action: retry until the click lands after
+		// hydration. A second click on List view is harmless.
+		await expect(async () => {
+			await page.getByRole('button', { name: 'List view' }).click();
+			await expect(page.getByRole('button', { name: 'List view' })).toHaveAttribute('aria-pressed', 'true', { timeout: 1000 });
+		}).toPass();
+		await expect(page.getByRole('button', { name: 'Grid view' })).toHaveAttribute('aria-pressed', 'false');
+
+		const tabs = page.locator('.tabs');
+		await expect(page.getByRole('tablist')).toHaveCount(0);
+		await expect(tabs.getByRole('button', { name: 'Artwork' })).toHaveAttribute('aria-current', 'page');
+		await expect(tabs.locator('[aria-current]')).toHaveCount(1);
+
+		await page.goto('/gallery?view=fursuit');
+		await expect(tabs.getByRole('button', { name: 'Fursuit Photos' })).toHaveAttribute('aria-current', 'page');
+		await expect(tabs.locator('[aria-current]')).toHaveCount(1);
+		for (const name of ['Photographer', 'Event']) {
+			await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
+		}
+	});
+
+	// Strict line-break gives way when a word cannot fit its box, so at 320px
+	// with 200% text the oval must be roomy enough for "ギャラリー" on one line.
+	test('never starts a line of the Japanese Gallery oval with the long-vowel mark', async ({ page }) => {
+		await page.setViewportSize({ width: 320, height: 800 });
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+		await page.goto('/');
+		await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+		const name = page.locator('a.stamp--oval .name');
+		await expect(name).toHaveText('ギャラリー');
+		const lineStarts = await name.evaluate((el) => {
+			const text = el.firstChild as Text;
+			const starts: string[] = [];
+			let top: number | null = null;
+			for (let i = 0; i < text.length; i++) {
+				const range = document.createRange();
+				range.setStart(text, i);
+				range.setEnd(text, i + 1);
+				const t = range.getClientRects()[0]?.top ?? 0;
+				if (top === null || t > top + 1) starts.push(text.data[i]);
+				top = t;
+			}
+			return starts;
+		});
+		expect(lineStarts).not.toContain('ー');
 	});
 });
 

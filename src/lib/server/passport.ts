@@ -17,7 +17,7 @@ import {
 import type { Database } from '$lib/server/db';
 import { refSheetQuery } from '$lib/server/presence';
 import { getMode } from '$lib/server/furtrack';
-import { DEFAULTS, parseLines, parseSonaColors, type SiteSettings } from '$lib/server/settings';
+import { DEFAULTS, type SiteSettings } from '$lib/server/settings';
 import { withTimeout } from '$lib/server/timeout';
 import { upcomingCutoff } from '$lib/convention-window';
 import {
@@ -73,17 +73,6 @@ function socialsOf(settings: SiteSettings): PassportData['socials'] {
 		{ platform: 'furtrack', url: settings.furtrackUrl }
 	];
 	return all.filter((s) => s.url);
-}
-
-/** Whether /about carries a sona detail: the /art details block, which /about
- *  links to. Pronouns and species are already on the data page. */
-function hasSonaDetail(settings: SiteSettings): boolean {
-	return (
-		Boolean(settings.sonaBuild || settings.sonaKeyFeatures) ||
-		parseSonaColors(settings.sonaColors).length > 0 ||
-		parseLines(settings.sonaDos).length > 0 ||
-		parseLines(settings.sonaDonts).length > 0
-	);
 }
 
 const publishedParent = and(eq(images.published, true), isNull(images.parentImageId));
@@ -283,7 +272,6 @@ export async function loadPassport(opts: {
 		photos: photos ?? [],
 		about: {
 			links: socials.length > 0,
-			details: hasSonaDetail(settings),
 			conventions: aboutConRows.length > 0
 		},
 		now

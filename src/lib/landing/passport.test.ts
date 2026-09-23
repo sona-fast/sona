@@ -30,7 +30,7 @@ function con(over: Partial<PassportConvention> & { id: number; startDate: string
 	return { name: `Con ${over.id}`, location: null, endDate: null, timezone: 'UTC', status: 'confirmed', ...over };
 }
 
-const NO_ABOUT = { links: false, details: false, conventions: false };
+const NO_ABOUT = { links: false, conventions: false };
 
 function build(over: Partial<Parameters<typeof buildStamps>[0]> = {}): PassportStamps {
 	return buildStamps({ counts: NO_COUNTS, conventions: [], photos: [], about: NO_ABOUT, now: NOW, ...over });
@@ -74,9 +74,9 @@ describe('passport feature stamps', () => {
 		}
 	});
 
-	it('shows About for socials, sona details, or a convention /about lists', () => {
+	it('shows About for socials or a convention /about lists', () => {
 		expect(build().features.map((f) => f.kind)).not.toContain('about');
-		expect(build({ about: { ...NO_ABOUT, details: true } }).features.map((f) => f.kind)).toContain('about');
+		expect(build({ about: { ...NO_ABOUT, links: true } }).features.map((f) => f.kind)).toContain('about');
 		const upcoming = build({ about: { ...NO_ABOUT, conventions: true } });
 		expect(upcoming.features.map((f) => f.kind)).toEqual(['about']);
 	});
@@ -100,10 +100,7 @@ describe('passport feature stamps', () => {
 			build(over).features.find((f) => f.kind === 'about')?.about;
 		expect(line({ about: { ...NO_ABOUT, links: true } })).toBe('links');
 		expect(line({ about: { ...NO_ABOUT, conventions: true } })).toBe('conventions');
-		expect(line({ about: { links: true, details: true, conventions: true } })).toBe('both');
 		expect(line({ about: { ...NO_ABOUT, links: true, conventions: true } })).toBe('both');
-		expect(line({ about: { ...NO_ABOUT, details: true } })).toBe('details');
-		expect(line({ about: { ...NO_ABOUT, details: true, links: true } })).toBe('links');
 	});
 });
 

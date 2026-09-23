@@ -158,6 +158,18 @@
 		letter-spacing: 0.1em;
 	}
 
+	/* At 320px with 200% text, "ギャラリー" needs about 198px with the tracking
+	   and the oval's content box is 178px, so it broke before ー despite strict
+	   line-break (that rule gives way when a word cannot fit). Kana need no
+	   tracking, and a slimmer inline padding gives the word the room it needs. */
+	.stamp--oval:lang(ja) {
+		padding-inline: 24px;
+	}
+
+	.stamp--oval .name:lang(ja) {
+		letter-spacing: 0;
+	}
+
 	.stamp--round {
 		border-radius: 20px;
 	}
