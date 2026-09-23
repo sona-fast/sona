@@ -152,7 +152,7 @@ describe('passport convention stamps', () => {
 			'Dated',
 			'Undated Con'
 		]);
-		expect(pastEventStamps([{ event: 'Undated Con' }])[0].month).toBeNull();
+		expect(pastEventStamps([{ event: 'Undated Con' }])[0]).toMatchObject({ kind: 'past', month: null });
 	});
 
 	it('links every stamp it renders: the unlinked stamp never occurs', () => {
