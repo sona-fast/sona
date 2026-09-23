@@ -2668,6 +2668,12 @@ describe('no state boundary draws with raw --primary (SONA-126)', () => {
 		],
 		['/lib/components/CloudflareSetupDialog.svelte', ['.unlocks — the accent bar down the note']],
 		[
+			'/lib/components/landing/Stamp.svelte',
+			[
+				'.stamp--live — the inset spacer ring sits on a fill of the same colour; the edge that marks the stamp is --primary-text'
+			]
+		],
+		[
 			'/lib/components/StickerPackForm.svelte',
 			['.select-check.on — the border sits on a fill of the same colour']
 		],
