@@ -254,8 +254,25 @@ describe('passport convention stamps', () => {
 		]);
 		// The cap still fills with other events.
 		const many = Array.from({ length: MAX_PAST_STAMPS }, (_, i) => ({ event: `Con ${i}`, takenAt: `202${i}-05-01` }));
-		const capped = pastEventStamps([{ event: 'Live', takenAt: '2030-01-01' }, ...many], 'Live');
+		const capped = pastEventStamps([{ event: 'Live', takenAt: '2030-01-01' }, ...many], new Set(['Live']));
 		expect(capped.map((p) => p.name)).toEqual(many.map((p) => p.event).reverse());
+	});
+
+	it('leaves every live convention out of the past stamps when two overlap', () => {
+		const earlier = con({ id: 1, name: 'Bayside Bash', startDate: '2026-10-14', endDate: '2026-10-17' });
+		const later = con({ id: 2, name: 'Cinder Valley Con', startDate: '2026-10-16', endDate: '2026-10-19' });
+		const stamps = build({
+			conventions: [later, earlier],
+			photos: [
+				{ event: 'Bayside Bash', takenAt: '2026-10-15' },
+				{ event: 'Cinder Valley Con', takenAt: '2026-10-17' },
+				{ event: 'Harbourfur 2025', takenAt: '2025-11-08' }
+			]
+		});
+		expect(stamps.live?.name).toBe('Bayside Bash');
+		expect(stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025' }
+		]);
 	});
 
 	it('puts Next before the past stamps', () => {

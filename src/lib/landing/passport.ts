@@ -107,18 +107,18 @@ function fursuitEventHref(event: string): string {
  * dated photo, and the number of photos carrying that event. Newest first by
  * that date (undated events after the dated ones), capped at MAX_PAST_STAMPS.
  *
- * `exclude` is the live convention's name: photos tagged during the event must
- * not add a past stamp for a convention that reads Here now. Exact match, as
+ * `exclude` holds every live convention's name: photos tagged during an event
+ * must not add a past stamp for a convention that is running. Exact match, as
  * the gallery's event filter compares, and before the cap so it still fills.
  */
-export function pastEventStamps(photos: PassportPhoto[], exclude?: string): ConventionStamp[] {
+export function pastEventStamps(photos: PassportPhoto[], exclude?: ReadonlySet<string>): ConventionStamp[] {
 	const byEvent = new Map<string, { photos: number; latest: string | null }>();
 	for (const photo of photos) {
 		// Grouped and linked by the stored value: the gallery's event filter
 		// compares exactly, so a trimmed name would link to an empty view. trim()
 		// only skips an event that is all whitespace.
 		const event = photo.event;
-		if (!event?.trim() || event === exclude) continue;
+		if (!event?.trim() || exclude?.has(event)) continue;
 		// The date part of a timestamp ("2025-11-09T10:00:00Z" reads as its day).
 		const date = calendarDate(photo.takenAt?.slice(0, 10));
 		const entry = byEvent.get(event) ?? { photos: 0, latest: null };
@@ -210,7 +210,8 @@ export function buildStamps(input: {
 	if (nextRow) {
 		conventions.push({ kind: 'next', name: nextRow.name, startDate: calendarDate(nextRow.startDate), href: '/connect' });
 	}
-	conventions.push(...pastEventStamps(input.photos, liveRow?.name));
+	const liveNames = new Set(confirmed.filter((c) => isLiveNow(c, now)).map((c) => c.name));
+	conventions.push(...pastEventStamps(input.photos, liveNames));
 
 	return {
 		live: liveRow
