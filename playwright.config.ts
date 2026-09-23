@@ -26,7 +26,13 @@ import {
 	E2E_PERSIST_TO_REGISTRY,
 	E2E_REGISTRY_MOCK,
 	E2E_REGISTRY_SCENARIO,
-	E2E_REGISTRY_URL
+	E2E_REGISTRY_URL,
+	E2E_PASSPORT_OVERLAY,
+	E2E_PERSIST_TO_PASSPORT,
+	E2E_PLATFORM_PERSIST_PASSPORT,
+	E2E_PASSPORT_EMPTY_OVERLAY,
+	E2E_PERSIST_TO_PASSPORT_EMPTY,
+	E2E_PLATFORM_PERSIST_PASSPORT_EMPTY
 } from './tests/e2e/paths';
 
 // The shared read-only DB/server (gallery, palette), an isolated one for the
@@ -34,11 +40,12 @@ import {
 // spec (needs UPLOADTHING_TOKEN + the UT interceptor, which would perturb the
 // shared specs), an isolated one for the upload spec, and isolated ones for the
 // serial tag-suggestions and suggest-tags specs, and one for the registry-sync
-// spec (registry features on, registry interceptor preloaded) — see below.
+// spec (registry features on, registry interceptor preloaded), and two for the
+// passport homepage spec (populated and fresh-site) — see below.
 //
-// The nine ports are derived from one base so a concurrent run can take a
-// private block: set SONA_E2E_BASE_PORT and this run binds base..base+8 instead
-// of 4179-4187. Without it, every checkout and every agent binds the same nine
+// The eleven ports are derived from one base so a concurrent run can take a
+// private block: set SONA_E2E_BASE_PORT and this run binds base..base+10 instead
+// of 4179-4189. Without it, every checkout and every agent binds the same eleven
 // ports, and a second run either dies on --strictPort or (worse) gets its
 // servers killed by whoever assumes the listener is their own stray (SONA-164).
 // `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
@@ -46,9 +53,9 @@ import {
 // explicitly invalid port still trips the check below rather than silently
 // falling back.)
 const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
-if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_527) {
+if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_525) {
 	throw new Error(
-		`SONA_E2E_BASE_PORT must be an integer in 1024-65527 (needs 9 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
+		`SONA_E2E_BASE_PORT must be an integer in 1024-65525 (needs 11 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
 	);
 }
 const PORT = BASE_PORT;
@@ -60,6 +67,8 @@ const SUGGEST_TAGS_PORT = BASE_PORT + 5;
 const THEME_PORT = BASE_PORT + 6;
 const STICKERS_PORT = BASE_PORT + 7;
 const REGISTRY_PORT = BASE_PORT + 8;
+const PASSPORT_PORT = BASE_PORT + 9;
+const PASSPORT_EMPTY_PORT = BASE_PORT + 10;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -170,6 +179,27 @@ const registryServerEnv = {
 	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_REGISTRY_MOCK}`.trim()
 };
 
+// The passport spec needs landingLayout = 'passport', which would change the
+// homepage every shared-server spec sees, and a second, content-free database
+// for the fresh-site state. Both servers seed the shared fixture and layer an
+// overlay on it (fixtures/passport.sql, fixtures/passport-empty.sql). The spec
+// only reads, and picks its server by project: see tests/e2e/passport.spec.ts.
+const PASSPORT_SPEC = '**/passport.spec.ts';
+
+const passportServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_PASSPORT,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_PASSPORT,
+	SONA_E2E_SEED_OVERLAY: E2E_PASSPORT_OVERLAY
+};
+
+const passportEmptyServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_PASSPORT_EMPTY,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_PASSPORT_EMPTY,
+	SONA_E2E_SEED_OVERLAY: E2E_PASSPORT_EMPTY_OVERLAY
+};
+
 const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 // storage-breakdown rides the ut-stat server: it also flips the storage
 // provider, which would race the shared server's specs (SONA-192).
@@ -245,7 +275,8 @@ export default defineConfig({
 				SUGGEST_TAGS_SPEC,
 				THEME_SPEC,
 				STICKERS_SPEC,
-				REGISTRY_SPEC
+				REGISTRY_SPEC,
+				PASSPORT_SPEC
 			],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
@@ -267,6 +298,16 @@ export default defineConfig({
 			name: 'stickers-content',
 			testMatch: STICKERS_SPEC,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${STICKERS_PORT}` }
+		},
+		{
+			name: 'passport',
+			testMatch: PASSPORT_SPEC,
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PASSPORT_PORT}` }
+		},
+		{
+			name: 'passport-empty',
+			testMatch: PASSPORT_SPEC,
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PASSPORT_EMPTY_PORT}` }
 		},
 		{
 			name: 'theme-picker',
@@ -312,6 +353,8 @@ export default defineConfig({
 		webServer(SUGGEST_TAGS_PORT, suggestServerEnv),
 		webServer(THEME_PORT, themeServerEnv),
 		webServer(STICKERS_PORT, stickersServerEnv),
-		webServer(REGISTRY_PORT, registryServerEnv)
+		webServer(REGISTRY_PORT, registryServerEnv),
+		webServer(PASSPORT_PORT, passportServerEnv),
+		webServer(PASSPORT_EMPTY_PORT, passportEmptyServerEnv)
 	]
 });
