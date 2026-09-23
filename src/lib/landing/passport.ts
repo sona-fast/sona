@@ -155,9 +155,10 @@ export function pastEventStamps(photos: PassportPhoto[]): ConventionStamp[] {
  * link or a convention /about itself lists (any status, against today's UTC
  * date). Sona details (build, key features, colours, dos and don'ts) are not a
  * reason: they live on /art, not /about, and /art already has its own stamps
- * through the gallery and the ref sheet. Only that read decides the conventions line, not
- * the live or next row: on a live con's last evening in its own zone, /about
- * may already have dropped it. Which of them exist picks the stamp's line.
+ * through the gallery and the ref sheet. Only that read decides the
+ * conventions line, not the live or next row: on a live con's last evening in
+ * its own zone, /about may already have dropped it. Which of them exist picks
+ * the stamp's line.
  */
 export function buildStamps(input: {
 	counts: PassportCounts;

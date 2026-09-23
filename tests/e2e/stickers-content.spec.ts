@@ -49,7 +49,7 @@ test('the Stickers link is ungated once a published pack exists', async ({ page 
 	// The twin of nav-gating.spec.ts, which asserts these are absent on a fork
 	// with no packs. Same three places, opposite expectation.
 	await expect(page.locator('.header nav a[href="/stickers"]')).toBeVisible();
-	await expect(page.locator('.tabs[role="tablist"] a[href="/stickers"]')).toBeVisible();
+	await expect(page.locator('.tabs a[href="/stickers"]')).toBeVisible();
 
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto('/gallery');

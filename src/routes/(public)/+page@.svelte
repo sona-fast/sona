@@ -431,7 +431,7 @@
 	}
 
 	.passport {
-		padding-block: 32px 56px;
+		padding-block: 28px 56px;
 	}
 
 	.section-header {

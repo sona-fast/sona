@@ -224,6 +224,7 @@
 				type="search"
 				class="input search"
 				placeholder={m.gallery_search_placeholder()}
+				aria-label={m.gallery_filter_search()}
 				value={data.filters.search}
 				onchange={(e) => updateFilter('q', e.currentTarget.value)}
 			/>
@@ -231,7 +232,7 @@
 		<div class="select-wrapper">
 			<select
 				class="input filter-select"
-				aria-label={m.gallery_tags()}
+				aria-label={m.gallery_filter_tag()}
 				value={data.filters.tag}
 				onchange={(e) => updateFilter('tag', e.currentTarget.value)}
 			>
@@ -246,6 +247,7 @@
 				type="text"
 				class="input filter-select combobox-input"
 				placeholder={m.gallery_all_artists()}
+				aria-label={m.gallery_filter_artist()}
 				bind:value={artistQuery}
 				onfocus={() => (artistOpen = true)}
 				oninput={() => (artistOpen = true)}

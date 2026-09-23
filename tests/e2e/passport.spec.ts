@@ -12,8 +12,8 @@ import { test, expect } from '@playwright/test';
 //                   social and the pronouns taken away (fixtures/
 //                   passport-empty.sql): a fresh fork.
 //
-// Read-only throughout: no login and no writes. This asserts markup, never
-// pixels.
+// Read-only throughout: no login and no writes. This asserts markup, not
+// pixels, apart from the card's offset below the header, which the mock fixes.
 
 test.describe('populated passport', () => {
 	test.beforeEach(({}, info) => {
@@ -63,6 +63,24 @@ test.describe('populated passport', () => {
 		const ogImage = await page.locator('meta[property="og:image"]').getAttribute('content');
 		expect(ogImage).toMatch(/\/e2e-face\.png$/);
 		expect(ogImage).not.toContain('e2e-avatar.svg');
+	});
+
+	// The mock puts the card 28px below the header on desktop and 16px below
+	// the top on mobile, where the header is hidden.
+	test('places the card where the mock does', async ({ page }) => {
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.goto('/');
+		const gap = await page.evaluate(
+			() =>
+				document.querySelector('.book')!.getBoundingClientRect().top -
+				document.querySelector('header')!.getBoundingClientRect().bottom
+		);
+		expect(gap).toBe(28);
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/');
+		const top = await page.evaluate(() => document.querySelector('.book')!.getBoundingClientRect().top);
+		expect(top).toBe(16);
 	});
 
 	test('renders every stamp as a link named for its feature and count', async ({ page }) => {
@@ -157,15 +175,16 @@ test.describe('populated passport', () => {
 		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'true');
 	});
 
-	// The gallery's filter row: every select has a name, the view toggle says
+	// The gallery's filter row: every input and select has a name, the view toggle says
 	// which view is on without colour, and the view switch is plain buttons and
 	// links marked like the nav, not a tablist with no tabpanels.
 	test('names the gallery filters and marks the current view and layout', async ({ page }) => {
 		await page.goto('/gallery');
-		for (const name of ['Tags', 'Character', 'Sort by']) {
+		for (const name of ['Tag', 'Artist', 'Character', 'Sort by']) {
 			await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
 		}
-		await expect(page.locator('select:not([aria-label])')).toHaveCount(0);
+		await expect(page.getByRole('searchbox', { name: 'Search artworks', exact: true })).toBeVisible();
+		await expect(page.locator('.filters :is(input, select):not([aria-label])')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Grid view' })).toHaveAttribute('aria-pressed', 'true');
 		await expect(page.getByRole('button', { name: 'List view' })).toHaveAttribute('aria-pressed', 'false');
 		// The toggle is a client action: retry until the click lands after
