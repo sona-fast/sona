@@ -5,6 +5,7 @@ import { getSettings, settingsFallback, toPublicSettings } from '$lib/server/set
 import { probeArtContent, shareHasContent } from '$lib/server/presence';
 import { navGateFlags, PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
 import { withTimeout } from '$lib/server/timeout';
+import { loadPassport } from '$lib/server/passport';
 import type { PageServerLoad } from './$types';
 
 // Bound each D1 read so a latency spike degrades the homepage to a fast page
@@ -26,6 +27,32 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// settings load doesn't run here — read settings directly (cached
 	// per-isolate, usually zero round-trips).
 	const settings = await withTimeout(getSettings(db), READ_TIMEOUT_MS, settingsFallback());
+
+	// The passport: a data page and one stamp per section with content. Its
+	// reads live in loadPassport, each bounded like the rest of this load, so a
+	// D1 stall renders a passport with fewer stamps instead of a 524.
+	if (settings.landingLayout === 'passport') {
+		const passport = await loadPassport({
+			db,
+			env: platform!.env,
+			settings,
+			host: url.host,
+			now: new Date(),
+			timeoutMs: READ_TIMEOUT_MS
+		});
+		const [stickersEnabled, collectionsEnabled] = await navFlags;
+		return {
+			settings: toPublicSettings(settings),
+			recentImages: [],
+			mosaicImageUrls: [],
+			host: url.host,
+			// The passport renders no path cards; true keeps the type uniform.
+			pathPresence: { art: true, share: true },
+			passport,
+			stickersEnabled,
+			collectionsEnabled
+		};
+	}
 
 	// The threePath splash is a standalone hub page — no image queries needed.
 	if (settings.landingLayout === 'threePath') {

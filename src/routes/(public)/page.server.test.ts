@@ -11,6 +11,7 @@ import { clearStickerTabCache } from '$lib/server/stickers';
 import { clearCollectionsNavCache } from '$lib/server/collections';
 import { load } from './+page.server';
 import { load as artLoad } from '../(paths)/art/+page.server';
+import type { PassportData } from '$lib/server/passport';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -40,6 +41,19 @@ function makeDb() {
 			variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0, featured_order INTEGER, created_at TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, pack_id INTEGER NOT NULL);
+		CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE conventions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, location TEXT, start_date TEXT NOT NULL,
+			end_date TEXT, url TEXT, status TEXT NOT NULL DEFAULT 'confirmed', source_id TEXT, timezone TEXT,
+			created_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE fursuit_photos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, furtrack_post_id INTEGER NOT NULL, character TEXT NOT NULL,
+			description TEXT, image_url TEXT NOT NULL, width INTEGER, height INTEGER, photographer TEXT NOT NULL,
+			photographer_url TEXT, event TEXT, license TEXT NOT NULL, permission_source TEXT,
+			furtrack_url TEXT NOT NULL, taken_at TEXT, created_at TEXT NOT NULL DEFAULT ''
+		);
 		CREATE TABLE collections (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL,
 			cover_image_url TEXT, created_at TEXT NOT NULL DEFAULT ''
@@ -269,5 +283,268 @@ describe('splash load — pathPresence card flags (#42)', () => {
 		// pathPresence true): the cached settings must keep us on threePath.
 		expect(data.settings.landingLayout).toBe('threePath');
 		expect(data.pathPresence).toEqual({ art: true, share: true });
+	});
+});
+
+type PassportPage = {
+	settings: { landingLayout: string };
+	passport: PassportData;
+};
+
+function loadPassportPage(platform: App.Platform) {
+	clearStickerTabCache();
+	clearCollectionsNavCache();
+	return load({ platform, url: new URL('http://example.ink/') } as never) as Promise<PassportPage>;
+}
+
+/** makeDb with the passport layout set and FurTrack in the given mode. */
+function makePassportDb(furtrackMode = 'off') {
+	const made = makeDb();
+	made.sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('landingLayout', 'passport')").run();
+	const env = made.platform.env as unknown as Record<string, unknown>;
+	env.FURTRACK_MODE = furtrackMode;
+	return made;
+}
+
+function isoDay(offsetDays: number): string {
+	return new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+}
+
+const kinds = (data: PassportPage) => data.passport.stamps.features.map((f) => f.kind);
+
+describe('passport load — counts', () => {
+	it('counts published parent pieces (NSFW included), their artists, stickers, avatars and collections', async () => {
+		const { sqlite, db, platform } = makePassportDb();
+		await db.insert(artists).values([{ id: 1, name: 'A' }, { id: 2, name: 'B' }]);
+		await db.insert(images).values([
+			{ id: 1, title: 'One', slug: 'one', imageUrl: '/1.png', artistId: 1, commissionedAt: '2021-05-01' },
+			{ id: 2, title: 'Two', slug: 'two', imageUrl: '/2.png', artistId: 2, nsfw: true, commissionedAt: '2019-02-01' },
+			{ id: 3, title: 'Three', slug: 'three', imageUrl: '/3.png', artistId: 1 },
+			// A variant, an unpublished piece, and an unpublished piece with an older
+			// commissioned date: none of them count, and the draft's year is not
+			// the "since" year.
+			{ id: 4, title: 'Alt', slug: 'alt', imageUrl: '/4.png', artistId: 2, parentImageId: 1 },
+			{ id: 5, title: 'Draft', slug: 'draft', imageUrl: '/5.png', artistId: 2, published: false, commissionedAt: '2010-01-01' }
+		]);
+		sqlite.exec(`
+			INSERT INTO sticker_packs (id, published) VALUES (1, 1), (2, 0);
+			INSERT INTO stickers (pack_id) VALUES (1), (1), (2);
+			INSERT INTO vr_avatars (published) VALUES (1), (0);
+			INSERT INTO collections (name, slug) VALUES ('C1', 'c1'), ('C2', 'c2');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(data.settings.landingLayout).toBe('passport');
+		expect(data.passport.stamps.features).toEqual([
+			{ kind: 'gallery', href: '/gallery', counts: [3, 2] },
+			{ kind: 'stickers', href: '/stickers', counts: [2, 1] },
+			{ kind: 'vr', href: '/vr', counts: [1] },
+			{ kind: 'collections', href: '/collections', counts: [2] }
+		]);
+		expect(data.passport.since).toBe('2019');
+		expect(data.passport.mrz[1]).toContain('2019');
+	});
+
+	it('reads the fursuit stamp and the past-event stamps from displayable photos only while FurTrack is on', async () => {
+		const seedPhotos = (sqlite: { exec: (s: string) => void }) =>
+			sqlite.exec(`
+				INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at, permission_source)
+				VALUES
+					(1, 'c', '/f1.jpg', 'Lens A', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/1', '2025-11-08', NULL),
+					(2, 'c', '/f2.jpg', 'Lens B', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/2', '2025-11-09', NULL),
+					(3, 'c', '/f3.jpg', 'Lens B', 'Pinewood Howl 2025', 'unknown', 'https://furtrack.example/3', '2025-06-14', 'DM 2025-06-20'),
+					(4, 'c', '/f4.jpg', 'Lens C', 'Secret Con 2025', 'unknown', 'https://furtrack.example/4', '2025-03-01', NULL);
+			`);
+
+		const on = makePassportDb('mock');
+		seedPhotos(on.sqlite);
+		const data = await loadPassportPage(on.platform);
+		// Photo 4 is not displayable and has no recorded permission: the gallery
+		// would not show it, so the passport neither counts nor names its event.
+		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [3, 2] });
+		expect(data.passport.stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 2, href: '/gallery?view=fursuit&event=Harbourfur%202025' },
+			{ kind: 'past', name: 'Pinewood Howl 2025', month: '2025-06', photos: 1, href: '/gallery?view=fursuit&event=Pinewood%20Howl%202025' }
+		]);
+
+		clearSettingsCache();
+		const off = makePassportDb('off');
+		seedPhotos(off.sqlite);
+		const offData = await loadPassportPage(off.platform);
+		expect(kinds(offData)).not.toContain('fursuit');
+		expect(offData.passport.stamps.conventions).toEqual([]);
+	});
+});
+
+describe('passport load — conventions', () => {
+	it('leads with a confirmed live convention (isLiveNow) and never with a maybe', async () => {
+		const { sqlite, platform } = makePassportDb();
+		const insert = sqlite.prepare(
+			'INSERT INTO conventions (name, location, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?, ?)'
+		);
+		insert.run('Maybe Con', 'Elsewhere', isoDay(-1), isoDay(1), 'maybe', 'UTC');
+		insert.run('Live Con', 'Reno, Nevada', isoDay(-1), isoDay(1), 'confirmed', 'UTC');
+		insert.run('Next Con', null, isoDay(40), isoDay(42), 'confirmed', 'UTC');
+		insert.run('Considering Con', null, isoDay(20), isoDay(22), 'considering', 'UTC');
+		// A confirmed convention that is over, with no fursuit photos: no stamp,
+		// because /connect and /about publish only upcoming and live conventions.
+		insert.run('Past Con', null, isoDay(-90), isoDay(-88), 'confirmed', 'UTC');
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.live).toEqual({
+			name: 'Live Con',
+			location: 'Reno, Nevada',
+			until: isoDay(1),
+			href: '/connect'
+		});
+		expect(data.passport.stamps.conventions).toEqual([
+			{ kind: 'next', name: 'Next Con', startDate: isoDay(40), href: '/connect' }
+		]);
+		// Upcoming conventions are what /about shows, so the About stamp follows.
+		expect(kinds(data)).toEqual(['about']);
+	});
+
+	it('gives a maybe convention running today no Here now stamp', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite
+			.prepare('INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)')
+			.run('Maybe Con', isoDay(-1), isoDay(1), 'maybe', 'UTC');
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.live).toBeNull();
+		expect(data.passport.hasStamps).toBe(false);
+	});
+});
+
+describe('passport load — picture precedence (shared with /art)', () => {
+	async function seedArt(db: ReturnType<typeof makeDb>['db']) {
+		await db.insert(artists).values({ id: 1, name: 'mothlamp' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+	}
+
+	it('uses the designated ref sheet even when it is NSFW, blurred, and agrees with /art', async () => {
+		const { db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'Mature Ref', slug: 'mature-ref', imageUrl: '/1.png', artistId: 1, nsfw: true, createdAt: '2026-01-01' },
+			// A newer tagged sheet that the designation outranks.
+			{ id: 2, title: 'Tagged Ref', slug: 'tagged-ref', imageUrl: '/2.png', artistId: 1, createdAt: '2026-06-01' }
+		]);
+		await db.insert(imageTags).values({ imageId: 2, tagId: 1 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 1 });
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'mature-ref', nsfw: true, artistName: 'mothlamp' });
+
+		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(artData.refSheet?.slug).toBe(data.passport.picture?.slug);
+	});
+
+	it('falls back to the newest reference-tagged sheet, skipping a designated variant', async () => {
+		const { db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'Parent', slug: 'parent', imageUrl: '/1.png', artistId: 1, createdAt: '2025-01-01' },
+			{ id: 2, title: 'Variant', slug: 'variant', imageUrl: '/2.png', artistId: 1, parentImageId: 1, createdAt: '2025-02-01' },
+			{ id: 3, title: 'Old Ref', slug: 'old-ref', imageUrl: '/3.png', artistId: 1, createdAt: '2025-03-01' },
+			{ id: 4, title: 'New Ref', slug: 'new-ref', imageUrl: '/4.png', artistId: 1, createdAt: '2025-04-01' }
+		]);
+		await db.insert(imageTags).values([{ imageId: 3, tagId: 1 }, { imageId: 4, tagId: 1 }]);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 2 });
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'new-ref' });
+		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(artData.refSheet?.slug).toBe('new-ref');
+	});
+
+	it('without a ref sheet, takes the first featured piece, then the newest SFW piece', async () => {
+		const { sqlite, db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'Featured Second', slug: 'f2', imageUrl: '/1.png', artistId: 1, featured: true, featuredOrder: 2, createdAt: '2025-01-01' },
+			{ id: 2, title: 'Featured First', slug: 'f1', imageUrl: '/2.png', artistId: 1, featured: true, featuredOrder: 1, createdAt: '2025-01-02' },
+			{ id: 3, title: 'Newest', slug: 'newest', imageUrl: '/3.png', artistId: 1, createdAt: '2026-01-01' },
+			{ id: 4, title: 'Newest NSFW', slug: 'newest-nsfw', imageUrl: '/4.png', artistId: 1, nsfw: true, createdAt: '2026-02-01' }
+		]);
+
+		let data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'f1', title: 'Featured First', nsfw: false });
+
+		sqlite.exec('UPDATE images SET featured = 0');
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'newest', nsfw: false });
+	});
+
+	it('falls back to the admin avatar, and to no picture without one', async () => {
+		const { sqlite, platform } = makePassportDb();
+		let data = await loadPassportPage(platform);
+		expect(data.passport.picture).toBeNull();
+
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('adminAvatarUrl', '/face.png')").run();
+		clearSettingsCache();
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'avatar', imageUrl: '/face.png', slug: null, nsfw: false });
+	});
+});
+
+describe('passport load — empty site and degraded reads', () => {
+	it('renders a fresh fork as a data page with no stamps, the host, and no default about text', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('ownerName', 'Ashby')").run();
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport).toMatchObject({
+			name: 'Ashby',
+			host: 'example.ink',
+			pronouns: '',
+			species: '',
+			since: null,
+			socials: [],
+			about: '',
+			hasStamps: false
+		});
+		expect(data.passport.stamps).toEqual({ live: null, features: [], conventions: [] });
+		expect(data.passport.mrz[1].startsWith('EXAMPLE<INK<')).toBe(true);
+		expect(data.passport.mrz.join('')).not.toMatch(/\d/);
+	});
+
+	it('shows an about text the operator wrote, and their socials with the About stamp', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite.exec(`
+			INSERT INTO site_settings (key, value) VALUES
+				('aboutText', 'A red fox in a blue jacket.'),
+				('blueskyUrl', 'https://bsky.app/profile/ashby.example');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.about).toBe('A red fox in a blue jacket.');
+		expect(data.passport.socials).toEqual([{ platform: 'bluesky', url: 'https://bsky.app/profile/ashby.example' }]);
+		expect(kinds(data)).toEqual(['about']);
+	});
+
+	it('degrades to a stampless passport, not a 500, when every D1 read fails', async () => {
+		// Warm the settings cache on a healthy DB so the load reaches the passport
+		// branch, then swap in a D1 whose every statement throws.
+		const { sqlite, db, platform } = makePassportDb('mock');
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('adminAvatarUrl', '/face.png')").run();
+		await db.insert(artists).values({ id: 1, name: 'A' });
+		await db.insert(images).values({ id: 1, title: 'One', slug: 'one', imageUrl: '/1.png', artistId: 1 });
+		await loadPassportPage(platform);
+
+		const failingD1 = {
+			prepare: () => {
+				throw new Error('D1_ERROR: transient');
+			},
+			batch: () => Promise.reject(new Error('D1_ERROR: transient'))
+		} as unknown as D1Database;
+		const failingPlatform = { env: { DB: failingD1, FURTRACK_MODE: 'mock' } } as unknown as App.Platform;
+
+		const data = await loadPassportPage(failingPlatform);
+		expect(data.settings.landingLayout).toBe('passport');
+		expect(data.passport.hasStamps).toBe(false);
+		expect(data.passport.stamps.features).toEqual([]);
+		// No count read means no stamp, never a zero, and the page still has a face.
+		expect(data.passport.picture).toMatchObject({ kind: 'avatar' });
 	});
 });
