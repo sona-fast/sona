@@ -24,13 +24,10 @@
 	}
 </script>
 
-<nav class="mobile-nav">
+<nav class="mobile-nav" aria-label={m.nav_main_label()}>
 	{#each tabs as tab (tab.href)}
-		<a
-			href={tab.href}
-			class="tab"
-			class:active={isActive(tab.href, $page.url.pathname)}
-		>
+		{@const active = isActive(tab.href, $page.url.pathname)}
+		<a href={tab.href} class="tab" class:active aria-current={active ? 'page' : undefined}>
 			<tab.icon size={20} />
 			<span>{tab.label()}</span>
 		</a>

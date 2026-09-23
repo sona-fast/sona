@@ -19,22 +19,57 @@
 	const FEATURE_TILTS = [-1, 2, -1.5, 2, -2, 1.5];
 	const CON_TILTS = [-2, 2, -2, 1.5, -1.5, 2, -1];
 
+	// The picture column's rendered width per viewport, from the .data grid's
+	// container queries below (13rem; 7.5rem on a page under 30rem; at most
+	// 10rem under 17.5rem), so a phone fetches the 480w file, not the 960w one.
+	// A page is under 30rem on a phone below about 34.5rem, and on the two-page
+	// spread below about 73rem, where each page is half the book.
+	const PICTURE_SIZES =
+		'(max-width: 22rem) 10rem, (max-width: 34.5rem) 7.5rem, (max-width: 56.25rem) 13rem, (max-width: 73rem) 7.5rem, 13rem';
+
 	// Bare YYYY-MM-DD dates are calendar facts, so they format in UTC, which
 	// keeps the server and the browser on the same day. English reads day before
-	// month ("Monday 19 October"), which is en-GB's order.
-	const intlLocale = $derived(getLocale() === 'ja' ? 'ja' : 'en-GB');
-	function monthYear(ym: string): string {
-		return new Intl.DateTimeFormat(intlLocale, { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(
-			new Date(`${ym}-01T00:00:00Z`)
+	// month ("Monday 19 October"), which is en-GB's order; the month stamp uses
+	// en-US, whose short September is "Sep" (en-GB's is "Sept"). Japanese puts
+	// the short weekday in brackets after the day ("10月19日(月)").
+	// Both return undefined on an Invalid Date, which format() would throw on
+	// during SSR: the date line drops instead.
+	const ja = $derived(getLocale() === 'ja');
+	function monthYear(ym: string): string | undefined {
+		const date = new Date(`${ym}-01T00:00:00Z`);
+		if (Number.isNaN(date.getTime())) return undefined;
+		return new Intl.DateTimeFormat(ja ? 'ja' : 'en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(
+			date
 		);
 	}
-	function untilDay(date: string): string {
-		return new Intl.DateTimeFormat(intlLocale, {
-			weekday: 'long',
+	function untilDay(day: string): string | undefined {
+		const date = new Date(`${day}T00:00:00Z`);
+		if (Number.isNaN(date.getTime())) return undefined;
+		return new Intl.DateTimeFormat(ja ? 'ja' : 'en-GB', {
+			weekday: ja ? 'short' : 'long',
 			day: 'numeric',
 			month: 'long',
 			timeZone: 'UTC'
-		}).format(new Date(`${date}T00:00:00Z`));
+		}).format(date);
+	}
+
+	function liveLine(location: string | null, until: string | null): string[] {
+		const date = until ? untilDay(until) : undefined;
+		if (!date) return location ? [location] : [];
+		return [location ? m.passport_live_line({ place: location, date }) : m.passport_live_until({ date })];
+	}
+
+	const ABOUT_LINES = {
+		links: m.passport_about_links,
+		conventions: m.passport_about_cons,
+		both: m.passport_about_links_cons,
+		details: m.passport_about_details
+	};
+
+	// The caption ends in a full stop unless the title already ends in its own
+	// punctuation ("Night swim!" would otherwise read "Night swim!.").
+	function captionTitle(title: string): string {
+		return /[.!?。！？]$/.test(title) ? title : m.passport_caption_title({ title });
 	}
 
 	function featureText(stamp: FeatureStamp): { name: string; lines: string[] } {
@@ -54,7 +89,7 @@
 			case 'collections':
 				return { name: m.nav_collections(), lines: [m.passport_collections({ count: a })] };
 			case 'about':
-				return { name: m.nav_about(), lines: [m.passport_about_line()] };
+				return { name: m.nav_about(), lines: stamp.about ? [ABOUT_LINES[stamp.about]()] : [] };
 		}
 	}
 
@@ -76,7 +111,10 @@
 						<div class="photo-frame photo-frame--square">
 							<img
 								class="art"
-								src={picture.imageUrl}
+								src={cdnImage(picture.imageUrl, 480)}
+								srcset="{cdnImage(picture.imageUrl, 480)} 480w, {cdnImage(picture.imageUrl, 960)} 960w"
+								sizes={PICTURE_SIZES}
+								use:rawFallback={picture.imageUrl}
 								alt={m.passport_alt_avatar({ name: passport.name })}
 								loading="eager"
 								fetchpriority="high"
@@ -98,7 +136,7 @@
 								class:blurred={picture.nsfw}
 								src={cdnImage(picture.imageUrl, 480)}
 								srcset="{cdnImage(picture.imageUrl, 480)} 480w, {cdnImage(picture.imageUrl, 960)} 960w"
-								sizes="13rem"
+								sizes={PICTURE_SIZES}
 								use:rawFallback={picture.imageUrl}
 								alt={pictureAlt}
 								loading="eager"
@@ -107,7 +145,7 @@
 							{#if picture.nsfw}<span class="gate">NSFW</span>{/if}
 						</a>
 						<figcaption>
-							{picture.kind === 'ref' ? m.passport_caption_ref() : m.passport_caption_title({ title: picture.title })}
+							{picture.kind === 'ref' ? m.passport_caption_ref() : captionTitle(picture.title)}
 							{#if picture.artistName}
 								{m.passport_art_by()}
 								<a href="/gallery?artist={encodeURIComponent(picture.artistName)}">{picture.artistName}</a>
@@ -197,11 +235,7 @@
 						wide
 						kicker={m.connect_here_now()}
 						name={live.name}
-						lines={[
-							live.location
-								? m.passport_live_line({ place: live.location, date: untilDay(live.until) })
-								: m.passport_live_until({ date: untilDay(live.until) })
-						]}
+						lines={liveLine(live.location, live.until)}
 					/>
 				</div>
 			{/if}
@@ -235,7 +269,7 @@
 									tilt={CON_TILTS[i % CON_TILTS.length]}
 									kicker={m.passport_next()}
 									name={con.name}
-									date={monthYear(con.startDate.slice(0, 7))}
+									date={con.startDate ? monthYear(con.startDate.slice(0, 7)) : undefined}
 								/>
 							{:else}
 								<Stamp
@@ -481,8 +515,8 @@
 		transform: scale(1.3);
 	}
 
-	/* A 60% scrim rather than ArtworkCard's 50%: over light blurred art the 50%
-	   one measures 3.95:1 behind the label, under the 4.5:1 text bar. */
+	/* ArtworkCard's NSFW scrim, 60%: over light blurred art a 50% one measures
+	   3.95:1 behind the label, under the 4.5:1 text bar. */
 	.gate {
 		position: absolute;
 		inset: 0;

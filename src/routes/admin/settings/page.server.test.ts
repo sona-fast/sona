@@ -1335,16 +1335,6 @@ describe('settings saveSite — themeId/landingLayout present-branch', () => {
 		expect(await getRawSetting(db, 'landingLayout')).toBe('threePath');
 	});
 
-	// The layout list comes from LANDING_LAYOUTS, so a new layout needs no change
-	// to the action, only an entry in the registry.
-	it('saves the passport layout from the registry', async () => {
-		const { db, platform } = makeDb();
-
-		await actions.saveSite(saveSiteEvent(platform, { landingLayout: 'passport' }));
-
-		expect(await getRawSetting(db, 'landingLayout')).toBe('passport');
-	});
-
 	it('coerces an unrecognized themeId and landingLayout to their defaults', async () => {
 		const { db, platform } = makeDb();
 

@@ -5,14 +5,15 @@ import { test, expect } from '@playwright/test';
 //
 //   passport        the shared fixture plus fixtures/passport.sql: an NSFW
 //                   designated ref sheet, three published pieces by one artist,
-//                   four published VR avatars, two socials, and a confirmed
-//                   convention running today.
+//                   four published VR avatars, two socials, a confirmed
+//                   convention running today and one upcoming, and one fursuit
+//                   photo from a past event (FurTrack in mock mode).
 //   passport-empty  the same fixture with every piece, avatar, convention,
 //                   social and the pronouns taken away (fixtures/
 //                   passport-empty.sql): a fresh fork.
 //
-// Read-only throughout: no login and no writes. Image URLs are same-origin
-// placeholders that 404 harmlessly, so this asserts markup, never pixels.
+// Read-only throughout: no login and no writes. This asserts markup, never
+// pixels.
 
 test.describe('populated passport', () => {
 	test.beforeEach(({}, info) => {
@@ -54,6 +55,16 @@ test.describe('populated passport', () => {
 		await expect(instagram).toHaveAttribute('rel', 'noopener noreferrer');
 	});
 
+	// A link preview shows no blur, so the NSFW ref sheet never becomes the
+	// og:image: the admin avatar stands in.
+	test('advertises the admin avatar, not the NSFW ref sheet, as the link preview', async ({ page }) => {
+		await page.goto('/');
+
+		const ogImage = await page.locator('meta[property="og:image"]').getAttribute('content');
+		expect(ogImage).toMatch(/\/e2e-face\.png$/);
+		expect(ogImage).not.toContain('e2e-avatar.svg');
+	});
+
 	test('renders every stamp as a link named for its feature and count', async ({ page }) => {
 		await page.goto('/');
 
@@ -65,17 +76,32 @@ test.describe('populated passport', () => {
 		await expect(live).toHaveAttribute('href', '/connect');
 
 		const site = stamps.getByRole('list', { name: 'On this site' });
-		await expect(site.getByRole('link')).toHaveCount(3);
+		await expect(site.getByRole('link')).toHaveCount(4);
 		await expect(site.getByRole('link', { name: 'Gallery, 3 pieces by 1 artist' })).toHaveAttribute('href', '/gallery');
+		const fursuit = site.getByRole('link', { name: 'Fursuit photos, 1 photo by 1 photographer' });
+		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
+		await expect(fursuit).toHaveClass(/stamp--rect/);
 		await expect(site.getByRole('link', { name: 'VR avatars, 4 avatars' })).toHaveAttribute('href', '/vr');
 		await expect(site.getByRole('link', { name: 'About, Links and conventions' })).toHaveAttribute('href', '/about');
 
-		// No sticker pack, no collection and FurTrack off in this fixture: those
-		// stamps are absent, never shown with a zero.
-		await expect(stamps.getByRole('link', { name: /Stickers|Collections|Fursuit/ })).toHaveCount(0);
+		// No sticker pack and no collection in this fixture: those stamps are
+		// absent, never shown with a zero.
+		await expect(stamps.getByRole('link', { name: /Stickers|Collections/ })).toHaveCount(0);
 		await expect(stamps).not.toContainText(/\b0 /);
-		// The live convention is the only one, and it is not repeated below.
-		await expect(stamps.getByRole('list', { name: 'Conventions' })).toHaveCount(0);
+
+		// Next (dashed) before the past event; the live convention is not
+		// repeated here.
+		const cons = stamps.getByRole('list', { name: 'Conventions' });
+		await expect(cons.getByRole('link')).toHaveCount(2);
+		const next = cons.getByRole('link').nth(0);
+		await expect(next).toHaveAccessibleName(/^Next: E2E Next Con, [A-Z][a-z]{2} \d{4}$/);
+		await expect(next).toHaveAttribute('href', '/connect');
+		await expect(next).toHaveClass(/stamp--next/);
+		const past = cons.getByRole('link').nth(1);
+		await expect(past).toHaveAccessibleName('E2E Past Con 2025, Jun 2025, 1 photo');
+		await expect(past).toHaveAttribute('href', '/gallery?view=fursuit&event=E2E%20Past%20Con%202025');
+		await expect(past).toHaveClass(/stamp--past/);
+		await expect(cons).not.toContainText('E2E Live Con');
 		await expect(stamps.getByText('This passport has no stamps yet.')).toHaveCount(0);
 	});
 });

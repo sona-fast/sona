@@ -6,12 +6,12 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { characters, images, artists, tags, imageTags, siteSettings } from '$lib/server/db/schema';
-import { clearSettingsCache } from '$lib/server/settings';
+import { clearSettingsCache, DEFAULTS } from '$lib/server/settings';
 import { clearStickerTabCache } from '$lib/server/stickers';
 import { clearCollectionsNavCache } from '$lib/server/collections';
 import { load } from './+page.server';
 import { load as artLoad } from '../(paths)/art/+page.server';
-import type { PassportData } from '$lib/server/passport';
+import { loadPassport, type PassportData } from '$lib/server/passport';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -320,6 +320,8 @@ describe('passport load — counts', () => {
 			{ id: 1, title: 'One', slug: 'one', imageUrl: '/1.png', artistId: 1, commissionedAt: '2021-05-01' },
 			{ id: 2, title: 'Two', slug: 'two', imageUrl: '/2.png', artistId: 2, nsfw: true, commissionedAt: '2019-02-01' },
 			{ id: 3, title: 'Three', slug: 'three', imageUrl: '/3.png', artistId: 1 },
+			// An empty commissioned date is no year: MIN would pick '' over 2019.
+			{ id: 6, title: 'Blank Date', slug: 'blank-date', imageUrl: '/6.png', artistId: 1, commissionedAt: '' },
 			// A variant, an unpublished piece, and an unpublished piece with an older
 			// commissioned date: none of them count, and the draft's year is not
 			// the "since" year.
@@ -336,7 +338,7 @@ describe('passport load — counts', () => {
 		const data = await loadPassportPage(platform);
 		expect(data.settings.landingLayout).toBe('passport');
 		expect(data.passport.stamps.features).toEqual([
-			{ kind: 'gallery', href: '/gallery', counts: [3, 2] },
+			{ kind: 'gallery', href: '/gallery', counts: [4, 2] },
 			{ kind: 'stickers', href: '/stickers', counts: [2, 1] },
 			{ kind: 'vr', href: '/vr', counts: [1] },
 			{ kind: 'collections', href: '/collections', counts: [2] }
@@ -404,7 +406,9 @@ describe('passport load — conventions', () => {
 		expect(kinds(data)).toEqual(['about']);
 	});
 
-	it('gives a maybe convention running today no Here now stamp', async () => {
+	// /about lists upcoming conventions of every status, so a maybe row still
+	// earns the About stamp, but never Here now or Next.
+	it('gives a maybe convention running today no Here now stamp, only About', async () => {
 		const { sqlite, platform } = makePassportDb();
 		sqlite
 			.prepare('INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)')
@@ -412,7 +416,27 @@ describe('passport load — conventions', () => {
 
 		const data = await loadPassportPage(platform);
 		expect(data.passport.stamps.live).toBeNull();
+		expect(data.passport.stamps.conventions).toEqual([]);
+		expect(data.passport.stamps.features).toEqual([
+			{ kind: 'about', href: '/about', counts: [], about: 'conventions' }
+		]);
+	});
+
+	it('shows About for an upcoming considering convention, and not for a past one', async () => {
+		const { sqlite, platform } = makePassportDb();
+		const insert = sqlite.prepare(
+			'INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)'
+		);
+		insert.run('Past Maybe', isoDay(-30), isoDay(-28), 'maybe', 'UTC');
+		let data = await loadPassportPage(platform);
 		expect(data.passport.hasStamps).toBe(false);
+
+		insert.run('Considering Con', isoDay(60), isoDay(62), 'considering', 'UTC');
+		data = await loadPassportPage(platform);
+		expect(data.passport.stamps.features).toEqual([
+			{ kind: 'about', href: '/about', counts: [], about: 'conventions' }
+		]);
+		expect(data.passport.stamps.conventions).toEqual([]);
 	});
 });
 
@@ -438,6 +462,24 @@ describe('passport load — picture precedence (shared with /art)', () => {
 
 		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
 		expect(artData.refSheet?.slug).toBe(data.passport.picture?.slug);
+	});
+
+	// The owner subquery orders by name: Zed is inserted first, so a query that
+	// dropped ORDER BY name would take Zed's designation (A) instead of Amy's (B).
+	it("takes the first owner by name's designation, the same on /art", async () => {
+		const { db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'A', slug: 'ref-a', imageUrl: '/a.png', artistId: 1, createdAt: '2026-01-01' },
+			{ id: 2, title: 'B', slug: 'ref-b', imageUrl: '/b.png', artistId: 1, createdAt: '2026-01-02' }
+		]);
+		await db.insert(characters).values({ name: 'Zed', isOwner: true, referenceImageId: 1 });
+		await db.insert(characters).values({ name: 'Amy', isOwner: true, referenceImageId: 2 });
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'ref-b' });
+		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(artData.refSheet?.slug).toBe('ref-b');
 	});
 
 	it('falls back to the newest reference-tagged sheet, skipping a designated variant', async () => {
@@ -521,6 +563,27 @@ describe('passport load — empty site and degraded reads', () => {
 		expect(data.passport.about).toBe('A red fox in a blue jacket.');
 		expect(data.passport.socials).toEqual([{ platform: 'bluesky', url: 'https://bsky.app/profile/ashby.example' }]);
 		expect(kinds(data)).toEqual(['about']);
+	});
+
+	it('degrades to no feature stamps and the avatar when the batch never answers', async () => {
+		const { db, sqlite } = makePassportDb();
+		await db.insert(artists).values({ id: 1, name: 'A' });
+		await db.insert(images).values({ id: 1, title: 'One', slug: 'one', imageUrl: '/1.png', artistId: 1 });
+		sqlite.exec("INSERT INTO sticker_packs (published) VALUES (1); INSERT INTO stickers (pack_id) VALUES (1);");
+		// A stall, not a failure: the batch promise never settles, so only the
+		// timeout can end the wait.
+		const stalled = Object.assign(Object.create(db), { batch: () => new Promise(() => {}) }) as typeof db;
+
+		const passport = await loadPassport({
+			db: stalled,
+			env: undefined,
+			settings: { ...DEFAULTS, adminAvatarUrl: '/face.png' },
+			host: 'example.ink',
+			now: new Date(),
+			timeoutMs: 20
+		});
+		expect(passport.stamps.features).toEqual([]);
+		expect(passport.picture).toMatchObject({ kind: 'avatar', imageUrl: '/face.png' });
 	});
 
 	it('degrades to a stampless passport, not a 500, when every D1 read fails', async () => {

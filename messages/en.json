@@ -21,6 +21,7 @@
 	"admin_settings_contact_email_nudge": "Set a monitored contact email so your Privacy Policy can list a real address for privacy requests and takedowns. Until then, it points visitors to the generic contact options on your site.",
 	"legal_last_updated": "Last updated {date}",
 	"footer_legal_label": "Site links",
+	"nav_main_label": "Main",
 	"footer_privacy": "Privacy",
 	"footer_terms": "Terms",
 	"footer_build": "build {sha}",
@@ -2101,7 +2102,10 @@
 	"passport_next": "Next",
 	"passport_fursuit": "Fursuit photos",
 	"passport_vr": "VR avatars",
-	"passport_about_line": "Links and conventions",
+	"passport_about_links": "Links",
+	"passport_about_cons": "Conventions",
+	"passport_about_links_cons": "Links and conventions",
+	"passport_about_details": "Character details",
 	"passport_pieces": [
 		{
 			"declarations": [

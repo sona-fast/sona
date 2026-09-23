@@ -29,8 +29,10 @@ function con(over: Partial<PassportConvention> & { id: number; startDate: string
 	return { name: `Con ${over.id}`, location: null, endDate: null, timezone: 'UTC', status: 'confirmed', ...over };
 }
 
+const NO_ABOUT = { links: false, details: false, conventions: false };
+
 function build(over: Partial<Parameters<typeof buildStamps>[0]> = {}): PassportStamps {
-	return buildStamps({ counts: NO_COUNTS, conventions: [], photos: [], aboutExtras: false, now: NOW, ...over });
+	return buildStamps({ counts: NO_COUNTS, conventions: [], photos: [], about: NO_ABOUT, now: NOW, ...over });
 }
 
 const allHrefs = (s: PassportStamps) => [
@@ -49,7 +51,7 @@ describe('passport feature stamps', () => {
 	it('renders each feature stamp only when its feature has content, in page order', () => {
 		const stamps = build({
 			counts: { pieces: 112, artists: 31, photos: 46, photographers: 12, stickers: 72, packs: 3, avatars: 2, collections: 5 },
-			aboutExtras: true
+			about: { ...NO_ABOUT, links: true }
 		});
 		expect(stamps.features).toEqual([
 			{ kind: 'gallery', href: '/gallery', counts: [112, 31] },
@@ -57,7 +59,7 @@ describe('passport feature stamps', () => {
 			{ kind: 'stickers', href: '/stickers', counts: [72, 3] },
 			{ kind: 'vr', href: '/vr', counts: [2] },
 			{ kind: 'collections', href: '/collections', counts: [5] },
-			{ kind: 'about', href: '/about', counts: [] }
+			{ kind: 'about', href: '/about', counts: [], about: 'links' }
 		]);
 	});
 
@@ -73,9 +75,23 @@ describe('passport feature stamps', () => {
 
 	it('shows About for socials or sona details, or for an upcoming or live convention', () => {
 		expect(build().features.map((f) => f.kind)).not.toContain('about');
-		expect(build({ aboutExtras: true }).features.map((f) => f.kind)).toContain('about');
+		expect(build({ about: { ...NO_ABOUT, details: true } }).features.map((f) => f.kind)).toContain('about');
 		const upcoming = build({ conventions: [con({ id: 1, startDate: '2027-03-01' })] });
 		expect(upcoming.features.map((f) => f.kind)).toEqual(['about']);
+	});
+
+	// The line names what /about has, so a site with socials alone never
+	// promises conventions.
+	it("picks the About stamp's line by what /about holds", () => {
+		const line = (over: Partial<Parameters<typeof buildStamps>[0]>) =>
+			build(over).features.find((f) => f.kind === 'about')?.about;
+		expect(line({ about: { ...NO_ABOUT, links: true } })).toBe('links');
+		expect(line({ about: { ...NO_ABOUT, conventions: true } })).toBe('conventions');
+		expect(line({ conventions: [con({ id: 1, startDate: '2027-03-01' })] })).toBe('conventions');
+		expect(line({ about: { links: true, details: true, conventions: true } })).toBe('both');
+		expect(line({ about: { ...NO_ABOUT, links: true }, conventions: [con({ id: 1, startDate: '2027-03-01' })] })).toBe('both');
+		expect(line({ about: { ...NO_ABOUT, details: true } })).toBe('details');
+		expect(line({ about: { ...NO_ABOUT, details: true, links: true } })).toBe('links');
 	});
 });
 
@@ -86,6 +102,32 @@ describe('passport convention stamps', () => {
 		const stamps = build({ conventions: [next, live] });
 		expect(stamps.live).toEqual({ name: 'Cinder Valley Con', location: 'Reno, Nevada', until: '2026-10-19', href: '/connect' });
 		expect(stamps.conventions).toEqual([{ kind: 'next', name: 'Lakeshore Den', startDate: '2027-03-05', href: '/connect' }]);
+	});
+
+	it('never reads a second convention running at the same time as Next', () => {
+		const first = con({ id: 1, name: 'First Live', startDate: '2026-10-15', endDate: '2026-10-19' });
+		const second = con({ id: 2, name: 'Second Live', startDate: '2026-10-16', endDate: '2026-10-18' });
+		const later = con({ id: 3, name: 'Later Con', startDate: '2027-03-05' });
+		const stamps = build({ conventions: [later, second, first] });
+		expect(stamps.live?.name).toBe('First Live');
+		expect(stamps.conventions).toEqual([{ kind: 'next', name: 'Later Con', startDate: '2027-03-05', href: '/connect' }]);
+		// With nothing later, the overlapping one still never becomes Next.
+		expect(build({ conventions: [second, first] }).conventions).toEqual([]);
+	});
+
+	// Intl.DateTimeFormat throws on an Invalid Date, so a malformed stored date
+	// must reach the page as no date at all, never as a string it will format.
+	it('treats a stored convention date that is not a bare calendar date as missing', () => {
+		const live = con({ id: 1, name: 'Stamped Live', startDate: '2026-10-16T00:00:00Z', endDate: '2026-10-19T00:00:00Z' });
+		const next = con({ id: 2, name: 'Slashed Next', startDate: '2027/03/05' });
+		const stamps = build({ conventions: [live, next] });
+		expect(stamps.live).toMatchObject({ name: 'Stamped Live', until: null });
+		expect(stamps.conventions).toEqual([{ kind: 'next', name: 'Slashed Next', startDate: null, href: '/connect' }]);
+
+		const tz = con({ id: 3, name: 'Timestamped Next', startDate: '2027-03-05T00:00:00Z' });
+		expect(build({ conventions: [tz] }).conventions).toEqual([
+			{ kind: 'next', name: 'Timestamped Next', startDate: null, href: '/connect' }
+		]);
 	});
 
 	it('never gives a maybe or considering row Here now or Next', () => {
@@ -132,6 +174,42 @@ describe('passport convention stamps', () => {
 		]);
 	});
 
+	it('treats a photo taken_at that names no real date as undated', () => {
+		const past = pastEventStamps([
+			{ event: 'Zeroed Con', takenAt: '0000-00-00 00:00:00' },
+			{ event: 'Month Thirteen', takenAt: '2025-13-05' },
+			{ event: 'Real Con', takenAt: '2025-06-14' }
+		]);
+		expect(past.map((p) => [p.name, p.kind === 'past' ? p.month : undefined])).toEqual([
+			['Real Con', '2025-06'],
+			['Month Thirteen', null],
+			['Zeroed Con', null]
+		]);
+	});
+
+	// The gallery's event filter compares the stored value exactly, so the
+	// stamp groups and links by it; only an all-whitespace event is skipped.
+	it('groups and links past stamps by the stored event value, trailing space included', () => {
+		const past = pastEventStamps([
+			{ event: 'Harbourfur 2025 ', takenAt: '2025-11-08' },
+			{ event: 'Harbourfur 2025', takenAt: '2025-11-09' },
+			{ event: '   ', takenAt: '2025-11-09' }
+		]);
+		expect(past).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025' },
+			{ kind: 'past', name: 'Harbourfur 2025 ', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025%20' }
+		]);
+	});
+
+	it('orders past events on the same date alphabetically', () => {
+		const past = pastEventStamps([
+			{ event: 'Maple Den', takenAt: '2025-05-01' },
+			{ event: 'Aspen Howl', takenAt: '2025-05-01' },
+			{ event: 'Cedar Con', takenAt: '2025-05-01' }
+		]);
+		expect(past.map((p) => p.name)).toEqual(['Aspen Howl', 'Cedar Con', 'Maple Den']);
+	});
+
 	it('puts Next before the past stamps', () => {
 		const stamps = build({
 			conventions: [con({ id: 1, name: 'Lakeshore Den', startDate: '2027-03-05' })],
@@ -158,7 +236,7 @@ describe('passport convention stamps', () => {
 	it('links every stamp it renders: the unlinked stamp never occurs', () => {
 		const stamps = build({
 			counts: { pieces: 1, artists: 1, photos: 3, photographers: 1, stickers: 1, packs: 1, avatars: 1, collections: 1 },
-			aboutExtras: true,
+			about: { ...NO_ABOUT, links: true },
 			conventions: [
 				con({ id: 1, startDate: '2026-10-16', endDate: '2026-10-19' }),
 				con({ id: 2, startDate: '2027-03-05' }),

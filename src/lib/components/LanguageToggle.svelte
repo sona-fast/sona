@@ -44,8 +44,19 @@
 		color: var(--foreground);
 	}
 
+	/* Inset, because the group clips its overflow and would cut an outer ring. */
+	.lang-toggle button:focus-visible {
+		outline: 2px solid var(--foreground);
+		outline-offset: -2px;
+	}
+
+	/* The pressed language reads by weight and underline too, not by the
+	   --secondary fill alone, which is faint against the header. */
 	.lang-toggle button.active {
 		background: var(--secondary);
 		color: var(--foreground);
+		font-weight: 700;
+		text-decoration: underline;
+		text-underline-offset: 3px;
 	}
 </style>

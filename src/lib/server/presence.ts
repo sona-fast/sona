@@ -39,8 +39,8 @@ export function refSheetQuery(db: Database) {
 			title: images.title,
 			artistName: artists.name,
 			nsfw: images.nsfw,
-			// width/height reserve the img box (no CLS): the ref sheet is the LCP
-			// element on /art and on the passport alike.
+			// width/height reserve the img box (no CLS): the ref sheet is /art's
+			// LCP element. The passport frames it by aspect ratio instead.
 			width: images.width,
 			height: images.height
 		})

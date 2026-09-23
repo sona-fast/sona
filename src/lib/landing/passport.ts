@@ -26,23 +26,30 @@ export interface PassportCounts {
 
 export type FeatureKind = 'gallery' | 'fursuit' | 'stickers' | 'vr' | 'collections' | 'about';
 
+/** What /about holds beyond the passport, which picks the About stamp's line. */
+export type AboutLine = 'links' | 'conventions' | 'both' | 'details';
+
 export interface FeatureStamp {
 	kind: FeatureKind;
 	href: string;
 	/** The numbers the stamp's lines template, in line order. Empty for About. */
 	counts: number[];
+	/** Set on the About stamp only. */
+	about?: AboutLine;
 }
 
 export interface LiveStamp {
 	name: string;
 	location: string | null;
-	/** The last day, as a bare YYYY-MM-DD date. */
-	until: string;
+	/** The last day, as a bare YYYY-MM-DD date; null when the stored date is not
+	 *  one, so the page drops the date rather than failing to format it. */
+	until: string | null;
 	href: string;
 }
 
 export type ConventionStamp =
-	| { kind: 'next'; name: string; startDate: string; href: string }
+	/** startDate is null when the stored date is not a calendar date. */
+	| { kind: 'next'; name: string; startDate: string | null; href: string }
 	| { kind: 'past'; name: string; month: string | null; photos: number; href: string };
 
 export interface PassportStamps {
@@ -66,9 +73,20 @@ export interface PassportPhoto {
 
 const positive = (n: number | null): n is number => n !== null && n > 0;
 
+/**
+ * A stored date as a strict YYYY-MM-DD or YYYY-MM with a real month, else
+ * null. Intl.DateTimeFormat throws on an Invalid Date, so a value like
+ * "0000-00-00" or "2025-13-05" reaching the page would 500 the homepage during
+ * SSR; treating it as missing drops the date line instead.
+ */
+function calendarDate(value: string | null | undefined): string | null {
+	if (!value || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(value)) return null;
+	return Number.isNaN(Date.parse(value)) ? null : value;
+}
+
 /** The gallery's fursuit view, filtered to one event. The same URL the
  *  gallery's own event filter produces, so the stamp lands on that view. */
-export function fursuitEventHref(event: string): string {
+function fursuitEventHref(event: string): string {
 	return `/gallery?view=fursuit&event=${encodeURIComponent(event)}`;
 }
 
@@ -89,9 +107,13 @@ export function fursuitEventHref(event: string): string {
 export function pastEventStamps(photos: PassportPhoto[]): ConventionStamp[] {
 	const byEvent = new Map<string, { photos: number; latest: string | null }>();
 	for (const photo of photos) {
-		const event = photo.event?.trim();
-		if (!event) continue;
-		const date = photo.takenAt && /^\d{4}-\d{2}/.test(photo.takenAt) ? photo.takenAt.slice(0, 10) : null;
+		// Grouped and linked by the stored value: the gallery's event filter
+		// compares exactly, so a trimmed name would link to an empty view. trim()
+		// only skips an event that is all whitespace.
+		const event = photo.event;
+		if (!event?.trim()) continue;
+		// The date part of a timestamp ("2025-11-09T10:00:00Z" reads as its day).
+		const date = calendarDate(photo.takenAt?.slice(0, 10));
 		const entry = byEvent.get(event) ?? { photos: 0, latest: null };
 		entry.photos++;
 		if (date && (!entry.latest || date > entry.latest)) entry.latest = date;
@@ -126,23 +148,31 @@ export function pastEventStamps(photos: PassportPhoto[]): ConventionStamp[] {
  * the live row left out of Next so it never shows twice. Past stamps come from
  * the fursuit photos, see pastEventStamps.
  *
- * `aboutExtras` is whether /about has something the passport doesn't already
- * show besides conventions: a social link or any /art sona detail.
+ * `about` is what /about has that the passport doesn't already show: a social
+ * link, any /art sona detail, or an upcoming convention of any status (/about
+ * lists maybe and considering rows too). A live or next confirmed row counts as
+ * a convention as well. Which of them exist picks the stamp's line.
  */
 export function buildStamps(input: {
 	counts: PassportCounts;
 	conventions: PassportConvention[];
 	photos: PassportPhoto[];
-	aboutExtras: boolean;
+	about: { links: boolean; details: boolean; conventions: boolean };
 	now: Date;
 }): PassportStamps {
 	const { counts, now } = input;
+	// The loader's query already selects confirmed rows in start order; that is
+	// an optimisation. This filter and sort are what decide, so the function is
+	// right for any rows it is handed. An undated row sorts last.
+	const startOf = (c: PassportConvention) => calendarDate(c.startDate) ?? '9999';
 	const confirmed = input.conventions
 		.filter((c) => c.status === 'confirmed')
-		.sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+		.sort((a, b) => (startOf(a) < startOf(b) ? -1 : startOf(a) > startOf(b) ? 1 : 0));
 
 	const liveRow = confirmed.find((c) => isLiveNow(c, now)) ?? null;
-	const nextRow = confirmed.find((c) => c.id !== liveRow?.id && !hasEnded(c, now)) ?? null;
+	// Not "not the live row": a second convention running at the same time is
+	// live too, and must never read as Next.
+	const nextRow = confirmed.find((c) => !isLiveNow(c, now) && !hasEnded(c, now)) ?? null;
 
 	const features: FeatureStamp[] = [];
 	if (positive(counts.pieces) && positive(counts.artists)) {
@@ -158,10 +188,17 @@ export function buildStamps(input: {
 	if (positive(counts.collections)) {
 		features.push({ kind: 'collections', href: '/collections', counts: [counts.collections] });
 	}
-	if (input.aboutExtras || liveRow || nextRow) features.push({ kind: 'about', href: '/about', counts: [] });
+	const links = input.about.links;
+	const cons = input.about.conventions || Boolean(liveRow || nextRow);
+	if (links || cons || input.about.details) {
+		const about: AboutLine = links && cons ? 'both' : links ? 'links' : cons ? 'conventions' : 'details';
+		features.push({ kind: 'about', href: '/about', counts: [], about });
+	}
 
 	const conventions: ConventionStamp[] = [];
-	if (nextRow) conventions.push({ kind: 'next', name: nextRow.name, startDate: nextRow.startDate, href: '/connect' });
+	if (nextRow) {
+		conventions.push({ kind: 'next', name: nextRow.name, startDate: calendarDate(nextRow.startDate), href: '/connect' });
+	}
 	conventions.push(...pastEventStamps(input.photos));
 
 	return {
@@ -169,7 +206,7 @@ export function buildStamps(input: {
 			? {
 					name: liveRow.name,
 					location: liveRow.location?.trim() || null,
-					until: liveRow.endDate || liveRow.startDate,
+					until: calendarDate(liveRow.endDate || liveRow.startDate),
 					href: '/connect'
 				}
 			: null,

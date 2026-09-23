@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 const passport = readFileSync(new URL('./Passport.svelte', import.meta.url), 'utf8');
 const stamp = readFileSync(new URL('./Stamp.svelte', import.meta.url), 'utf8');
 const home = readFileSync(new URL('../../../routes/(public)/+page@.svelte', import.meta.url), 'utf8');
+const artworkCard = readFileSync(new URL('../ArtworkCard.svelte', import.meta.url), 'utf8');
 
 // Comments stripped: a comment explaining why --ring is avoided must not count as a use.
 const styleOf = (source: string) =>
@@ -27,15 +28,42 @@ describe('passport markup', () => {
 		}
 	});
 
+	// The avatar used to skip the transform, and a fixed "13rem" sizes made a
+	// phone fetch the 960w file for a 7.5rem column.
+	it('routes every picture through the image transform, sized to its column', () => {
+		const imgs = [...passport.matchAll(/<img\b[\s\S]*?\/>/g)].map((m) => m[0]);
+		for (const img of imgs) {
+			expect(img).toContain('src={cdnImage(picture.imageUrl, 480)}');
+			expect(img).toContain('use:rawFallback={picture.imageUrl}');
+			expect(img).toContain('sizes={PICTURE_SIZES}');
+		}
+		expect(passport).toMatch(/const PICTURE_SIZES =\s*'\(max-width: 22rem\) 10rem, \(max-width: 34\.5rem\) 7\.5rem,/);
+	});
+
+	// Intl.DateTimeFormat.format throws on an Invalid Date, which would 500 the
+	// homepage during SSR; both formatters bail out first.
+	it('drops a date line rather than formatting an Invalid Date', () => {
+		for (const fn of ['monthYear', 'untilDay']) {
+			const body = passport.match(new RegExp(`function ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\t\\}`))?.[1] ?? '';
+			expect(body).toMatch(/if \(Number\.isNaN\(date\.getTime\(\)\)\) return undefined;[\s\S]*\.format\(/);
+		}
+	});
+
+	it('adds the caption full stop only when the title has no closing punctuation', () => {
+		expect(passport).toContain('/[.!?。！？]$/.test(title) ? title : m.passport_caption_title({ title })');
+	});
+
 	it('puts no button inside the picture link: the piece page has its own NSFW gate', () => {
 		expect(passport).not.toMatch(/<button\b/);
 		expect(passport).toMatch(/class:blurred=\{picture\.nsfw\}/);
 		expect(passport).toMatch(/<span class="gate">NSFW<\/span>/);
 	});
 
-	// 50% black measures 3.95:1 behind the label over light blurred art.
-	it('lays the NSFW label on a 60% scrim', () => {
+	// 50% black measures 3.95:1 behind the label over light blurred art. The
+	// gallery card's gate uses the same scrim, so the two NSFW gates match.
+	it('lays the NSFW label on a 60% scrim, the same as the gallery card', () => {
 		expect(rule(passport, '.gate')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
+		expect(rule(artworkCard, '.nsfw-overlay')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
 	});
 
 	it('keeps list semantics on the unstyled stamp and social lists', () => {

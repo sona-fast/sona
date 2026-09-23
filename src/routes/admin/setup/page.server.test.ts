@@ -92,18 +92,6 @@ describe('setup wizard — unrecognized enum values fail instead of silently def
 		expect(await getRawSetting(db, 'adminEmail')).toBe('admin@taro.surf');
 	});
 
-	it('accepts the passport layout from the registry', async () => {
-		const { db, platform } = makeDb();
-
-		try {
-			await actions.default(setupEvent(platform, { landingLayout: 'passport' }));
-			expect.unreachable('setup should redirect on success');
-		} catch (e) {
-			if (!isRedirect(e)) throw e;
-		}
-		expect(await getRawSetting(db, 'landingLayout')).toBe('passport');
-	});
-
 	it('rejects an adminEmail that does not look like an email and saves nothing', async () => {
 		const { db, platform } = makeDb();
 

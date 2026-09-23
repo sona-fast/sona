@@ -165,8 +165,15 @@
 			inset 0 0 0 5px var(--primary-foreground);
 	}
 
+	/* The hover moves the fill the way .btn-primary's does: toward white in dark
+	   modes and toward black in light ones, where white drops the label under
+	   4.5:1 (aurora and terracotta light). */
 	.stamp--live:hover {
 		background: color-mix(in srgb, var(--primary) 88%, white);
+	}
+
+	:global([data-theme='light']) .stamp--live:hover {
+		background: color-mix(in srgb, var(--primary) 88%, black);
 	}
 
 	.stamp--live .kicker,

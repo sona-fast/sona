@@ -918,6 +918,35 @@ describe('DownloadMenu lifted-surface WCAG AA contrast, every theme × mode (SON
 	}
 });
 
+// The passport's Here now stamp is --primary-foreground on --primary, and its
+// hover moves the fill. A mix toward white in light modes measured 4.33:1
+// (aurora) and 3.72:1 (terracotta), so the light rule mixes toward black. Parse
+// both rules out of the component and assert the label on each hovered fill.
+describe('passport live stamp hover WCAG AA contrast, every theme × mode', () => {
+	const stampCss = readFileSync(
+		fileURLToPath(new URL('./components/landing/Stamp.svelte', import.meta.url)),
+		'utf8'
+	);
+	function liveHover(prefix: string): { pct: number; toward: 'black' | 'white' } {
+		const re = new RegExp(
+			`\\n\\t${prefix}\\.stamp--live:hover\\s*\\{\\s*background:\\s*color-mix\\(in srgb,\\s*var\\(--primary\\)\\s*(\\d+)%,\\s*(black|white)\\)`
+		);
+		const m = stampCss.match(re);
+		if (!m) throw new Error(`${prefix}.stamp--live:hover has no srgb color-mix fill`);
+		return { pct: Number(m[1]), toward: m[2] as 'black' | 'white' };
+	}
+	const dark = liveHover('');
+	const light = liveHover(":global\\(\\[data-theme='light'\\]\\) ");
+
+	for (const { name, mode, sel } of THEME_BLOCKS) {
+		it(`${name}: hovered live stamp label meets 4.5:1`, () => {
+			const { pct, toward } = mode === 'light' ? light : dark;
+			const hovered = mixSrgb(blockToken(sel, 'primary'), pct, toward);
+			expect(contrast(blockToken(sel, 'primary-foreground'), hovered)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
 describe('public chip text (foreground on secondary) WCAG AA contrast (SONA-124)', () => {
 	// The VR pages' chips (platform/format/role) render --foreground on
 	// --secondary: the --muted-foreground pairing they replaced was 3.96:1 on

@@ -111,7 +111,10 @@ export const E2E_PLATFORM_PERSIST_STICKERS = path.join(E2E_PERSIST_TO_STICKERS, 
 // needs two databases: the shared fixture (a live convention, an NSFW
 // designated ref sheet, VR avatars, socials) and a fresh-site one with no
 // content at all, for the stampless empty state. Each server seeds the shared
-// fixture and layers its own overlay on top. Both only read.
+// fixture and layers its own overlay on top. Both only read. The populated one
+// runs FurTrack in mock mode (its own wrangler config) so the fursuit and
+// past-event stamps render.
+export const E2E_WRANGLER_CONFIG_PASSPORT = path.join(here, 'wrangler.e2e-passport.toml');
 export const E2E_PASSPORT_OVERLAY = path.join(here, 'fixtures', 'passport.sql');
 export const E2E_PERSIST_TO_PASSPORT = path.join(persistRoot, '.wrangler-e2e-passport');
 export const E2E_PLATFORM_PERSIST_PASSPORT = path.join(E2E_PERSIST_TO_PASSPORT, 'v3');

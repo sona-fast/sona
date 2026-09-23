@@ -16,7 +16,6 @@ import {
 } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
 import { refSheetQuery } from '$lib/server/presence';
-import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
 import { getMode } from '$lib/server/furtrack';
 import { DEFAULTS, parseLines, parseSonaColors, type SiteSettings } from '$lib/server/settings';
 import { withTimeout } from '$lib/server/timeout';
@@ -26,9 +25,10 @@ import {
 	hasAnyStamp,
 	machineLine,
 	type PassportCounts,
+	type PassportPhoto,
 	type PassportStamps
 } from '$lib/landing/passport';
-import type { FursuitPhoto } from '$lib/furtrack/types';
+import { LICENSES, type LicenseKey } from '$lib/furtrack/license';
 import type { SocialPlatform } from '$lib/social-platforms';
 
 export interface PassportPicture {
@@ -41,8 +41,6 @@ export interface PassportPicture {
 	/** null when no artist is on file; the caption reads "Unattributed". */
 	artistName: string | null;
 	nsfw: boolean;
-	width: number | null;
-	height: number | null;
 }
 
 export interface PassportData {
@@ -148,25 +146,47 @@ export async function loadPassport(opts: {
 					sql`COALESCE(${conventions.endDate}, ${conventions.startDate}) >= ${upcomingCutoff(now)}`
 				)
 			)
-			.orderBy(asc(conventions.startDate))
+			.orderBy(asc(conventions.startDate)),
+		// Whether /about lists any convention: it shows upcoming rows of every
+		// status against today's UTC date, so this uses its predicate, not the
+		// confirmed-only one above. Existence only, for the About stamp.
+		db
+			.select({ id: conventions.id })
+			.from(conventions)
+			.where(sql`COALESCE(${conventions.endDate}, ${conventions.startDate}) >= ${now.toISOString().slice(0, 10)}`)
+			.limit(1)
 	]);
 
 	// Fursuit photos only while FurTrack is on, the same gate as the gallery's
 	// fursuit view. Independent of the batch, so it runs alongside it rather
 	// than adding a round trip. null (not []) on a stall, so the fursuit stamp
-	// hides instead of counting zero.
-	const photosRead: Promise<FursuitPhoto[] | null> = furtrackOn
+	// hides instead of counting zero. Only the columns the counts, the event
+	// stamps and the displayable filter read; no row limit, because the counts
+	// need every row, and no order, because the stamps sort by date themselves.
+	const photosRead: Promise<(PassportPhoto & { photographer: string })[] | null> = furtrackOn
 		? withTimeout(
 				db
-					.select()
+					.select({
+						event: fursuitPhotos.event,
+						takenAt: fursuitPhotos.takenAt,
+						photographer: fursuitPhotos.photographer,
+						license: fursuitPhotos.license,
+						permissionSource: fursuitPhotos.permissionSource
+					})
 					.from(fursuitPhotos)
-					.orderBy(desc(fursuitPhotos.createdAt))
 					.then((rows) =>
 						rows
-							.map(fursuitPhotoFromRow)
-							// The gallery's own filter: never count or group a photo the
-							// fursuit view would not show.
-							.filter((p) => p.license.displayable || !!p.permissionSource)
+							// The gallery's own filter (fursuitPhotoFromRow's license lookup):
+							// never count or group a photo the fursuit view would not show.
+							.filter(
+								(r) =>
+									(LICENSES[r.license as LicenseKey] ?? LICENSES.unknown).displayable || !!r.permissionSource
+							)
+							.map((r) => ({
+								event: r.event ?? undefined,
+								takenAt: r.takenAt ?? undefined,
+								photographer: r.photographer
+							}))
 					),
 				timeoutMs,
 				null
@@ -174,7 +194,8 @@ export async function loadPassport(opts: {
 		: Promise.resolve(null);
 
 	const [batchResult, photos] = await Promise.all([withTimeout(batch, timeoutMs, null), photosRead]);
-	const [refRows, galleryRows, stickerRows, vrRows, collectionRows, conRows] = batchResult ?? [
+	const [refRows, galleryRows, stickerRows, vrRows, collectionRows, conRows, aboutConRows] = batchResult ?? [
+		[],
 		[],
 		[],
 		[],
@@ -188,7 +209,16 @@ export async function loadPassport(opts: {
 	let picture: PassportPicture | null = null;
 	const ref = refRows[0];
 	if (ref) {
-		picture = { kind: 'ref', ...ref, width: ref.width ?? null, height: ref.height ?? null };
+		// Field by field: the query's width and height are /art's, and the passport
+		// sizes its frame by aspect ratio, so they stay out of the page payload.
+		picture = {
+			kind: 'ref',
+			slug: ref.slug,
+			imageUrl: ref.imageUrl,
+			title: ref.title,
+			artistName: ref.artistName,
+			nsfw: ref.nsfw
+		};
 	} else if (batchResult) {
 		// Round trip 2, only without a ref sheet: the first featured piece, else
 		// the newest SFW parent. Featured pieces are SFW by construction; the
@@ -201,9 +231,7 @@ export async function loadPassport(opts: {
 					slug: images.slug,
 					imageUrl: images.imageUrl,
 					title: images.title,
-					artistName: artists.name,
-					width: images.width,
-					height: images.height
+					artistName: artists.name
 				})
 				.from(images)
 				.leftJoin(artists, eq(artists.id, images.artistId))
@@ -230,9 +258,7 @@ export async function loadPassport(opts: {
 			slug: null,
 			title: '',
 			artistName: null,
-			nsfw: false,
-			width: null,
-			height: null
+			nsfw: false
 		};
 	}
 
@@ -252,7 +278,11 @@ export async function loadPassport(opts: {
 		counts,
 		conventions: conRows,
 		photos: photos ?? [],
-		aboutExtras: socials.length > 0 || hasSonaDetail(settings),
+		about: {
+			links: socials.length > 0,
+			details: hasSonaDetail(settings),
+			conventions: aboutConRows.length > 0
+		},
 		now
 	});
 
