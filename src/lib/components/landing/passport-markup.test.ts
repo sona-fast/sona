@@ -9,6 +9,7 @@ const passport = readFileSync(new URL('./Passport.svelte', import.meta.url), 'ut
 const stamp = readFileSync(new URL('./Stamp.svelte', import.meta.url), 'utf8');
 const home = readFileSync(new URL('../../../routes/(public)/+page@.svelte', import.meta.url), 'utf8');
 const artworkCard = readFileSync(new URL('../ArtworkCard.svelte', import.meta.url), 'utf8');
+const ja = JSON.parse(readFileSync(new URL('../../../../messages/ja.json', import.meta.url), 'utf8'));
 
 // Comments stripped: a comment explaining why --ring is avoided must not count as a use.
 const styleOf = (source: string) =>
@@ -80,14 +81,37 @@ describe('passport markup', () => {
 	it('punctuates the accessible names and the caption for Japanese', () => {
 		expect(stamp).toContain("`${kicker}${ja ? '：' : ': '}`");
 		expect(stamp).toContain(".join(ja ? '、' : ', ')");
+		expect(stamp).toContain("lines.join(ja ? '、' : ' ')");
 		expect(passport).toContain("`${pictureAlt}${ja ? '、' : ', '}NSFW`");
 		expect(passport).toMatch(/captionTitle\(picture\.title\)\}\{ja\s*\?\s*''\s*:\s*' '\}\{#if picture\.artistName\}/);
+	});
+
+	// Japanese has no spaces, so without keep-all the browser splits words
+	// mid-way ("今 / 後") and strands 「す。」 on a line of its own.
+	it('breaks Japanese stamp lines and the stamps note at punctuation, not mid-word', () => {
+		for (const [source, selector] of [
+			[stamp, '.line:lang(ja)'],
+			[passport, '.stamps-note:lang(ja)']
+		] as const) {
+			const body = rule(source, selector);
+			expect(body).toMatch(/word-break:\s*keep-all/);
+			expect(body).toMatch(/overflow-wrap:\s*anywhere/);
+		}
+		expect(rule(passport, '.stamps-note:lang(ja)')).toMatch(/text-wrap:\s*pretty/);
+		// keep-all leaves no break inside the About line, so its zero-width space
+		// after と is the one place it may wrap in the round stamp.
+		expect(ja.passport_about_links_cons).toBe('リンクと\u200b参加予定のコン');
 	});
 
 	// Text zoom scales em but not px, so an em bottom padding keeps the folio
 	// clear of the last stamp at 200%.
 	it('reserves em space for the folio under each page', () => {
 		expect(rule(passport, '.page')).toMatch(/padding:\s*28px 40px 3em/);
+		// The phone and single-page layouts override it; theirs stay in em too.
+		expect(styleOf(passport)).toMatch(
+			/@media \(max-width: 768px\)\s*\{\s*\.page\s*\{\s*padding:\s*20px 20px 2\.5em;/
+		);
+		expect(rule(passport, '.book--single .page + .page')).toMatch(/padding-bottom:\s*2\.5em/);
 	});
 
 	it('keeps list semantics on the unstyled stamp and social lists', () => {

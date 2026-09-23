@@ -32,7 +32,14 @@
 		<nav aria-label={m.nav_main_label()}>
 			{#each navItems as item (item.href)}
 				{@const active = $page.url.pathname.startsWith(item.href)}
-				<a href={item.href} class="nav-link" class:active aria-current={active ? 'page' : undefined}>
+				<!-- "page" only on the section's own page: a piece under /gallery is in
+				     the Gallery section ("true") but is not the Gallery page. -->
+				<a
+					href={item.href}
+					class="nav-link"
+					class:active
+					aria-current={$page.url.pathname === item.href ? 'page' : active ? 'true' : undefined}
+				>
 					{item.label()}
 				</a>
 			{/each}

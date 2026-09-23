@@ -14,20 +14,27 @@ const langSrc = read('./LanguageToggle.svelte');
 
 describe('shared chrome accessibility markup', () => {
 	it('marks the current page with aria-current on the mobile tab, the header logo and the header links', () => {
-		expect(mobileNavSrc).toMatch(/aria-current=\{active \? 'page' : undefined\}/);
-		expect(mobileNavSrc).toMatch(/\{@const active = isActive\(tab\.href, \$page\.url\.pathname\)\}/);
+		// "page" only on an exact match; a page further down the section (a piece
+		// under /gallery) gets "true", so it is not announced as the Gallery page.
+		expect(mobileNavSrc).toMatch(
+			/aria-current=\{\$page\.url\.pathname\s*===\s*tab\.href\s*\?\s*'page'\s*:\s*active\s*\?\s*'true'\s*:\s*undefined\}/
+		);
+		expect(mobileNavSrc).toMatch(/\{@const\s+active\s*=\s*isActive\(tab\.href,\s*\$page\.url\.pathname\)\}/);
 		expect(headerSrc).toMatch(
-			/<a href="\/" class="logo" aria-current=\{\$page\.url\.pathname === '\/' \? 'page' : undefined\}>/
+			/<a\s+href="\/"\s+class="logo"\s+aria-current=\{\$page\.url\.pathname\s*===\s*'\/'\s*\?\s*'page'\s*:\s*undefined\}\s*>/
 		);
 		expect(headerSrc).toMatch(/\{@const\s+active\s*=\s*\$page\.url\.pathname\.startsWith\(item\.href\)\}/);
 		expect(headerSrc).toMatch(
-			/<a\s+href=\{item\.href\}\s+class="nav-link"\s+class:active\s+aria-current=\{active\s*\?\s*'page'\s*:\s*undefined\}/
+			/<a\s+href=\{item\.href\}\s+class="nav-link"\s+class:active\s+aria-current=\{\$page\.url\.pathname\s*===\s*item\.href\s*\?\s*'page'\s*:\s*active\s*\?\s*'true'\s*:\s*undefined\}/
 		);
+		// No link may claim "page" from a prefix match alone.
+		expect(headerSrc).not.toMatch(/aria-current=\{active\s*\?\s*'page'/);
+		expect(mobileNavSrc).not.toMatch(/aria-current=\{active\s*\?\s*'page'/);
 	});
 
 	it('names both main navs through the message catalog', () => {
-		expect(headerSrc).toContain('<nav aria-label={m.nav_main_label()}>');
-		expect(mobileNavSrc).toContain('<nav class="mobile-nav" aria-label={m.nav_main_label()}>');
+		expect(headerSrc).toMatch(/<nav\s+aria-label=\{m\.nav_main_label\(\)\}\s*>/);
+		expect(mobileNavSrc).toMatch(/<nav\s+class="mobile-nav"\s+aria-label=\{m\.nav_main_label\(\)\}\s*>/);
 	});
 
 	it('gives the language buttons an inset focus ring and a pressed state beyond the fill', () => {

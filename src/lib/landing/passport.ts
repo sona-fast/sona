@@ -84,7 +84,6 @@ const positive = (n: number | null): n is number => n !== null && n > 0;
 function calendarDate(value: string | null | undefined): string | null {
 	if (!value || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(value)) return null;
 	const date = new Date(`${value.length === 7 ? `${value}-01` : value}T00:00:00Z`);
-	if (Number.isNaN(date.getTime())) return null;
 	return date.toISOString().slice(0, value.length) === value ? value : null;
 }
 

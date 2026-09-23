@@ -104,6 +104,26 @@ test.describe('populated passport', () => {
 		await expect(cons).not.toContainText('E2E Live Con');
 		await expect(stamps.getByText('This passport has no stamps yet.')).toHaveCount(0);
 	});
+
+	// Japanese punctuates the accessible names and the caption with its own
+	// full-width forms, and runs on after 。 with no space. The paraglide locale
+	// cookie switches the SSR locale, as in vr-guide.spec.ts.
+	test('punctuates the stamps, the NSFW picture and the caption for Japanese', async ({ page }) => {
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+		await page.goto('/');
+		await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
+
+		const stamps = page.getByRole('region', { name: '査証', exact: true });
+		await expect(
+			stamps.getByRole('link', { name: 'ギャラリー、作品 3点、アーティスト 1人', exact: true })
+		).toHaveAttribute('href', '/gallery');
+		const next = stamps.locator('a.stamp--next');
+		await expect(next).toHaveAccessibleName(/^次回：E2E Next Con、\d{4}年\d{1,2}月$/);
+
+		const data = page.getByRole('region', { name: 'E2E', exact: true });
+		await expect(data.locator('a.photo-frame')).toHaveAccessibleName(/、NSFW$/);
+		await expect(data.locator('figcaption')).toContainText('設定画。作者');
+	});
 });
 
 test.describe('fresh-site passport', () => {

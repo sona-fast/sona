@@ -27,11 +27,13 @@
 	// aria-label rather than visually hidden commas, because Chrome pads each
 	// hidden span with spaces ("Gallery , 3 pieces"). It carries every visible
 	// word in order, so the spoken name still matches what a voice user reads.
-	// Japanese takes its own full-width colon and 読点 rather than ASCII ": ", ", ".
+	// Japanese takes its own full-width colon and 読点 rather than ASCII ": ", ", ",
+	// and a 読点 between the count lines, where English reads them as one phrase
+	// ("3 pieces by 1 artist").
 	const ja = $derived(getLocale() === 'ja');
 	const label = $derived(
 		(kicker ? `${kicker}${ja ? '：' : ': '}` : '') +
-			[name, date, lines.join(' ')].filter(Boolean).join(ja ? '、' : ', ')
+			[name, date, lines.join(ja ? '、' : ' ')].filter(Boolean).join(ja ? '、' : ', ')
 	);
 </script>
 
@@ -102,6 +104,15 @@
 		line-height: 1.35;
 		color: var(--muted-foreground);
 		text-wrap: balance;
+	}
+
+	/* Japanese has no spaces, so the browser breaks between any two characters,
+	   splitting words ("今 / 後"). keep-all breaks only at punctuation and at
+	   the zero-width spaces in the messages; overflow-wrap still breaks a run
+	   that cannot fit, so nothing spills out of the stamp at 200% text zoom. */
+	.line:lang(ja) {
+		word-break: keep-all;
+		overflow-wrap: anywhere;
 	}
 
 	.kicker {

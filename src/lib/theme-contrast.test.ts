@@ -918,15 +918,14 @@ describe('DownloadMenu lifted-surface WCAG AA contrast, every theme × mode (SON
 	}
 });
 
+// Both passport hover suites below parse the same stamp component.
+const stampCss = readFileSync(fileURLToPath(new URL('./components/landing/Stamp.svelte', import.meta.url)), 'utf8');
+
 // The passport's Here now stamp is --primary-foreground on --primary, and its
 // hover moves the fill. A mix toward white in light modes measured 4.33:1
 // (aurora) and 3.72:1 (terracotta), so the light rule mixes toward black. Parse
 // both rules out of the component and assert the label on each hovered fill.
 describe('passport live stamp hover WCAG AA contrast, every theme × mode', () => {
-	const stampCss = readFileSync(
-		fileURLToPath(new URL('./components/landing/Stamp.svelte', import.meta.url)),
-		'utf8'
-	);
 	function liveHover(prefix: string): { pct: number; toward: 'black' | 'white' } {
 		const re = new RegExp(
 			`\\n\\t${prefix}\\.stamp--live:hover\\s*\\{\\s*background:\\s*color-mix\\(in srgb,\\s*var\\(--primary\\)\\s*(\\d+)%,\\s*(black|white)\\)`
@@ -953,10 +952,6 @@ describe('passport live stamp hover WCAG AA contrast, every theme × mode', () =
 // if it applies to Next again (or Next gains its own fill), measure the kicker
 // on that fill.
 describe('passport Next stamp hover WCAG AA contrast, every theme × mode', () => {
-	const stampCss = readFileSync(
-		fileURLToPath(new URL('./components/landing/Stamp.svelte', import.meta.url)),
-		'utf8'
-	);
 	const m = stampCss.match(
 		/\n\t(\.stamp(?::where\(:not\(\.stamp--next\)\))?):hover\s*\{\s*background:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*transparent\)/
 	);

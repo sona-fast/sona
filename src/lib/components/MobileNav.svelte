@@ -27,7 +27,14 @@
 <nav class="mobile-nav" aria-label={m.nav_main_label()}>
 	{#each tabs as tab (tab.href)}
 		{@const active = isActive(tab.href, $page.url.pathname)}
-		<a href={tab.href} class="tab" class:active aria-current={active ? 'page' : undefined}>
+		<!-- "page" only on the section's own page: a piece under /gallery is in
+		     the Gallery section ("true") but is not the Gallery page. -->
+		<a
+			href={tab.href}
+			class="tab"
+			class:active
+			aria-current={$page.url.pathname === tab.href ? 'page' : active ? 'true' : undefined}
+		>
 			<tab.icon size={20} />
 			<span>{tab.label()}</span>
 		</a>

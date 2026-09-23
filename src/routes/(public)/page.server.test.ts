@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -437,6 +437,43 @@ describe('passport load — conventions', () => {
 			{ kind: 'about', href: '/about', counts: [], about: 'conventions' }
 		]);
 		expect(data.passport.stamps.conventions).toEqual([]);
+	});
+
+	// /about reads against today's UTC date with no day of slack, so a maybe or
+	// considering row that ended yesterday is gone from /about, and the About
+	// stamp must not point there for it.
+	it('gives no About stamp for a maybe or considering convention that ended yesterday (UTC)', async () => {
+		const { sqlite, platform } = makePassportDb();
+		const insert = sqlite.prepare(
+			'INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)'
+		);
+		insert.run('Ended Maybe', isoDay(-3), isoDay(-1), 'maybe', 'UTC');
+		insert.run('Ended Considering', isoDay(-3), isoDay(-1), 'considering', 'UTC');
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.hasStamps).toBe(false);
+		expect(kinds(data)).not.toContain('about');
+	});
+
+	// The Here now read keeps /connect's day of slack, so a confirmed convention
+	// whose last day is still running in Los Angeles is live, while the About
+	// read, which is /about's UTC-date predicate, has already dropped it. Pinned
+	// at 05:00 UTC, when it is still the previous evening in Los Angeles.
+	it('keeps Here now for a con still running further west while About has dropped it', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		try {
+			vi.setSystemTime(new Date('2026-03-10T05:00:00Z'));
+			const { sqlite, platform } = makePassportDb();
+			sqlite
+				.prepare('INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)')
+				.run('West Con', '2026-03-07', '2026-03-09', 'confirmed', 'America/Los_Angeles');
+
+			const data = await loadPassportPage(platform);
+			expect(data.passport.stamps.live).toMatchObject({ name: 'West Con', until: '2026-03-09' });
+			expect(kinds(data)).not.toContain('about');
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 

@@ -652,6 +652,14 @@
 		color: var(--muted-foreground);
 	}
 
+	/* Break Japanese at 、 rather than mid-word, and keep 「す。」 off a line of
+	   its own; overflow-wrap still breaks a run too long for the page. */
+	.stamps-note:lang(ja) {
+		word-break: keep-all;
+		overflow-wrap: anywhere;
+		text-wrap: pretty;
+	}
+
 	.stamps-empty {
 		font-size: 1rem;
 		color: var(--muted-foreground);
