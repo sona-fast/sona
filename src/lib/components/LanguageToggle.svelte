@@ -44,8 +44,31 @@
 		color: var(--foreground);
 	}
 
+	/* Inset, because the group clips its overflow and would cut an outer ring. */
+	.lang-toggle button:focus-visible {
+		outline: 2px solid var(--foreground);
+		outline-offset: -2px;
+	}
+
+	/* The end buttons take the pill's rounded ends, so the inset ring follows
+	   the curve; square ends meet the clip as a filled crescent. */
+	.lang-toggle button:first-child {
+		border-start-start-radius: var(--radius-pill);
+		border-end-start-radius: var(--radius-pill);
+	}
+
+	.lang-toggle button:last-child {
+		border-start-end-radius: var(--radius-pill);
+		border-end-end-radius: var(--radius-pill);
+	}
+
+	/* The pressed language reads by weight and underline too, not by the
+	   --secondary fill alone, which is faint against the header. */
 	.lang-toggle button.active {
 		background: var(--secondary);
 		color: var(--foreground);
+		font-weight: 700;
+		text-decoration: underline;
+		text-underline-offset: 3px;
 	}
 </style>

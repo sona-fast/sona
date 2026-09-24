@@ -1,5 +1,5 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
-import { characters, images, imageTags, siteSettings, tags } from './db/schema';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { artists, characters, images, imageTags, siteSettings, tags } from './db/schema';
 import { parseSonaColors, parseLines, type SiteSettings } from './settings';
 import type { Database } from './db';
 
@@ -13,6 +13,59 @@ import type { Database } from './db';
 
 // The reference sheet is the most recent published gallery image tagged this.
 export const REFERENCE_TAG = 'reference';
+
+/**
+ * The ref sheet query, unexecuted, so a caller can put it in a db.batch with
+ * its other reads (the passport homepage does). /art and the passport both
+ * read the ref sheet through this one query, so the two pages can never pick
+ * different pictures.
+ *
+ * Precedence, in one statement: the first owner character's (by name)
+ * explicit reference_image_id wins when that image is published; otherwise the
+ * most recent published image tagged REFERENCE_TAG. The designation is honored
+ * even when the image is NSFW (SONA-18): the row carries the flag so each page
+ * renders it behind its own blur. Variants (parent_image_id set) are excluded
+ * from both paths, so a designated variant falls through as if it had never
+ * been designated. The owner subquery must match probeArtContent's and the
+ * other loads' name-ordered find(), or a page could 404 while its card shows.
+ */
+export function refSheetQuery(db: Database) {
+	const designated = sql`(SELECT ${characters.referenceImageId} FROM ${characters} WHERE ${characters.isOwner} = 1 ORDER BY ${characters.name} LIMIT 1)`;
+	const tagged = sql`${images.id} IN (SELECT ${imageTags.imageId} FROM ${imageTags} INNER JOIN ${tags} ON ${tags.id} = ${imageTags.tagId} WHERE ${tags.name} = ${REFERENCE_TAG})`;
+	return db
+		.select({
+			slug: images.slug,
+			imageUrl: images.imageUrl,
+			title: images.title,
+			artistName: artists.name,
+			nsfw: images.nsfw,
+			// width/height reserve the img box (no CLS): the ref sheet is /art's
+			// LCP element. The passport frames it by aspect ratio instead.
+			width: images.width,
+			height: images.height
+		})
+		.from(images)
+		.leftJoin(artists, eq(artists.id, images.artistId))
+		.where(
+			and(
+				eq(images.published, true),
+				isNull(images.parentImageId),
+				sql`(${images.id} = ${designated} OR ${tagged})`
+			)
+		)
+		// The designated row sorts first whatever its age; a NULL designation
+		// matches nothing, so the tag fallback's newest row wins.
+		.orderBy(sql`CASE WHEN ${images.id} = ${designated} THEN 0 ELSE 1 END`, desc(images.createdAt), desc(images.id))
+		.limit(1);
+}
+
+export type RefSheet = Awaited<ReturnType<typeof refSheetQuery>>[number];
+
+/** The ref sheet by the shared precedence (see refSheetQuery), or null. */
+export async function loadRefSheet(db: Database): Promise<RefSheet | null> {
+	const [row] = await refSheetQuery(db);
+	return row ?? null;
+}
 
 /** The sona-details block the /art page renders, derived from settings. */
 export function sonaDetails(

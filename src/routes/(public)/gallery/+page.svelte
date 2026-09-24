@@ -112,14 +112,15 @@
 
 	<!-- Suppressed when only Artwork would show (fresh fork, every other section
 	     gated off): a lone-pill segmented control reads as broken, and there is
-	     nothing to switch to. -->
+	     nothing to switch to. Not a tablist: Stickers and VR are links to other
+	     pages and there are no tabpanels, so the current view is marked the way
+	     the nav marks it. -->
 	{#if data.fursuitEnabled || data.stickersEnabled || data.vrEnabled}
-		<div class="tabs" role="tablist">
+		<div class="tabs">
 			<button
 				class="tab"
 				class:active={!isFursuit}
-				role="tab"
-				aria-selected={!isFursuit}
+				aria-current={!isFursuit ? 'page' : undefined}
 				onclick={() => updateFilter('view', '')}
 			>
 				{m.gallery_view_artwork()}
@@ -128,8 +129,7 @@
 				<button
 					class="tab"
 					class:active={isFursuit}
-					role="tab"
-					aria-selected={isFursuit}
+					aria-current={isFursuit ? 'page' : undefined}
 					onclick={() => updateFilter('view', 'fursuit')}
 				>
 					{m.gallery_view_fursuit()}
@@ -150,6 +150,7 @@
 				<div class="select-wrapper">
 					<select
 						class="input filter-select"
+						aria-label={m.gallery_filter_photographer()}
 						value={data.fursuitFilters.photographer}
 						onchange={(e) => updateFilter('photographer', e.currentTarget.value)}
 					>
@@ -162,6 +163,7 @@
 				<div class="select-wrapper">
 					<select
 						class="input filter-select"
+						aria-label={m.gallery_filter_event()}
 						value={data.fursuitFilters.event}
 						onchange={(e) => updateFilter('event', e.currentTarget.value)}
 					>
@@ -217,11 +219,12 @@
 	{/if}
 	<div class="filters">
 		<div class="search-wrapper">
-			<Search size={16} class="search-icon" />
+			<Search size={16} class="search-icon" aria-hidden="true" />
 			<input
 				type="search"
 				class="input search"
 				placeholder={m.gallery_search_placeholder()}
+				aria-label={m.gallery_filter_search()}
 				value={data.filters.search}
 				onchange={(e) => updateFilter('q', e.currentTarget.value)}
 			/>
@@ -229,6 +232,7 @@
 		<div class="select-wrapper">
 			<select
 				class="input filter-select"
+				aria-label={m.gallery_filter_tag()}
 				value={data.filters.tag}
 				onchange={(e) => updateFilter('tag', e.currentTarget.value)}
 			>
@@ -243,6 +247,7 @@
 				type="text"
 				class="input filter-select combobox-input"
 				placeholder={m.gallery_all_artists()}
+				aria-label={m.gallery_filter_artist()}
 				bind:value={artistQuery}
 				onfocus={() => (artistOpen = true)}
 				oninput={() => (artistOpen = true)}
@@ -261,10 +266,10 @@
 				aria-controls="artist-combobox-list"
 				autocomplete="off"
 			/>
-			<ChevronDown size={16} class="select-chevron" />
+			<ChevronDown size={16} class="select-chevron" aria-hidden="true" />
 			{#if artistOpen}
-				<ul class="combobox-list" id="artist-combobox-list" role="listbox">
-					<li>
+				<ul class="combobox-list" id="artist-combobox-list" role="listbox" aria-label={m.gallery_filter_artist()}>
+					<li role="presentation">
 						<button
 							type="button"
 							class="combobox-option"
@@ -275,7 +280,7 @@
 						>{m.gallery_all_artists()}</button>
 					</li>
 					{#each artistMatches as artist}
-						<li>
+						<li role="presentation">
 							<button
 								type="button"
 								class="combobox-option"
@@ -286,7 +291,7 @@
 							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
 						</li>
 					{:else}
-						<li class="combobox-empty">No matching artists</li>
+						<li role="option" aria-disabled="true" aria-selected="false" class="combobox-empty">{m.gallery_filter_no_artists()}</li>
 					{/each}
 				</ul>
 			{/if}
@@ -294,6 +299,7 @@
 		<div class="select-wrapper">
 			<select
 				class="input filter-select"
+				aria-label={m.gallery_filter_character()}
 				value={data.filters.character}
 				onchange={(e) => updateFilter('character', e.currentTarget.value)}
 			>
@@ -306,6 +312,7 @@
 		<div class="select-wrapper">
 			<select
 				class="input filter-select"
+				aria-label={m.gallery_filter_sort()}
 				value={data.filters.sort}
 				onchange={(e) => updateFilter('sort', e.currentTarget.value)}
 			>
@@ -316,8 +323,8 @@
 			</select>
 		</div>
 		<div class="view-toggle">
-			<button class="view-btn" class:active={view === 'grid'} onclick={() => (view = 'grid')} aria-label={m.gallery_grid_view()}><LayoutGrid size={18} /></button>
-			<button class="view-btn" class:active={view === 'list'} onclick={() => (view = 'list')} aria-label={m.gallery_list_view()}><List size={18} /></button>
+			<button class="view-btn" class:active={view === 'grid'} aria-pressed={view === 'grid'} onclick={() => (view = 'grid')} aria-label={m.gallery_grid_view()}><LayoutGrid size={18} /></button>
+			<button class="view-btn" class:active={view === 'list'} aria-pressed={view === 'list'} onclick={() => (view = 'list')} aria-label={m.gallery_list_view()}><List size={18} /></button>
 		</div>
 	</div>
 
@@ -331,6 +338,7 @@
 					imageUrl={image.thumbnailUrl || image.imageUrl}
 					tag={image.tag}
 					nsfw={image.nsfw}
+					headingLevel="h2"
 				/>
 			{:else}
 				<a href="/gallery/{image.slug}" class="list-item">
@@ -338,10 +346,10 @@
 						<img src={cdnImage(image.thumbnailUrl || image.imageUrl, 200)} alt={image.title} loading="lazy" use:rawFallback={image.thumbnailUrl || image.imageUrl} />
 					</div>
 					<div class="list-info">
-						<h3 class="list-title">
+						<h2 class="list-title">
 							{image.title}
 							{#if image.nsfw}<span class="nsfw-badge">NSFW</span>{/if}
-						</h3>
+						</h2>
 						<p class="list-artist">{m.card_by_artist({ artistName: image.artistName || m.common_unknown() })}</p>
 					</div>
 					{#if image.tag}

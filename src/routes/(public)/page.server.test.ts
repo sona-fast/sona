@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -6,11 +6,12 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { characters, images, artists, tags, imageTags, siteSettings } from '$lib/server/db/schema';
-import { clearSettingsCache } from '$lib/server/settings';
+import { clearSettingsCache, DEFAULTS } from '$lib/server/settings';
 import { clearStickerTabCache } from '$lib/server/stickers';
 import { clearCollectionsNavCache } from '$lib/server/collections';
 import { load } from './+page.server';
 import { load as artLoad } from '../(paths)/art/+page.server';
+import { loadPassport, type PassportData } from '$lib/server/passport';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -40,6 +41,19 @@ function makeDb() {
 			variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0, featured_order INTEGER, created_at TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, pack_id INTEGER NOT NULL);
+		CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE conventions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, location TEXT, start_date TEXT NOT NULL,
+			end_date TEXT, url TEXT, status TEXT NOT NULL DEFAULT 'confirmed', source_id TEXT, timezone TEXT,
+			created_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE fursuit_photos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, furtrack_post_id INTEGER NOT NULL, character TEXT NOT NULL,
+			description TEXT, image_url TEXT NOT NULL, width INTEGER, height INTEGER, photographer TEXT NOT NULL,
+			photographer_url TEXT, event TEXT, license TEXT NOT NULL, permission_source TEXT,
+			furtrack_url TEXT NOT NULL, taken_at TEXT, created_at TEXT NOT NULL DEFAULT ''
+		);
 		CREATE TABLE collections (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL,
 			cover_image_url TEXT, created_at TEXT NOT NULL DEFAULT ''
@@ -269,5 +283,493 @@ describe('splash load — pathPresence card flags (#42)', () => {
 		// pathPresence true): the cached settings must keep us on threePath.
 		expect(data.settings.landingLayout).toBe('threePath');
 		expect(data.pathPresence).toEqual({ art: true, share: true });
+	});
+});
+
+type PassportPage = {
+	settings: { landingLayout: string };
+	passport: PassportData;
+};
+
+function loadPassportPage(platform: App.Platform) {
+	clearStickerTabCache();
+	clearCollectionsNavCache();
+	return load({ platform, url: new URL('http://example.ink/') } as never) as Promise<PassportPage>;
+}
+
+/** makeDb with the passport layout set and FurTrack in the given mode. */
+function makePassportDb(furtrackMode = 'off') {
+	const made = makeDb();
+	made.sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('landingLayout', 'passport')").run();
+	const env = made.platform.env as unknown as Record<string, unknown>;
+	env.FURTRACK_MODE = furtrackMode;
+	return made;
+}
+
+function isoDay(offsetDays: number): string {
+	return new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+}
+
+const kinds = (data: PassportPage) => data.passport.stamps.features.map((f) => f.kind);
+
+describe('passport load — counts', () => {
+	it('counts published parent pieces (NSFW included), their artists, stickers, avatars and collections', async () => {
+		const { sqlite, db, platform } = makePassportDb();
+		await db.insert(artists).values([{ id: 1, name: 'A' }, { id: 2, name: 'B' }]);
+		await db.insert(images).values([
+			{ id: 1, title: 'One', slug: 'one', imageUrl: '/1.png', artistId: 1, commissionedAt: '2021-05-01' },
+			{ id: 2, title: 'Two', slug: 'two', imageUrl: '/2.png', artistId: 2, nsfw: true, commissionedAt: '2019-02-01' },
+			{ id: 3, title: 'Three', slug: 'three', imageUrl: '/3.png', artistId: 1 },
+			// An empty commissioned date is no year: MIN would pick '' over 2019.
+			{ id: 6, title: 'Blank Date', slug: 'blank-date', imageUrl: '/6.png', artistId: 1, commissionedAt: '' },
+			// A variant, an unpublished piece, and an unpublished piece with an older
+			// commissioned date: none of them count, and the draft's year is not
+			// the "since" year.
+			{ id: 4, title: 'Alt', slug: 'alt', imageUrl: '/4.png', artistId: 2, parentImageId: 1 },
+			{ id: 5, title: 'Draft', slug: 'draft', imageUrl: '/5.png', artistId: 2, published: false, commissionedAt: '2010-01-01' }
+		]);
+		sqlite.exec(`
+			INSERT INTO sticker_packs (id, published) VALUES (1, 1), (2, 0);
+			INSERT INTO stickers (pack_id) VALUES (1), (1), (2);
+			INSERT INTO vr_avatars (published) VALUES (1), (0);
+			INSERT INTO collections (name, slug) VALUES ('C1', 'c1'), ('C2', 'c2');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(data.settings.landingLayout).toBe('passport');
+		expect(data.passport.stamps.features).toEqual([
+			{ kind: 'gallery', href: '/gallery', counts: [4, 2] },
+			{ kind: 'stickers', href: '/stickers', counts: [2, 1] },
+			{ kind: 'vr', href: '/vr', counts: [1] },
+			{ kind: 'collections', href: '/collections', counts: [2] }
+		]);
+		expect(data.passport.since).toBe('2019');
+		expect(data.passport.mrz[1]).toContain('2019');
+	});
+
+	it('reads the fursuit stamp and the past-event stamps from displayable photos only while FurTrack is on', async () => {
+		const seedPhotos = (sqlite: { exec: (s: string) => void }) =>
+			sqlite.exec(`
+				INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at, permission_source)
+				VALUES
+					(1, 'c', '/f1.jpg', 'Lens A', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/1', '2025-11-08', NULL),
+					(2, 'c', '/f2.jpg', 'Lens B', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/2', '2025-11-09T10:00:00Z', NULL),
+					(3, 'c', '/f3.jpg', 'Lens B', 'Pinewood Howl 2025', 'unknown', 'https://furtrack.example/3', '2025-06-14', 'DM 2025-06-20'),
+					(4, 'c', '/f4.jpg', 'Lens C', 'Secret Con 2025', 'unknown', 'https://furtrack.example/4', '2025-03-01', NULL),
+					(5, 'c', '/f5.jpg', 'Lens D', NULL, 'public-domain', 'https://furtrack.example/5', '2025-12-01', NULL),
+					(6, 'c', '/f6.jpg', 'Lens A', '  ', 'cc-by', 'https://furtrack.example/6', '2025-12-02', NULL),
+					(7, 'c', '/f7.jpg', 'Lens E', 'Hidden Con 2025', 'all-rights-reserved', 'https://furtrack.example/7', '2025-12-03', ''),
+					(8, 'c', '/f8.jpg', 'Lens E', 'Odd Key Con', 'toString', 'https://furtrack.example/8', '2025-12-04', NULL);
+			`);
+
+		const on = makePassportDb('mock');
+		seedPhotos(on.sqlite);
+		const data = await loadPassportPage(on.platform);
+		// Photos 4, 7 and 8 are not displayable and have no recorded permission
+		// (an empty source is none, an unknown key is not displayable): the
+		// gallery would not show them, so the passport neither counts nor names
+		// their events. Photos 5 and 6 count but carry no event, so no stamp.
+		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [5, 3] });
+		expect(data.passport.stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 2, href: '/gallery?view=fursuit&event=Harbourfur%202025' },
+			{ kind: 'past', name: 'Pinewood Howl 2025', month: '2025-06', photos: 1, href: '/gallery?view=fursuit&event=Pinewood%20Howl%202025' }
+		]);
+
+		clearSettingsCache();
+		const off = makePassportDb('off');
+		seedPhotos(off.sqlite);
+		const offData = await loadPassportPage(off.platform);
+		expect(kinds(offData)).not.toContain('fursuit');
+		expect(offData.passport.stamps.conventions).toEqual([]);
+	});
+
+	// The events are grouped, ordered and limited in SQL; the limit must leave
+	// room for an event named after an upcoming confirmed convention, which
+	// pastEventStamps drops, so the six newest other events still fill the cap.
+	it('fills the past stamps with the newest events, skipping one named after an upcoming convention', async () => {
+		const { sqlite, platform } = makePassportDb('mock');
+		const events = ['Con A', 'Con B', 'Con C', 'Con D', 'Con E', 'Con F', 'Con G'];
+		const insert = sqlite.prepare(
+			"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at) VALUES (?, 'c', '/f.jpg', 'Lens', ?, 'cc-by', 'https://furtrack.example', ?)"
+		);
+		events.forEach((event, i) => insert.run(i + 1, event, `2025-0${i + 1}-01`));
+		insert.run(100, 'Con A', '2025-01-02');
+		// Tagged before it starts, and the newest date of all.
+		insert.run(101, 'Future Fest', isoDay(-1));
+		sqlite
+			.prepare("INSERT INTO conventions (name, start_date, status, timezone) VALUES ('Future Fest', ?, 'confirmed', 'UTC')")
+			.run(isoDay(30));
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.conventions.map((c) => [c.kind, c.name])).toEqual([
+			['next', 'Future Fest'],
+			['past', 'Con G'],
+			['past', 'Con F'],
+			['past', 'Con E'],
+			['past', 'Con D'],
+			['past', 'Con C'],
+			['past', 'Con B']
+		]);
+		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [9, 1] });
+	});
+
+	// A malformed date that sorts above the real ones must not become the
+	// event's latest day: '2025-13-05' is no month, and '2026-02-30' is no day.
+	it("takes each event's month from its valid dates, ignoring impossible ones that sort higher", async () => {
+		const { sqlite, platform } = makePassportDb('mock');
+		sqlite.exec(`
+			INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at)
+			VALUES
+				(1, 'c', '/f1.jpg', 'Lens', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/1', '2025-11-08'),
+				(2, 'c', '/f2.jpg', 'Lens', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/2', '2025-13-05'),
+				(3, 'c', '/f3.jpg', 'Lens', 'Snowpaw 2026', 'cc-by', 'https://furtrack.example/3', '2026-01-10T09:00:00Z'),
+				(4, 'c', '/f4.jpg', 'Lens', 'Snowpaw 2026', 'cc-by', 'https://furtrack.example/4', '2026-02-30');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Snowpaw 2026', month: '2026-01', photos: 2, href: '/gallery?view=fursuit&event=Snowpaw%202026' },
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 2, href: '/gallery?view=fursuit&event=Harbourfur%202025' }
+		]);
+	});
+
+	// The group read is one row per event, so its slack is wide: more than eight
+	// newer events named after confirmed conventions that have not ended still
+	// leave every older event a chance at a past stamp.
+	it('fills the past stamps past more than eight newer events named after upcoming conventions', async () => {
+		const { sqlite, platform } = makePassportDb('mock');
+		const insert = sqlite.prepare(
+			"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at) VALUES (?, 'c', '/f.jpg', 'Lens', ?, 'cc-by', 'https://furtrack.example', ?)"
+		);
+		const addCon = sqlite.prepare(
+			"INSERT INTO conventions (name, start_date, status, timezone) VALUES (?, ?, 'confirmed', 'UTC')"
+		);
+		const past = ['Con A', 'Con B', 'Con C', 'Con D', 'Con E', 'Con F'];
+		past.forEach((event, i) => insert.run(i + 1, event, `2025-0${i + 1}-01`));
+		for (let i = 0; i < 9; i++) {
+			insert.run(100 + i, `Future Fest ${i}`, isoDay(-1));
+			addCon.run(`Future Fest ${i}`, isoDay(30 + i));
+		}
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.conventions.filter((c) => c.kind === 'past').map((c) => c.name)).toEqual([
+			'Con F',
+			'Con E',
+			'Con D',
+			'Con C',
+			'Con B',
+			'Con A'
+		]);
+	});
+});
+
+describe('passport load — conventions', () => {
+	it('leads with a confirmed live convention (isLiveNow) and never with a maybe', async () => {
+		const { sqlite, platform } = makePassportDb();
+		const insert = sqlite.prepare(
+			'INSERT INTO conventions (name, location, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?, ?)'
+		);
+		insert.run('Maybe Con', 'Elsewhere', isoDay(-1), isoDay(1), 'maybe', 'UTC');
+		insert.run('Live Con', 'Reno, Nevada', isoDay(-1), isoDay(1), 'confirmed', 'UTC');
+		insert.run('Next Con', null, isoDay(40), isoDay(42), 'confirmed', 'UTC');
+		insert.run('Considering Con', null, isoDay(20), isoDay(22), 'considering', 'UTC');
+		// A confirmed convention that is over, with no fursuit photos: no stamp,
+		// because /connect and /about publish only upcoming and live conventions.
+		insert.run('Past Con', null, isoDay(-90), isoDay(-88), 'confirmed', 'UTC');
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.live).toEqual({
+			name: 'Live Con',
+			location: 'Reno, Nevada',
+			until: isoDay(1),
+			href: '/connect'
+		});
+		expect(data.passport.stamps.conventions).toEqual([
+			{ kind: 'next', name: 'Next Con', startDate: isoDay(40), href: '/connect' }
+		]);
+		// Upcoming conventions are what /about shows, so the About stamp follows.
+		expect(kinds(data)).toEqual(['about']);
+	});
+
+	// /about lists upcoming conventions of every status, so a maybe row still
+	// earns the About stamp, but never Here now or Next.
+	it('gives a maybe convention running today no Here now stamp, only About', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite
+			.prepare('INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)')
+			.run('Maybe Con', isoDay(-1), isoDay(1), 'maybe', 'UTC');
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.live).toBeNull();
+		expect(data.passport.stamps.conventions).toEqual([]);
+		expect(data.passport.stamps.features).toEqual([
+			{ kind: 'about', href: '/about', counts: [], about: 'conventions' }
+		]);
+	});
+
+	it('shows About for an upcoming considering convention, and not for a past one', async () => {
+		const { sqlite, platform } = makePassportDb();
+		const insert = sqlite.prepare(
+			'INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)'
+		);
+		insert.run('Past Maybe', isoDay(-30), isoDay(-28), 'maybe', 'UTC');
+		let data = await loadPassportPage(platform);
+		expect(data.passport.hasStamps).toBe(false);
+
+		insert.run('Considering Con', isoDay(60), isoDay(62), 'considering', 'UTC');
+		data = await loadPassportPage(platform);
+		expect(data.passport.stamps.features).toEqual([
+			{ kind: 'about', href: '/about', counts: [], about: 'conventions' }
+		]);
+		expect(data.passport.stamps.conventions).toEqual([]);
+	});
+
+	// /about reads against today's UTC date with no day of slack, so a maybe or
+	// considering row that ended yesterday is gone from /about, and the About
+	// stamp must not point there for it.
+	it('gives no About stamp for a maybe or considering convention that ended yesterday (UTC)', async () => {
+		const { sqlite, platform } = makePassportDb();
+		const insert = sqlite.prepare(
+			'INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)'
+		);
+		insert.run('Ended Maybe', isoDay(-3), isoDay(-1), 'maybe', 'UTC');
+		insert.run('Ended Considering', isoDay(-3), isoDay(-1), 'considering', 'UTC');
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.hasStamps).toBe(false);
+		expect(kinds(data)).not.toContain('about');
+	});
+
+	// The Here now read keeps /connect's day of slack, so a confirmed convention
+	// whose last day is still running in Los Angeles is live, while the About
+	// read, which is /about's UTC-date predicate, has already dropped it. Pinned
+	// at 05:00 UTC, when it is still the previous evening in Los Angeles.
+	it('keeps Here now for a con still running further west while About has dropped it', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		try {
+			vi.setSystemTime(new Date('2026-03-10T05:00:00Z'));
+			const { sqlite, platform } = makePassportDb();
+			sqlite
+				.prepare('INSERT INTO conventions (name, start_date, end_date, status, timezone) VALUES (?, ?, ?, ?, ?)')
+				.run('West Con', '2026-03-07', '2026-03-09', 'confirmed', 'America/Los_Angeles');
+
+			const data = await loadPassportPage(platform);
+			expect(data.passport.stamps.live).toMatchObject({ name: 'West Con', until: '2026-03-09' });
+			expect(kinds(data)).not.toContain('about');
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+describe('passport load — picture precedence (shared with /art)', () => {
+	async function seedArt(db: ReturnType<typeof makeDb>['db']) {
+		await db.insert(artists).values({ id: 1, name: 'mothlamp' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+	}
+
+	it('uses the designated ref sheet even when it is NSFW, blurred, and agrees with /art', async () => {
+		const { db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'Mature Ref', slug: 'mature-ref', imageUrl: '/1.png', artistId: 1, nsfw: true, createdAt: '2026-01-01' },
+			// A newer tagged sheet that the designation outranks.
+			{ id: 2, title: 'Tagged Ref', slug: 'tagged-ref', imageUrl: '/2.png', artistId: 1, createdAt: '2026-06-01' }
+		]);
+		await db.insert(imageTags).values({ imageId: 2, tagId: 1 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 1 });
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'mature-ref', nsfw: true, artistName: 'mothlamp' });
+
+		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(artData.refSheet?.slug).toBe(data.passport.picture?.slug);
+	});
+
+	// The owner subquery orders by name: Zed is inserted first, so a query that
+	// dropped ORDER BY name would take Zed's designation (A) instead of Amy's (B).
+	it("takes the first owner by name's designation, the same on /art", async () => {
+		const { db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'A', slug: 'ref-a', imageUrl: '/a.png', artistId: 1, createdAt: '2026-01-01' },
+			{ id: 2, title: 'B', slug: 'ref-b', imageUrl: '/b.png', artistId: 1, createdAt: '2026-01-02' }
+		]);
+		await db.insert(characters).values({ name: 'Zed', isOwner: true, referenceImageId: 1 });
+		await db.insert(characters).values({ name: 'Amy', isOwner: true, referenceImageId: 2 });
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'ref-b' });
+		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(artData.refSheet?.slug).toBe('ref-b');
+	});
+
+	it('falls back to the newest reference-tagged sheet, skipping a designated variant', async () => {
+		const { db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'Parent', slug: 'parent', imageUrl: '/1.png', artistId: 1, createdAt: '2025-01-01' },
+			{ id: 2, title: 'Variant', slug: 'variant', imageUrl: '/2.png', artistId: 1, parentImageId: 1, createdAt: '2025-02-01' },
+			{ id: 3, title: 'Old Ref', slug: 'old-ref', imageUrl: '/3.png', artistId: 1, createdAt: '2025-03-01' },
+			{ id: 4, title: 'New Ref', slug: 'new-ref', imageUrl: '/4.png', artistId: 1, createdAt: '2025-04-01' }
+		]);
+		await db.insert(imageTags).values([{ imageId: 3, tagId: 1 }, { imageId: 4, tagId: 1 }]);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 2 });
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'new-ref' });
+		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(artData.refSheet?.slug).toBe('new-ref');
+	});
+
+	it('without a ref sheet, takes the first featured piece, then the newest SFW piece', async () => {
+		const { sqlite, db, platform } = makePassportDb();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: 'Featured Second', slug: 'f2', imageUrl: '/1.png', artistId: 1, featured: true, featuredOrder: 2, createdAt: '2025-01-01' },
+			{ id: 2, title: 'Featured First', slug: 'f1', imageUrl: '/2.png', artistId: 1, featured: true, featuredOrder: 1, createdAt: '2025-01-02' },
+			{ id: 3, title: 'Newest', slug: 'newest', imageUrl: '/3.png', artistId: 1, createdAt: '2026-01-01' },
+			{ id: 4, title: 'Newest NSFW', slug: 'newest-nsfw', imageUrl: '/4.png', artistId: 1, nsfw: true, createdAt: '2026-02-01' }
+		]);
+
+		let data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'f1', title: 'Featured First', nsfw: false });
+
+		sqlite.exec('UPDATE images SET featured = 0');
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'newest', nsfw: false });
+	});
+
+	// The schema allows an empty title; the picture link and caption still
+	// need one, so the character's name (the data page's name) stands in.
+	it("titles an untitled fallback piece or ref sheet with the character's name", async () => {
+		const { sqlite, db, platform } = makePassportDb();
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('ownerName', 'Ashby')").run();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: '', slug: 'untitled', imageUrl: '/1.png', artistId: 1, createdAt: '2026-01-01' }
+		]);
+
+		let data = await loadPassportPage(platform);
+		expect(data.passport.name).toBe('Ashby');
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'untitled', title: 'Ashby' });
+
+		sqlite.exec("UPDATE images SET title = '   '");
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', title: 'Ashby' });
+
+		await db.insert(imageTags).values({ imageId: 1, tagId: 1 });
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'untitled', title: 'Ashby' });
+	});
+
+	it('falls back to the admin avatar, and to no picture without one', async () => {
+		const { sqlite, platform } = makePassportDb();
+		let data = await loadPassportPage(platform);
+		expect(data.passport.picture).toBeNull();
+
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('adminAvatarUrl', '/face.png')").run();
+		clearSettingsCache();
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'avatar', imageUrl: '/face.png', slug: null, nsfw: false });
+	});
+});
+
+describe('passport load — empty site and degraded reads', () => {
+	it('renders a fresh fork as a data page with no stamps, the host, and no default about text', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('ownerName', 'Ashby')").run();
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport).toMatchObject({
+			name: 'Ashby',
+			host: 'example.ink',
+			pronouns: '',
+			species: '',
+			since: null,
+			socials: [],
+			about: '',
+			hasStamps: false
+		});
+		expect(data.passport.stamps).toEqual({ live: null, features: [], conventions: [] });
+		expect(data.passport.mrz[1].startsWith('EXAMPLE<INK<')).toBe(true);
+		expect(data.passport.mrz.join('')).not.toMatch(/\d/);
+	});
+
+	it('shows an about text the operator wrote, and their socials with the About stamp', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite.exec(`
+			INSERT INTO site_settings (key, value) VALUES
+				('aboutText', 'A red fox in a blue jacket.'),
+				('blueskyUrl', 'https://bsky.app/profile/ashby.example');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.about).toBe('A red fox in a blue jacket.');
+		expect(data.passport.socials).toEqual([{ platform: 'bluesky', url: 'https://bsky.app/profile/ashby.example' }]);
+		expect(kinds(data)).toEqual(['about']);
+	});
+
+	// Sona details live on /art, not /about, so they alone never earn the
+	// About stamp: it would open a page with none of them.
+	it('gives no About stamp for sona details alone, with no socials and no conventions', async () => {
+		const { sqlite, platform } = makePassportDb();
+		sqlite.exec(`
+			INSERT INTO site_settings (key, value) VALUES
+				('sonaBuild', 'Lanky'),
+				('sonaKeyFeatures', 'A white tail tip'),
+				('sonaColors', '[{"name":"Rust","hex":"#b7410e"}]'),
+				('sonaDos', 'Blue jacket'),
+				('sonaDonts', 'No hat');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(kinds(data)).not.toContain('about');
+	});
+
+	it('degrades to no feature stamps and the avatar when the batch never answers', async () => {
+		const { db, sqlite } = makePassportDb();
+		await db.insert(artists).values({ id: 1, name: 'A' });
+		await db.insert(images).values({ id: 1, title: 'One', slug: 'one', imageUrl: '/1.png', artistId: 1 });
+		sqlite.exec("INSERT INTO sticker_packs (published) VALUES (1); INSERT INTO stickers (pack_id) VALUES (1);");
+		// A stall, not a failure: the batch promise never settles, so only the
+		// timeout can end the wait.
+		const stalled = Object.assign(Object.create(db), { batch: () => new Promise(() => {}) }) as typeof db;
+
+		const passport = await loadPassport({
+			db: stalled,
+			env: undefined,
+			settings: { ...DEFAULTS, adminAvatarUrl: '/face.png' },
+			host: 'example.ink',
+			now: new Date(),
+			timeoutMs: 20
+		});
+		expect(passport.stamps.features).toEqual([]);
+		expect(passport.picture).toMatchObject({ kind: 'avatar', imageUrl: '/face.png' });
+	});
+
+	it('degrades to a stampless passport, not a 500, when every D1 read fails', async () => {
+		// Warm the settings cache on a healthy DB so the load reaches the passport
+		// branch, then swap in a D1 whose every statement throws.
+		const { sqlite, db, platform } = makePassportDb('mock');
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('adminAvatarUrl', '/face.png')").run();
+		await db.insert(artists).values({ id: 1, name: 'A' });
+		await db.insert(images).values({ id: 1, title: 'One', slug: 'one', imageUrl: '/1.png', artistId: 1 });
+		await loadPassportPage(platform);
+
+		const failingD1 = {
+			prepare: () => {
+				throw new Error('D1_ERROR: transient');
+			},
+			batch: () => Promise.reject(new Error('D1_ERROR: transient'))
+		} as unknown as D1Database;
+		const failingPlatform = { env: { DB: failingD1, FURTRACK_MODE: 'mock' } } as unknown as App.Platform;
+
+		const data = await loadPassportPage(failingPlatform);
+		expect(data.settings.landingLayout).toBe('passport');
+		expect(data.passport.hasStamps).toBe(false);
+		expect(data.passport.stamps.features).toEqual([]);
+		// No count read means no stamp, never a zero, and the page still has a face.
+		expect(data.passport.picture).toMatchObject({ kind: 'avatar' });
 	});
 });

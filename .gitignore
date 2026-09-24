@@ -38,6 +38,8 @@ vite.config.ts.timestamp-*
 .wrangler-e2e-theme
 .wrangler-e2e-stickers
 .wrangler-e2e-registry
+.wrangler-e2e-passport
+.wrangler-e2e-passport-empty
 
 # Playwright
 /test-results

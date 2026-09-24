@@ -34,7 +34,7 @@ original deployment it grew out of). The project home is
 - **Single-admin CMS** — a protected admin panel for all content management. No
   user accounts, no moderation tools — it's a personal site, not a platform.
 - **Themes + landing layouts** *(in progress)* — selectable visual themes and
-  landing-page layouts (a mosaic hero, or a multi-path entry).
+  landing-page layouts (a mosaic hero, a multi-path entry, or a passport).
 - **Shared artist registry** *(in progress)* — opt into a central, curated artist
   directory so you don't re-enter the same artists every fork.
 

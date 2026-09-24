@@ -918,6 +918,60 @@ describe('DownloadMenu lifted-surface WCAG AA contrast, every theme × mode (SON
 	}
 });
 
+// Both passport hover suites below parse the same stamp component.
+const stampCss = readFileSync(fileURLToPath(new URL('./components/landing/Stamp.svelte', import.meta.url)), 'utf8');
+
+// The passport's Here now stamp is --primary-foreground on --primary, and its
+// hover moves the fill. A mix toward white in light modes measured 4.33:1
+// (aurora) and 3.72:1 (terracotta), so the light rule mixes toward black. Parse
+// both rules out of the component and assert the label on each hovered fill.
+describe('passport live stamp hover WCAG AA contrast, every theme × mode', () => {
+	function liveHover(prefix: string): { pct: number; toward: 'black' | 'white' } {
+		const re = new RegExp(
+			`\\n\\t${prefix}\\.stamp--live:hover\\s*\\{\\s*background:\\s*color-mix\\(in srgb,\\s*var\\(--primary\\)\\s*(\\d+)%,\\s*(black|white)\\)`
+		);
+		const m = stampCss.match(re);
+		if (!m) throw new Error(`${prefix}.stamp--live:hover has no srgb color-mix fill`);
+		return { pct: Number(m[1]), toward: m[2] as 'black' | 'white' };
+	}
+	const dark = liveHover('');
+	const light = liveHover(":global\\(\\[data-theme='light'\\]\\) ");
+
+	for (const { name, mode, sel } of THEME_BLOCKS) {
+		it(`${name}: hovered live stamp label meets 4.5:1`, () => {
+			const { pct, toward } = mode === 'light' ? light : dark;
+			const hovered = mixSrgb(blockToken(sel, 'primary'), pct, toward);
+			expect(contrast(blockToken(sel, 'primary-foreground'), hovered)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
+// The Next stamp's kicker and edge are --primary-text on the card. The shared
+// stamp hover tints the card with 6% --foreground, which drops that kicker to
+// 3.92:1 in terracotta dark, so the tint skips Next. Read the rule's selector:
+// if it applies to Next again (or Next gains its own fill), measure the kicker
+// on that fill.
+describe('passport Next stamp hover WCAG AA contrast, every theme × mode', () => {
+	const m = stampCss.match(
+		/\n\t(\.stamp(?::where\(:not\(\.stamp--next\)\))?):hover\s*\{\s*background:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*transparent\)/
+	);
+	if (!m) throw new Error('Stamp.svelte has no .stamp hover tint to measure');
+	const tintsNext = m[1] === '.stamp';
+	const pct = Number(m[2]);
+
+	it('gives Next no hover fill of its own', () => {
+		expect(stampCss).not.toMatch(/\.stamp--next:hover\s*\{[^}]*background/);
+	});
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: Next kicker on the hovered stamp meets 4.5:1`, () => {
+			const card = blockToken(sel, 'card');
+			const fill = tintsNext ? mix2(blockToken(sel, 'foreground'), pct, card) : card;
+			expect(contrast(blockToken(sel, 'primary-text'), fill)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
 describe('public chip text (foreground on secondary) WCAG AA contrast (SONA-124)', () => {
 	// The VR pages' chips (platform/format/role) render --foreground on
 	// --secondary: the --muted-foreground pairing they replaced was 3.96:1 on
@@ -2667,6 +2721,12 @@ describe('no state boundary draws with raw --primary (SONA-126)', () => {
 			]
 		],
 		['/lib/components/CloudflareSetupDialog.svelte', ['.unlocks — the accent bar down the note']],
+		[
+			'/lib/components/landing/Stamp.svelte',
+			[
+				'.stamp--live — the inset spacer ring sits on a fill of the same colour; the edge that marks the stamp is --primary-text'
+			]
+		],
 		[
 			'/lib/components/StickerPackForm.svelte',
 			['.select-check.on — the border sits on a fill of the same colour']
