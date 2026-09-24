@@ -89,8 +89,11 @@ const shownPhoto = or(
 
 /** Room in the event-group read for events pastEventStamps drops because a
  *  confirmed convention of that name has not ended. The conventions load in
- *  the parallel batch, so the count is not known when this read starts. */
-const PAST_STAMP_SLACK = 8;
+ *  the parallel batch, so the count is not known when this read starts. The
+ *  limit bounds rows per event, not photos, so the slack is cheap: only a site
+ *  with more than 50 confirmed unfinished conventions named after photo events
+ *  could underfill MAX_PAST_STAMPS. */
+const PAST_STAMP_SLACK = 50;
 
 export async function loadPassport(opts: {
 	db: Database;
@@ -170,7 +173,13 @@ export async function loadPassport(opts: {
 	// for pastEventStamps to drop up to PAST_STAMP_SLACK events named after a
 	// confirmed convention that has not ended and still fill MAX_PAST_STAMPS.
 	// Both in one batch, so they fail together: no counts without stamps.
-	const latest = sql<string | null>`max(substr(${fursuitPhotos.takenAt}, 1, 10))`;
+	// Only a real calendar date counts toward an event's latest day: date()
+	// returns NULL for '2025-13-05' and normalises '2026-02-30' to '2026-03-02',
+	// so neither round-trips. Otherwise a malformed date that sorts high would
+	// become the group's latest (read as undated by calendarDate) and could take
+	// a slot from a real event in the ordering and limit below.
+	const day = sql`substr(${fursuitPhotos.takenAt}, 1, 10)`;
+	const latest = sql<string | null>`max(CASE WHEN date(${day}) = ${day} THEN ${day} END)`;
 	const photosRead = furtrackOn
 		? withTimeout(
 				db.batch([
@@ -206,6 +215,7 @@ export async function loadPassport(opts: {
 	const gallery = galleryRows[0];
 	const sticker = stickerRows[0];
 
+	const name = settings.ownerName || settings.siteName;
 	let picture: PassportPicture | null = null;
 	const ref = refRows[0];
 	if (ref) {
@@ -215,7 +225,9 @@ export async function loadPassport(opts: {
 			kind: 'ref',
 			slug: ref.slug,
 			imageUrl: ref.imageUrl,
-			title: ref.title,
+			// The schema allows an empty title; the character's name keeps the
+			// picture link named and the caption titled.
+			title: ref.title.trim() || name,
 			artistName: ref.artistName,
 			nsfw: ref.nsfw
 		};
@@ -249,7 +261,7 @@ export async function loadPassport(opts: {
 			timeoutMs,
 			null
 		);
-		if (piece) picture = { kind: 'piece', ...piece, nsfw: false };
+		if (piece) picture = { kind: 'piece', ...piece, title: piece.title.trim() || name, nsfw: false };
 	}
 	if (!picture && settings.adminAvatarUrl) {
 		picture = {
@@ -285,7 +297,6 @@ export async function loadPassport(opts: {
 		now
 	});
 
-	const name = settings.ownerName || settings.siteName;
 	const since = gallery?.since && /^\d{4}$/.test(gallery.since) ? gallery.since : null;
 	const about = settings.aboutText.trim() === DEFAULTS.aboutText ? '' : settings.aboutText.trim();
 

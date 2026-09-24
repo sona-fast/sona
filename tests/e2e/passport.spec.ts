@@ -302,6 +302,32 @@ test.describe('populated passport', () => {
 		});
 		expect(lineStarts).not.toContain('ー');
 	});
+
+	// The language buttons' ring as rendered, not just as written in the CSS
+	// source. Tab there for real: :focus-visible does not match a programmatic
+	// .focus(), which would make the ring assertion vacuous.
+	test('rings a keyboard-focused language button in the foreground colour', async ({ page }) => {
+		await page.goto('/');
+		let reached = false;
+		for (let i = 0; i < 40 && !reached; i++) {
+			await page.keyboard.press('Tab');
+			reached = await page.evaluate(() => !!document.activeElement?.matches('.lang-toggle button'));
+		}
+		expect(reached).toBe(true);
+		const ring = await page.evaluate(() => {
+			const el = document.activeElement as HTMLElement;
+			const style = getComputedStyle(el);
+			// Resolve --foreground to the same rgb() form outline-color computes to.
+			const probe = document.createElement('div');
+			probe.style.color = 'var(--foreground)';
+			document.body.append(probe);
+			const foreground = getComputedStyle(probe).color;
+			probe.remove();
+			return { style: style.outlineStyle, width: style.outlineWidth, color: style.outlineColor, foreground };
+		});
+		expect(ring).toEqual({ style: 'solid', width: '2px', color: ring.foreground, foreground: ring.foreground });
+		expect(ring.foreground).not.toBe('rgba(0, 0, 0, 0)');
+	});
 });
 
 test.describe('fresh-site passport', () => {

@@ -412,6 +412,55 @@ describe('passport load — counts', () => {
 		]);
 		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [9, 1] });
 	});
+
+	// A malformed date that sorts above the real ones must not become the
+	// event's latest day: '2025-13-05' is no month, and '2026-02-30' is no day.
+	it("takes each event's month from its valid dates, ignoring impossible ones that sort higher", async () => {
+		const { sqlite, platform } = makePassportDb('mock');
+		sqlite.exec(`
+			INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at)
+			VALUES
+				(1, 'c', '/f1.jpg', 'Lens', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/1', '2025-11-08'),
+				(2, 'c', '/f2.jpg', 'Lens', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/2', '2025-13-05'),
+				(3, 'c', '/f3.jpg', 'Lens', 'Snowpaw 2026', 'cc-by', 'https://furtrack.example/3', '2026-01-10T09:00:00Z'),
+				(4, 'c', '/f4.jpg', 'Lens', 'Snowpaw 2026', 'cc-by', 'https://furtrack.example/4', '2026-02-30');
+		`);
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Snowpaw 2026', month: '2026-01', photos: 2, href: '/gallery?view=fursuit&event=Snowpaw%202026' },
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 2, href: '/gallery?view=fursuit&event=Harbourfur%202025' }
+		]);
+	});
+
+	// The group read is one row per event, so its slack is wide: more than eight
+	// newer events named after confirmed conventions that have not ended still
+	// leave every older event a chance at a past stamp.
+	it('fills the past stamps past more than eight newer events named after upcoming conventions', async () => {
+		const { sqlite, platform } = makePassportDb('mock');
+		const insert = sqlite.prepare(
+			"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at) VALUES (?, 'c', '/f.jpg', 'Lens', ?, 'cc-by', 'https://furtrack.example', ?)"
+		);
+		const addCon = sqlite.prepare(
+			"INSERT INTO conventions (name, start_date, status, timezone) VALUES (?, ?, 'confirmed', 'UTC')"
+		);
+		const past = ['Con A', 'Con B', 'Con C', 'Con D', 'Con E', 'Con F'];
+		past.forEach((event, i) => insert.run(i + 1, event, `2025-0${i + 1}-01`));
+		for (let i = 0; i < 9; i++) {
+			insert.run(100 + i, `Future Fest ${i}`, isoDay(-1));
+			addCon.run(`Future Fest ${i}`, isoDay(30 + i));
+		}
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.conventions.filter((c) => c.kind === 'past').map((c) => c.name)).toEqual([
+			'Con F',
+			'Con E',
+			'Con D',
+			'Con C',
+			'Con B',
+			'Con A'
+		]);
+	});
 });
 
 describe('passport load — conventions', () => {
@@ -589,6 +638,29 @@ describe('passport load — picture precedence (shared with /art)', () => {
 		sqlite.exec('UPDATE images SET featured = 0');
 		data = await loadPassportPage(platform);
 		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'newest', nsfw: false });
+	});
+
+	// The schema allows an empty title; the picture link and caption still
+	// need one, so the character's name (the data page's name) stands in.
+	it("titles an untitled fallback piece or ref sheet with the character's name", async () => {
+		const { sqlite, db, platform } = makePassportDb();
+		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('ownerName', 'Ashby')").run();
+		await seedArt(db);
+		await db.insert(images).values([
+			{ id: 1, title: '', slug: 'untitled', imageUrl: '/1.png', artistId: 1, createdAt: '2026-01-01' }
+		]);
+
+		let data = await loadPassportPage(platform);
+		expect(data.passport.name).toBe('Ashby');
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'untitled', title: 'Ashby' });
+
+		sqlite.exec("UPDATE images SET title = '   '");
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', title: 'Ashby' });
+
+		await db.insert(imageTags).values({ imageId: 1, tagId: 1 });
+		data = await loadPassportPage(platform);
+		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'untitled', title: 'Ashby' });
 	});
 
 	it('falls back to the admin avatar, and to no picture without one', async () => {

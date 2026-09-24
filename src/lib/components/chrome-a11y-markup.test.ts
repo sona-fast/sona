@@ -39,6 +39,8 @@ describe('shared chrome accessibility markup', () => {
 		expect(mobileNavSrc).toMatch(/<nav\s+class="mobile-nav"\s+aria-label=\{m\.nav_main_label\(\)\}\s*>/);
 	});
 
+	// Source-level only; tests/e2e/passport.spec.ts ("rings a keyboard-focused
+	// language button in the foreground colour") checks the rendered ring.
 	it('gives the language buttons an inset focus ring and a pressed state beyond the fill', () => {
 		const rule = (sel: string) =>
 			langSrc.match(new RegExp(`\\.lang-toggle\\s+button${sel}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
