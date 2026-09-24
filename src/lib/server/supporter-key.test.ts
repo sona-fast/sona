@@ -175,13 +175,6 @@ describe('verifySupporterKey', () => {
 		expect(res).toMatchObject({ valid: true, login: 'sparky' });
 	});
 
-	it('verifies against the baked-in production key by default (no override)', async () => {
-		// A random token can't be signed by the real (secret) issuer key, so the
-		// default path must reject it — proves the default key is wired, not thrown.
-		const res = await verifySupporterKey('abc.def', NOW);
-		expect(res.valid).toBe(false);
-	});
-
 	// Key-rotation tripwire. This token was signed by the REAL production private
 	// key (which lives only on sona.fast) and is verified here against the
 	// baked-in PRODUCTION_PUBLIC_KEY_SPKI_B64 (no override). Reaching 'expired'

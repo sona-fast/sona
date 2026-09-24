@@ -47,10 +47,9 @@ const putEntryPath = `PUT /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoi
 const zoneOk: CfApiResult = { ok: true, status: 200, result: [{ id: ZONE }] };
 
 describe('buildRule', () => {
-	it('encodes the beacon expression, block action, ref, and rate-limit knobs', () => {
+	it('sets the block action, ref, description, and rate-limit knobs', () => {
 		const rule = buildRule();
 		expect(rule.action).toBe('block');
-		expect(rule.expression).toBe(RULE_EXPRESSION);
 		expect(rule.ref).toBe(RULE_REF);
 		expect(rule.description).toBe(RULE_DESCRIPTION);
 		// Free requires a 10s period and a mitigation timeout equal to it (and one

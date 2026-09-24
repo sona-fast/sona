@@ -52,8 +52,10 @@ export const EARLY_ACCESS: Record<string, { gaDate: string; label: EarlyAccessLa
  * Message id carrying a flag's human-readable, localized display label —
  * `early_access_label_<flag>` with dashes flattened to underscores (message
  * ids can't contain `-`). This is the author-facing naming convention for the
- * message id a registry entry's `label` statically references; it's enforced
- * only by early-access.test.ts. The ja.json half of that check is the only
+ * message id a registry entry's `label` statically references. Only
+ * early-access.test.ts enforces it: each id must exist in both locale files,
+ * and each entry's `label` must be the compiled function of its id (its output
+ * equals that message's text). The ja.json half of that check is the only
  * guard against a missing Japanese label — paraglide compiles from en, so a
  * missing ja translation silently falls back to English.
  */

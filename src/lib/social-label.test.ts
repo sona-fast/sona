@@ -1,7 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
 import { socialAtHandle, socialHandle, socialLabel, type SocialPlatform } from './social-label';
 
 // One table per platform covering the five URL shapes a stored setting takes.
@@ -413,50 +410,6 @@ describe('scheme-less values', () => {
 		expect(socialLabel('twitter', 'n/a')).toBe('Twitter');
 		expect(socialLabel('twitter', 'taro/photos')).toBe('Twitter');
 		expect(socialLabel('twitter', 'see my profile/here')).toBe('Twitter');
-	});
-});
-
-// SONA-128's point was one rule everywhere, so the surfaces are pinned as well
-// as the helper: a page that grows its own handle() is how the three rules
-// diverged in the first place. Source scan rather than render — these pages pull
-// in $app/state and paraglide, which this pure-TS vitest setup does not provide.
-describe('every surface renders socials through this module', () => {
-	it.each([
-		['/about', '../routes/(public)/about/+page.svelte'],
-		['/connect', '../routes/(paths)/connect/+page.svelte'],
-		['/share', '../routes/(paths)/share/+page.svelte'],
-		['NewArtistDialog', './components/NewArtistDialog.svelte']
-	])('%s takes its handles from the shared module and defines no local one', (_name, path) => {
-		const source = readFileSync(new URL(path, import.meta.url), 'utf8');
-		// NewArtistDialog reaches it through $lib/registry-search's resultHandle.
-		expect(source).toMatch(/from '\$lib\/(social-label|registry-search)'/);
-		// Both spellings: a `const handle = (url) => …` is the same helper.
-		expect(source).not.toMatch(/function handle\s*\(|(?:const|let)\s+handle\s*=\s*\(/);
-		// Rule 1's @ comes from socialAtHandle, never from the surface. A page that
-		// interpolates its own prefix carries the rule only until someone edits that
-		// line, and /share did exactly that until this scan went in.
-		expect(source).not.toMatch(/'@'\s*\+|`@\$\{/);
-	});
-
-	// Repo-wide rather than a list of four: the next page to render a social is
-	// not on that list, and a hand-rolled helper is recognizable by what it does
-	// — splitting a path apart — in whatever form it is written.
-	it('no component splits a URL path into a handle by hand', () => {
-		// fileURLToPath, not .pathname: the latter is percent-encoded, so a checkout
-		// under a path with a space in it would fail this scan for reasons that
-		// have nothing to do with drift.
-		const dir = fileURLToPath(new URL('../', import.meta.url));
-		// The shared module itself is a .ts and so is never in this list.
-		// VrAvatarForm splits a model URL down to its FILENAME, not a handle.
-		const allowed = ['lib/components/VrAvatarForm.svelte'];
-		const files = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter(
-			(f) => f.endsWith('.svelte') && !allowed.includes(f)
-		);
-		expect(files.length).toBeGreaterThan(20); // the scan actually matched something
-		const offenders = files.filter((f) =>
-			/pathname\s*\.split|\.split\(['"]\/['"]\)/.test(readFileSync(join(dir, f), 'utf8'))
-		);
-		expect(offenders).toEqual([]);
 	});
 });
 

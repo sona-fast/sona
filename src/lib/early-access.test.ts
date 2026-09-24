@@ -76,9 +76,8 @@ describe('earlyAccessActive', () => {
 describe('earlyAccessLabel', () => {
 	// The settings page's supporter status line renders each early-access flag
 	// through this resolver (SONA-124 item: never the raw slug). The registry is
-	// empty since vr-avatars retired (SONA-157), so the positive cases seed a
-	// stub entry; 'shipped registry' below keeps real entries labeled in both
-	// locale files.
+	// cleared before each test, so the positive cases seed a stub entry;
+	// 'shipped registry' below keeps real entries labeled in both locale files.
 	// Locale-aware stub: this is the one test that reads the label per-locale.
 	const stubLabel: EarlyAccessLabel = (_inputs, options) =>
 		options?.locale === 'ja' ? 'パイロット' : 'Pilot';
@@ -110,9 +109,8 @@ describe('earlyAccessLabelKey', () => {
 
 describe('shipped registry', () => {
 	it('holds only well-formed GA dates', () => {
-		// Empty since vr-avatars retired (SONA-157). Armed against a fabricated
-		// malformed date so the shape check cannot rot while the registry is
-		// empty; the loop guards whatever the next release registers.
+		// Armed against a fabricated malformed date so the shape check cannot
+		// pass vacuously; the loop guards every registered flag.
 		const shape = /^\d{4}-\d{2}-\d{2}$/;
 		expect('17-08-2026').not.toMatch(shape);
 		for (const entry of Object.values(SHIPPED)) {
@@ -131,7 +129,7 @@ describe('shipped registry', () => {
 			) as Record<string, string>
 		}));
 		// The invariant as a predicate, so it can be proven armed against
-		// fabricated inputs even while SHIPPED is empty (SONA-157).
+		// fabricated inputs whatever SHIPPED happens to hold.
 		const missingLabels = (flags: string[], files: typeof locales) =>
 			flags.flatMap((flag) =>
 				files
@@ -141,7 +139,7 @@ describe('shipped registry', () => {
 		// Armed: a flag without messages is caught in both locales, so the
 		// invariant below cannot pass vacuously by never matching anything.
 		expect(missingLabels(['fabricated-flag'], locales)).toHaveLength(2);
-		// The real invariant, over whatever the next release registers.
+		// The real invariant, over every registered flag.
 		expect(missingLabels(Object.keys(SHIPPED), locales)).toEqual([]);
 	});
 
@@ -149,7 +147,6 @@ describe('shipped registry', () => {
 		// The entry's `label` must be the compiled function of its by-convention
 		// message id, not some other message: its output must equal the raw JSON
 		// text (early-access labels take no inputs, so direct equality holds).
-		// Vacuous while the registry is empty; arms as soon as a flag registers.
 		for (const locale of ['en', 'ja'] as const) {
 			const messages = JSON.parse(
 				readFileSync(new URL(`../../messages/${locale}.json`, import.meta.url), 'utf-8')

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { adminLogin } from './admin-login';
 
 // The con card generator (SONA-115), driven in a real browser. Everything below
-// only works there: the two fieldsets and the preview are unit-pinned as SOURCE
+// only works there: the download paths and the preview are unit-pinned as SOURCE
 // in con-card-markup.test.ts (nothing renders the component under vitest), and
 // the phone save runs an SVG through an <img>, a <canvas> and toBlob: three
 // browser APIs whose failure modes are exactly what a source pin cannot see.
@@ -184,9 +184,9 @@ test.describe('/connect/qr', () => {
 	// binding away needs a server booted without it, and the harness builds a
 	// server per wrangler config + persist dir, and a fifth one for a single
 	// assertion costs every run a seed and a boot. What actually holds the
-	// property is structural and is pinned as such in
-	// src/routes/connect/qr/page.server.test.ts: the load touches no database,
-	// and the route sits outside every group whose layout does.
+	// property is structural: src/routes/connect/qr/page.server.test.ts pins that
+	// the load touches no database, and that the route sits outside every group
+	// whose layout does.
 });
 
 test.describe('admin settings con card, before its GA date', () => {

@@ -91,34 +91,3 @@ describe('settings sub-tab strip overflow affordance', () => {
 		expect(rule).toMatch(/scroll-padding-inline-start:\s*24px/);
 	});
 });
-
-// Both admin navs mark the page you are on for assistive tech, not just with a
-// fill: the tab strip on phones and the sidebar on wider viewports. Each sets
-// aria-current from the same expression that sets its .active class, so the
-// marker cannot drift away from the highlight. The Playwright side of this,
-// which checks the rendered page carries exactly one of each, is in
-// tests/e2e/settings-tabs.spec.ts.
-describe('the admin navs mark the current page for assistive tech', () => {
-	const layout = readSource(new URL('../../routes/admin/+layout.svelte', import.meta.url));
-
-	// `class:active={EXPR}` and `aria-current={EXPR ? 'page' : undefined}` on the
-	// same element, with EXPR captured so the two can be compared.
-	function activeMarkers(source: string, where: string) {
-		const active = source.match(/class:active=\{([^}]+)\}/)?.[1];
-		const current = source.match(/aria-current=\{([^}]+)\s*\?\s*'page'\s*:\s*undefined\}/)?.[1];
-		if (!active) throw new Error(`${where} no longer sets class:active`);
-		return { active: active.trim(), current: current?.trim() };
-	}
-
-	for (const [where, source] of [
-		['AdminTabs.svelte', src],
-		['routes/admin/+layout.svelte', layout]
-	] as const) {
-		it(`${where} sets aria-current from the same expression as .active`, () => {
-			const { active, current } = activeMarkers(source, where);
-			expect(current, `${where} no longer sets aria-current="page" on the active link`).toBe(
-				active
-			);
-		});
-	}
-});

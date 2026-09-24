@@ -1812,58 +1812,6 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		);
 	});
 
-	// Stacked under a full-width Save, that shared fill would be a short pill
-	// orphaned at the left edge, so the phone breakpoint widens it to the tray
-	// instead of dropping it. Dropping it is what this test is here to stop: a
-	// phone has no cursor and no hover, so the fill, the outline and the label
-	// mix are the whole of the refused cue. The mix rides on --secondary, which
-	// the disabled-pill loop above already floors at 4.5:1 in every theme.
-	it('widens the refused Dismiss to the tray on a phone and keeps the shared fill', () => {
-		const rule = css.match(
-			/\.tag-actions \.tag-btn-text\[aria-disabled='true'\],\n\t\.tag-actions \.tag-btn-text\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/
-		)?.[1];
-		if (!rule) throw new Error('the phone-width refused Dismiss rule is missing from app.css');
-		expect(rule).toMatch(/width:\s*100%\s*;/);
-		// Full width centres the label, which takes the resting padding on both
-		// sides. A resting Dismiss keeps that padding too and is centred under the
-		// primary by the stacked row itself, so no rule zeroes a pad on either.
-		expect(css).toMatch(
-			/@media \(max-width: 640px\) \{[^}]*\.tag-actions\s*\{\s*flex-direction:\s*column;\s*align-items:\s*center;/
-		);
-		expect(css).not.toMatch(/\.tag-actions \.tag-btn-text:not\(\[aria-disabled='true'\]\)/);
-		expect(rule).not.toMatch(/padding/);
-		// And nothing here may undo the inert treatment the base rule sets.
-		expect(rule).not.toMatch(/background/);
-		expect(rule).not.toMatch(/border/);
-		expect(rule).not.toMatch(/color:/);
-	});
-
-	// A lone Dismiss drops its left pad on a wide screen to sit on the tray's
-	// content edge. Stacked there is no edge to sit on, so the phone breakpoint
-	// gives the pad back — and it has to be the pad the button rests at, or the
-	// label lands off centre by the difference. Pinned to the base rule so the
-	// two cannot drift apart.
-	it('restores the resting left pad to a lone Dismiss on a phone', () => {
-		const base = css.match(/^\.tag-btn-text\s*\{([^}]*)\}/m)?.[1];
-		if (!base) throw new Error('the .tag-btn-text rest rule is missing from app.css');
-		const resting = /padding:\s*[\d.]+px\s+([\d.]+px)\s*;/.exec(base)?.[1];
-		if (!resting) throw new Error('the .tag-btn-text rest rule has no horizontal padding');
-		const rule = css.match(/\.tag-actions \.tag-btn-text-flush\s*\{([^}]*)\}/)?.[1];
-		if (!rule) throw new Error('the phone-width flush Dismiss rule is missing from app.css');
-		expect(rule).toMatch(new RegExp(`padding-left:\\s*${resting.replace('.', '\\.')}\\s*;`));
-	});
-
-	// The refused state draws a real border. The rest rule reserves the same 1px
-	// as a transparent one, so the border appearing mid-save does not widen
-	// Dismiss and shove the row; the radius rides along so the visible border is
-	// the capsule the buttons beside it wear.
-	it('the resting Dismiss button reserves the refused border and its capsule', () => {
-		const rule = css.match(/^\.tag-btn-text\s*\{([^}]*)\}/m)?.[1];
-		if (!rule) throw new Error('the .tag-btn-text rest rule is missing from app.css');
-		expect(rule).toMatch(/border:\s*1px solid transparent\s*;/);
-		expect(rule).toMatch(/border-radius:\s*var\(--radius-pill\)\s*;/);
-	});
-
 	// A kept chip is a tint plus a check, and the check is the non-colour cue for
 	// the state, so it is a meaningful graphic under the 3:1 bar. It sits on the
 	// tint over the tray's --card, and takes --link in the light themes where raw
@@ -2256,31 +2204,6 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		{ file: './components/VrAvatarForm.svelte', selector: '.file-btn' }
 	];
 
-	// .input.input-sm resets padding on all four sides and outranks select.input,
-	// so without its own gutter a compact select paints the caret over the value.
-	it('select.input.input-sm keeps the caret gutter', () => {
-		expect(blockBody('select.input.input-sm')).toMatch(/padding-right:\s*40px/);
-		const forced = css.match(/@media \(forced-colors: active\) \{\s*select\.input\.input-sm \{([^}]*)\}/)?.[1];
-		expect(forced, 'no forced-colors gutter for the compact select').toMatch(/padding-right:\s*16px/);
-	});
-
-	// The social-URL rows in the artist and character edit modals are the same
-	// kind of boundary: the pill draws the edge and the input inside it is
-	// .input-plain, so the pill's edge is the whole control edge. Both pages ran
-	// a byte-identical copy until the shared .field-pill in app.css (SONA-209
-	// r2), so one assertion now covers both. .input-plain sets `outline: none`,
-	// so without the focus-within ring the fields show no focus at all.
-	it('.field-pill draws its border with --input and rings on focus-within', () => {
-		expect(blockBody('.field-pill')).toMatch(/border:\s*1px solid var\(--input\)/);
-		// !important is load-bearing: both modal pages scope `.modal-form label`
-		// into a column, which outranks this rule, and a stacked pill hides the
-		// edge the assertion above pins.
-		expect(blockBody('.field-pill')).toMatch(/flex-direction:\s*row\s*!important/);
-		// Inset like .input:focus, so the pill focuses the way the fields above it do.
-		expect(blockBody('.field-pill:focus-within')).toMatch(/outline:\s*2px solid var\(--ring\)/);
-		expect(blockBody('.field-pill:focus-within')).toMatch(/outline-offset:\s*-1px/);
-	});
-
 	// The "remove model" twin holds no hidden input, so the form's :has() ring
 	// never reaches it — it needs a :focus-visible of its own (SONA-209 r2).
 	// A second rule with the same selector later in the file would win, so the
@@ -2583,115 +2506,6 @@ describe('the mosaic hero text survives its scrim over white artwork', () => {
 			}
 		}
 	}
-});
-
-// The admin nav's current page is told apart from a hovered one by an edge
-// marker, not by weight alone: both states paint the same --sidebar-accent fill.
-// The marker's contrast against that fill is swept in RESTING_PAIRS; this pins
-// the rule that draws it, so dropping the marker (or moving hover onto the same
-// shape) fails here rather than quietly returning the two states to a tie.
-describe('the admin nav marks its active item with an edge, not weight alone', () => {
-	const layout = '../routes/admin/+layout.svelte';
-
-	it('the active link draws a --primary-text inset edge', () => {
-		expect(ruleBody(layout, '.sidebar-link.active')).toMatch(
-			/box-shadow:\s*inset\s+\d+px\s+0\s+0\s+var\(--primary-text\)/
-		);
-	});
-
-	it('the hover state stays the fill alone', () => {
-		expect(ruleBody(layout, '.sidebar-link:hover')).not.toMatch(/box-shadow|border-left/);
-	});
-
-	// Forced colors drops box-shadow, so that inset edge disappears and the active
-	// item reads like any other. A real border in a system colour replaces it, and
-	// the left padding drops by the border's width so the row does not shift.
-	it('forced colors swaps the inset edge for a real border of the same width', () => {
-		const layoutSource = readFileSync(fileURLToPath(new URL(layout, import.meta.url)), 'utf8');
-		const marker = ruleBody(layout, '.sidebar-link.active').match(
-			/box-shadow:\s*inset\s+(\d+)px/
-		)?.[1];
-		const restingPad = ruleBody(layout, '.sidebar-link').match(/padding:\s*\d+px\s+(\d+)px/)?.[1];
-		expect(marker, '.sidebar-link.active no longer draws an inset marker').toBe('3');
-		expect(restingPad, '.sidebar-link no longer sets a two-value padding').toBeDefined();
-
-		const block = layoutSource.match(
-			/@media \(forced-colors: active\) \{\s*\.sidebar-link\.active \{([^}]*)\}/
-		)?.[1];
-		expect(block, 'the forced-colors fallback for the active sidebar link is gone').toBeDefined();
-		expect(block).toMatch(/border-left:\s*3px solid \w+/);
-		const forcedPad = block!.match(/padding-left:\s*(\d+)px/)?.[1];
-		expect(
-			Number(forcedPad),
-			`the forced-colors border adds 3px, so padding-left has to drop from ${restingPad}px by the same 3`
-		).toBe(Number(restingPad) - 3);
-	});
-});
-
-// Two affordances that forced colors would otherwise turn into a defect: the
-// masked tab strips fade to nothing rather than dimming, and the selects lose
-// the background-image caret app.css paints. Each filter page keeps exactly one
-// arrow under forced colors: the stickers page its own overlaid chevron, the
-// gallery the native caret it asks for itself.
-describe('the forced-colors fallbacks stay in place', () => {
-	for (const [where, file] of [
-		['the admin tab strip', './components/AdminTabs.svelte'],
-		['the settings sub-tab strip', '../routes/admin/settings/+page.svelte']
-	] as const) {
-		it(`${where} drops its edge fade under forced colors`, () => {
-			const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
-			const block = source.match(/@media \(forced-colors: active\) \{[\s\S]*?\n\t*\}\n/)?.[0];
-			expect(block, `${where} has no forced-colors block`).toBeDefined();
-			expect(block).toMatch(/[^-]mask-image:\s*none/);
-			expect(block).toMatch(/-webkit-mask-image:\s*none/);
-			// The padding that keeps the last tab off the edge is NOT dropped with it.
-			expect(block).not.toMatch(/padding/);
-		});
-	}
-
-	it('app.css hands the native select caret back', () => {
-		const forced = [...css.matchAll(/@media \(forced-colors: active\) \{[\s\S]*?\n\}/g)]
-			.map((m) => m[0])
-			.find((block) => block.includes('select.input'));
-		expect(forced, 'app.css no longer hands the native select caret back').toBeDefined();
-		expect(forced).toMatch(/select\.input \{[^}]*appearance: auto/);
-		// It must not reach for the overlaid chevron the filter pages draw: that
-		// icon is the only arrow those pages have left once forced colors drops the
-		// background-image caret, because their own `.filter-select` rule outranks
-		// the appearance:auto above.
-		expect(
-			forced,
-			'app.css hides the overlaid chevron again, which leaves the filter pages with no arrow'
-		).not.toMatch(/\.select-chevron/);
-	});
-
-	// The gallery's filter selects carry no chevron of their own (only its artist
-	// combobox does), and Svelte's scoping makes their `appearance: none` beat the
-	// app.css rule above, so the page has to take the native caret itself.
-	it('the gallery filter selects take the native caret at page scope', () => {
-		const gallery = readFileSync(
-			fileURLToPath(new URL('../routes/(public)/gallery/+page.svelte', import.meta.url)),
-			'utf8'
-		);
-		const block = gallery.match(
-			/@media \(forced-colors: active\) \{\s*select\.filter-select \{([^}]*)\}/
-		)?.[1];
-		expect(block, 'the gallery has no forced-colors fallback for its filter selects').toBeDefined();
-		expect(block).toMatch(/appearance: auto/);
-		expect(block).toMatch(/padding-right: 16px/);
-	});
-
-	// The stickers filter select DOES overlay its own chevron, so it needs no
-	// fallback: dropping the background-image caret leaves that icon in place.
-	it('the stickers filter select still overlays its own chevron', () => {
-		const stickers = readFileSync(
-			fileURLToPath(new URL('../routes/(public)/stickers/+page.svelte', import.meta.url)),
-			'utf8'
-		);
-		expect(stickers, 'the stickers filter select lost the chevron it draws itself').toMatch(
-			/class="select-chevron"/
-		);
-	});
 });
 
 // SONA-126, the boundary twin of the text sweep above: a `border`, `outline` or

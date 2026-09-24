@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// Guards the download-count client wiring against the page source (same spirit
-// as lcp-image.test.ts). The bytes go straight from the browser to the storage
-// provider, so this beacon is the ONLY place a press can be observed — and it is
-// pure client wiring no server test can cover. Drop `onclick={countDownload}` or
+// Guards the download-count client wiring against the page source. The bytes
+// go straight from the browser to the storage provider, so this beacon is the
+// ONLY place a press can be observed — and it is pure client wiring no server
+// test can cover. Drop `onclick={countDownload}` or
 // `keepalive: true` and download counting silently dies with the whole suite
 // green, so both are pinned here.
 const pageSrc = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');

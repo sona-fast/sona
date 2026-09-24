@@ -55,11 +55,12 @@ test('NSFW poster mature-gates the detail page and hides the 3D entry', async ({
 	const overlay = page.locator('.nsfw-overlay');
 	await expect(overlay).toBeVisible();
 	await expect(overlay.getByRole('button', { name: /Show avatar/ })).toBeVisible();
+	await expect(overlay.locator('img.blurred')).toBeVisible();
 	await expect(page.getByRole('button', { name: 'View in 3D' })).toHaveCount(0);
 
-	// The reveal click itself is deliberately not exercised here: that
-	// interaction is VrViewer/page behavior already pinned by the unit and
-	// markup tests. This spec's job is the DB→loader→gate chain.
+	// The reveal click itself is deliberately not exercised here; this spec's
+	// job is the DB→loader→gate chain, and the gated state (overlay, reveal
+	// button, blurred poster) is asserted here in the browser.
 });
 
 test('unpublished avatar detail page is indistinguishable from unknown', async ({ page }) => {

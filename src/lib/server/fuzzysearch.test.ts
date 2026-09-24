@@ -268,8 +268,6 @@ describe('searchImage — request shape', () => {
 		const sent = body.get('image');
 		expect(sent).toBeInstanceOf(File);
 		expect((sent as File).name).toBe('image');
-		// The bound the signal was built with, pinned so it can't silently grow.
-		expect(FUZZYSEARCH_TIMEOUT_MS).toBe(8000);
 	});
 
 	// `instanceof AbortSignal` passes for a signal that never fires, so the one

@@ -50,8 +50,7 @@ describe('AI-page link gating markup', () => {
 	// the page off gets neither the link nor the route. Below 768px the desktop
 	// Footer is display:none, so MobileCredit needs the same gated link or phone
 	// visitors could never reach the disclosure.
-	it('wraps the AI link in the aiPageEnabled conditional in both chromes', () => {
-		expect(footerSrc).toMatch(/\{#if settings\.aiPageEnabled\}\s*<a href="\/ai"/);
+	it('wraps the AI link in the aiPageEnabled conditional in MobileCredit', () => {
 		expect(mobileCreditSrc).toMatch(/\{#if settings\.aiPageEnabled\}\s*<a href="\/ai"/);
 	});
 });

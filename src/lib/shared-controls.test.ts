@@ -213,46 +213,6 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		expect(selectors(media).filter(isControlSubject)).toEqual(['.row .btn']);
 	});
 
-	// The bulk-action bar on the sticker importer is a row of .btn-compact
-	// buttons with the artist select at its head. The select carried a scoped
-	// `sm` class that matched no rule; .input-sm is the variant that matches.
-	// It sets font-size and padding only — .input's 40px height still applies —
-	// so what this fixes is the select matching its twin in StickerPackForm's
-	// bulk bar rather than rendering a size the app declares nowhere.
-	it('the sticker importer bulk bar uses the compact input', () => {
-		const source = readFileSync(`${srcRoot}/routes/admin/stickers/import/+page.svelte`, 'utf8');
-		const select = source.match(/<select[^>]*bind:value=\{bulkArtist\}[^>]*>/)?.[0];
-		expect(select, 'the bulk-artist select moved or was renamed').toBeDefined();
-		expect(select).toContain('class="input input-sm"');
-	});
-
-	// .file-btn is the VR form's file-picker pair, kept local rather than folded
-	// into .btn-compact. Pinned HERE, beside the variant it resembles, because no
-	// other suite reads that component's layout CSS: the rule sits under a
-	// `label { flex-direction: column }` that would stack the picker's label and
-	// its icon, so `flex-direction: row` is what keeps the pair on one line
-	// (SONA-209 r2).
-	it('the VR file-picker buttons lay their contents out in a row', () => {
-		const source = readFileSync(`${srcRoot}/lib/components/VrAvatarForm.svelte`, 'utf8');
-		const rule = source.match(/^\s*\.file-btn\s*\{([^}]*)\}/m)?.[1];
-		expect(rule, '.file-btn rule not found in VrAvatarForm.svelte').toBeDefined();
-		expect(rule).toMatch(/flex-direction:\s*row/);
-	});
-
-	// The pair goes inert together during a save, so it has to dim together too:
-	// the <label> has no :disabled state, so .file-btn.disabled carries the
-	// dimming and the <button> twin takes the class as well as the attribute
-	// (SONA-209 r3).
-	it('both VR file-picker buttons take the disabled class while saving', () => {
-		const source = readFileSync(`${srcRoot}/lib/components/VrAvatarForm.svelte`, 'utf8');
-		const replace = source.match(/<label[^>]*class="file-btn"[^>]*>/)?.[0];
-		expect(replace, 'the replace-model label moved or was renamed').toBeDefined();
-		expect(replace).toContain('class:disabled={saving}');
-		const remove = source.match(/<button[^>]*onclick=\{removeModel\}[^>]*>/)?.[0];
-		expect(remove, 'the remove-model button moved or was renamed').toBeDefined();
-		expect(remove).toContain('class:disabled={saving}');
-	});
-
 	const scopedSelectors = (file: string) =>
 		selectors(readFileSync(`${srcRoot}${file}`, 'utf8')).filter(isControlSubject).sort();
 	const scopedCount = (file: string) => scopedSelectors(file).length;

@@ -3,8 +3,7 @@ import { readFileSync } from 'node:fs';
 import { THUMB_WIDTH } from './img';
 
 // Source-pin for the ONE width every gallery-row thumbnail is transformed at
-// (the cover-picker-square.test.ts precedent: markup facts no runtime test
-// covers, guarded by reading the source).
+// (markup facts no runtime test covers, guarded by reading the source).
 //
 // Two separate regressions are in scope, and they fail differently:
 //

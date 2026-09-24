@@ -933,7 +933,7 @@ a.tag-pill {
 	/* Stacked and centred there is no content edge for a lone Dismiss to sit
 	   flush against, and the missing left pad pulled its label about 5px right
 	   of centre. It takes the resting padding back on both sides here: 10px is
-	   .tag-btn-text's own horizontal padding, and a test pins the two together. */
+	   .tag-btn-text's own horizontal padding. */
 	.tag-actions .tag-btn-text-flush {
 		padding-left: 10px;
 	}

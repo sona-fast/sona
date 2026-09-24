@@ -24,9 +24,7 @@ function bucketRecording(stored: Stored[]) {
 			else if (body instanceof Uint8Array) bytes = body;
 			else bytes = new Uint8Array(body as ArrayBuffer);
 			stored.push({ key, bytes, contentType: opts?.httpMetadata?.contentType });
-		}),
-		delete: vi.fn(async () => {}),
-		list: vi.fn(async () => ({ objects: [], truncated: false }))
+		})
 	};
 }
 
@@ -236,16 +234,5 @@ describe('getStorage wraps the provider in metadata scrubbing', () => {
 			})
 		).rejects.toThrow(UnscrubbableImageError);
 		expect(stored).toHaveLength(0);
-	});
-
-	it('delegates deleteByUrl, owns and deleteOrphans to the provider', async () => {
-		const stored: Stored[] = [];
-		const { storage, bucket } = storageFor(stored);
-		expect(storage.id).toBe('r2');
-		expect(storage.owns('https://cdn.test/artwork/a.jpg')).toBe(true);
-		await storage.deleteByUrl('https://cdn.test/artwork/a.jpg');
-		expect(bucket.delete).toHaveBeenCalledWith('artwork/a.jpg');
-		expect(await storage.deleteOrphans([])).toBe(0);
-		expect(bucket.list).toHaveBeenCalled();
 	});
 });

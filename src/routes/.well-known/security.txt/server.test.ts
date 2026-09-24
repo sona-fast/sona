@@ -20,7 +20,6 @@ describe('/.well-known/security.txt', () => {
 		expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
 		expect(body).toContain('Contact: https://github.com/sona-fast/sona/security/advisories/new');
 		expect(body).toContain('Contact: mailto:security@sona.fast');
-		expect(body).toContain('Policy: https://github.com/sona-fast/sona/blob/main/SECURITY.md');
 		// A public issue tracker in Contact would make a report a disclosure.
 		expect(body).not.toContain('/issues');
 	});

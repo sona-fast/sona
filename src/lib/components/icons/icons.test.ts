@@ -117,7 +117,7 @@ describe('nothing renders a social icon as an anchor with no accessible name', (
 		//
 		// The /about chips are NOT covered here: they render the icon dynamically
 		// (<link.icon />), so the by-name scan above cannot see them. Their
-		// labelling is guarded by social-chips.test.ts instead.
+		// labelling is guarded by tests/e2e/instagram-social.spec.ts instead.
 		expect(matched.length).toBeGreaterThanOrEqual(21);
 	});
 

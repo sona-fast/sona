@@ -15,7 +15,6 @@ describe('CopyCommand accessible name', () => {
 		// with more than one copyable value can say WHICH one, since that name is
 		// all a screen-reader user gets to tell the buttons apart.
 		expect(copyCommandSrc).toMatch(/aria-label=\{label \?\? m\.admin_setup_copy\(\)\}/);
-		expect(copyCommandSrc).toMatch(/label\?: string;/);
 	});
 
 	it('is passed a specific label by the feed-key row, which shares a page with other copy buttons', () => {

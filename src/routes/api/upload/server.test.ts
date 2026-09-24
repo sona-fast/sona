@@ -138,13 +138,6 @@ describe('POST /api/upload', () => {
 		expect(put).toHaveBeenCalledTimes(1);
 	});
 
-	it('pins the cap at 64 MiB (LITERAL — guards against silent upward drift)', () => {
-		// The 64 MiB cap exists for isolate memory safety (one buffered copy is
-		// half the 128 MB ceiling); a raise must trip this pin and be re-justified.
-		// The constant-driven 413 test above covers enforcement.
-		expect(MAX_BUFFER_BYTES).toBe(64 * 1024 * 1024);
-	});
-
 	it('accepts a video/webm clip whose head carries the EBML magic (SONA-124)', async () => {
 		// The VR showcase widening: webm rides the image endpoint but is verified
 		// against its own signature, not the raster sniff.

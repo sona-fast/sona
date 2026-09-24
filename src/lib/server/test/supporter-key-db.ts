@@ -1,8 +1,7 @@
 import type { Database } from '$lib/server/db';
 
 // Fakes of the ONE query both supporter-key memos issue — getRawSetting's
-// `db.select().from(t).where(...).get()`. Shared by settings.test.ts and
-// vr-gate.test.ts so a cache-hit assertion means the same thing at both layers.
+// `db.select().from(t).where(...).get()`. Used by settings.test.ts.
 
 /**
  * Resolves to the single stored row. Reads are counted, so a cache hit is

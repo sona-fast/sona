@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// Source-pin for the picker grids' TRACK sizing, following the
-// cover-picker-square.test.ts precedent.
+// Source-pin for the picker grids' TRACK sizing.
 //
 // Why this can't be an e2e test: the bug only appears in stock Firefox. Both
 // Chromium and Playwright's bundled (patched) Firefox render these grids
