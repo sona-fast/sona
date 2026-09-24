@@ -11,7 +11,7 @@ import { clearStickerTabCache } from '$lib/server/stickers';
 import { clearCollectionsNavCache } from '$lib/server/collections';
 import { load } from './+page.server';
 import { load as artLoad } from '../(paths)/art/+page.server';
-import { loadPassport, type PassportData } from '$lib/server/passport';
+import { loadPassport, loadPassportPicture, type PassportData } from '$lib/server/passport';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -575,9 +575,10 @@ describe('passport load — the picture of the day', () => {
 		);
 	}
 
+	const seedArtist = (db: ReturnType<typeof makeDb>['db']) => db.insert(artists).values({ id: 1, name: 'mothlamp' });
+
 	async function seedPieces(db: ReturnType<typeof makeDb>['db'], ids: number[]) {
-		await db.insert(artists).values({ id: 1, name: 'mothlamp' });
-		if (ids.length === 0) return;
+		await seedArtist(db);
 		await db
 			.insert(images)
 			.values(ids.map((id) => ({ id, title: `Piece ${id}`, slug: `piece-${id}`, imageUrl: `/${id}.png`, artistId: 1 })));
@@ -585,7 +586,7 @@ describe('passport load — the picture of the day', () => {
 
 	it('picks only published SFW parents tagged with no character or only owner characters', async () => {
 		const { db } = makePassportDb();
-		await seedPieces(db, []);
+		await seedArtist(db);
 		await db.insert(characters).values([
 			{ id: 1, name: 'Owner', isOwner: true },
 			{ id: 2, name: 'Second Owner', isOwner: true },
@@ -649,7 +650,6 @@ describe('passport load — the picture of the day', () => {
 	it('leaves the pick alone when a lower-ranked piece is published mid-day', async () => {
 		const { sqlite, db } = makePassportDb();
 		await seedPieces(db, [1, 2, 3]);
-		sqlite.exec('UPDATE images SET published = 0 WHERE id = 3');
 
 		let unchanged = 0;
 		for (let day = 0; day < 30; day++) {
@@ -662,6 +662,19 @@ describe('passport load — the picture of the day', () => {
 		}
 		// Not vacuous: on most days the new piece does not outrank the pick.
 		expect(unchanged).toBeGreaterThan(0);
+	});
+
+	// image_characters has no index on image_id, so a correlated subquery
+	// rescans the whole table once per candidate piece. The owner-only filter
+	// must run as a subquery SQLite evaluates once.
+	it('filters out other characters without a correlated subquery', () => {
+		const { sqlite, db } = makePassportDb();
+		const { sql: text, params } = loadPassportPicture(db, NOON).toSQL();
+		const plan = (sqlite.prepare(`EXPLAIN QUERY PLAN ${text}`).all(...params) as { detail: string }[]).map(
+			(row) => row.detail
+		);
+		expect(plan.some((detail) => detail.includes('image_characters'))).toBe(true);
+		expect(plan.filter((detail) => detail.includes('CORRELATED'))).toEqual([]);
 	});
 
 	// The schema allows an empty title; the picture link still needs a name,
@@ -681,7 +694,7 @@ describe('passport load — the picture of the day', () => {
 	// of the pool, and a SFW one is one piece among the rest.
 	it('ignores the ref sheet designation and the featured order', async () => {
 		const { db } = makePassportDb();
-		await seedPieces(db, []);
+		await seedArtist(db);
 		await db.insert(images).values([
 			{ id: 1, title: 'Mature Ref', slug: 'mature-ref', imageUrl: '/1.png', artistId: 1, nsfw: true },
 			{ id: 2, title: 'Featured', slug: 'featured', imageUrl: '/2.png', artistId: 1, nsfw: true, featured: true, featuredOrder: 1 },

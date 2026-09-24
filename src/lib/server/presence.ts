@@ -15,8 +15,7 @@ import type { Database } from './db';
 export const REFERENCE_TAG = 'reference';
 
 /**
- * The ref sheet query, unexecuted, so a caller can put it in a db.batch with
- * its other reads. /art reads the ref sheet through it (via loadRefSheet).
+ * The ref sheet query. /art reads the ref sheet through it (via loadRefSheet).
  *
  * Precedence, in one statement: the first owner character's (by name)
  * explicit reference_image_id wins when that image is published; otherwise the

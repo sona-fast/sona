@@ -113,7 +113,11 @@ export function loadPassportPicture(db: Database, now: Date) {
 	const y = sql`((${x} * 1597334677) & 2147483647)`;
 	const z = sql`((${y} | (${y} >> 16)) - (${y} & (${y} >> 16)))`;
 	const rank = sql`((${z} * 747796405) & 2147483647)`;
-	const otherCharacter = sql`EXISTS (SELECT 1 FROM ${imageCharacters} INNER JOIN ${characters} ON ${characters.id} = ${imageCharacters.characterId} WHERE ${imageCharacters.imageId} = ${images.id} AND ${characters.isOwner} = 0)`;
+	// Pieces tagged with anyone else's character, as a non-correlated subquery
+	// SQLite builds once: image_characters has no index on image_id, so a
+	// per-piece EXISTS would scan the whole table for every candidate.
+	// image_id is NOT NULL, so NOT IN has no NULL trap.
+	const otherCharacter = sql`${images.id} IN (SELECT ${imageCharacters.imageId} FROM ${imageCharacters} INNER JOIN ${characters} ON ${characters.id} = ${imageCharacters.characterId} WHERE ${characters.isOwner} = 0)`;
 	return db
 		.select({
 			slug: images.slug,
