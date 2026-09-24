@@ -120,6 +120,10 @@ test.describe('gallery artist combobox keyboard', () => {
 	test('Enter on "All Artists" clears the filter, and Enter with the list closed does nothing', async ({ page }) => {
 		await openHydrated(page, '/gallery?artist=Test+Artist');
 
+		// The applied filter is announced as current; the active row is option 0.
+		await expect(option(page, 1)).toHaveAttribute('aria-current', 'true');
+		await expect(option(page, 0)).not.toHaveAttribute('aria-current');
+
 		// Option 0 is active, so Enter must pick it, not the first-match fallback.
 		await input(page).press('Enter');
 		await expect(page).not.toHaveURL(/[?&]artist=/);
@@ -150,6 +154,8 @@ test.describe('gallery artist combobox keyboard', () => {
 		// list: Enter must not pick, ArrowUp must not move the highlight.
 		await input(page).dispatchEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true });
 		await input(page).dispatchEvent('keydown', { key: 'ArrowUp', isComposing: true, bubbles: true });
+		// Some engines only report composition through the legacy keyCode 229.
+		await input(page).dispatchEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true });
 		await expect(listbox(page)).toBeVisible();
 		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-1');
 		await expect(page).not.toHaveURL(/[?&]artist=/);

@@ -357,6 +357,7 @@
 							class:active={artistActive === 0}
 							role="option"
 							aria-selected={artistActive === 0}
+							aria-current={!data.filters.artist ? 'true' : undefined}
 							onpointermove={(e) => artistPointerMove(e, 0)}
 							onclick={() => selectArtist('')}
 						>{m.gallery_all_artists()}</button>
@@ -372,6 +373,7 @@
 								class:active={i + 1 === artistActive}
 								role="option"
 								aria-selected={i + 1 === artistActive}
+								aria-current={artist.name === data.filters.artist ? 'true' : undefined}
 								onpointermove={(e) => artistPointerMove(e, i + 1)}
 								onclick={() => selectArtist(artist.name)}
 							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
@@ -680,7 +682,8 @@
 		background: var(--secondary);
 	}
 
-	/* The fill belongs to the active row; the current filter is bold only. */
+	/* The fill belongs to the active row; the current filter is bold only
+	   (and carries aria-current, since aria-selected follows the active row). */
 	.combobox-option.selected {
 		font-weight: 600;
 	}
