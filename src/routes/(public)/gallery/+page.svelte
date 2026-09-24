@@ -294,6 +294,10 @@
 					artistActive = -1;
 				}}
 				onkeydown={(e) => {
+					// While an IME is composing (CJK input), Enter confirms the conversion
+					// and the arrows move through candidates; none of it is meant for the
+					// list. keyCode 229 is the legacy signal some engines still send.
+					if (e.isComposing || e.keyCode === 229) return;
 					if (e.key === 'ArrowDown') {
 						e.preventDefault();
 						artistOpen = true;

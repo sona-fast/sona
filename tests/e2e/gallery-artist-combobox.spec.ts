@@ -145,6 +145,15 @@ test.describe('gallery artist combobox keyboard', () => {
 
 		await input(page).press('ArrowDown');
 		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-1');
+
+		// Keys that arrive while an IME is composing belong to the IME, not the
+		// list: Enter must not pick, ArrowUp must not move the highlight.
+		await input(page).dispatchEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true });
+		await input(page).dispatchEvent('keydown', { key: 'ArrowUp', isComposing: true, bubbles: true });
+		await expect(listbox(page)).toBeVisible();
+		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-1');
+		await expect(page).not.toHaveURL(/[?&]artist=/);
+
 		await input(page).pressSequentially('Test');
 		await expect(input(page)).not.toHaveAttribute('aria-activedescendant');
 
