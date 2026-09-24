@@ -30,9 +30,12 @@ async function openHydrated(page: Page, path = '/gallery') {
 }
 
 test.describe('gallery artist combobox keyboard', () => {
-	test('ArrowDown moves the active option and Enter picks it', async ({ page }) => {
-		// Hydration-retry headroom for openHydrated.
+	// Hydration-retry headroom for openHydrated.
+	test.beforeEach(() => {
 		test.slow();
+	});
+
+	test('ArrowDown moves the active option and Enter picks it', async ({ page }) => {
 		await openHydrated(page);
 		await expect(listbox(page)).toBeVisible();
 
@@ -51,8 +54,6 @@ test.describe('gallery artist combobox keyboard', () => {
 	});
 
 	test('arrows stop at both ends and Escape closes the list', async ({ page }) => {
-		// Hydration-retry headroom for openHydrated.
-		test.slow();
 		await openHydrated(page);
 
 		// ArrowUp at the first option stays there.
@@ -74,11 +75,31 @@ test.describe('gallery artist combobox keyboard', () => {
 		await expect(input(page)).toBeFocused();
 		await input(page).press('ArrowUp');
 		await expect(listbox(page)).toHaveCount(0);
+
+		// ArrowDown reopens the closed list on the first option.
+		await input(page).press('ArrowDown');
+		await expect(listbox(page)).toBeVisible();
+		await expect(input(page)).toHaveAttribute('aria-expanded', 'true');
+		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-0');
+
+		// A click on the still-focused input reopens the list after Escape.
+		await input(page).press('Escape');
+		await expect(listbox(page)).toHaveCount(0);
+		await input(page).click();
+		await expect(listbox(page)).toBeVisible();
+
+		// Tab leaves the combobox (the options aren't tab stops) and closes the list.
+		await input(page).press('Tab');
+		await expect(input(page)).not.toBeFocused();
+		await expect(listbox(page)).toHaveCount(0);
+
+		// Closing on focusout doesn't swallow a mouse pick.
+		await input(page).click();
+		await option(page, 1).click();
+		await expect(page).toHaveURL(/[?&]artist=Test(\+|%20)Artist(&|$)/);
 	});
 
 	test('Enter on "All Artists" clears the filter, and Enter with the list closed does nothing', async ({ page }) => {
-		// Hydration-retry headroom for openHydrated.
-		test.slow();
 		await openHydrated(page, '/gallery?artist=Test+Artist');
 
 		// Option 0 is active, so Enter must pick it, not the first-match fallback.
@@ -102,8 +123,6 @@ test.describe('gallery artist combobox keyboard', () => {
 	});
 
 	test('typing resets the active option and Enter falls back to the first match', async ({ page }) => {
-		// Hydration-retry headroom for openHydrated.
-		test.slow();
 		await openHydrated(page);
 
 		await input(page).press('ArrowDown');
@@ -125,23 +144,20 @@ test.describe('gallery artist combobox keyboard', () => {
 	test('Enter with no matching artists leaves the URL alone', async ({ page }) => {
 		const errors: Error[] = [];
 		page.on('pageerror', (err) => errors.push(err));
-		// Hydration-retry headroom for openHydrated.
-		test.slow();
 		await openHydrated(page);
 
 		await input(page).pressSequentially('zzzz-no-such-artist');
 		await expect(listbox(page)).toContainText('No matching artists');
 		await expect(option(page, 1)).toHaveCount(0);
 
+		// A stray pick would close the list and replace the typed text.
 		await input(page).press('Enter');
-		await page.waitForTimeout(500);
-		await expect(page).not.toHaveURL(/[?&]artist=/);
+		await expect(input(page)).toHaveValue('zzzz-no-such-artist');
+		await expect(listbox(page)).toContainText('No matching artists');
 		expect(errors).toEqual([]);
 	});
 
 	test('pointer movement sets the active option; a parked pointer does not', async ({ page }) => {
-		// Hydration-retry headroom for openHydrated.
-		test.slow();
 		await openHydrated(page);
 
 		const box = await option(page, 1).boundingBox();
@@ -166,5 +182,54 @@ test.describe('gallery artist combobox keyboard', () => {
 		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-1');
 		await input(page).press('Enter');
 		await expect(page).toHaveURL(/[?&]artist=Test(\+|%20)Artist(&|$)/);
+	});
+
+	test('arrow keys scroll the active option into view; a scroll under a parked pointer keeps it', async ({ page }) => {
+		await openHydrated(page);
+		// Two options never overflow the 260px list; shrink it so it scrolls (the
+		// rows are 37px, so 60px shows one whole row but not both).
+		await page.addStyleTag({ content: '#artist-combobox-list{max-height:60px}' });
+
+		const inView = (i: number) =>
+			listbox(page).evaluate((list, id) => {
+				const opt = document.getElementById(id)!;
+				const l = list.getBoundingClientRect();
+				const o = opt.getBoundingClientRect();
+				return o.top >= l.top && o.bottom <= l.bottom;
+			}, `artist-combobox-opt-${i}`);
+		const idAtPoint = (px: number, py: number) =>
+			page.evaluate(([ex, ey]) => document.elementFromPoint(ex, ey)?.id, [px, py]);
+
+		// Park the pointer near the top of option 0.
+		const box = await option(page, 0).boundingBox();
+		if (!box) throw new Error('option 0 has no bounding box');
+		const x = box.x + box.width / 2;
+		const y = box.y + 6;
+		await page.mouse.move(x - 1, y);
+		await page.mouse.move(x, y);
+		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-0');
+		await expect.poll(() => inView(1)).toBe(false);
+
+		// ArrowDown scrolls option 1 into view, and option 0 stays under the pointer.
+		await input(page).press('ArrowDown');
+		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-1');
+		await expect.poll(() => inView(1)).toBe(true);
+		await expect.poll(() => idAtPoint(x, y)).toBe('artist-combobox-opt-0');
+
+		// A desktop browser sends a move event, at unchanged coordinates, when
+		// content scrolls under a still pointer; headless Chromium doesn't, so
+		// dispatch it. Only a real coordinate change may move the active option.
+		await page.evaluate(([px, py]) => {
+			document
+				.elementFromPoint(px, py)!
+				.dispatchEvent(new PointerEvent('pointermove', { clientX: px, clientY: py, bubbles: true }));
+		}, [x, y]);
+		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-1');
+
+		// ArrowUp scrolls option 0 back into view.
+		await expect.poll(() => inView(0)).toBe(false);
+		await input(page).press('ArrowUp');
+		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-0');
+		await expect.poll(() => inView(0)).toBe(true);
 	});
 });

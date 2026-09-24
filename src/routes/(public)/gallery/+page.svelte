@@ -267,13 +267,23 @@
 				{/each}
 			</select>
 		</div>
-		<div class="select-wrapper combobox" bind:this={artistBox}>
+		<div
+			class="select-wrapper combobox"
+			bind:this={artistBox}
+			onfocusout={(e) => {
+				// Tab away closes the list. A pointer press on an option can blur the
+				// input with no relatedTarget (Safari doesn't focus buttons), so only
+				// close when focus lands outside; outside clicks close via pointerdown.
+				if (e.relatedTarget && !artistBox?.contains(e.relatedTarget as Node)) artistOpen = false;
+			}}
+		>
 			<input
 				type="text"
 				class="input filter-select combobox-input"
 				placeholder={m.gallery_all_artists()}
 				bind:value={artistQuery}
 				onfocus={() => (artistOpen = true)}
+				onclick={() => (artistOpen = true)}
 				oninput={() => {
 					artistOpen = true;
 					artistActive = -1;
@@ -298,7 +308,9 @@
 						// match. With the menu closed, Enter does nothing.
 						if (!artistOpen) return;
 						if (artistActive >= 0) {
-							selectArtist(artistActive === 0 ? '' : artistMatches[artistActive - 1].name);
+							// The match list can shrink under a stale index; then do nothing.
+							const pick = artistActive === 0 ? '' : artistMatches[artistActive - 1]?.name;
+							if (pick !== undefined) selectArtist(pick);
 						} else if (artistMatches.length) {
 							selectArtist(artistMatches[0].name);
 						}
@@ -318,6 +330,7 @@
 						<button
 							type="button"
 							id="artist-combobox-opt-0"
+							tabindex="-1"
 							class="combobox-option"
 							class:selected={!data.filters.artist}
 							class:active={artistActive === 0}
@@ -332,6 +345,7 @@
 							<button
 								type="button"
 								id={`artist-combobox-opt-${i + 1}`}
+								tabindex="-1"
 								class="combobox-option"
 								class:selected={artist.name === data.filters.artist}
 								class:active={i + 1 === artistActive}
@@ -642,8 +656,8 @@
 		background: var(--secondary);
 	}
 
+	/* The fill belongs to the active row; the current filter is bold only. */
 	.combobox-option.selected {
-		background: var(--secondary);
 		font-weight: 600;
 	}
 
@@ -659,6 +673,11 @@
 		font-family: var(--font-primary);
 		font-size: 12px;
 		color: var(--muted-foreground);
+	}
+
+	/* --muted-foreground misses 4.5:1 on the active row's --secondary fill. */
+	.combobox-option.active .combobox-former {
+		color: var(--foreground);
 	}
 
 	/* AKA pointer — one quiet line when an old ?artist= name was redirected. A thin
