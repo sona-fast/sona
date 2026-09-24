@@ -170,7 +170,7 @@ test.describe('populated passport', () => {
 		const stamps = page.getByRole('region', { name: 'Stamps', exact: true });
 		const heading = stamps.getByRole('heading', { level: 2, name: 'Stamps', exact: true });
 		await expect(heading).toHaveCount(1);
-		await expect(heading).toHaveClass('sr-only');
+		await expect(heading).toHaveClass(/\bsr-only\b/);
 		await expect(heading).toHaveCSS('clip', 'rect(0px, 0px, 0px, 0px)');
 		expect(await heading.evaluate((el) => el.getBoundingClientRect().width)).toBeLessThanOrEqual(1);
 		await expect(page.getByText('Each stamp opens that part of the site.')).toHaveCount(0);
