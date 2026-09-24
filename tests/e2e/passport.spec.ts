@@ -129,7 +129,7 @@ test.describe('populated passport', () => {
 		expect(t.site).toBe(t.passport);
 
 		// On a phone the stamps page sits under the data page, and its first
-		// item starts at the mock's 20px page padding.
+		// item starts at the mock's 20px page padding plus the 1px divider above it.
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/');
 		t = await tops();

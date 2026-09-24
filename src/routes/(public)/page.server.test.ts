@@ -675,6 +675,9 @@ describe('passport load — the picture of the day', () => {
 		);
 		expect(plan.some((detail) => detail.includes('image_characters'))).toBe(true);
 		expect(plan.filter((detail) => detail.includes('CORRELATED'))).toEqual([]);
+		// A positive check too, so a renamed plan label fails loudly instead of
+		// letting a reverted correlated form pass unnoticed.
+		expect(plan.some((detail) => detail.includes('LIST SUBQUERY'))).toBe(true);
 	});
 
 	// The schema allows an empty title; the picture link still needs a name,
