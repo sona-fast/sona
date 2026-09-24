@@ -1,85 +1,22 @@
 import { error } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { images, artists, imageTags, tags, characters } from '$lib/server/db/schema';
+import { images, artists } from '$lib/server/db/schema';
 import { getSettings } from '$lib/server/settings';
-import { REFERENCE_TAG, sonaDetails, artHasContent } from '$lib/server/presence';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { sonaDetails, artHasContent, loadRefSheet } from '$lib/server/presence';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
 	const settings = await getSettings(db);
 
-	// refSheet precedence: an owner character's explicit reference_image_id wins
-	// (when that image is published); otherwise fall back to the most recent
-	// published image tagged REFERENCE_TAG.
-	//
-	// SONA-18: the operator's designation is honored even when the image is NSFW
-	// — the load carries the flag through so the page can render it behind the
-	// site's usual blur-and-reveal shield, rather than dropping the ref sheet.
-	// Variants (parent_image_id set) are excluded from both paths: a variant is
-	// one angle of another image, not a sheet in its own right, so a designated
-	// variant falls through as if it had never been designated. (The recentArt
-	// strip below still lists variants as standalone cards, unlike the gallery
-	// and homepage queries — an older inconsistency this change doesn't touch.)
-	const owner = await db
-		.select({ referenceImageId: characters.referenceImageId })
-		.from(characters)
-		.where(eq(characters.isOwner, true))
-		// first owner by name — must match the loads' find() over name-ordered characters
-		.orderBy(characters.name)
-		.get();
-
-	let refSheet =
-		owner?.referenceImageId != null
-			? (await db
-					.select({
-						slug: images.slug,
-						imageUrl: images.imageUrl,
-						title: images.title,
-						artistName: artists.name,
-						nsfw: images.nsfw,
-						// width/height reserve the img box (no CLS) — the ref sheet is the
-						// page's LCP element.
-						width: images.width,
-						height: images.height
-					})
-					.from(images)
-					.leftJoin(artists, eq(artists.id, images.artistId))
-					.where(
-						and(
-							eq(images.id, owner.referenceImageId),
-							eq(images.published, true),
-							isNull(images.parentImageId)
-						)
-					)
-					.get()) ?? null
-			: null;
-
-	refSheet ??=
-		(await db
-			.select({
-				slug: images.slug,
-				imageUrl: images.imageUrl,
-				title: images.title,
-				artistName: artists.name,
-				nsfw: images.nsfw,
-				width: images.width,
-				height: images.height
-			})
-			.from(images)
-			.innerJoin(imageTags, eq(imageTags.imageId, images.id))
-			.innerJoin(tags, eq(tags.id, imageTags.tagId))
-			.leftJoin(artists, eq(artists.id, images.artistId))
-			.where(
-				and(
-					eq(tags.name, REFERENCE_TAG),
-					eq(images.published, true),
-					isNull(images.parentImageId)
-				)
-			)
-			.orderBy(desc(images.createdAt))
-			.get()) ?? null;
+	// The ref sheet precedence lives in loadRefSheet, shared with the passport
+	// homepage so the two pages can never pick different pictures. It honors an
+	// NSFW designation (SONA-18); the page renders it behind the blur shield.
+	// (The recentArt strip below still lists variants as standalone cards,
+	// unlike the gallery and homepage queries — an older inconsistency this
+	// change doesn't touch.)
+	const refSheet = await loadRefSheet(db);
 
 	const recentArt = await db
 		.select({ slug: images.slug, imageUrl: images.imageUrl, thumbnailUrl: images.thumbnailUrl, title: images.title })

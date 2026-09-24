@@ -84,6 +84,22 @@ describe('art load — refSheet precedence', () => {
 		expect(data.refSheet?.slug).toBe('art-6');
 	});
 
+	// Two owners with designations: the first by name wins, not the first by
+	// rowid. Zed is inserted first so a subquery that drops ORDER BY name picks A.
+	it("takes the first owner by name's designation when several owners designate one", async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values([
+			{ id: 1, title: 'A', slug: 'art-a', imageUrl: 'https://cdn.example.com/a.png', artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' },
+			{ id: 2, title: 'B', slug: 'art-b', imageUrl: 'https://cdn.example.com/b.png', artistId: 1, published: true, createdAt: '2026-01-02T00:00:00.000Z' }
+		]);
+		await db.insert(characters).values({ name: 'Zed', isOwner: true, referenceImageId: 1 });
+		await db.insert(characters).values({ name: 'Amy', isOwner: true, referenceImageId: 2 });
+
+		const data = (await load({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(data.refSheet?.slug).toBe('art-b');
+	});
+
 	// The ref sheet is /art's LCP element; the load must carry intrinsic
 	// width/height so the template can reserve its box (no CLS).
 	it('returns intrinsic width/height via the designated path', async () => {

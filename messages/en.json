@@ -21,6 +21,7 @@
 	"admin_settings_contact_email_nudge": "Set a monitored contact email so your Privacy Policy can list a real address for privacy requests and takedowns. Until then, it points visitors to the generic contact options on your site.",
 	"legal_last_updated": "Last updated {date}",
 	"footer_legal_label": "Site links",
+	"nav_main_label": "Main",
 	"footer_privacy": "Privacy",
 	"footer_terms": "Terms",
 	"footer_build": "build {sha}",
@@ -124,6 +125,14 @@
 	"gallery_search_placeholder": "Search artworks...",
 	"gallery_grid_view": "Grid view",
 	"gallery_list_view": "List view",
+	"gallery_filter_photographer": "Photographer",
+	"gallery_filter_event": "Event",
+	"gallery_filter_character": "Character",
+	"gallery_filter_sort": "Sort by",
+	"gallery_filter_tag": "Tag",
+	"gallery_filter_search": "Search artworks",
+	"gallery_filter_artist": "Artist",
+	"gallery_filter_no_artists": "No matching artists",
 	"gallery_previous": "Previous",
 	"gallery_next": "Next",
 	"gallery_fursuit_capped": "Showing the most recent photos — older ones aren't loaded yet.",
@@ -2078,5 +2087,152 @@
 	"admin_lookup_announce_shared_refilled_date": "Sona filled the commissioned date from the parent image's result.",
 	"admin_lookup_announce_shared_cleared": "Sona cleared the source post URL and commissioned date the last lookup filled.",
 	"admin_lookup_announce_shared_cleared_source": "Sona cleared the source post URL the last lookup filled.",
-	"admin_lookup_announce_shared_cleared_date": "Sona cleared the commissioned date the last lookup filled."
+	"admin_lookup_announce_shared_cleared_date": "Sona cleared the commissioned date the last lookup filled.",
+	"passport_label": "Passport",
+	"passport_name": "Name",
+	"passport_pronouns": "Pronouns",
+	"passport_species": "Species",
+	"passport_home": "Home",
+	"passport_since": "Commissioning since",
+	"passport_elsewhere": "Elsewhere",
+	"passport_caption_ref": "Ref sheet.",
+	"passport_caption_title": "{title}.",
+	"passport_art_by": "Art by",
+	"passport_unattributed": "Unattributed",
+	"passport_caption_avatar": "Profile picture, unattributed",
+	"passport_alt_ref": "{name}, reference sheet",
+	"passport_alt_avatar": "{name}, profile picture",
+	"passport_stamps": "Stamps",
+	"passport_stamps_note": "Each stamp opens that part of the site.",
+	"passport_on_this_site": "On this site",
+	"passport_conventions": "Conventions",
+	"passport_no_stamps": "This passport has no stamps yet.",
+	"passport_next": "Next",
+	"passport_fursuit": "Fursuit photos",
+	"passport_vr": "VR avatars",
+	"passport_about_links": "Links",
+	"passport_about_cons": "Upcoming conventions",
+	"passport_about_links_cons": "Links and upcoming conventions",
+	"passport_pieces": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} piece",
+				"countPlural=other": "{count} pieces"
+			}
+		}
+	],
+	"passport_by_artists": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "by {count} artist",
+				"countPlural=other": "by {count} artists"
+			}
+		}
+	],
+	"passport_photos": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} photo",
+				"countPlural=other": "{count} photos"
+			}
+		}
+	],
+	"passport_by_photographers": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "by {count} photographer",
+				"countPlural=other": "by {count} photographers"
+			}
+		}
+	],
+	"passport_stickers": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} sticker",
+				"countPlural=other": "{count} stickers"
+			}
+		}
+	],
+	"passport_in_packs": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "in {count} pack",
+				"countPlural=other": "in {count} packs"
+			}
+		}
+	],
+	"passport_avatars": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} avatar",
+				"countPlural=other": "{count} avatars"
+			}
+		}
+	],
+	"passport_collections": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} collection",
+				"countPlural=other": "{count} collections"
+			}
+		}
+	],
+	"passport_live_line": "{place}, until {date}",
+	"passport_live_until": "Until {date}"
 }

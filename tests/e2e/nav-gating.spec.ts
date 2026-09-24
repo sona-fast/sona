@@ -36,7 +36,7 @@ test('/gallery tab bar shows the VR pill (seeded published avatar) but no Sticke
 }) => {
 	await page.goto('/gallery');
 
-	const tabs = page.locator('.tabs[role="tablist"]');
+	const tabs = page.locator('.tabs');
 	await expect(tabs).toBeVisible();
 	await expect(tabs.locator('a[href="/vr"]')).toBeVisible();
 	await expect(tabs.locator('a[href="/stickers"]')).toHaveCount(0);

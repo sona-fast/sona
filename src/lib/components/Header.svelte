@@ -28,10 +28,18 @@
 
 <header class="header">
 	<div class="header-inner container">
-		<a href="/" class="logo">{siteName}</a>
-		<nav>
+		<a href="/" class="logo" aria-current={$page.url.pathname === '/' ? 'page' : undefined}>{siteName}</a>
+		<nav aria-label={m.nav_main_label()}>
 			{#each navItems as item (item.href)}
-				<a href={item.href} class="nav-link" class:active={$page.url.pathname.startsWith(item.href)}>
+				{@const active = $page.url.pathname.startsWith(item.href)}
+				<!-- "page" only on the section's own page: a piece under /gallery is in
+				     the Gallery section ("true") but is not the Gallery page. -->
+				<a
+					href={item.href}
+					class="nav-link"
+					class:active
+					aria-current={$page.url.pathname === item.href ? 'page' : active ? 'true' : undefined}
+				>
 					{item.label()}
 				</a>
 			{/each}

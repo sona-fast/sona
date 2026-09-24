@@ -12,12 +12,22 @@
 	import Footer from '$lib/components/Footer.svelte';
 	import MobileCredit from '$lib/components/MobileCredit.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
+	import Passport from '$lib/components/landing/Passport.svelte';
 	import { splashWordmark } from '$lib/landing';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
 	const splash = $derived(data.settings.landingLayout === 'threePath');
+	// Set only on the passport branch of the load.
+	const passport = $derived(data.passport ?? null);
+	// The passport's own picture for link previews, unless it is NSFW: a preview
+	// card shows no blur. The admin avatar is the safe fallback.
+	const passportImage = $derived(
+		passport?.picture && !passport.picture.nsfw
+			? passport.picture.imageUrl
+			: data.settings.adminAvatarUrl || null
+	);
 
 	// ownerName "Sunday" -> "SUNDAY"; else "example.ink" -> "EXAMPLE"
 	const wordmark = $derived(splashWordmark(data.settings.ownerName, data.settings.siteName));
@@ -58,7 +68,11 @@
 	title={data.settings.siteName}
 	description={data.settings.aboutText}
 	url={`${page.url.origin}/`}
-	image={splash ? data.settings.adminAvatarUrl || null : (data.mosaicImageUrls[0] ?? null)}
+	image={passport
+		? passportImage
+		: splash
+			? data.settings.adminAvatarUrl || null
+			: (data.mosaicImageUrls[0] ?? null)}
 	siteName={data.settings.siteName}
 />
 
@@ -108,6 +122,25 @@
 	</div>
 
 	<MobileNav stickersEnabled={data.stickersEnabled} />
+{:else if passport}
+	<!-- The passport composes the same chrome as the mosaic branch below. -->
+	<div class="public-layout">
+		<div class="desktop-header">
+			<Header
+				siteName={data.settings.siteName}
+				stickersEnabled={data.stickersEnabled}
+				collectionsEnabled={data.collectionsEnabled}
+			/>
+		</div>
+		<main class="passport container">
+			<Passport {passport} />
+		</main>
+		<div class="desktop-footer">
+			<Footer settings={data.settings} host={data.host} />
+		</div>
+		<MobileCredit settings={data.settings} host={data.host} />
+		<MobileNav stickersEnabled={data.stickersEnabled} />
+	</div>
 {:else}
 	<div class="public-layout">
 		<div class="desktop-header">
@@ -397,6 +430,10 @@
 		padding: 48px 24px;
 	}
 
+	.passport {
+		padding-block: 28px 56px;
+	}
+
 	.section-header {
 		display: flex;
 		align-items: center;
@@ -430,6 +467,10 @@
 
 		.recent {
 			padding: 24px 16px;
+		}
+
+		.passport {
+			padding: 16px 16px 32px;
 		}
 
 		.section-header h2 {

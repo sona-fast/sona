@@ -66,11 +66,12 @@ describe('the flags are actually plumbed into the nav components', () => {
 		expect(publicLayoutSrc).toContain('<MobileNav stickersEnabled={data.stickersEnabled} />');
 	});
 
-	it('the homepage (+page@ escapes that layout) passes them to BOTH branches', () => {
-		// 2 Headers + 2 MobileNavs carry the stickers flag; both Headers carry
-		// the collections flag — a dropped pass anywhere lowers its count.
-		expect(homeSrc.match(/stickersEnabled=\{data\.stickersEnabled\}/g)).toHaveLength(4);
-		expect(homeSrc.match(/collectionsEnabled=\{data\.collectionsEnabled\}/g)).toHaveLength(2);
+	it('the homepage (+page@ escapes that layout) passes them to EVERY branch', () => {
+		// threePath, passport and mosaic: 3 Headers + 3 MobileNavs carry the
+		// stickers flag; all three Headers carry the collections flag — a dropped
+		// pass anywhere lowers its count.
+		expect(homeSrc.match(/stickersEnabled=\{data\.stickersEnabled\}/g)).toHaveLength(6);
+		expect(homeSrc.match(/collectionsEnabled=\{data\.collectionsEnabled\}/g)).toHaveLength(3);
 	});
 
 	it('the (paths) layout passes the stickers flag to MobileNav', () => {

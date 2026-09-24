@@ -48,6 +48,7 @@
 				imageUrl={image.thumbnailUrl || image.imageUrl}
 				tag={image.tag}
 				nsfw={image.nsfw}
+				headingLevel="h2"
 			/>
 		{:else}
 			<p class="empty">{m.collection_empty()}</p>
