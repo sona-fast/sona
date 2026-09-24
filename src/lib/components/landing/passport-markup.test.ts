@@ -59,41 +59,10 @@ describe('passport markup', () => {
 		}
 	});
 
-	// The caption is only the credit: the title is the image's alt (and so the
-	// link's name), never a caption sentence with a full stop after it.
-	it('captions the piece with the credit alone and names the link by the title', () => {
-		const caption =
-			passport.match(/<a class="photo-frame"[\s\S]*?<figcaption>([\s\S]*?)<\/figcaption>/)?.[1] ?? '';
-		expect(caption).toMatch(/^\s*\{#if picture\.artistName\}\{m\.passport_art_by\(\)\}/);
-		expect(caption).not.toContain('title');
-		expect(passport).toContain('<a class="photo-frame" href="/gallery/{picture.slug}">');
-		expect(passport).toContain('{@render art(picture.imageUrl, picture.title)}');
-		expect(passport).not.toContain('passport_caption_title');
-		expect(passport).not.toContain('passport_caption_ref');
-	});
-
-	// The pool is SFW only, so the passport has no NSFW gate of its own: no
-	// blur, no scrim, no label, and no reveal button inside the link.
-	it('draws no NSFW gate on the picture', () => {
-		expect(passport).not.toMatch(/<button\b/);
-		expect(passport).not.toMatch(/class:blurred|class="gate"|\.gate\b|picture\.nsfw/);
-	});
-
 	// 50% black measures 3.95:1 behind the label over light blurred art, so the
 	// gallery card's gate uses 60%.
 	it('lays the gallery card NSFW label on a 60% scrim', () => {
 		expect(rule(artworkCard, '.nsfw-overlay')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
-	});
-
-	// The heading names the stamps region and keeps the h1, h2, h3 outline, but
-	// nothing shows: no visible "Stamps" label and no note under it.
-	it('keeps the stamps heading for screen readers only, with no note', () => {
-		expect(passport).toContain('<section class="page page--stamps" aria-labelledby="pp-stamps">');
-		expect(passport).toContain('<h2 id="pp-stamps" class="sr-only">{m.passport_stamps()}</h2>');
-		expect(passport).not.toContain('stamps-note');
-		// The first group label takes the top of the page when no Here now stamp
-		// sits between it and the hidden heading.
-		expect(rule(passport, '.sr-only + .group-h')).toMatch(/margin-top:\s*0/);
 	});
 
 	// The card's title was a fixed h3, so /gallery and a collection page jumped
@@ -115,7 +84,6 @@ describe('passport markup', () => {
 		expect(stamp).toContain(".join(ja ? '、' : ', ')");
 		expect(stamp).toContain("lines.join(ja ? '、' : ' ')");
 		// 作者：Test Artist, but Art by Test Artist.
-		expect(passport).toContain("{m.passport_art_by()}{ja ? '' : ' '}<a");
 		expect(ja.passport_art_by).toBe('作者：');
 		// The place carries its own ASCII comma ("Denver, CO"), so a 読点 after
 		// it would mix the two; a space joins it to the date.

@@ -50,9 +50,9 @@ test.describe('populated passport', () => {
 		await expect(details).toContainText('2019');
 		await expect(data.getByText('A red fox in a blue jacket, seeded for the browser tests.')).toBeVisible();
 
-		// The one piece in the pool: not the NSFW piece, and not the pieces tagged
-		// with a character who isn't the owner. Linked to its piece page, named by
-		// its title, eager, and with no NSFW gate.
+		// The one piece in the pool (the loader unit tests own which pieces the
+		// pool leaves out). Linked to its piece page, named by its title, eager,
+		// and with no NSFW gate.
 		const picture = data.locator('a.photo-frame');
 		await expect(picture).toHaveAttribute('href', '/gallery/e2e-daily-piece');
 		await expect(picture).toHaveAccessibleName('E2E Daily Piece');
@@ -395,6 +395,9 @@ test.describe('fresh-site passport', () => {
 		await expect(data.locator('.photo-frame img')).toHaveAttribute('alt', 'E2E, profile picture');
 		await expect(data.locator('.photo-frame a, a.photo-frame')).toHaveCount(0);
 		await expect(data.locator('figcaption')).toHaveText('Profile picture, unattributed');
+		// With no piece in the pool, the admin avatar is the link preview too.
+		const ogImage = await page.locator('meta[property="og:image"]').getAttribute('content');
+		expect(ogImage).toMatch(/\/e2e-face\.png$/);
 		await expect(data.locator('dl')).toContainText(new URL(page.url()).host);
 		// Unset rows are not rendered at all.
 		await expect(data).not.toContainText('Pronouns');

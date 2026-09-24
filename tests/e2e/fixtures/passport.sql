@@ -22,11 +22,13 @@ UPDATE images SET commissioned_at = '2019-04-02' WHERE id = 1;
 
 -- The picture pool holds exactly one piece, so the picture of the day is the
 -- same on every day the suite runs. Image 6 is tagged only with the owner
--- character (Thistle), which keeps it in the pool. Out of it: image 3 is tagged
--- with Taro, who is not the owner; image 1 with Taro and Thistle both; image 5
--- is NSFW; image 2 is a variant. Image 6 points at a real static image, so the
--- picture loads rather than 404s, and not the admin avatar's file: the spec
--- tells the two apart in og:image.
+-- character (Thistle), which keeps it in the pool. The other rows are here for
+-- realism, not as a test of the pool rules: this spec would still see image 6
+-- on most days if the loader let images 1 and 3 (tagged with Taro, who is not
+-- the owner), 5 (NSFW) or 2 (a variant) in. The loader unit tests in
+-- src/routes/(public)/page.server.test.ts own those rules. Image 6 points at a
+-- real static image, so the picture loads rather than 404s, and not the admin
+-- avatar's file: the spec tells the two apart in og:image.
 INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
 VALUES
