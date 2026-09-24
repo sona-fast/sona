@@ -3,11 +3,13 @@
 // in $lib/landing/passport. Every D1 read is bounded: a stall degrades the page
 // to fewer stamps (or the profile picture), never to a 500 and never to a zero.
 
-import { and, asc, count, countDistinct, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, count, countDistinct, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
+	characters,
 	collections,
 	conventions,
 	fursuitPhotos,
+	imageCharacters,
 	images,
 	artists,
 	stickerPacks,
@@ -15,7 +17,6 @@ import {
 	vrAvatars
 } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
-import { refSheetQuery } from '$lib/server/presence';
 import { getMode } from '$lib/server/furtrack';
 import { DEFAULTS, type SiteSettings } from '$lib/server/settings';
 import { withTimeout } from '$lib/server/timeout';
@@ -32,15 +33,15 @@ import { LICENSES, type LicenseKey } from '$lib/furtrack/license';
 import type { SocialPlatform } from '$lib/social-platforms';
 
 export interface PassportPicture {
-	/** ref: the ref sheet; piece: the first featured or newest SFW piece;
-	 *  avatar: the admin avatar, which is not a gallery piece. */
-	kind: 'ref' | 'piece' | 'avatar';
+	/** piece: the day's piece from the SFW pool (see loadPassportPicture);
+	 *  avatar: the admin avatar, which is not a gallery piece. Neither is ever
+	 *  NSFW, so the picture needs no blur and is always fit for a link preview. */
+	kind: 'piece' | 'avatar';
 	imageUrl: string;
 	slug: string | null;
 	title: string;
 	/** null when no artist is on file; the caption reads "Unattributed". */
 	artistName: string | null;
-	nsfw: boolean;
 }
 
 export interface PassportData {
@@ -77,6 +78,56 @@ function socialsOf(settings: SiteSettings): PassportData['socials'] {
 
 const publishedParent = and(eq(images.published, true), isNull(images.parentImageId));
 
+const DAY_MS = 86_400_000;
+
+/**
+ * The day's passport picture, unexecuted, so loadPassport can put it in its
+ * db.batch (awaiting it on its own runs it too). At most one row.
+ *
+ * The pool is every published, SFW parent piece whose tagged characters are
+ * none or only owner characters: a piece of someone else's character is not
+ * this character's passport photo.
+ *
+ * The pick: each piece gets a rank from its id and the UTC day number, and the
+ * lowest rank wins. The rank depends on nothing else, so every visitor and the
+ * link preview see the same piece all day, and a piece published or hidden
+ * mid-day changes the pick only when it is the pick or outranks it (a count
+ * and an offset would move the pick on every publish). The next day reshuffles
+ * the ranks.
+ *
+ * The rank is a small integer mix (xor with the day, a multiply, a
+ * xor-shift, a multiply, all within 31 bits), not a security hash: it only has
+ * to scatter the order from day to day. Integer arithmetic only, so SQLite and
+ * D1 agree: every product stays under 2^63 (ids under 2^32 times a 31-bit
+ * constant), `& 2147483647` is mod 2^31, and SQLite has no xor, so a ^ b is
+ * spelled (a | b) - (a & b).
+ */
+export function loadPassportPicture(db: Database, now: Date) {
+	const day = Math.floor(now.getTime() / DAY_MS);
+	// The day's own scatter, computed here in exact integers: a 31-bit value
+	// from Knuth's multiplicative constant, bound as an integer below.
+	const dayMix = Number((BigInt(day) * 2654435761n) & 0x7fffffffn);
+	const a = sql`((${images.id} * 1103515245) & 2147483647)`;
+	const d = sql`CAST(${dayMix} AS INTEGER)`;
+	const x = sql`((${a} | ${d}) - (${a} & ${d}))`;
+	const y = sql`((${x} * 1597334677) & 2147483647)`;
+	const z = sql`((${y} | (${y} >> 16)) - (${y} & (${y} >> 16)))`;
+	const rank = sql`((${z} * 747796405) & 2147483647)`;
+	const otherCharacter = sql`EXISTS (SELECT 1 FROM ${imageCharacters} INNER JOIN ${characters} ON ${characters.id} = ${imageCharacters.characterId} WHERE ${imageCharacters.imageId} = ${images.id} AND ${characters.isOwner} = 0)`;
+	return db
+		.select({
+			slug: images.slug,
+			imageUrl: images.imageUrl,
+			title: images.title,
+			artistName: artists.name
+		})
+		.from(images)
+		.leftJoin(artists, eq(artists.id, images.artistId))
+		.where(and(publishedParent, eq(images.nsfw, false), sql`NOT ${otherCharacter}`))
+		.orderBy(rank, asc(images.id))
+		.limit(1);
+}
+
 // The gallery's own filter (fursuitPhotoFromRow's license lookup, then
 // `license.displayable || !!permissionSource`) in SQL: never count or group a
 // photo the fursuit view would not show. An unknown license key is not
@@ -108,9 +159,9 @@ export async function loadPassport(opts: {
 
 	// Round trip 1: every independent read in one batch. D1 batches are
 	// all-or-nothing, so a stall or failure drops the whole set to its fallback:
-	// no feature stamps and no ref sheet, which still renders a page.
+	// no feature stamps and the profile picture, which still renders a page.
 	const batch = db.batch([
-		refSheetQuery(db),
+		loadPassportPicture(db, now),
 		// Counts include NSFW pieces: a count isn't a picture.
 		db
 			.select({
@@ -203,7 +254,7 @@ export async function loadPassport(opts: {
 
 	const [batchResult, photoResult] = await Promise.all([withTimeout(batch, timeoutMs, null), photosRead]);
 	const photoTotals = photoResult?.[0][0];
-	const [refRows, galleryRows, stickerRows, vrRows, collectionRows, conRows, aboutConRows] = batchResult ?? [
+	const [pieceRows, galleryRows, stickerRows, vrRows, collectionRows, conRows, aboutConRows] = batchResult ?? [
 		[],
 		[],
 		[],
@@ -217,60 +268,18 @@ export async function loadPassport(opts: {
 
 	const name = settings.ownerName || settings.siteName;
 	let picture: PassportPicture | null = null;
-	const ref = refRows[0];
-	if (ref) {
-		// Field by field: the query's width and height are /art's, and the passport
-		// sizes its frame by aspect ratio, so they stay out of the page payload.
-		picture = {
-			kind: 'ref',
-			slug: ref.slug,
-			imageUrl: ref.imageUrl,
-			// The schema allows an empty title; the character's name keeps the
-			// picture link named and the caption titled.
-			title: ref.title.trim() || name,
-			artistName: ref.artistName,
-			nsfw: ref.nsfw
-		};
-	} else if (batchResult) {
-		// Round trip 2, only without a ref sheet: the first featured piece, else
-		// the newest SFW parent. Featured pieces are SFW by construction; the
-		// nsfw filter keeps both halves of the fallback safe to show unblurred.
-		// Skipped when round trip 1 already failed: D1 is struggling, and the
-		// profile picture is a fine page.
-		const piece = await withTimeout(
-			db
-				.select({
-					slug: images.slug,
-					imageUrl: images.imageUrl,
-					title: images.title,
-					artistName: artists.name
-				})
-				.from(images)
-				.leftJoin(artists, eq(artists.id, images.artistId))
-				.where(and(publishedParent, eq(images.nsfw, false)))
-				.orderBy(
-					desc(images.featured),
-					// featured_order only ranks featured pieces: an unfeatured piece can
-					// keep a stale order from when it was featured.
-					sql`CASE WHEN ${images.featured} = 1 THEN ${images.featuredOrder} END asc nulls last`,
-					desc(images.createdAt),
-					desc(images.id)
-				)
-				.limit(1)
-				.then((rows) => rows[0] ?? null),
-			timeoutMs,
-			null
-		);
-		if (piece) picture = { kind: 'piece', ...piece, title: piece.title.trim() || name, nsfw: false };
-	}
-	if (!picture && settings.adminAvatarUrl) {
+	const piece = pieceRows[0];
+	if (piece) {
+		// The schema allows an empty title; the character's name keeps the
+		// picture link named.
+		picture = { kind: 'piece', ...piece, title: piece.title.trim() || name };
+	} else if (settings.adminAvatarUrl) {
 		picture = {
 			kind: 'avatar',
 			imageUrl: settings.adminAvatarUrl,
 			slug: null,
 			title: '',
-			artistName: null,
-			nsfw: false
+			artistName: null
 		};
 	}
 

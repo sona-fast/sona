@@ -32,7 +32,7 @@ const rule = (source: string, selector: string) => {
 describe('passport markup', () => {
 	it('renders both pictures from the one art snippet', () => {
 		expect(imgs.length).toBe(1);
-		expect(passport).toMatch(/\{#snippet art\(imageUrl: string, alt: string, blurred: boolean\)\}\s*<img\b/);
+		expect(passport).toMatch(/\{#snippet art\(imageUrl: string, alt: string\)\}\s*<img\b/);
 		expect([...passport.matchAll(/\{@render art\(picture\.imageUrl,/g)].length).toBe(2);
 	});
 
@@ -59,22 +59,41 @@ describe('passport markup', () => {
 		}
 	});
 
-	it('adds the caption full stop only when the title has no closing punctuation', () => {
-		expect(passport).toContain('/[.!?。！？]$/.test(title) ? title : m.passport_caption_title({ title })');
+	// The caption is only the credit: the title is the image's alt (and so the
+	// link's name), never a caption sentence with a full stop after it.
+	it('captions the piece with the credit alone and names the link by the title', () => {
+		const caption =
+			passport.match(/<a class="photo-frame"[\s\S]*?<figcaption>([\s\S]*?)<\/figcaption>/)?.[1] ?? '';
+		expect(caption).toMatch(/^\s*\{#if picture\.artistName\}\{m\.passport_art_by\(\)\}/);
+		expect(caption).not.toContain('title');
+		expect(passport).toContain('<a class="photo-frame" href="/gallery/{picture.slug}">');
+		expect(passport).toContain('{@render art(picture.imageUrl, picture.title)}');
+		expect(passport).not.toContain('passport_caption_title');
+		expect(passport).not.toContain('passport_caption_ref');
 	});
 
-	it('puts no button inside the picture link: the piece page has its own NSFW gate', () => {
+	// The pool is SFW only, so the passport has no NSFW gate of its own: no
+	// blur, no scrim, no label, and no reveal button inside the link.
+	it('draws no NSFW gate on the picture', () => {
 		expect(passport).not.toMatch(/<button\b/);
-		expect(passport).toMatch(/class:blurred\b/);
-		expect(passport).toContain('{@render art(picture.imageUrl, pictureAlt, picture.nsfw)}');
-		expect(passport).toMatch(/<span class="gate">NSFW<\/span>/);
+		expect(passport).not.toMatch(/class:blurred|class="gate"|\.gate\b|picture\.nsfw/);
 	});
 
-	// 50% black measures 3.95:1 behind the label over light blurred art. The
-	// gallery card's gate uses the same scrim, so the two NSFW gates match.
-	it('lays the NSFW label on a 60% scrim, the same as the gallery card', () => {
-		expect(rule(passport, '.gate')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
+	// 50% black measures 3.95:1 behind the label over light blurred art, so the
+	// gallery card's gate uses 60%.
+	it('lays the gallery card NSFW label on a 60% scrim', () => {
 		expect(rule(artworkCard, '.nsfw-overlay')).toMatch(/background:\s*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
+	});
+
+	// The heading names the stamps region and keeps the h1, h2, h3 outline, but
+	// nothing shows: no visible "Stamps" label and no note under it.
+	it('keeps the stamps heading for screen readers only, with no note', () => {
+		expect(passport).toContain('<section class="page page--stamps" aria-labelledby="pp-stamps">');
+		expect(passport).toContain('<h2 id="pp-stamps" class="sr-only">{m.passport_stamps()}</h2>');
+		expect(passport).not.toContain('stamps-note');
+		// The first group label takes the top of the page when no Here now stamp
+		// sits between it and the hidden heading.
+		expect(rule(passport, '.sr-only + .group-h')).toMatch(/margin-top:\s*0/);
 	});
 
 	// The card's title was a fixed h3, so /gallery and a collection page jumped
@@ -95,8 +114,9 @@ describe('passport markup', () => {
 		expect(stamp).toContain("`${kicker}${ja ? '：' : ': '}`");
 		expect(stamp).toContain(".join(ja ? '、' : ', ')");
 		expect(stamp).toContain("lines.join(ja ? '、' : ' ')");
-		expect(passport).toContain("`${pictureAlt}${ja ? '、' : ', '}NSFW`");
-		expect(passport).toMatch(/captionTitle\(picture\.title\)\}\{ja\s*\?\s*''\s*:\s*' '\}\{#if picture\.artistName\}/);
+		// 作者：Test Artist, but Art by Test Artist.
+		expect(passport).toContain("{m.passport_art_by()}{ja ? '' : ' '}<a");
+		expect(ja.passport_art_by).toBe('作者：');
 		// The place carries its own ASCII comma ("Denver, CO"), so a 読点 after
 		// it would mix the two; a space joins it to the date.
 		expect(ja.passport_live_line).toBe('{place} {date}まで');
@@ -106,16 +126,10 @@ describe('passport markup', () => {
 
 	// Japanese has no spaces, so without keep-all the browser splits words
 	// mid-way ("今 / 後") and strands 「す。」 on a line of its own.
-	it('breaks Japanese stamp lines and the stamps note at punctuation, not mid-word', () => {
-		for (const [source, selector] of [
-			[stamp, '.line:lang(ja)'],
-			[passport, '.stamps-note:lang(ja)']
-		] as const) {
-			const body = rule(source, selector);
-			expect(body).toMatch(/word-break:\s*keep-all/);
-			expect(body).toMatch(/overflow-wrap:\s*anywhere/);
-		}
-		expect(rule(passport, '.stamps-note:lang(ja)')).toMatch(/text-wrap:\s*pretty/);
+	it('breaks Japanese stamp lines at punctuation, not mid-word', () => {
+		const line = rule(stamp, '.line:lang(ja)');
+		expect(line).toMatch(/word-break:\s*keep-all/);
+		expect(line).toMatch(/overflow-wrap:\s*anywhere/);
 		// The name too, and strict so no line starts with ー ("ギャラリ / ー").
 		const name = rule(stamp, '.name:lang(ja)');
 		expect(name).toMatch(/word-break:\s*keep-all/);

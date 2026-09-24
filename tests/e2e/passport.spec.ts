@@ -3,11 +3,13 @@ import { test, expect, type Page } from '@playwright/test';
 // The passport homepage (landingLayout = 'passport'), end to end. This file runs
 // under two projects, each on its own seeded server (see playwright.config.ts):
 //
-//   passport        the shared fixture plus fixtures/passport.sql: an NSFW
-//                   designated ref sheet, three published pieces by one artist,
-//                   four published VR avatars, two socials, a confirmed
-//                   convention running today and one upcoming, and one fursuit
-//                   photo from a past event (FurTrack in mock mode).
+//   passport        the shared fixture plus fixtures/passport.sql: four
+//                   published pieces by one artist, only one of them in the
+//                   picture pool (one NSFW, two tagged with a character who
+//                   is not the owner), four published VR avatars, two
+//                   socials, a confirmed convention running today and one
+//                   upcoming, and one fursuit photo from a past event
+//                   (FurTrack in mock mode).
 //   passport-empty  the same fixture with every piece, avatar, convention,
 //                   social and the pronouns taken away (fixtures/
 //                   passport-empty.sql): a fresh fork.
@@ -31,7 +33,7 @@ test.describe('populated passport', () => {
 		test.skip(info.project.name !== 'passport', 'runs on the populated passport server');
 	});
 
-	test('renders the data page: one h1, the details, and the blurred NSFW ref sheet', async ({ page }) => {
+	test('renders the data page: one h1, the details, and the piece of the day', async ({ page }) => {
 		await page.goto('/');
 
 		await expect(page.locator('h1')).toHaveCount(1);
@@ -48,17 +50,27 @@ test.describe('populated passport', () => {
 		await expect(details).toContainText('2019');
 		await expect(data.getByText('A red fox in a blue jacket, seeded for the browser tests.')).toBeVisible();
 
-		// The designated ref sheet is NSFW: linked to its piece page, blurred,
-		// labelled, eager, and with no reveal button inside the link.
+		// The one piece in the pool: not the NSFW piece, and not the pieces tagged
+		// with a character who isn't the owner. Linked to its piece page, named by
+		// its title, eager, and with no NSFW gate.
 		const picture = data.locator('a.photo-frame');
-		await expect(picture).toHaveAttribute('href', '/gallery/mature-ref-sheet');
+		await expect(picture).toHaveAttribute('href', '/gallery/e2e-daily-piece');
+		await expect(picture).toHaveAccessibleName('E2E Daily Piece');
+		await expect(data.getByRole('link', { name: 'E2E Daily Piece', exact: true })).toHaveCount(1);
 		const img = picture.locator('img');
-		await expect(img).toHaveClass(/blurred/);
+		await expect(img).toHaveAttribute('alt', 'E2E Daily Piece');
 		await expect(img).toHaveAttribute('loading', 'eager');
 		await expect(img).toHaveAttribute('fetchpriority', 'high');
-		await expect(picture.locator('.gate')).toHaveText('NSFW');
-		await expect(picture.locator('button')).toHaveCount(0);
-		await expect(data.locator('figcaption')).toContainText('Ref sheet. Art by Test Artist');
+		await expect(picture.locator('.gate, button')).toHaveCount(0);
+		await expect(img).toHaveCSS('filter', 'none');
+		// The caption is the credit alone: no title and no "Ref sheet".
+		const caption = data.locator('figcaption');
+		await expect(caption).toHaveText('Art by Test Artist');
+		await expect(caption.getByRole('link', { name: 'Test Artist' })).toHaveAttribute(
+			'href',
+			'/gallery?artist=Test%20Artist'
+		);
+		await expect(data).not.toContainText('Ref sheet');
 
 		// Socials open in a new tab and say so.
 		const instagram = data.getByRole('link', { name: 'Instagram (opens in a new tab)' });
@@ -66,14 +78,12 @@ test.describe('populated passport', () => {
 		await expect(instagram).toHaveAttribute('rel', 'noopener noreferrer');
 	});
 
-	// A link preview shows no blur, so the NSFW ref sheet never becomes the
-	// og:image: the admin avatar stands in.
-	test('advertises the admin avatar, not the NSFW ref sheet, as the link preview', async ({ page }) => {
+	// The pool is SFW only, so the piece of the day is always the link preview.
+	test('advertises the piece of the day as the link preview', async ({ page }) => {
 		await page.goto('/');
 
 		const ogImage = await page.locator('meta[property="og:image"]').getAttribute('content');
-		expect(ogImage).toMatch(/\/e2e-face\.png$/);
-		expect(ogImage).not.toContain('e2e-avatar.svg');
+		expect(ogImage).toMatch(/\/e2e-avatar\.svg$/);
 	});
 
 	// The mock puts the card 28px below the header on desktop and 16px below
@@ -94,21 +104,54 @@ test.describe('populated passport', () => {
 		expect(top).toBe(16);
 	});
 
+	// With the Stamps heading hidden and no note under it, the stamps page's
+	// first visible item sits level with the data page's "Passport" label: the
+	// Here now stamp when a convention is live, otherwise the "On this site"
+	// label. The fixture has a live convention, so the second half takes the
+	// Here now stamp out of the page to reach the other state.
+	test('starts the stamps page level with the Passport label', async ({ page }) => {
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.goto('/');
+		const tops = () =>
+			page.evaluate(() => ({
+				passport: document.querySelector('.page--data .page-label')!.getBoundingClientRect().top,
+				stamps: document.querySelector('.page--stamps')!.getBoundingClientRect().top,
+				live: document.querySelector('.page--stamps .live')?.getBoundingClientRect().top ?? null,
+				site: document.querySelector('#pp-site')!.getBoundingClientRect().top
+			}));
+		let t = await tops();
+		expect(t.live).toBe(t.passport);
+		// 28px of page padding, as in the mock.
+		expect(t.passport - t.stamps).toBe(28);
+
+		await page.evaluate(() => document.querySelector('.page--stamps .live')!.remove());
+		t = await tops();
+		expect(t.site).toBe(t.passport);
+
+		// On a phone the stamps page sits under the data page, and its first
+		// item starts at the mock's 20px page padding.
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/');
+		t = await tops();
+		expect(t.live! - t.stamps).toBe(21);
+		await page.evaluate(() => document.querySelector('.page--stamps .live')!.remove());
+		t = await tops();
+		expect(t.site - t.stamps).toBe(21);
+	});
+
 	// The name steps down from 36px to the mock's 28px on a phone-width page,
-	// and the stamps note, a stamp's kicker and its date keep the mock's 1.5
-	// line height (14px text on 21px, 12px on 18px).
-	test('sizes the name and the stamps note as the mock does', async ({ page }) => {
+	// and a stamp's kicker and its date keep the mock's 1.5 line height (12px
+	// on 18px, 14px on 21px).
+	test('sizes the name and the stamp lines as the mock does', async ({ page }) => {
 		const measure = () =>
 			page.evaluate(() => ({
 				name: getComputedStyle(document.querySelector('h1.name')!).fontSize,
-				noteSize: getComputedStyle(document.querySelector('.stamps-note')!).fontSize,
-				noteLine: getComputedStyle(document.querySelector('.stamps-note')!).lineHeight,
 				kicker: getComputedStyle(document.querySelector('.stamp .kicker')!).lineHeight,
 				date: getComputedStyle(document.querySelector('.stamp .date')!).lineHeight,
 				// The mock's font shorthand resets the Elsewhere rows to normal.
 				socials: getComputedStyle(document.querySelector('.socials')!).lineHeight
 			}));
-		const lines = { noteSize: '14px', noteLine: '21px', kicker: '18px', date: '21px', socials: 'normal' };
+		const lines = { kicker: '18px', date: '21px', socials: 'normal' };
 
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/');
@@ -122,8 +165,15 @@ test.describe('populated passport', () => {
 	test('renders every stamp as a link named for its feature and count', async ({ page }) => {
 		await page.goto('/');
 
+		// The heading names the region for screen readers and shows nothing, and
+		// no note sits under it.
 		const stamps = page.getByRole('region', { name: 'Stamps', exact: true });
-		await expect(stamps.getByText('Each stamp opens that part of the site.')).toBeVisible();
+		const heading = stamps.getByRole('heading', { level: 2, name: 'Stamps', exact: true });
+		await expect(heading).toHaveCount(1);
+		await expect(heading).toHaveClass('sr-only');
+		await expect(heading).toHaveCSS('clip', 'rect(0px, 0px, 0px, 0px)');
+		expect(await heading.evaluate((el) => el.getBoundingClientRect().width)).toBeLessThanOrEqual(1);
+		await expect(page.getByText('Each stamp opens that part of the site.')).toHaveCount(0);
 
 		// The live convention leads the page, linked to /connect.
 		const live = stamps.getByRole('link', { name: /^Here now: E2E Live Con, Denver, CO, until / });
@@ -131,7 +181,7 @@ test.describe('populated passport', () => {
 
 		const site = stamps.getByRole('list', { name: 'On this site' });
 		await expect(site.getByRole('link')).toHaveCount(4);
-		await expect(site.getByRole('link', { name: 'Gallery, 3 pieces by 1 artist' })).toHaveAttribute('href', '/gallery');
+		await expect(site.getByRole('link', { name: 'Gallery, 4 pieces by 1 artist' })).toHaveAttribute('href', '/gallery');
 		const fursuit = site.getByRole('link', { name: 'Fursuit photos, 1 photo by 1 photographer' });
 		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
 		await expect(fursuit).toHaveClass(/stamp--rect/);
@@ -162,14 +212,14 @@ test.describe('populated passport', () => {
 	// Japanese punctuates the accessible names and the caption with its own
 	// full-width forms, and runs on after 。 with no space. The paraglide locale
 	// cookie switches the SSR locale, as in vr-guide.spec.ts.
-	test('punctuates the stamps, the NSFW picture and the caption for Japanese', async ({ page }) => {
+	test('punctuates the stamps and the caption for Japanese', async ({ page }) => {
 		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
 		await page.goto('/');
 		await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
 
 		const stamps = page.getByRole('region', { name: '査証', exact: true });
 		await expect(
-			stamps.getByRole('link', { name: 'ギャラリー、作品 3点、アーティスト 1人', exact: true })
+			stamps.getByRole('link', { name: 'ギャラリー、作品 4点、アーティスト 1人', exact: true })
 		).toHaveAttribute('href', '/gallery');
 		const next = stamps.locator('a.stamp--next');
 		await expect(next).toHaveAccessibleName(/^次回：E2E Next Con、\d{4}年\d{1,2}月$/);
@@ -191,9 +241,11 @@ test.describe('populated passport', () => {
 		expect(raw.label).not.toContain('\u200b');
 		expect(raw.line).toBe('リンクと\u200b参加予定のコン');
 
+		// The full-width colon runs straight on into the artist's name.
 		const data = page.getByRole('region', { name: 'E2E', exact: true });
-		await expect(data.locator('a.photo-frame')).toHaveAccessibleName(/、NSFW$/);
-		await expect(data.locator('figcaption')).toContainText('設定画。作者');
+		await expect(data.locator('a.photo-frame')).toHaveAccessibleName('E2E Daily Piece');
+		await expect(data.locator('figcaption')).toHaveText('作者：Test Artist');
+		await expect(data).not.toContainText('設定画');
 	});
 
 	// The header and the phone tab bar say which page this is ("page") on the

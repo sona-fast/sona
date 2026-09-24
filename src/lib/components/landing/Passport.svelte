@@ -65,12 +65,6 @@
 		both: m.passport_about_links_cons
 	};
 
-	// The caption ends in a full stop unless the title already ends in its own
-	// punctuation ("Night swim!" would otherwise read "Night swim!.").
-	function captionTitle(title: string): string {
-		return /[.!?。！？]$/.test(title) ? title : m.passport_caption_title({ title });
-	}
-
 	function featureText(stamp: FeatureStamp): { name: string; lines: string[] } {
 		const [a = 0, b = 0] = stamp.counts;
 		switch (stamp.kind) {
@@ -93,19 +87,16 @@
 	}
 
 	const picture = $derived(passport.picture);
-	const pictureAlt = $derived(
-		picture?.kind === 'ref' ? m.passport_alt_ref({ name: passport.name }) : (picture?.title ?? '')
-	);
 	const stamps = $derived(passport.stamps);
 	const live = $derived(stamps.live);
 </script>
 
-<!-- The avatar and the piece render the same picture element; only the alt and
-     the NSFW blur differ. -->
-{#snippet art(imageUrl: string, alt: string, blurred: boolean)}
+<!-- The avatar and the piece render the same picture element; only the alt
+     differs. The piece comes from an SFW-only pool, so nothing here is ever
+     blurred. -->
+{#snippet art(imageUrl: string, alt: string)}
 	<img
 		class="art"
-		class:blurred
 		src={cdnImage(imageUrl, 480)}
 		srcset="{cdnImage(imageUrl, 480)} 480w, {cdnImage(imageUrl, 960)} 960w"
 		sizes={PICTURE_SIZES}
@@ -124,30 +115,21 @@
 				<figure class="photo">
 					{#if picture.kind === 'avatar'}
 						<div class="photo-frame photo-frame--square">
-							{@render art(picture.imageUrl, m.passport_alt_avatar({ name: passport.name }), false)}
+							{@render art(picture.imageUrl, m.passport_alt_avatar({ name: passport.name }))}
 						</div>
 						<figcaption>{m.passport_caption_avatar()}</figcaption>
 					{:else}
-						<!-- The picture links to its piece page, which has its own NSFW gate, so
-						     there is no reveal button here: a button inside a link is invalid. -->
-						<!-- Named by the image and, when blurred, the label; an aria-label rather
-						     than a hidden comma, which Chrome pads with spaces. -->
-						<a
-							class="photo-frame"
-							href="/gallery/{picture.slug}"
-							aria-label={picture.nsfw ? `${pictureAlt}${ja ? '、' : ', '}NSFW` : undefined}
-						>
-							{@render art(picture.imageUrl, pictureAlt, picture.nsfw)}
-							{#if picture.nsfw}<span class="gate">NSFW</span>{/if}
+						<!-- The link is named by the image: its alt is the piece title. -->
+						<a class="photo-frame" href="/gallery/{picture.slug}">
+							{@render art(picture.imageUrl, picture.title)}
 						</a>
-						<!-- No template whitespace between the sentences: Japanese runs on
-						     after 。 with no space, so the space is rendered for other
-						     locales only. -->
+						<!-- Only the credit, with no full stop: the title is the alt, not a
+						     caption sentence. No template whitespace after "Art by": Japanese
+						     runs on after 作者： with no space, so the space is rendered for
+						     other locales only. -->
 						<figcaption>
-							{picture.kind === 'ref' ? m.passport_caption_ref() : captionTitle(picture.title)}{ja
-								? ''
-								: ' '}{#if picture.artistName}{m.passport_art_by()}
-								<a href="/gallery?artist={encodeURIComponent(picture.artistName)}">{picture.artistName}</a
+							{#if picture.artistName}{m.passport_art_by()}{ja ? '' : ' '}<a
+									href="/gallery?artist={encodeURIComponent(picture.artistName)}">{picture.artistName}</a
 								>{:else}{m.passport_unattributed()}{/if}
 						</figcaption>
 					{/if}
@@ -220,9 +202,11 @@
 	</section>
 
 	<section class="page page--stamps" aria-labelledby="pp-stamps">
-		<h2 id="pp-stamps" class="page-label">{m.passport_stamps()}</h2>
+		<!-- Visually hidden: it names the region and keeps the h1, h2, h3
+		     outline. The first visible item takes the top of the page, level with
+		     the data page's "Passport" label. -->
+		<h2 id="pp-stamps" class="sr-only">{m.passport_stamps()}</h2>
 		{#if passport.hasStamps}
-			<p class="stamps-note">{m.passport_stamps_note()}</p>
 			{#if live}
 				<div class="live">
 					<Stamp
@@ -494,8 +478,8 @@
 		margin: 0;
 	}
 
-	/* 3:4, letterboxed on --secondary: object-fit contain shows a landscape ref
-	   sheet whole instead of cutting its sides. */
+	/* 3:4, letterboxed on --secondary: object-fit contain shows a landscape
+	   piece whole instead of cutting its sides. */
 	.photo-frame {
 		position: relative;
 		display: block;
@@ -522,27 +506,6 @@
 
 	.photo-frame--square .art {
 		object-fit: cover;
-	}
-
-	/* ArtworkCard's NSFW treatment, without its reveal button. */
-	.art.blurred {
-		filter: blur(24px);
-		transform: scale(1.3);
-	}
-
-	/* ArtworkCard's NSFW scrim, 60%: over light blurred art a 50% one measures
-	   3.95:1 behind the label, under the 4.5:1 text bar. */
-	.gate {
-		position: absolute;
-		inset: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: rgba(0, 0, 0, 0.6);
-		color: white;
-		font-family: var(--font-primary);
-		font-weight: 600;
-		font-size: 0.875rem;
 	}
 
 	.photo figcaption {
@@ -651,22 +614,6 @@
 	}
 
 	/* ---- stamps page ---- */
-	.stamps-note {
-		margin-top: -8px;
-		margin-bottom: 20px;
-		font-size: 0.875rem;
-		line-height: 1.5;
-		color: var(--muted-foreground);
-	}
-
-	/* Break Japanese at 、 rather than mid-word, and keep 「す。」 off a line of
-	   its own; overflow-wrap still breaks a run too long for the page. */
-	.stamps-note:lang(ja) {
-		word-break: keep-all;
-		overflow-wrap: anywhere;
-		text-wrap: pretty;
-	}
-
 	.stamps-empty {
 		font-size: 1rem;
 		line-height: 1.5;
@@ -687,9 +634,14 @@
 		margin-block: 24px 14px;
 	}
 
-	.live + .group-h,
-	.stamps-note + .group-h {
+	.live + .group-h {
 		margin-top: 4px;
+	}
+
+	/* With no Here now stamp, the first group label takes the top of the page,
+	   level with the "Passport" label. The hidden h2 before it is out of flow. */
+	.sr-only + .group-h {
+		margin-top: 0;
 	}
 
 	/* The row gap is in em so it grows with text zoom: tilted neighbours keep

@@ -21,13 +21,9 @@
 	const splash = $derived(data.settings.landingLayout === 'threePath');
 	// Set only on the passport branch of the load.
 	const passport = $derived(data.passport ?? null);
-	// The passport's own picture for link previews, unless it is NSFW: a preview
-	// card shows no blur. The admin avatar is the safe fallback.
-	const passportImage = $derived(
-		passport?.picture && !passport.picture.nsfw
-			? passport.picture.imageUrl
-			: data.settings.adminAvatarUrl || null
-	);
+	// The passport's own picture for link previews: the day's piece from an
+	// SFW-only pool, or the admin avatar, so it is always safe to show unblurred.
+	const passportImage = $derived(passport?.picture?.imageUrl ?? null);
 
 	// ownerName "Sunday" -> "SUNDAY"; else "example.ink" -> "EXAMPLE"
 	const wordmark = $derived(splashWordmark(data.settings.ownerName, data.settings.siteName));

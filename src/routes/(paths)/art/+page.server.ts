@@ -10,9 +10,8 @@ export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
 	const settings = await getSettings(db);
 
-	// The ref sheet precedence lives in loadRefSheet, shared with the passport
-	// homepage so the two pages can never pick different pictures. It honors an
-	// NSFW designation (SONA-18); the page renders it behind the blur shield.
+	// The ref sheet precedence lives in loadRefSheet. It honors an NSFW
+	// designation (SONA-18); the page renders it behind the blur shield.
 	// (The recentArt strip below still lists variants as standalone cards,
 	// unlike the gallery and homepage queries — an older inconsistency this
 	// change doesn't touch.)

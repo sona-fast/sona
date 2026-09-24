@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
-import { characters, images, artists, tags, imageTags, siteSettings } from '$lib/server/db/schema';
+import { characters, images, artists, tags, imageTags, imageCharacters, siteSettings } from '$lib/server/db/schema';
 import { clearSettingsCache, DEFAULTS } from '$lib/server/settings';
 import { clearStickerTabCache } from '$lib/server/stickers';
 import { clearCollectionsNavCache } from '$lib/server/collections';
@@ -33,6 +33,7 @@ function makeDb() {
 			deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, avatar_url TEXT,
 			is_owner INTEGER NOT NULL DEFAULT 0, reference_image_id INTEGER, created_at TEXT NOT NULL DEFAULT ''
 		);
+		CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, image_url TEXT NOT NULL,
 			thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER, md5hash TEXT,
@@ -562,116 +563,147 @@ describe('passport load — conventions', () => {
 	});
 });
 
-describe('passport load — picture precedence (shared with /art)', () => {
-	async function seedArt(db: ReturnType<typeof makeDb>['db']) {
-		await db.insert(artists).values({ id: 1, name: 'mothlamp' });
-		await db.insert(tags).values({ id: 1, name: 'reference' });
+describe('passport load — the picture of the day', () => {
+	// Noon UTC on a fixed day, so "later the same day" and "the next day" are
+	// plain offsets.
+	const NOON = new Date('2026-09-24T12:00:00Z');
+	const at = (days: number, hours = 0) => new Date(NOON.getTime() + days * 86_400_000 + hours * 3_600_000);
+
+	function pick(db: ReturnType<typeof makeDb>['db'], now: Date, settings = DEFAULTS) {
+		return loadPassport({ db, env: undefined, settings, host: 'example.ink', now, timeoutMs: 1000 }).then(
+			(p) => p.picture
+		);
 	}
 
-	it('uses the designated ref sheet even when it is NSFW, blurred, and agrees with /art', async () => {
-		const { db, platform } = makePassportDb();
-		await seedArt(db);
-		await db.insert(images).values([
-			{ id: 1, title: 'Mature Ref', slug: 'mature-ref', imageUrl: '/1.png', artistId: 1, nsfw: true, createdAt: '2026-01-01' },
-			// A newer tagged sheet that the designation outranks.
-			{ id: 2, title: 'Tagged Ref', slug: 'tagged-ref', imageUrl: '/2.png', artistId: 1, createdAt: '2026-06-01' }
+	async function seedPieces(db: ReturnType<typeof makeDb>['db'], ids: number[]) {
+		await db.insert(artists).values({ id: 1, name: 'mothlamp' });
+		if (ids.length === 0) return;
+		await db
+			.insert(images)
+			.values(ids.map((id) => ({ id, title: `Piece ${id}`, slug: `piece-${id}`, imageUrl: `/${id}.png`, artistId: 1 })));
+	}
+
+	it('picks only published SFW parents tagged with no character or only owner characters', async () => {
+		const { db } = makePassportDb();
+		await seedPieces(db, []);
+		await db.insert(characters).values([
+			{ id: 1, name: 'Owner', isOwner: true },
+			{ id: 2, name: 'Second Owner', isOwner: true },
+			{ id: 3, name: 'Friend', isOwner: false }
 		]);
-		await db.insert(imageTags).values({ imageId: 2, tagId: 1 });
-		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 1 });
-
-		const data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'mature-ref', nsfw: true, artistName: 'mothlamp' });
-
-		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
-		expect(artData.refSheet?.slug).toBe(data.passport.picture?.slug);
-	});
-
-	// The owner subquery orders by name: Zed is inserted first, so a query that
-	// dropped ORDER BY name would take Zed's designation (A) instead of Amy's (B).
-	it("takes the first owner by name's designation, the same on /art", async () => {
-		const { db, platform } = makePassportDb();
-		await seedArt(db);
 		await db.insert(images).values([
-			{ id: 1, title: 'A', slug: 'ref-a', imageUrl: '/a.png', artistId: 1, createdAt: '2026-01-01' },
-			{ id: 2, title: 'B', slug: 'ref-b', imageUrl: '/b.png', artistId: 1, createdAt: '2026-01-02' }
+			{ id: 1, title: 'Untagged', slug: 'untagged', imageUrl: '/1.png', artistId: 1 },
+			{ id: 2, title: 'Owners Only', slug: 'owners-only', imageUrl: '/2.png', artistId: 1 },
+			{ id: 3, title: 'NSFW', slug: 'nsfw', imageUrl: '/3.png', artistId: 1, nsfw: true },
+			{ id: 4, title: 'Draft', slug: 'draft', imageUrl: '/4.png', artistId: 1, published: false },
+			{ id: 5, title: 'Variant', slug: 'variant', imageUrl: '/5.png', artistId: 1, parentImageId: 1 },
+			{ id: 6, title: 'Friend Only', slug: 'friend-only', imageUrl: '/6.png', artistId: 1 },
+			{ id: 7, title: 'Owner And Friend', slug: 'owner-and-friend', imageUrl: '/7.png', artistId: 1 }
 		]);
-		await db.insert(characters).values({ name: 'Zed', isOwner: true, referenceImageId: 1 });
-		await db.insert(characters).values({ name: 'Amy', isOwner: true, referenceImageId: 2 });
-
-		const data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'ref-b' });
-		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
-		expect(artData.refSheet?.slug).toBe('ref-b');
-	});
-
-	it('falls back to the newest reference-tagged sheet, skipping a designated variant', async () => {
-		const { db, platform } = makePassportDb();
-		await seedArt(db);
-		await db.insert(images).values([
-			{ id: 1, title: 'Parent', slug: 'parent', imageUrl: '/1.png', artistId: 1, createdAt: '2025-01-01' },
-			{ id: 2, title: 'Variant', slug: 'variant', imageUrl: '/2.png', artistId: 1, parentImageId: 1, createdAt: '2025-02-01' },
-			{ id: 3, title: 'Old Ref', slug: 'old-ref', imageUrl: '/3.png', artistId: 1, createdAt: '2025-03-01' },
-			{ id: 4, title: 'New Ref', slug: 'new-ref', imageUrl: '/4.png', artistId: 1, createdAt: '2025-04-01' }
-		]);
-		await db.insert(imageTags).values([{ imageId: 3, tagId: 1 }, { imageId: 4, tagId: 1 }]);
-		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 2 });
-
-		const data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'new-ref' });
-		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
-		expect(artData.refSheet?.slug).toBe('new-ref');
-	});
-
-	it('without a ref sheet, takes the first featured piece, then the newest SFW piece', async () => {
-		const { sqlite, db, platform } = makePassportDb();
-		await seedArt(db);
-		await db.insert(images).values([
-			{ id: 1, title: 'Featured Second', slug: 'f2', imageUrl: '/1.png', artistId: 1, featured: true, featuredOrder: 2, createdAt: '2025-01-01' },
-			{ id: 2, title: 'Featured First', slug: 'f1', imageUrl: '/2.png', artistId: 1, featured: true, featuredOrder: 1, createdAt: '2025-01-02' },
-			{ id: 3, title: 'Newest', slug: 'newest', imageUrl: '/3.png', artistId: 1, createdAt: '2026-01-01' },
-			{ id: 4, title: 'Newest NSFW', slug: 'newest-nsfw', imageUrl: '/4.png', artistId: 1, nsfw: true, createdAt: '2026-02-01' }
+		await db.insert(imageCharacters).values([
+			{ imageId: 2, characterId: 1 },
+			{ imageId: 2, characterId: 2 },
+			{ imageId: 6, characterId: 3 },
+			{ imageId: 7, characterId: 1 },
+			{ imageId: 7, characterId: 3 }
 		]);
 
-		let data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'f1', title: 'Featured First', nsfw: false });
-
-		sqlite.exec('UPDATE images SET featured = 0');
-		data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'newest', nsfw: false });
+		const picked = new Set<string | null>();
+		for (let day = 0; day < 60; day++) picked.add((await pick(db, at(day)))?.slug ?? null);
+		// Over two months both eligible pieces come up, and nothing else ever does.
+		expect([...picked].sort()).toEqual(['owners-only', 'untagged']);
 	});
 
-	// The schema allows an empty title; the picture link and caption still
-	// need one, so the character's name (the data page's name) stands in.
-	it("titles an untitled fallback piece or ref sheet with the character's name", async () => {
+	it('credits the piece by title and artist, and never carries an NSFW flag', async () => {
+		const { db } = makePassportDb();
+		await seedPieces(db, [1]);
+		const picture = await pick(db, NOON);
+		expect(picture).toEqual({ kind: 'piece', slug: 'piece-1', imageUrl: '/1.png', title: 'Piece 1', artistName: 'mothlamp' });
+	});
+
+	it('keeps the same piece all day and moves on across days', async () => {
+		const { db } = makePassportDb();
+		await seedPieces(db, [1, 2, 3, 4, 5]);
+
+		// The whole UTC day, midnight to a millisecond before the next one.
+		const today = (await pick(db, NOON))?.slug;
+		const midnight = new Date('2026-09-24T00:00:00Z');
+		for (const now of [midnight, at(0, -6), at(0, 6), new Date('2026-09-24T23:59:59.999Z')]) {
+			expect((await pick(db, now))?.slug).toBe(today);
+		}
+
+		// Two weeks of days, each stable in itself, and not all the same piece.
+		const days: (string | null | undefined)[] = [];
+		for (let day = 0; day < 14; day++) {
+			const morning = (await pick(db, at(day, -11)))?.slug;
+			expect((await pick(db, at(day, 11)))?.slug).toBe(morning);
+			days.push(morning);
+		}
+		expect(new Set(days).size).toBeGreaterThan(1);
+		expect(days.some((slug, i) => i > 0 && slug !== days[i - 1])).toBe(true);
+	});
+
+	// The rank is per piece, so publishing a piece mid-day only changes the
+	// pick when the new piece outranks it; a count-and-offset pick would move
+	// on every publish.
+	it('leaves the pick alone when a lower-ranked piece is published mid-day', async () => {
+		const { sqlite, db } = makePassportDb();
+		await seedPieces(db, [1, 2, 3]);
+		sqlite.exec('UPDATE images SET published = 0 WHERE id = 3');
+
+		let unchanged = 0;
+		for (let day = 0; day < 30; day++) {
+			sqlite.exec('UPDATE images SET published = 0 WHERE id = 3');
+			const before = (await pick(db, at(day, -1)))?.slug;
+			sqlite.exec('UPDATE images SET published = 1 WHERE id = 3');
+			const after = (await pick(db, at(day, 1)))?.slug;
+			expect([before, 'piece-3']).toContain(after);
+			if (after === before) unchanged++;
+		}
+		// Not vacuous: on most days the new piece does not outrank the pick.
+		expect(unchanged).toBeGreaterThan(0);
+	});
+
+	// The schema allows an empty title; the picture link still needs a name,
+	// so the character's name (the data page's name) stands in.
+	it("titles an untitled piece with the character's name", async () => {
 		const { sqlite, db, platform } = makePassportDb();
 		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('ownerName', 'Ashby')").run();
-		await seedArt(db);
-		await db.insert(images).values([
-			{ id: 1, title: '', slug: 'untitled', imageUrl: '/1.png', artistId: 1, createdAt: '2026-01-01' }
-		]);
-
-		let data = await loadPassportPage(platform);
-		expect(data.passport.name).toBe('Ashby');
-		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'untitled', title: 'Ashby' });
-
+		await seedPieces(db, [1]);
 		sqlite.exec("UPDATE images SET title = '   '");
-		data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'piece', title: 'Ashby' });
 
-		await db.insert(imageTags).values({ imageId: 1, tagId: 1 });
-		data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'ref', slug: 'untitled', title: 'Ashby' });
+		const data = await loadPassportPage(platform);
+		expect(data.passport.name).toBe('Ashby');
+		expect(data.passport.picture).toMatchObject({ kind: 'piece', slug: 'piece-1', title: 'Ashby' });
 	});
 
-	it('falls back to the admin avatar, and to no picture without one', async () => {
-		const { sqlite, platform } = makePassportDb();
+	// The ref sheet no longer takes the passport: a designated NSFW sheet is out
+	// of the pool, and a SFW one is one piece among the rest.
+	it('ignores the ref sheet designation and the featured order', async () => {
+		const { db } = makePassportDb();
+		await seedPieces(db, []);
+		await db.insert(images).values([
+			{ id: 1, title: 'Mature Ref', slug: 'mature-ref', imageUrl: '/1.png', artistId: 1, nsfw: true },
+			{ id: 2, title: 'Featured', slug: 'featured', imageUrl: '/2.png', artistId: 1, nsfw: true, featured: true, featuredOrder: 1 },
+			{ id: 3, title: 'Plain', slug: 'plain', imageUrl: '/3.png', artistId: 1 }
+		]);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 1 });
+
+		for (let day = 0; day < 7; day++) expect(await pick(db, at(day))).toMatchObject({ kind: 'piece', slug: 'plain' });
+	});
+
+	it('falls back to the admin avatar with an empty pool, and to no picture without one', async () => {
+		const { sqlite, db, platform } = makePassportDb();
+		await seedPieces(db, [1]);
+		// Every piece out of the pool: NSFW.
+		sqlite.exec('UPDATE images SET nsfw = 1');
 		let data = await loadPassportPage(platform);
 		expect(data.passport.picture).toBeNull();
 
 		sqlite.prepare("INSERT INTO site_settings (key, value) VALUES ('adminAvatarUrl', '/face.png')").run();
 		clearSettingsCache();
 		data = await loadPassportPage(platform);
-		expect(data.passport.picture).toMatchObject({ kind: 'avatar', imageUrl: '/face.png', slug: null, nsfw: false });
+		expect(data.passport.picture).toEqual({ kind: 'avatar', imageUrl: '/face.png', slug: null, title: '', artistName: null });
 	});
 });
 
