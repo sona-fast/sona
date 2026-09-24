@@ -38,6 +38,9 @@ test.describe('gallery artist combobox keyboard', () => {
 	test('ArrowDown moves the active option and Enter picks it', async ({ page }) => {
 		await openHydrated(page);
 		await expect(listbox(page)).toBeVisible();
+		await expect(input(page)).toHaveAttribute('aria-autocomplete', 'list');
+		// The li wrappers are presentational so screen readers count only options.
+		await expect(page.locator('#artist-combobox-list > li:not([role="presentation"])')).toHaveCount(0);
 
 		await input(page).press('ArrowDown');
 		await expect(input(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-1');
@@ -88,13 +91,22 @@ test.describe('gallery artist combobox keyboard', () => {
 		await input(page).click();
 		await expect(listbox(page)).toBeVisible();
 
-		// Tab leaves the combobox (the options aren't tab stops) and closes the list.
+		// Tab leaves the combobox and closes the list. Shrink the list first so it
+		// overflows: a scroll container with no focusable children is itself a Tab
+		// stop unless it carries tabindex=-1, and the two-option seed never scrolls.
+		await page.addStyleTag({ content: '#artist-combobox-list{max-height:60px}' });
 		await input(page).press('Tab');
 		await expect(input(page)).not.toBeFocused();
 		await expect(listbox(page)).toHaveCount(0);
+		await expect(page.locator('#artist-combobox-list')).toHaveCount(0);
 
-		// Closing on focusout doesn't swallow a mouse pick.
+		// Closing on focusout doesn't swallow a mouse pick. Safari blurs the input
+		// with no relatedTarget on an option press; dispatch that shape and make
+		// sure the list survives it before the click lands.
 		await input(page).click();
+		await expect(listbox(page)).toBeVisible();
+		await input(page).dispatchEvent('focusout', { bubbles: true, relatedTarget: null });
+		await expect(listbox(page)).toBeVisible();
 		await option(page, 1).click();
 		await expect(page).toHaveURL(/[?&]artist=Test(\+|%20)Artist(&|$)/);
 	});

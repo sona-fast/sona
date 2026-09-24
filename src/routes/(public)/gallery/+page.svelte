@@ -325,7 +325,10 @@
 			/>
 			<ChevronDown size={16} class="select-chevron" />
 			{#if artistOpen}
-				<ul class="combobox-list" id="artist-combobox-list" role="listbox">
+				<!-- tabindex=-1: once the list overflows, a scroll container with no
+				     focusable children becomes a Tab stop in Chromium and Firefox; that
+				     would strand focus inside the wrapper with the key handlers unreachable. -->
+				<ul class="combobox-list" id="artist-combobox-list" role="listbox" tabindex="-1">
 					<li role="presentation">
 						<button
 							type="button"
@@ -670,6 +673,7 @@
 	/* Former name annotation in the combobox — quiet mono, like the credit line. */
 	.combobox-former {
 		margin-left: 6px;
+		font-weight: 400;
 		font-family: var(--font-primary);
 		font-size: 12px;
 		color: var(--muted-foreground);
