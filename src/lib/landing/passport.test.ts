@@ -9,6 +9,7 @@ import {
 	MRZ_WIDTH,
 	type PassportConvention,
 	type PassportCounts,
+	type PassportEventGroup,
 	type PassportStamps
 } from './passport';
 import { LANDING_LAYOUTS } from './index';
@@ -32,8 +33,30 @@ function con(over: Partial<PassportConvention> & { id: number; startDate: string
 
 const NO_ABOUT = { links: false, conventions: false };
 
-function build(over: Partial<Parameters<typeof buildStamps>[0]> = {}): PassportStamps {
-	return buildStamps({ counts: NO_COUNTS, conventions: [], photos: [], about: NO_ABOUT, now: NOW, ...over });
+type Photo = { event?: string; takenAt?: string };
+
+/** Groups photo fixtures the way the loader's GROUP BY event does: a count and
+ *  the largest taken_at date part per stored event value. Blank events are kept,
+ *  so the pure function's own skip stays covered. */
+function groupPhotos(photos: Photo[]): PassportEventGroup[] {
+	const groups = new Map<string | null, PassportEventGroup>();
+	for (const { event = null, takenAt } of photos) {
+		const group = groups.get(event) ?? { event, photos: 0, latest: null };
+		const day = takenAt?.slice(0, 10) ?? null;
+		group.photos++;
+		if (day !== null && (group.latest === null || day > group.latest)) group.latest = day;
+		groups.set(event, group);
+	}
+	return [...groups.values()];
+}
+
+const stampsFor = (photos: Photo[], exclude?: ReadonlySet<string>) => pastEventStamps(groupPhotos(photos), exclude);
+
+function build(
+	over: Partial<Omit<Parameters<typeof buildStamps>[0], 'events'>> & { photos?: Photo[] } = {}
+): PassportStamps {
+	const { photos = [], ...rest } = over;
+	return buildStamps({ counts: NO_COUNTS, conventions: [], events: groupPhotos(photos), about: NO_ABOUT, now: NOW, ...rest });
 }
 
 const allHrefs = (s: PassportStamps) => [
@@ -184,7 +207,7 @@ describe('passport convention stamps', () => {
 	});
 
 	it('treats a photo taken_at that names no real date as undated', () => {
-		const past = pastEventStamps([
+		const past = stampsFor([
 			{ event: 'Zeroed Con', takenAt: '0000-00-00 00:00:00' },
 			{ event: 'Month Thirteen', takenAt: '2025-13-05' },
 			{ event: 'Real Con', takenAt: '2025-06-14' }
@@ -200,7 +223,7 @@ describe('passport convention stamps', () => {
 	// so only a round trip tells "2026-02-30" from a real date.
 	it('treats an impossible day as undated and keeps a real leap day', () => {
 		const month = (takenAt: string) => {
-			const [stamp] = pastEventStamps([{ event: 'Con', takenAt }]);
+			const [stamp] = stampsFor([{ event: 'Con', takenAt }]);
 			return stamp.kind === 'past' ? stamp.month : undefined;
 		};
 		expect(month('2026-02-30')).toBeNull();
@@ -216,7 +239,7 @@ describe('passport convention stamps', () => {
 	// The gallery's event filter compares the stored value exactly, so the
 	// stamp groups and links by it; only an all-whitespace event is skipped.
 	it('groups and links past stamps by the stored event value, trailing space included', () => {
-		const past = pastEventStamps([
+		const past = stampsFor([
 			{ event: 'Harbourfur 2025 ', takenAt: '2025-11-08' },
 			{ event: 'Harbourfur 2025', takenAt: '2025-11-09' },
 			{ event: '   ', takenAt: '2025-11-09' }
@@ -228,7 +251,7 @@ describe('passport convention stamps', () => {
 	});
 
 	it('orders past events on the same date alphabetically', () => {
-		const past = pastEventStamps([
+		const past = stampsFor([
 			{ event: 'Maple Den', takenAt: '2025-05-01' },
 			{ event: 'Aspen Howl', takenAt: '2025-05-01' },
 			{ event: 'Cedar Con', takenAt: '2025-05-01' }
@@ -254,7 +277,7 @@ describe('passport convention stamps', () => {
 		]);
 		// The cap still fills with other events.
 		const many = Array.from({ length: MAX_PAST_STAMPS }, (_, i) => ({ event: `Con ${i}`, takenAt: `202${i}-05-01` }));
-		const capped = pastEventStamps([{ event: 'Live', takenAt: '2030-01-01' }, ...many], new Set(['Live']));
+		const capped = stampsFor([{ event: 'Live', takenAt: '2030-01-01' }, ...many], new Set(['Live']));
 		expect(capped.map((p) => p.name)).toEqual(many.map((p) => p.event).reverse());
 	});
 
@@ -275,6 +298,23 @@ describe('passport convention stamps', () => {
 		]);
 	});
 
+	// Photos tagged with an upcoming convention's name before it starts must not
+	// read as a past visit while the same convention reads as Next.
+	it('leaves a confirmed convention that has not started out of the past stamps', () => {
+		const upcoming = con({ id: 1, name: 'Lakeshore Den', startDate: '2027-03-05' });
+		const stamps = build({
+			conventions: [upcoming],
+			photos: [
+				{ event: 'Lakeshore Den', takenAt: '2026-09-01' },
+				{ event: 'Harbourfur 2025', takenAt: '2025-11-08' }
+			]
+		});
+		expect(stamps.conventions).toEqual([
+			{ kind: 'next', name: 'Lakeshore Den', startDate: '2027-03-05', href: '/connect' },
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025' }
+		]);
+	});
+
 	it('puts Next before the past stamps', () => {
 		const stamps = build({
 			conventions: [con({ id: 1, name: 'Lakeshore Den', startDate: '2027-03-05' })],
@@ -288,14 +328,14 @@ describe('passport convention stamps', () => {
 			{ event: 'Undated Con' },
 			...Array.from({ length: 8 }, (_, i) => ({ event: `Con ${i}`, takenAt: `202${i}-05-01` }))
 		];
-		const past = pastEventStamps(photos);
+		const past = stampsFor(photos);
 		expect(past).toHaveLength(MAX_PAST_STAMPS);
 		expect(past.map((p) => p.name)).toEqual(['Con 7', 'Con 6', 'Con 5', 'Con 4', 'Con 3', 'Con 2']);
-		expect(pastEventStamps([{ event: 'Undated Con' }, { event: 'Dated', takenAt: '2020-01-01' }]).map((p) => p.name)).toEqual([
+		expect(stampsFor([{ event: 'Undated Con' }, { event: 'Dated', takenAt: '2020-01-01' }]).map((p) => p.name)).toEqual([
 			'Dated',
 			'Undated Con'
 		]);
-		expect(pastEventStamps([{ event: 'Undated Con' }])[0]).toMatchObject({ kind: 'past', month: null });
+		expect(stampsFor([{ event: 'Undated Con' }])[0]).toMatchObject({ kind: 'past', month: null });
 	});
 
 	it('links every stamp it renders: the unlinked stamp never occurs', () => {

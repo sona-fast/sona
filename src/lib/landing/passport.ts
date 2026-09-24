@@ -65,10 +65,13 @@ export interface PassportConvention extends ConventionWindow {
 	status: string;
 }
 
-/** The two fields of a displayable fursuit photo the event stamps read. */
-export interface PassportPhoto {
-	event?: string;
-	takenAt?: string;
+/** One event's displayable fursuit photos, grouped by the loader in SQL. */
+export interface PassportEventGroup {
+	/** The stored event value, exactly as the gallery's event filter compares it. */
+	event: string | null;
+	photos: number;
+	/** The newest photo's taken_at date part, as stored; validated here. */
+	latest: string | null;
 }
 
 const positive = (n: number | null): n is number => n !== null && n > 0;
@@ -104,27 +107,24 @@ function fursuitEventHref(event: string): string {
  * no stamp, and every stamp has somewhere to link.
  *
  * The month and the count come from the photos too: the month of the newest
- * dated photo, and the number of photos carrying that event. Newest first by
+ * photo's date, and the number of photos carrying that event. The loader
+ * groups them in SQL; the sort and cap here are what decide. Newest first by
  * that date (undated events after the dated ones), capped at MAX_PAST_STAMPS.
  *
- * `exclude` holds every live convention's name: photos tagged during an event
- * must not add a past stamp for a convention that is running. Exact match, as
- * the gallery's event filter compares, and before the cap so it still fills.
+ * `exclude` holds every confirmed convention that has not ended: photos
+ * tagged during an event, or before it starts, must not add a past stamp for a
+ * convention that is running or reads Next. Exact match, as the gallery's
+ * event filter compares, and before the cap so it still fills.
  */
-export function pastEventStamps(photos: PassportPhoto[], exclude?: ReadonlySet<string>): ConventionStamp[] {
+export function pastEventStamps(groups: PassportEventGroup[], exclude?: ReadonlySet<string>): ConventionStamp[] {
 	const byEvent = new Map<string, { photos: number; latest: string | null }>();
-	for (const photo of photos) {
+	for (const group of groups) {
 		// Grouped and linked by the stored value: the gallery's event filter
 		// compares exactly, so a trimmed name would link to an empty view. trim()
 		// only skips an event that is all whitespace.
-		const event = photo.event;
+		const event = group.event;
 		if (!event?.trim() || exclude?.has(event)) continue;
-		// The date part of a timestamp ("2025-11-09T10:00:00Z" reads as its day).
-		const date = calendarDate(photo.takenAt?.slice(0, 10));
-		const entry = byEvent.get(event) ?? { photos: 0, latest: null };
-		entry.photos++;
-		if (date && (!entry.latest || date > entry.latest)) entry.latest = date;
-		byEvent.set(event, entry);
+		byEvent.set(event, { photos: group.photos, latest: calendarDate(group.latest) });
 	}
 	return [...byEvent]
 		.sort(([nameA, a], [nameB, b]) => {
@@ -167,7 +167,7 @@ export function pastEventStamps(photos: PassportPhoto[], exclude?: ReadonlySet<s
 export function buildStamps(input: {
 	counts: PassportCounts;
 	conventions: PassportConvention[];
-	photos: PassportPhoto[];
+	events: PassportEventGroup[];
 	about: { links: boolean; conventions: boolean };
 	now: Date;
 }): PassportStamps {
@@ -180,9 +180,10 @@ export function buildStamps(input: {
 		.filter((c) => c.status === 'confirmed')
 		.sort((a, b) => (startOf(a) < startOf(b) ? -1 : startOf(a) > startOf(b) ? 1 : 0));
 
-	const liveRows = confirmed.filter((c) => isLiveNow(c, now));
-	const liveRow = liveRows[0] ?? null;
-	const liveNames = new Set(liveRows.map((c) => c.name));
+	const liveRow = confirmed.find((c) => isLiveNow(c, now)) ?? null;
+	// Live and upcoming alike: photos tagged with a convention's name before it
+	// starts must not add a past stamp for the convention that reads Next.
+	const unfinishedNames = new Set(confirmed.filter((c) => !hasEnded(c, now)).map((c) => c.name));
 	// Not "not the live row": a second convention running at the same time is
 	// live too, and must never read as Next.
 	const nextRow = confirmed.find((c) => !isLiveNow(c, now) && !hasEnded(c, now)) ?? null;
@@ -212,7 +213,7 @@ export function buildStamps(input: {
 	if (nextRow) {
 		conventions.push({ kind: 'next', name: nextRow.name, startDate: calendarDate(nextRow.startDate), href: '/connect' });
 	}
-	conventions.push(...pastEventStamps(input.photos, liveNames));
+	conventions.push(...pastEventStamps(input.events, unfinishedNames));
 
 	return {
 		live: liveRow

@@ -353,17 +353,23 @@ describe('passport load — counts', () => {
 				INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at, permission_source)
 				VALUES
 					(1, 'c', '/f1.jpg', 'Lens A', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/1', '2025-11-08', NULL),
-					(2, 'c', '/f2.jpg', 'Lens B', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/2', '2025-11-09', NULL),
+					(2, 'c', '/f2.jpg', 'Lens B', 'Harbourfur 2025', 'cc-by', 'https://furtrack.example/2', '2025-11-09T10:00:00Z', NULL),
 					(3, 'c', '/f3.jpg', 'Lens B', 'Pinewood Howl 2025', 'unknown', 'https://furtrack.example/3', '2025-06-14', 'DM 2025-06-20'),
-					(4, 'c', '/f4.jpg', 'Lens C', 'Secret Con 2025', 'unknown', 'https://furtrack.example/4', '2025-03-01', NULL);
+					(4, 'c', '/f4.jpg', 'Lens C', 'Secret Con 2025', 'unknown', 'https://furtrack.example/4', '2025-03-01', NULL),
+					(5, 'c', '/f5.jpg', 'Lens D', NULL, 'public-domain', 'https://furtrack.example/5', '2025-12-01', NULL),
+					(6, 'c', '/f6.jpg', 'Lens A', '  ', 'cc-by', 'https://furtrack.example/6', '2025-12-02', NULL),
+					(7, 'c', '/f7.jpg', 'Lens E', 'Hidden Con 2025', 'all-rights-reserved', 'https://furtrack.example/7', '2025-12-03', ''),
+					(8, 'c', '/f8.jpg', 'Lens E', 'Odd Key Con', 'toString', 'https://furtrack.example/8', '2025-12-04', NULL);
 			`);
 
 		const on = makePassportDb('mock');
 		seedPhotos(on.sqlite);
 		const data = await loadPassportPage(on.platform);
-		// Photo 4 is not displayable and has no recorded permission: the gallery
-		// would not show it, so the passport neither counts nor names its event.
-		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [3, 2] });
+		// Photos 4, 7 and 8 are not displayable and have no recorded permission
+		// (an empty source is none, an unknown key is not displayable): the
+		// gallery would not show them, so the passport neither counts nor names
+		// their events. Photos 5 and 6 count but carry no event, so no stamp.
+		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [5, 3] });
 		expect(data.passport.stamps.conventions).toEqual([
 			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 2, href: '/gallery?view=fursuit&event=Harbourfur%202025' },
 			{ kind: 'past', name: 'Pinewood Howl 2025', month: '2025-06', photos: 1, href: '/gallery?view=fursuit&event=Pinewood%20Howl%202025' }
@@ -375,6 +381,36 @@ describe('passport load — counts', () => {
 		const offData = await loadPassportPage(off.platform);
 		expect(kinds(offData)).not.toContain('fursuit');
 		expect(offData.passport.stamps.conventions).toEqual([]);
+	});
+
+	// The events are grouped, ordered and limited in SQL; the limit must leave
+	// room for an event named after an upcoming confirmed convention, which
+	// pastEventStamps drops, so the six newest other events still fill the cap.
+	it('fills the past stamps with the newest events, skipping one named after an upcoming convention', async () => {
+		const { sqlite, platform } = makePassportDb('mock');
+		const events = ['Con A', 'Con B', 'Con C', 'Con D', 'Con E', 'Con F', 'Con G'];
+		const insert = sqlite.prepare(
+			"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at) VALUES (?, 'c', '/f.jpg', 'Lens', ?, 'cc-by', 'https://furtrack.example', ?)"
+		);
+		events.forEach((event, i) => insert.run(i + 1, event, `2025-0${i + 1}-01`));
+		insert.run(100, 'Con A', '2025-01-02');
+		// Tagged before it starts, and the newest date of all.
+		insert.run(101, 'Future Fest', isoDay(-1));
+		sqlite
+			.prepare("INSERT INTO conventions (name, start_date, status, timezone) VALUES ('Future Fest', ?, 'confirmed', 'UTC')")
+			.run(isoDay(30));
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.conventions.map((c) => [c.kind, c.name])).toEqual([
+			['next', 'Future Fest'],
+			['past', 'Con G'],
+			['past', 'Con F'],
+			['past', 'Con E'],
+			['past', 'Con D'],
+			['past', 'Con C'],
+			['past', 'Con B']
+		]);
+		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [9, 1] });
 	});
 });
 

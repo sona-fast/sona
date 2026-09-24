@@ -3,7 +3,7 @@
 // in $lib/landing/passport. Every D1 read is bounded: a stall degrades the page
 // to fewer stamps (or the profile picture), never to a 500 and never to a zero.
 
-import { and, asc, count, countDistinct, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, countDistinct, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
 	collections,
 	conventions,
@@ -24,8 +24,8 @@ import {
 	buildStamps,
 	hasAnyStamp,
 	machineLine,
+	MAX_PAST_STAMPS,
 	type PassportCounts,
-	type PassportPhoto,
 	type PassportStamps
 } from '$lib/landing/passport';
 import { LICENSES, type LicenseKey } from '$lib/furtrack/license';
@@ -76,6 +76,21 @@ function socialsOf(settings: SiteSettings): PassportData['socials'] {
 }
 
 const publishedParent = and(eq(images.published, true), isNull(images.parentImageId));
+
+// The gallery's own filter (fursuitPhotoFromRow's license lookup, then
+// `license.displayable || !!permissionSource`) in SQL: never count or group a
+// photo the fursuit view would not show. An unknown license key is not
+// displayable, and an empty permission source is no permission.
+const DISPLAYABLE_LICENSES = (Object.keys(LICENSES) as LicenseKey[]).filter((key) => LICENSES[key].displayable);
+const shownPhoto = or(
+	inArray(fursuitPhotos.license, DISPLAYABLE_LICENSES),
+	sql`${fursuitPhotos.permissionSource} <> ''`
+);
+
+/** Room in the event-group read for events pastEventStamps drops because a
+ *  confirmed convention of that name has not ended. The conventions load in
+ *  the parallel batch, so the count is not known when this read starts. */
+const PAST_STAMP_SLACK = 8;
 
 export async function loadPassport(opts: {
 	db: Database;
@@ -149,43 +164,36 @@ export async function loadPassport(opts: {
 	// Fursuit photos only while FurTrack is on, the same gate as the gallery's
 	// fursuit view. Independent of the batch, so it runs alongside it rather
 	// than adding a round trip. null (not []) on a stall, so the fursuit stamp
-	// hides instead of counting zero. Only the columns the counts, the event
-	// stamps and the displayable filter read; no row limit, because the counts
-	// need every row, and no order, because the stamps sort by date themselves.
-	// Every row crosses the wire, which is fine at personal-library sizes; if
-	// libraries grow into the thousands, the next step is counting and grouping
-	// by event in SQL (GROUP BY) with the license filter moved into the query.
-	const photosRead: Promise<(PassportPhoto & { photographer: string })[] | null> = furtrackOn
+	// hides instead of counting zero. Counted and grouped in SQL, so only two
+	// small result sets cross the wire however large the library grows: the
+	// totals, and one row per event, newest first. The group limit leaves room
+	// for pastEventStamps to drop up to PAST_STAMP_SLACK events named after a
+	// confirmed convention that has not ended and still fill MAX_PAST_STAMPS.
+	// Both in one batch, so they fail together: no counts without stamps.
+	const latest = sql<string | null>`max(substr(${fursuitPhotos.takenAt}, 1, 10))`;
+	const photosRead = furtrackOn
 		? withTimeout(
-				db
-					.select({
-						event: fursuitPhotos.event,
-						takenAt: fursuitPhotos.takenAt,
-						photographer: fursuitPhotos.photographer,
-						license: fursuitPhotos.license,
-						permissionSource: fursuitPhotos.permissionSource
-					})
-					.from(fursuitPhotos)
-					.then((rows) =>
-						rows
-							// The gallery's own filter (fursuitPhotoFromRow's license lookup):
-							// never count or group a photo the fursuit view would not show.
-							.filter(
-								(r) =>
-									(LICENSES[r.license as LicenseKey] ?? LICENSES.unknown).displayable || !!r.permissionSource
-							)
-							.map((r) => ({
-								event: r.event ?? undefined,
-								takenAt: r.takenAt ?? undefined,
-								photographer: r.photographer
-							}))
-					),
+				db.batch([
+					db
+						.select({ photos: count(), photographers: countDistinct(fursuitPhotos.photographer) })
+						.from(fursuitPhotos)
+						.where(shownPhoto),
+					db
+						.select({ event: fursuitPhotos.event, photos: count(), latest })
+						.from(fursuitPhotos)
+						// trim() drops a NULL event too: NULL <> '' is not true.
+						.where(and(shownPhoto, sql`trim(${fursuitPhotos.event}) <> ''`))
+						.groupBy(fursuitPhotos.event)
+						.orderBy(sql`${latest} desc nulls last`, asc(fursuitPhotos.event))
+						.limit(MAX_PAST_STAMPS + PAST_STAMP_SLACK)
+				]),
 				timeoutMs,
 				null
 			)
 		: Promise.resolve(null);
 
-	const [batchResult, photos] = await Promise.all([withTimeout(batch, timeoutMs, null), photosRead]);
+	const [batchResult, photoResult] = await Promise.all([withTimeout(batch, timeoutMs, null), photosRead]);
+	const photoTotals = photoResult?.[0][0];
 	const [refRows, galleryRows, stickerRows, vrRows, collectionRows, conRows, aboutConRows] = batchResult ?? [
 		[],
 		[],
@@ -257,8 +265,8 @@ export async function loadPassport(opts: {
 	const counts: PassportCounts = {
 		pieces: gallery?.pieces ?? null,
 		artists: gallery?.artists ?? null,
-		photos: photos ? photos.length : null,
-		photographers: photos ? new Set(photos.map((p) => p.photographer)).size : null,
+		photos: photoTotals?.photos ?? null,
+		photographers: photoTotals?.photographers ?? null,
 		stickers: sticker?.stickers ?? null,
 		packs: sticker?.packs ?? null,
 		avatars: vrRows[0]?.n ?? null,
@@ -269,7 +277,7 @@ export async function loadPassport(opts: {
 	const stamps = buildStamps({
 		counts,
 		conventions: conRows,
-		photos: photos ?? [],
+		events: photoResult?.[1] ?? [],
 		about: {
 			links: socials.length > 0,
 			conventions: aboutConRows.length > 0
