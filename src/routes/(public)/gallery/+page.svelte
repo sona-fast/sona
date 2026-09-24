@@ -57,6 +57,20 @@
 	let artistQuery = $state(data.filters.artist);
 	let artistOpen = $state(false);
 	let artistBox = $state<HTMLDivElement>();
+	// Keyboard-active option: 0 is "All Artists", i is artistMatches[i - 1],
+	// -1 is none. Arrow keys move it, Enter picks it.
+	let artistActive = $state(-1);
+
+	// Every way the menu closes (pick, Escape, outside click) drops the active option.
+	$effect(() => {
+		if (!artistOpen) artistActive = -1;
+	});
+
+	// Keep the keyboard-active option scrolled into the 260px listbox.
+	$effect(() => {
+		if (artistActive < 0) return;
+		document.getElementById(`artist-combobox-opt-${artistActive}`)?.scrollIntoView({ block: 'nearest' });
+	});
 
 	// Keep the input text in sync with the active filter after navigation, but
 	// never clobber what the user is typing while the menu is open.
@@ -245,20 +259,39 @@
 				placeholder={m.gallery_all_artists()}
 				bind:value={artistQuery}
 				onfocus={() => (artistOpen = true)}
-				oninput={() => (artistOpen = true)}
+				oninput={() => {
+					artistOpen = true;
+					artistActive = -1;
+				}}
 				onkeydown={(e) => {
-					if (e.key === 'Escape') {
+					if (e.key === 'ArrowDown') {
+						e.preventDefault();
+						artistOpen = true;
+						artistActive = Math.min(artistActive + 1, artistMatches.length);
+					} else if (e.key === 'ArrowUp') {
+						if (!artistOpen) return;
+						e.preventDefault();
+						artistActive = Math.max(artistActive - 1, 0);
+					} else if (e.key === 'Escape') {
 						artistOpen = false;
+						artistActive = -1;
 						artistQuery = data.filters.artist;
 						e.currentTarget.blur();
 					} else if (e.key === 'Enter') {
 						e.preventDefault();
-						if (artistMatches.length) selectArtist(artistMatches[0].name);
+						// Pick the keyboard-active option; with none, fall back to the first match.
+						if (artistOpen && artistActive >= 0) {
+							selectArtist(artistActive === 0 ? '' : artistMatches[artistActive - 1].name);
+						} else if (artistMatches.length) {
+							selectArtist(artistMatches[0].name);
+						}
 					}
 				}}
 				role="combobox"
 				aria-expanded={artistOpen}
 				aria-controls="artist-combobox-list"
+				aria-autocomplete="list"
+				aria-activedescendant={artistOpen && artistActive >= 0 ? `artist-combobox-opt-${artistActive}` : undefined}
 				autocomplete="off"
 			/>
 			<ChevronDown size={16} class="select-chevron" />
@@ -267,21 +300,27 @@
 					<li>
 						<button
 							type="button"
+							id="artist-combobox-opt-0"
 							class="combobox-option"
 							class:selected={!data.filters.artist}
+							class:active={artistActive === 0}
 							role="option"
-							aria-selected={!data.filters.artist}
+							aria-selected={artistActive === 0}
+							onmouseenter={() => (artistActive = 0)}
 							onclick={() => selectArtist('')}
 						>{m.gallery_all_artists()}</button>
 					</li>
-					{#each artistMatches as artist}
+					{#each artistMatches as artist, i}
 						<li>
 							<button
 								type="button"
+								id={`artist-combobox-opt-${i + 1}`}
 								class="combobox-option"
 								class:selected={artist.name === data.filters.artist}
+								class:active={i + 1 === artistActive}
 								role="option"
-								aria-selected={artist.name === data.filters.artist}
+								aria-selected={i + 1 === artistActive}
+								onmouseenter={() => (artistActive = i + 1)}
 								onclick={() => selectArtist(artist.name)}
 							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
 						</li>
@@ -575,7 +614,8 @@
 		cursor: pointer;
 	}
 
-	.combobox-option:hover {
+	.combobox-option:hover,
+	.combobox-option.active {
 		background: var(--secondary);
 	}
 
