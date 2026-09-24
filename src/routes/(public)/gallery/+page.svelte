@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { APP_NAME, GALLERY_VIEW_STORAGE_KEY } from '$lib/config';
 	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
 	import { Search, ChevronDown, LayoutGrid, List, ImageOff, ArrowRight } from 'lucide-svelte';
@@ -66,11 +67,25 @@
 		if (!artistOpen) artistActive = -1;
 	});
 
-	// Keep the keyboard-active option scrolled into the 260px listbox.
-	$effect(() => {
-		if (artistActive < 0) return;
+	// Keep the keyboard-active option scrolled into the 260px listbox. Only the
+	// arrow keys call this, so a pointer-driven change never scrolls the row
+	// out from under the pointer.
+	async function scrollArtistActiveIntoView() {
+		await tick();
 		document.getElementById(`artist-combobox-opt-${artistActive}`)?.scrollIntoView({ block: 'nearest' });
-	});
+	}
+
+	// Last pointer position over the list. Keyboard scrolling slides a new row
+	// under a pointer that hasn't moved, and the browser still fires mouse
+	// events for it; only a real change in coordinates moves the active option.
+	let artistPointerX = -1;
+	let artistPointerY = -1;
+	function artistPointerMove(e: PointerEvent, index: number) {
+		if (e.clientX === artistPointerX && e.clientY === artistPointerY) return;
+		artistPointerX = e.clientX;
+		artistPointerY = e.clientY;
+		artistActive = index;
+	}
 
 	// Keep the input text in sync with the active filter after navigation, but
 	// never clobber what the user is typing while the menu is open.
@@ -268,19 +283,21 @@
 						e.preventDefault();
 						artistOpen = true;
 						artistActive = Math.min(artistActive + 1, artistMatches.length);
+						scrollArtistActiveIntoView();
 					} else if (e.key === 'ArrowUp') {
 						if (!artistOpen) return;
 						e.preventDefault();
 						artistActive = Math.max(artistActive - 1, 0);
+						scrollArtistActiveIntoView();
 					} else if (e.key === 'Escape') {
 						artistOpen = false;
-						artistActive = -1;
 						artistQuery = data.filters.artist;
-						e.currentTarget.blur();
 					} else if (e.key === 'Enter') {
 						e.preventDefault();
-						// Pick the keyboard-active option; with none, fall back to the first match.
-						if (artistOpen && artistActive >= 0) {
+						// Pick the keyboard-active option; with none, fall back to the first
+						// match. With the menu closed, Enter does nothing.
+						if (!artistOpen) return;
+						if (artistActive >= 0) {
 							selectArtist(artistActive === 0 ? '' : artistMatches[artistActive - 1].name);
 						} else if (artistMatches.length) {
 							selectArtist(artistMatches[0].name);
@@ -297,7 +314,7 @@
 			<ChevronDown size={16} class="select-chevron" />
 			{#if artistOpen}
 				<ul class="combobox-list" id="artist-combobox-list" role="listbox">
-					<li>
+					<li role="presentation">
 						<button
 							type="button"
 							id="artist-combobox-opt-0"
@@ -306,12 +323,12 @@
 							class:active={artistActive === 0}
 							role="option"
 							aria-selected={artistActive === 0}
-							onmouseenter={() => (artistActive = 0)}
+							onpointermove={(e) => artistPointerMove(e, 0)}
 							onclick={() => selectArtist('')}
 						>{m.gallery_all_artists()}</button>
 					</li>
 					{#each artistMatches as artist, i}
-						<li>
+						<li role="presentation">
 							<button
 								type="button"
 								id={`artist-combobox-opt-${i + 1}`}
@@ -320,12 +337,12 @@
 								class:active={i + 1 === artistActive}
 								role="option"
 								aria-selected={i + 1 === artistActive}
-								onmouseenter={() => (artistActive = i + 1)}
+								onpointermove={(e) => artistPointerMove(e, i + 1)}
 								onclick={() => selectArtist(artist.name)}
 							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
 						</li>
 					{:else}
-						<li class="combobox-empty">No matching artists</li>
+						<li class="combobox-empty" role="presentation">No matching artists</li>
 					{/each}
 				</ul>
 			{/if}
@@ -599,14 +616,15 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-s);
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+		scroll-padding-block: 4px;
 	}
 
 	.combobox-option {
 		display: block;
 		width: 100%;
 		text-align: left;
-		padding: 8px 10px;
-		border: none;
+		padding: 7px 9px;
+		border: 1px solid transparent;
 		background: none;
 		border-radius: var(--radius-xs);
 		font: inherit;
@@ -614,8 +632,13 @@
 		cursor: pointer;
 	}
 
-	.combobox-option:hover,
+	/* Pointer movement and the arrow keys both drive artistActive, so only
+	   .active is styled; a :hover rule would light a second row when a parked
+	   pointer and the keyboard disagree. --secondary alone is too faint against
+	   the list, so the border carries the indicator: --primary-text clears 3:1
+	   in every theme, as in NewArtistDialog's .reg-results. */
 	.combobox-option.active {
+		border-color: var(--primary-text);
 		background: var(--secondary);
 	}
 
