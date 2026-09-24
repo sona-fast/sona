@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 // Source pins for the shared chrome's accessibility attributes. The unit suite
 // renders no Svelte components, and a dropped attribute fails silently: the
 // page still looks right, but a screen reader loses which page is current or
-// which nav is which.
+// which nav is which. The rendered aria-current states are asserted end to end
+// in tests/e2e/passport.spec.ts, 'marks the Gallery nav links as the current
+// page or the current section'.
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 

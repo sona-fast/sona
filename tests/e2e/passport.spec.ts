@@ -197,18 +197,32 @@ test.describe('populated passport', () => {
 	});
 
 	// The header and the phone tab bar say which page this is ("page") on the
-	// Gallery itself, and only which section ("true") on a piece inside it.
+	// Gallery itself, and only which section ("true") on a piece inside it. The
+	// root and an unrelated page (About) mark only their own links. This is the
+	// rendered check that the unit suite's source pins in
+	// chrome-a11y-markup.test.ts stand in for.
 	test('marks the Gallery nav links as the current page or the current section', async ({ page }) => {
 		const links = () => [page.locator('header a.nav-link[href="/gallery"]'), page.locator('nav.mobile-nav a[href="/gallery"]')];
+		const aboutLinks = () => [page.locator('header a.nav-link[href="/about"]'), page.locator('nav.mobile-nav a[href="/about"]')];
+
+		await page.goto('/');
+		await expect(page.locator('header a.logo')).toHaveAttribute('aria-current', 'page');
+		await expect(page.locator('nav.mobile-nav a[href="/"]')).toHaveAttribute('aria-current', 'page');
+		for (const link of links()) await expect(link).not.toHaveAttribute('aria-current');
 
 		await page.goto('/gallery');
 		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'page');
+		for (const link of aboutLinks()) await expect(link).not.toHaveAttribute('aria-current');
 		// The card titles sit straight under the page h1, so they are h2s.
 		await expect(page.locator('a.card h2.card-title').first()).toBeVisible();
 		await expect(page.locator('a.card h3')).toHaveCount(0);
 
 		await page.goto('/gallery/mature-ref-sheet');
 		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'true');
+
+		await page.goto('/about');
+		for (const link of aboutLinks()) await expect(link).toHaveAttribute('aria-current', 'page');
+		for (const link of links()) await expect(link).not.toHaveAttribute('aria-current');
 	});
 
 	// The gallery's filter row: every input and select has a name, the view toggle says
