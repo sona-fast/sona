@@ -98,13 +98,19 @@ test.describe('gallery artist combobox keyboard', () => {
 		await input(page).press('Tab');
 		await expect(input(page)).not.toBeFocused();
 		await expect(listbox(page)).toHaveCount(0);
-		await expect(page.locator('#artist-combobox-list')).toHaveCount(0);
+
+		// A press on the list's own padding must not take focus off the input.
+		await input(page).click();
+		await expect(listbox(page)).toBeVisible();
+		const list = await listbox(page).boundingBox();
+		if (!list) throw new Error('listbox has no bounding box');
+		await page.mouse.click(list.x + list.width / 2, list.y + 2);
+		await expect(input(page)).toBeFocused();
+		await expect(listbox(page)).toBeVisible();
 
 		// Closing on focusout doesn't swallow a mouse pick. Safari blurs the input
 		// with no relatedTarget on an option press; dispatch that shape and make
 		// sure the list survives it before the click lands.
-		await input(page).click();
-		await expect(listbox(page)).toBeVisible();
 		await input(page).dispatchEvent('focusout', { bubbles: true, relatedTarget: null });
 		await expect(listbox(page)).toBeVisible();
 		await option(page, 1).click();

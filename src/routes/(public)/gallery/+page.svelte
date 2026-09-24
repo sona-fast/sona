@@ -327,8 +327,16 @@
 			{#if artistOpen}
 				<!-- tabindex=-1: once the list overflows, a scroll container with no
 				     focusable children becomes a Tab stop in Chromium and Firefox; that
-				     would strand focus inside the wrapper with the key handlers unreachable. -->
-				<ul class="combobox-list" id="artist-combobox-list" role="listbox" tabindex="-1">
+				     would strand focus inside the wrapper with the key handlers unreachable.
+				     The pointerdown preventDefault keeps a press on the list (padding, empty
+				     row, or an option) from taking focus off the input; clicks still fire. -->
+				<ul
+					class="combobox-list"
+					id="artist-combobox-list"
+					role="listbox"
+					tabindex="-1"
+					onpointerdown={(e) => e.preventDefault()}
+				>
 					<li role="presentation">
 						<button
 							type="button"
