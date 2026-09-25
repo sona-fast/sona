@@ -73,19 +73,19 @@ export class R2Storage implements StorageProvider {
 		// caller-declared size — a lying source is caught by the length check.
 		// A stream with NO size buffers under MAX_BUFFER_BYTES (M8) instead.
 		const FixedLengthStream = fixedLengthStreamCtor();
-		if (body instanceof ReadableStream && size !== undefined && FixedLengthStream) {
+		if (body instanceof ReadableStream && size !== undefined && size !== 0 && FixedLengthStream) {
 			const fixed = new FixedLengthStream(size);
 			const pump = body.pipeThrough(holdBackPastLength(size)).pipeTo(fixed.writable);
 			// Await both: the put consumes the readable side, and a pump failure
 			// (size mismatch, source error) must reject the call, not float.
-			// Guarantee (for a declared size above 0): a rejected put leaves
-			// nothing at the key, because holdBackPastLength keeps the completing
-			// bytes from the store until the source has ended without overrunning
-			// (see the SONA-140 harness). With size 0 the store can commit an
-			// empty object before any byte arrives; no caller streams a 0-byte
-			// declaration, so that case is left unguarded. No cleanup delete:
-			// nothing of ours is ever committed, and a delete could destroy a
-			// live object under migrate's deterministic keys.
+			// Guarantee: a rejected put leaves nothing at the key, because
+			// holdBackPastLength keeps the completing bytes from the store until
+			// the source has ended without overrunning (see the SONA-140 harness).
+			// A declared size of 0 takes the buffered branch below instead: the
+			// store would commit an empty object before any byte could arrive,
+			// while the buffered branch rejects a non-empty body before the put.
+			// No cleanup delete: nothing of ours is ever committed, and a delete
+			// could destroy a live object under migrate's deterministic keys.
 			// The cast bridges the DOM ReadableStream type to workers-types' (the
 			// same object at runtime; only the .d.ts lineages differ).
 			await Promise.all([

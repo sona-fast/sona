@@ -34,7 +34,12 @@ function makeStorage(put: (key: string, value: unknown, opts?: unknown) => Promi
 function committingBucket(declared: number) {
 	const stored = new Map<string, Uint8Array>();
 	const bucket = {
-		put: async (key: string, value: ReadableStream<Uint8Array>) => {
+		put: async (key: string, value: ReadableStream<Uint8Array> | Uint8Array | ArrayBuffer) => {
+			if (!(value instanceof ReadableStream)) {
+				// The buffered branch hands the store bytes, not a stream.
+				stored.set(key, new Uint8Array(value instanceof Uint8Array ? value : new Uint8Array(value)));
+				return {};
+			}
 			const reader = value.getReader();
 			const committed = new Uint8Array(declared);
 			let got = 0;
@@ -246,6 +251,28 @@ describe('R2 streaming put', () => {
 			filename: 'reuse.png'
 		});
 		expect(Array.from(stored.get('a/reuse.png') ?? [])).toEqual([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]);
+	});
+
+	it('a declared size of 0 rejects a non-empty body before the store sees it, and accepts an empty one', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(0);
+		const nonEmpty = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(new Uint8Array(16));
+				c.close();
+			}
+		});
+		await expect(
+			storage.put({ suggestedKey: 'a/zero.png', body: nonEmpty, size: 0, contentType: 'image/png', filename: 'zero.png' })
+		).rejects.toThrow(/0-byte buffer cap|0 were declared/);
+		expect(stored.has('a/zero.png')).toBe(false);
+		const empty = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.close();
+			}
+		});
+		await storage.put({ suggestedKey: 'a/empty.png', body: empty, size: 0, contentType: 'image/png', filename: 'empty.png' });
+		expect(stored.get('a/empty.png')?.length).toBe(0);
 	});
 
 	it('a source that errors before the store commits leaves an existing object in place', async () => {
