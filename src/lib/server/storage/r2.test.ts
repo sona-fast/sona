@@ -36,13 +36,16 @@ function committingBucket(declared: number) {
 	const bucket = {
 		put: async (key: string, value: ReadableStream<Uint8Array>) => {
 			const reader = value.getReader();
+			const committed = new Uint8Array(declared);
 			let got = 0;
 			while (got < declared) {
 				const { done, value: chunk } = await reader.read();
 				if (done) throw new Error('put: body ended early');
-				got += chunk.length;
+				const take = Math.min(chunk.length, declared - got);
+				committed.set(chunk.subarray(0, take), got);
+				got += take;
 			}
-			stored.set(key, new Uint8Array(declared));
+			stored.set(key, committed);
 			void (async () => {
 				for (;;) if ((await reader.read()).done) return;
 			})().catch(() => {});
@@ -196,7 +199,15 @@ describe('R2 streaming put', () => {
 	it('an exact-length source still commits every byte through the hold-back', async () => {
 		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
 		const { stored, storage } = committingBucket(12);
-		const { stream } = countingSource(3, 4);
+		const expected = Uint8Array.from({ length: 12 }, (_, n) => 0x10 * n + n);
+		const stream = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(expected.slice(0, 4));
+				c.enqueue(expected.slice(4, 8));
+				c.enqueue(expected.slice(8));
+				c.close();
+			}
+		});
 		await storage.put({
 			suggestedKey: 'a/exact.png',
 			body: stream,
@@ -204,7 +215,7 @@ describe('R2 streaming put', () => {
 			contentType: 'image/png',
 			filename: 'exact.png'
 		});
-		expect(stored.get('a/exact.png')?.length).toBe(12);
+		expect(stored.get('a/exact.png')).toEqual(expected);
 	});
 
 	it('a source that errors before the store commits leaves an existing object in place', async () => {
@@ -212,10 +223,18 @@ describe('R2 streaming put', () => {
 		const { stored, storage } = committingBucket(16);
 		const previous = new Uint8Array([9, 9, 9]);
 		stored.set('a/keep.png', previous);
+		// The full 16 bytes arrive first and the source errors on the NEXT pull.
+		// Erroring in the same tick would drop the queued chunk before the store
+		// saw it, so the test would pass with or without the hold-back.
+		let emitted = false;
 		const stream = new ReadableStream<Uint8Array>({
-			start(c) {
-				c.enqueue(new Uint8Array(8));
-				c.error(new Error('source died mid-body'));
+			pull(c) {
+				if (emitted) {
+					c.error(new Error('source died mid-body'));
+					return;
+				}
+				emitted = true;
+				c.enqueue(new Uint8Array(16));
 			}
 		});
 		await expect(
