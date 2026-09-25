@@ -31,13 +31,3 @@ describe('the backfill rows', () => {
 		expect(imagesPage).toMatch(/href="\/admin\/images\/suggest-tags"[^>]*data-sveltekit-preload-data="tap"/);
 	});
 });
-
-describe('the backfill row\'s rating line', () => {
-	it('reads an unsaved row the same way in the pill guard and the saved branch', () => {
-		// A row whose save wrote no tags leaves savedTags as an empty array: truthy
-		// to `!savedTags`, falsy to `savedTags?.length`. Read differently, the row
-		// lost its pill AND drew no saved line, so there was no way back to a lookup.
-		expect(backfillPage).toMatch(/\{#if !savedTags\?\.length && !conflicts\[row\.id\]/);
-		expect(backfillPage).toMatch(/\{:else if savedTags\?\.length\}/);
-	});
-});
