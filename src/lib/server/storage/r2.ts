@@ -16,6 +16,37 @@ export interface R2Options {
 	publicBase: string;
 }
 
+/**
+ * A pass-through that keeps the last chunk back until the source either sends
+ * another or ends, and errors instead of forwarding a chunk that would take the
+ * total past `size`. Downstream therefore sees the byte that completes `size`
+ * only after the source has closed without overrunning. One chunk in flight;
+ * nothing is buffered beyond it.
+ */
+function holdBackPastLength(size: number): TransformStream<Uint8Array, Uint8Array> {
+	let total = 0;
+	let held: Uint8Array | undefined;
+	return new TransformStream({
+		transform(chunk, controller) {
+			// An empty chunk must not release the held one: it adds no bytes, so
+			// the overrun check below could not have run on the chunk after it.
+			if (chunk.byteLength === 0) return;
+			total += chunk.byteLength;
+			// Same wording as workerd's FixedLengthStream error. Only the tests
+			// and the integration harness match on it; no production caller does.
+			if (total > size) throw new TypeError(`r2: attempt to write too many bytes (${total} > ${size} declared)`);
+			if (held) controller.enqueue(held);
+			// Copy: enqueue never copies, and a source that reuses its buffer for
+			// the next chunk would otherwise rewrite the held bytes before they
+			// are forwarded.
+			held = chunk.slice();
+		},
+		flush(controller) {
+			if (held) controller.enqueue(held);
+		}
+	});
+}
+
 export class R2Storage implements StorageProvider {
 	readonly id = 'r2' as const;
 	#bucket: R2Bucket;
@@ -42,24 +73,19 @@ export class R2Storage implements StorageProvider {
 		// caller-declared size — a lying source is caught by the length check.
 		// A stream with NO size buffers under MAX_BUFFER_BYTES (M8) instead.
 		const FixedLengthStream = fixedLengthStreamCtor();
-		if (body instanceof ReadableStream && size !== undefined && FixedLengthStream) {
+		if (body instanceof ReadableStream && size !== undefined && size !== 0 && FixedLengthStream) {
 			const fixed = new FixedLengthStream(size);
-			const pump = body.pipeTo(fixed.writable);
+			const pump = body.pipeThrough(holdBackPastLength(size)).pipeTo(fixed.writable);
 			// Await both: the put consumes the readable side, and a pump failure
 			// (size mismatch, source error) must reject the call, not float.
-			// Failure modes: an under-length or errored source leaves the key
-			// absent, but an OVER-length source — put() still rejects — CAN leave
-			// a truncated object of exactly the declared size at the key,
-			// replacing whatever was there (timing-dependent: the store's write
-			// completes only if it finishes before the pump's rejection; both
-			// outcomes observed under workerd — see the SONA-140 harness).
-			// No cleanup delete, deliberately: every caller
-			// passes an authoritative size (File.size or a fetch-bounded
-			// Content-Length), so an over-length source is unreachable today; if
-			// it ever happened the leftover is an unreferenced orphan the sweep
-			// reclaims (the rejection means no DB row points at it), whereas a
-			// delete here could destroy a live object under migrate's
-			// deterministic keys.
+			// Guarantee: a rejected put leaves nothing at the key, because
+			// holdBackPastLength keeps the completing bytes from the store until
+			// the source has ended without overrunning (see the SONA-140 harness).
+			// A declared size of 0 takes the buffered branch below instead: the
+			// store would commit an empty object before any byte could arrive,
+			// while the buffered branch rejects a non-empty body before the put.
+			// No cleanup delete: nothing of ours is ever committed, and a delete
+			// could destroy a live object under migrate's deterministic keys.
 			// The cast bridges the DOM ReadableStream type to workers-types' (the
 			// same object at runtime; only the .d.ts lineages differ).
 			await Promise.all([

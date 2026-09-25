@@ -24,6 +24,46 @@ function makeStorage(put: (key: string, value: unknown, opts?: unknown) => Promi
 	return { bucket, storage };
 }
 
+/**
+ * A bucket that stores into a Map and behaves like R2 against a
+ * FixedLengthStream body: its put reads until it holds `declared` bytes, then
+ * commits and resolves, the way workerd's readable ends at exactly byteLength.
+ * It keeps draining afterwards, so an over-length source's extra bytes still
+ * reach the FixedLengthStream and fail the pump: the commit-then-reject race.
+ */
+function committingBucket(declared: number) {
+	const stored = new Map<string, Uint8Array>();
+	const bucket = {
+		put: async (key: string, value: ReadableStream<Uint8Array> | Uint8Array | ArrayBuffer) => {
+			if (!(value instanceof ReadableStream)) {
+				// The buffered branch hands the store bytes, not a stream.
+				stored.set(key, new Uint8Array(value instanceof Uint8Array ? value : new Uint8Array(value)));
+				return {};
+			}
+			const reader = value.getReader();
+			const committed = new Uint8Array(declared);
+			let got = 0;
+			while (got < declared) {
+				const { done, value: chunk } = await reader.read();
+				if (done) throw new Error('put: body ended early');
+				const take = Math.min(chunk.length, declared - got);
+				committed.set(chunk.subarray(0, take), got);
+				got += take;
+			}
+			stored.set(key, committed);
+			void (async () => {
+				for (;;) if ((await reader.read()).done) return;
+			})().catch(() => {});
+			return {};
+		}
+	};
+	const storage = new R2Storage({
+		bucket: bucket as unknown as R2Bucket,
+		publicBase: 'https://cdn.example.com'
+	});
+	return { stored, storage };
+}
+
 describe('R2 streaming put', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -101,6 +141,170 @@ describe('R2 streaming put', () => {
 		// assertion guards the real hazard: a cleanup delete could destroy a
 		// pre-existing live object at the same key.
 		expect(bucket.delete).not.toHaveBeenCalled();
+	});
+
+	it('an over-length source never lets the store commit a truncated object', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(8);
+		const { stream } = countingSource(2, 8); // 16 bytes actual
+		await expect(
+			storage.put({
+				suggestedKey: 'a/over.png',
+				body: stream,
+				size: 8, // the first chunk alone completes the declared size
+				contentType: 'image/png',
+				filename: 'over.png'
+			})
+		).rejects.toThrow(/too many bytes/);
+		expect(stored.has('a/over.png')).toBe(false);
+	});
+
+	it('an over-length put leaves an existing object at the key untouched', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(8);
+		const previous = new Uint8Array([1, 2, 3]);
+		stored.set('a/over.png', previous);
+		// The overrun arrives in a later chunk than the one completing the size.
+		const { stream } = countingSource(3, 4); // 12 bytes actual
+		await expect(
+			storage.put({
+				suggestedKey: 'a/over.png',
+				body: stream,
+				size: 8,
+				contentType: 'image/png',
+				filename: 'over.png'
+			})
+		).rejects.toThrow(/too many bytes/);
+		expect(stored.get('a/over.png')).toBe(previous);
+	});
+
+	it('an empty chunk does not release the chunk that completes the size', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(8);
+		const sizes = [4, 4, 0, 4]; // 12 bytes actual; the empty chunk sits at the boundary
+		const stream = new ReadableStream<Uint8Array>({
+			pull(c) {
+				const n = sizes.shift();
+				if (n === undefined) c.close();
+				else c.enqueue(new Uint8Array(n));
+			}
+		});
+		await expect(
+			storage.put({
+				suggestedKey: 'a/over.png',
+				body: stream,
+				size: 8,
+				contentType: 'image/png',
+				filename: 'over.png'
+			})
+		).rejects.toThrow(/too many bytes/);
+		expect(stored.has('a/over.png')).toBe(false);
+	});
+
+	it('an exact-length source still commits every byte through the hold-back', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(12);
+		const expected = Uint8Array.from({ length: 12 }, (_, n) => 0x10 * n + n);
+		const stream = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(expected.slice(0, 4));
+				c.enqueue(expected.slice(4, 8));
+				c.enqueue(expected.slice(8));
+				c.close();
+			}
+		});
+		await storage.put({
+			suggestedKey: 'a/exact.png',
+			body: stream,
+			size: 12,
+			contentType: 'image/png',
+			filename: 'exact.png'
+		});
+		expect(stored.get('a/exact.png')).toEqual(expected);
+	});
+
+	it('a source that reuses one buffer across chunks still stores the bytes it sent', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(12);
+		// One backing buffer, rewritten before every enqueue. With a zero high
+		// water mark the source is pulled only after the consumer took the last
+		// chunk, so each rewrite lands while the hold-back is still holding that
+		// chunk. The held chunk is a copy, so the store sees 1,1,1,1,2,2,2,2,3,3,3,3
+		// and not the last fill.
+		const buffer = new Uint8Array(4);
+		let fill = 0;
+		const stream = new ReadableStream<Uint8Array>(
+			{
+				pull(c) {
+					if (fill === 3) return c.close();
+					buffer.fill(++fill);
+					c.enqueue(buffer);
+				}
+			},
+			{ highWaterMark: 0 }
+		);
+		await storage.put({
+			suggestedKey: 'a/reuse.png',
+			body: stream,
+			size: 12,
+			contentType: 'image/png',
+			filename: 'reuse.png'
+		});
+		expect(Array.from(stored.get('a/reuse.png') ?? [])).toEqual([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]);
+	});
+
+	it('a declared size of 0 rejects a non-empty body before the store sees it, and accepts an empty one', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(0);
+		const nonEmpty = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(new Uint8Array(16));
+				c.close();
+			}
+		});
+		await expect(
+			storage.put({ suggestedKey: 'a/zero.png', body: nonEmpty, size: 0, contentType: 'image/png', filename: 'zero.png' })
+		).rejects.toThrow(/0-byte buffer cap|0 were declared/);
+		expect(stored.has('a/zero.png')).toBe(false);
+		const empty = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.close();
+			}
+		});
+		await storage.put({ suggestedKey: 'a/empty.png', body: empty, size: 0, contentType: 'image/png', filename: 'empty.png' });
+		expect(stored.get('a/empty.png')?.length).toBe(0);
+	});
+
+	it('a source that errors before the store commits leaves an existing object in place', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(16);
+		const previous = new Uint8Array([9, 9, 9]);
+		stored.set('a/keep.png', previous);
+		// The full 16 bytes arrive first and the source errors on the NEXT pull.
+		// Erroring in the same tick would drop the queued chunk before the store
+		// saw it, so the test would pass with or without the hold-back.
+		let emitted = false;
+		const stream = new ReadableStream<Uint8Array>({
+			pull(c) {
+				if (emitted) {
+					c.error(new Error('source died mid-body'));
+					return;
+				}
+				emitted = true;
+				c.enqueue(new Uint8Array(16));
+			}
+		});
+		await expect(
+			storage.put({
+				suggestedKey: 'a/keep.png',
+				body: stream,
+				size: 16,
+				contentType: 'image/png',
+				filename: 'keep.png'
+			})
+		).rejects.toThrow('source died mid-body');
+		// The put never committed, so the cleanup must not touch the key.
+		expect(stored.get('a/keep.png')).toBe(previous);
 	});
 
 	it('round-trips: a URL returned by the streaming put survives an orphan sweep', async () => {
