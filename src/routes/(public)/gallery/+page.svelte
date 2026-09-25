@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { APP_NAME, GALLERY_VIEW_STORAGE_KEY } from '$lib/config';
 	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
 	import { Search, ChevronDown, LayoutGrid, List, ImageOff, ArrowRight } from 'lucide-svelte';
@@ -57,6 +58,34 @@
 	let artistQuery = $state(data.filters.artist);
 	let artistOpen = $state(false);
 	let artistBox = $state<HTMLDivElement>();
+	// Keyboard-active option: 0 is "All Artists", i is artistMatches[i - 1],
+	// -1 is none. Arrow keys move it, Enter picks it.
+	let artistActive = $state(-1);
+
+	// Every way the menu closes (pick, Escape, outside click) drops the active option.
+	$effect(() => {
+		if (!artistOpen) artistActive = -1;
+	});
+
+	// Keep the keyboard-active option scrolled into the 260px listbox. Only the
+	// arrow keys call this, so a pointer-driven change never scrolls the row
+	// out from under the pointer.
+	async function scrollArtistActiveIntoView() {
+		await tick();
+		document.getElementById(`artist-combobox-opt-${artistActive}`)?.scrollIntoView({ block: 'nearest' });
+	}
+
+	// Last pointer position over the list. Keyboard scrolling slides a new row
+	// under a pointer that hasn't moved, and the browser still fires mouse
+	// events for it; only a real change in coordinates moves the active option.
+	let artistPointerX = -1;
+	let artistPointerY = -1;
+	function artistPointerMove(e: PointerEvent, index: number) {
+		if (e.clientX === artistPointerX && e.clientY === artistPointerY) return;
+		artistPointerX = e.clientX;
+		artistPointerY = e.clientY;
+		artistActive = index;
+	}
 
 	// Keep the input text in sync with the active filter after navigation, but
 	// never clobber what the user is typing while the menu is open.
@@ -242,7 +271,16 @@
 				{/each}
 			</select>
 		</div>
-		<div class="select-wrapper combobox" bind:this={artistBox}>
+		<div
+			class="select-wrapper combobox"
+			bind:this={artistBox}
+			onfocusout={(e) => {
+				// Tab away closes the list. A pointer press on an option can blur the
+				// input with no relatedTarget (Safari doesn't focus buttons), so only
+				// close when focus lands outside; outside clicks close via pointerdown.
+				if (e.relatedTarget && !artistBox?.contains(e.relatedTarget as Node)) artistOpen = false;
+			}}
+		>
 			<input
 				type="text"
 				class="input filter-select combobox-input"
@@ -250,43 +288,93 @@
 				aria-label={m.gallery_filter_artist()}
 				bind:value={artistQuery}
 				onfocus={() => (artistOpen = true)}
-				oninput={() => (artistOpen = true)}
+				onclick={() => (artistOpen = true)}
+				oninput={() => {
+					artistOpen = true;
+					artistActive = -1;
+				}}
 				onkeydown={(e) => {
-					if (e.key === 'Escape') {
+					// While an IME is composing (CJK input), Enter confirms the conversion
+					// and the arrows move through candidates; none of it is meant for the
+					// list. keyCode 229 is the legacy signal some engines still send.
+					if (e.isComposing || e.keyCode === 229) return;
+					if (e.key === 'ArrowDown') {
+						e.preventDefault();
+						artistOpen = true;
+						artistActive = Math.min(artistActive + 1, artistMatches.length);
+						scrollArtistActiveIntoView();
+					} else if (e.key === 'ArrowUp') {
+						if (!artistOpen) return;
+						e.preventDefault();
+						artistActive = Math.max(artistActive - 1, 0);
+						scrollArtistActiveIntoView();
+					} else if (e.key === 'Escape') {
 						artistOpen = false;
 						artistQuery = data.filters.artist;
-						e.currentTarget.blur();
 					} else if (e.key === 'Enter') {
 						e.preventDefault();
-						if (artistMatches.length) selectArtist(artistMatches[0].name);
+						// Pick the keyboard-active option; with none, fall back to the first
+						// match. With the menu closed, Enter does nothing.
+						if (!artistOpen) return;
+						if (artistActive >= 0) {
+							// The match list can shrink under a stale index; then do nothing.
+							const pick = artistActive === 0 ? '' : artistMatches[artistActive - 1]?.name;
+							if (pick !== undefined) selectArtist(pick);
+						} else if (artistMatches.length) {
+							selectArtist(artistMatches[0].name);
+						}
 					}
 				}}
 				role="combobox"
 				aria-expanded={artistOpen}
 				aria-controls="artist-combobox-list"
+				aria-autocomplete="list"
+				aria-activedescendant={artistOpen && artistActive >= 0 ? `artist-combobox-opt-${artistActive}` : undefined}
 				autocomplete="off"
 			/>
 			<ChevronDown size={16} class="select-chevron" aria-hidden="true" />
 			{#if artistOpen}
-				<ul class="combobox-list" id="artist-combobox-list" role="listbox" aria-label={m.gallery_filter_artist()}>
+				<!-- tabindex=-1: once the list overflows, a scroll container with no
+				     focusable children becomes a Tab stop in Chromium and Firefox; that
+				     would strand focus inside the wrapper with the key handlers unreachable.
+				     The pointerdown preventDefault keeps a press on the list (padding, empty
+				     row, or an option) from taking focus off the input; clicks still fire. -->
+				<ul
+					class="combobox-list"
+					id="artist-combobox-list"
+					role="listbox"
+					aria-label={m.gallery_filter_artist()}
+					tabindex="-1"
+					onpointerdown={(e) => e.preventDefault()}
+				>
 					<li role="presentation">
 						<button
 							type="button"
+							id="artist-combobox-opt-0"
+							tabindex="-1"
 							class="combobox-option"
 							class:selected={!data.filters.artist}
+							class:active={artistActive === 0}
 							role="option"
-							aria-selected={!data.filters.artist}
+							aria-selected={artistActive === 0}
+							aria-current={!data.filters.artist ? 'true' : undefined}
+							onpointermove={(e) => artistPointerMove(e, 0)}
 							onclick={() => selectArtist('')}
 						>{m.gallery_all_artists()}</button>
 					</li>
-					{#each artistMatches as artist}
+					{#each artistMatches as artist, i}
 						<li role="presentation">
 							<button
 								type="button"
+								id={`artist-combobox-opt-${i + 1}`}
+								tabindex="-1"
 								class="combobox-option"
 								class:selected={artist.name === data.filters.artist}
+								class:active={i + 1 === artistActive}
 								role="option"
-								aria-selected={artist.name === data.filters.artist}
+								aria-selected={i + 1 === artistActive}
+								aria-current={artist.name === data.filters.artist ? 'true' : undefined}
+								onpointermove={(e) => artistPointerMove(e, i + 1)}
 								onclick={() => selectArtist(artist.name)}
 							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
 						</li>
@@ -568,14 +656,15 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-s);
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+		scroll-padding-block: 4px;
 	}
 
 	.combobox-option {
 		display: block;
 		width: 100%;
 		text-align: left;
-		padding: 8px 10px;
-		border: none;
+		padding: 7px 9px;
+		border: 1px solid transparent;
 		background: none;
 		border-radius: var(--radius-xs);
 		font: inherit;
@@ -583,12 +672,19 @@
 		cursor: pointer;
 	}
 
-	.combobox-option:hover {
+	/* Pointer movement and the arrow keys both drive artistActive, so only
+	   .active is styled; a :hover rule would light a second row when a parked
+	   pointer and the keyboard disagree. --secondary alone is too faint against
+	   the list, so the border carries the indicator: --primary-text clears 3:1
+	   in every theme, as in NewArtistDialog's .reg-results. */
+	.combobox-option.active {
+		border-color: var(--primary-text);
 		background: var(--secondary);
 	}
 
+	/* The fill belongs to the active row; the current filter is bold only
+	   (and carries aria-current, since aria-selected follows the active row). */
 	.combobox-option.selected {
-		background: var(--secondary);
 		font-weight: 600;
 	}
 
@@ -601,9 +697,15 @@
 	/* Former name annotation in the combobox — quiet mono, like the credit line. */
 	.combobox-former {
 		margin-left: 6px;
+		font-weight: 400;
 		font-family: var(--font-primary);
 		font-size: 12px;
 		color: var(--muted-foreground);
+	}
+
+	/* --muted-foreground misses 4.5:1 on the active row's --secondary fill. */
+	.combobox-option.active .combobox-former {
+		color: var(--foreground);
 	}
 
 	/* AKA pointer — one quiet line when an old ?artist= name was redirected. A thin
