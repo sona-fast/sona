@@ -15,10 +15,7 @@ import type { Database } from './db';
 export const REFERENCE_TAG = 'reference';
 
 /**
- * The ref sheet query, unexecuted, so a caller can put it in a db.batch with
- * its other reads (the passport homepage does). /art and the passport both
- * read the ref sheet through this one query, so the two pages can never pick
- * different pictures.
+ * The ref sheet query. /art reads the ref sheet through it (via loadRefSheet).
  *
  * Precedence, in one statement: the first owner character's (by name)
  * explicit reference_image_id wins when that image is published; otherwise the
@@ -40,7 +37,7 @@ export function refSheetQuery(db: Database) {
 			artistName: artists.name,
 			nsfw: images.nsfw,
 			// width/height reserve the img box (no CLS): the ref sheet is /art's
-			// LCP element. The passport frames it by aspect ratio instead.
+			// LCP element.
 			width: images.width,
 			height: images.height
 		})

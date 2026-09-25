@@ -83,7 +83,7 @@
 		align-items: center;
 		justify-content: center;
 		gap: 4px;
-		/* 60%, the passport's scrim too: over light blurred art a 50% one measures
+		/* 60%: over light blurred art a 50% one measures
 		   3.95:1 behind the label, under the 4.5:1 text bar. */
 		background: rgba(0, 0, 0, 0.6);
 		border: none;
