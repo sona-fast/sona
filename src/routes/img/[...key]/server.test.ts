@@ -13,14 +13,13 @@ import { GET } from './+server';
  *    against a real binding, not assumed);
  *  - workerd rejects a quoted tag by throwing, which is why the route unquotes.
  *
- * Two known departures from the real binding, neither load-bearing here:
- * it throws for a shortlist of bad tags where workerd's parser is stricter (the
- * grammar itself is pinned in src/lib/server/etag.test.ts), and it reports
- * `range` only when one was asked for, where the real binding always populates
- * it. That second one masks a PRE-EXISTING defect in the unsatisfiable-range
- * fallback — against real R2 it answers 206 with a Content-Range covering the
- * whole object rather than the 200 the tests below expect. That is unchanged by
- * the conditional work and left alone deliberately; fixing it is its own change.
+ *  - object.range is populated on EVERY returned object, covering the whole
+ *    object when the get was unranged, so the route cannot use its presence to
+ *    decide between 206 and 200 (it tracks whether it asked for a range).
+ *
+ * One known departure from the real binding, not load-bearing here: it throws
+ * for a shortlist of bad tags where workerd's parser is stricter (the grammar
+ * itself is pinned in src/lib/server/etag.test.ts).
  */
 function bucket(
 	objects: Record<string, { body: string; contentType?: string }>,
@@ -47,7 +46,8 @@ function bucket(
 			}
 			const meta = {
 				size: bytes.byteLength,
-				range: getOpts?.range,
+				// Like the real binding: always set, the whole extent when unranged.
+				range: getOpts?.range ?? { offset: 0, length: bytes.byteLength },
 				httpEtag: etag,
 				httpMetadata: o.contentType ? { contentType: o.contentType } : undefined
 			};
