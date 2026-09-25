@@ -163,6 +163,17 @@ VALUES
   (1, 'Taro', 0, '2026-07-01T00:00:00.000Z'),
   (2, 'Thistle', 1, '2026-07-01T00:00:00.000Z');
 
+-- The piece page's optional sections, for the heading-outline spec in
+-- site-chrome.spec.ts (SONA-229): variant-piece already renders Details and
+-- Variants, and ref-sheet renders Tags, so the variant gets the other two, a
+-- source link and a featured character. Image 2 is the variant on purpose: the
+-- passport picture pool leaves variants out and passport.sql links no
+-- character to it, the feed skips it as NSFW, and no spec opens its edit page.
+-- The source is on a host the suggest-tags scan does not read (it looks for
+-- Bluesky and X posts only), so that list does not grow.
+UPDATE images SET source_post_url = 'https://www.furaffinity.net/view/12345/' WHERE id = 2;
+INSERT OR REPLACE INTO image_characters (image_id, character_id) VALUES (2, 1);
+
 -- NSFW reference sheet for the /art shield spec (SONA-18): published,
 -- non-variant, and designated on the OWNER character, so it exercises the
 -- explicit reference_image_id path rather than the REFERENCE_TAG fallback.

@@ -34,8 +34,11 @@
 	/* How much bottom space clears the fixed mobile nav. MobileNav publishes its
 	   own height as --mobile-nav-height; the nav wraps onto more rows when the
 	   text is enlarged, so a fixed gap would let it cover the page's last lines.
-	   Never less than the 88px the layouts were designed around. */
-	--mobile-nav-clearance: max(88px, calc(var(--mobile-nav-height, 0px) + 32px));
+	   Never less than the 88px the layouts were designed around, and that floor
+	   is 5.5rem so it grows with the reader's text size too: before hydration or
+	   with JavaScript off the height is never published, and the floor alone
+	   has to clear a bar that wrapped under enlarged text. */
+	--mobile-nav-clearance: max(5.5rem, calc(var(--mobile-nav-height, 0px) + 32px));
 }
 
 /* Reset */

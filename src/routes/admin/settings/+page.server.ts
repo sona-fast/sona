@@ -397,10 +397,10 @@ export const actions = {
 		let adminAvatarUrl: string | undefined;
 		if (data.has('bluesky')) {
 			blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string);
+			const current = await getSettings(db, { fresh: true });
 			if (blueskyUrl) {
 				// Re-host to our own CDN (same as artist avatars) so the owner avatar can't
 				// rot if the source changes. Uses the current storage config.
-				const current = await getSettings(db, { fresh: true });
 				const ours = (u: string) => isOurAvatarUrl(platform?.env, current, url.origin, u);
 				const currentOwned = !!current.adminAvatarUrl && ours(current.adminAvatarUrl);
 				const handleChanged = blueskyUrl !== current.blueskyUrl;
@@ -438,7 +438,6 @@ export const actions = {
 				// with it. The site tab posts the field on every save, so a fork
 				// that never set a handle posts blank each time, and treating that
 				// as a clear wiped an avatar no handle produced.
-				const current = await getSettings(db, { fresh: true });
 				if (current.blueskyUrl) adminAvatarUrl = '';
 			}
 		}

@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 // page still looks right, but a screen reader loses which page is current or
 // which nav is which. The rendered aria-current states are asserted end to end
 // in tests/e2e/passport.spec.ts, 'marks the Gallery nav links as the current
-// page or the current section'.
+// page or the current section', and the nav names in tests/e2e/site-chrome.spec.ts.
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
@@ -32,13 +32,6 @@ describe('shared chrome accessibility markup', () => {
 		// No link may claim "page" from a prefix match alone.
 		expect(headerSrc).not.toMatch(/aria-current=\{active\s*\?\s*'page'/);
 		expect(mobileNavSrc).not.toMatch(/aria-current=\{active\s*\?\s*'page'/);
-	});
-
-	it('names both main navs through the message catalog', () => {
-		expect(headerSrc).toMatch(/<nav\s+aria-label=\{m\.nav_main_label\(\)\}\s*>/);
-		// Other attributes may sit on the tag (the bar binds itself to publish
-		// its height); what matters is the label on the mobile-nav element.
-		expect(mobileNavSrc).toMatch(/<nav\s+class="mobile-nav"\s+aria-label=\{m\.nav_main_label\(\)\}[^>]*>/);
 	});
 
 	// Source-level only; tests/e2e/passport.spec.ts ("rings a keyboard-focused
