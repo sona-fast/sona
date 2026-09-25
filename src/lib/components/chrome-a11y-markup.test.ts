@@ -36,7 +36,9 @@ describe('shared chrome accessibility markup', () => {
 
 	it('names both main navs through the message catalog', () => {
 		expect(headerSrc).toMatch(/<nav\s+aria-label=\{m\.nav_main_label\(\)\}\s*>/);
-		expect(mobileNavSrc).toMatch(/<nav\s+class="mobile-nav"\s+aria-label=\{m\.nav_main_label\(\)\}\s*>/);
+		// Other attributes may sit on the tag (the bar binds itself to publish
+		// its height); what matters is the label on the mobile-nav element.
+		expect(mobileNavSrc).toMatch(/<nav\s+class="mobile-nav"\s+aria-label=\{m\.nav_main_label\(\)\}[^>]*>/);
 	});
 
 	// Source-level only; tests/e2e/passport.spec.ts ("rings a keyboard-focused

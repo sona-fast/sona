@@ -45,17 +45,19 @@ VALUES (2, 'Avatar Artist', '/e2e-avatar.svg', '2026-07-01T00:00:00.000Z');
 -- Variant group: a published SFW parent + a published NSFW variant that points
 -- at it via parent_image_id. The gallery variant strip renders both, and the
 -- NSFW sibling must arrive blurred. Image URLs are same-origin placeholder paths
--- (they 404 harmlessly) so the tests make NO external network calls — the
--- distinct `parentpiece` / `variantpiece` tokens let specs assert the shown
--- image follows the URL.
+-- so the tests make NO external network calls — the distinct `parentpiece` /
+-- `variantpiece` tokens let specs assert the shown image follows the URL. The
+-- full-size paths 404 harmlessly; the thumbnails load, because seed.ts puts the
+-- committed fixtures/e2e-thumb.png into the local bucket under every
+-- '/img/e2e/…-thumb.png' key this file names, and /img serves it.
 INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
 VALUES
   (1, 'Parent Piece SFW', 'parent-piece',
-   '/e2e/parentpiece.png', '/e2e/parentpiece-thumb.png',
+   '/e2e/parentpiece.png', '/img/e2e/parentpiece-thumb.png',
    900, 700, 0, 1, 1, NULL, NULL, '2026-07-01T00:00:00.000Z'),
   (2, 'Variant Piece NSFW', 'variant-piece',
-   '/e2e/variantpiece.png', '/e2e/variantpiece-thumb.png',
+   '/e2e/variantpiece.png', '/img/e2e/variantpiece-thumb.png',
    900, 700, 1, 1, 1, 1, 'Alt', '2026-07-02T00:00:00.000Z');
 
 -- Reference sheet for the admin palette-picker spec: a published image tagged
@@ -66,7 +68,7 @@ INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
 VALUES
   (3, 'Ref Sheet', 'ref-sheet',
-   '/e2e/refsheet.png', '/e2e/refsheet-thumb.png',
+   '/e2e/refsheet.png', '/img/e2e/refsheet-thumb.png',
    1200, 900, 0, 1, 1, NULL, NULL, '2026-07-03T00:00:00.000Z');
 INSERT OR REPLACE INTO tags (id, name, created_at) VALUES (1, 'reference', '2026-07-01T00:00:00.000Z');
 INSERT OR REPLACE INTO image_tags (image_id, tag_id) VALUES (3, 1);
@@ -79,7 +81,7 @@ INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
 VALUES
   (4, 'Mature Poster Source', 'mature-poster-source',
-   '/e2e/matureposter.png', '/e2e/matureposter-thumb.png',
+   '/e2e/matureposter.png', '/img/e2e/matureposter-thumb.png',
    900, 700, 1, 0, 1, NULL, NULL, '2026-07-04T00:00:00.000Z');
 
 -- Edit-page target for the artist-lookup spec (SONA-156). Credited to Avatar
@@ -90,7 +92,7 @@ INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
 VALUES
   (10, 'Lookup Edit Target', 'lookup-edit-target',
-   '/e2e/lookuptarget.png', '/e2e/lookuptarget-thumb.png',
+   '/e2e/lookuptarget.png', '/img/e2e/lookuptarget-thumb.png',
    900, 700, 0, 0, 2, NULL, NULL, '2026-07-05T00:00:00.000Z');
 
 -- Untagged images with a Bluesky or X source post, for the suggest-tags spec
@@ -172,7 +174,7 @@ INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
 VALUES
   (5, 'Mature Ref Sheet', 'mature-ref-sheet',
-   '/e2e/matureref.png', '/e2e/matureref-thumb.png',
+   '/e2e/matureref.png', '/img/e2e/matureref-thumb.png',
    1200, 900, 1, 1, 1, NULL, NULL, '2026-07-05T00:00:00.000Z');
 UPDATE characters SET reference_image_id = 5 WHERE id = 2;
 INSERT OR REPLACE INTO vr_avatars

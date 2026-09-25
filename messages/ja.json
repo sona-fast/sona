@@ -22,6 +22,7 @@
 	"legal_last_updated": "最終更新 {date}",
 	"footer_legal_label": "サイト内リンク",
 	"nav_main_label": "メイン",
+	"nav_skip_to_content": "本文へスキップ",
 	"footer_privacy": "プライバシー",
 	"footer_terms": "利用規約",
 	"footer_build": "ビルド {sha}",

@@ -391,7 +391,8 @@ export const actions = {
 			data.has(key) ? normalizeSocialUrl(platformKey, data.get(key) as string) : undefined;
 
 		// The avatar re-resolves only when this form carries the bluesky field;
-		// clearing bluesky clears the derived avatar with it (paired on purpose).
+		// clearing a stored bluesky handle clears the derived avatar with it
+		// (paired on purpose). A blank field with no stored handle leaves it alone.
 		let blueskyUrl: string | undefined;
 		let adminAvatarUrl: string | undefined;
 		if (data.has('bluesky')) {
@@ -433,7 +434,12 @@ export const actions = {
 					}
 				}
 			} else {
-				adminAvatarUrl = '';
+				// Only a real clear (a stored handle going blank) takes the avatar
+				// with it. The site tab posts the field on every save, so a fork
+				// that never set a handle posts blank each time, and treating that
+				// as a clear wiped an avatar no handle produced.
+				const current = await getSettings(db, { fresh: true });
+				if (current.blueskyUrl) adminAvatarUrl = '';
 			}
 		}
 

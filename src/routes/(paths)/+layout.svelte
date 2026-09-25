@@ -24,7 +24,7 @@
 			<LanguageToggle />
 		</div>
 	</header>
-	<main class="paths-page">
+	<main id="main-content" tabindex="-1" class="paths-page">
 		{@render children()}
 	</main>
 </div>
@@ -67,7 +67,7 @@
 		}
 
 		.paths-page {
-			padding-bottom: 88px;
+			padding-bottom: var(--mobile-nav-clearance);
 		}
 	}
 

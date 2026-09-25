@@ -1134,6 +1134,21 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(resolveAvatarUrl).not.toHaveBeenCalled();
 	});
 
+	// The site tab posts the bluesky field on every save, blank when no handle
+	// is set. A fork with an avatar but no handle (the e2e seed is one) used to
+	// lose it to any unrelated save, because blank-to-blank read as a clear.
+	it('a blank bluesky with no stored handle keeps the avatar', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/face.jpg');
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'Taro Surf', bluesky: '' }));
+
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/face.jpg');
+		expect(await getRawSetting(db, 'siteName')).toBe('Taro Surf');
+		expect(resolveAvatarUrl).not.toHaveBeenCalled();
+	});
+
 	// Unchanged-handle guard (#187): the site tab posts bluesky on EVERY save, so
 	// an unrelated save (a transient resolve failure included) must not degrade an
 	// owned re-hosted copy — the refresh cron would heal it back, but a day later

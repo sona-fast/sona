@@ -18,13 +18,30 @@
 		{ href: '/about', label: m.nav_about, icon: User }
 	]);
 
+	// Publish the bar's height so the layouts' bottom gap (--mobile-nav-clearance
+	// in app.css) grows with it. Enlarged text wraps the tabs onto a second row,
+	// and a fixed 88px gap would then leave the page's last lines under the bar.
+	// The property is left in place on teardown: the next page's nav overwrites
+	// it, and a removal racing that write would reset the gap to its floor.
+	let navEl: HTMLElement | undefined = $state();
+	$effect(() => {
+		const el = navEl;
+		if (!el) return;
+		const root = document.documentElement;
+		const observer = new ResizeObserver(() => {
+			root.style.setProperty('--mobile-nav-height', `${el.offsetHeight}px`);
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	});
+
 	function isActive(href: string, pathname: string): boolean {
 		if (href === '/') return pathname === '/';
 		return pathname.startsWith(href);
 	}
 </script>
 
-<nav class="mobile-nav" aria-label={m.nav_main_label()}>
+<nav class="mobile-nav" aria-label={m.nav_main_label()} bind:this={navEl}>
 	{#each tabs as tab (tab.href)}
 		{@const active = isActive(tab.href, $page.url.pathname)}
 		<!-- "page" only on the section's own page: a piece under /gallery is in
@@ -67,6 +84,11 @@
 	@media (max-width: 768px) {
 		.mobile-nav {
 			display: flex;
+			/* At 320px with 200% text the five labels no longer fit one row
+			   (WCAG 1.4.4 and 1.4.10). Wrapping moves whole tabs onto a second
+			   row instead of pushing the last ones off the screen. */
+			flex-wrap: wrap;
+			row-gap: 4px;
 			justify-content: space-around;
 		}
 	}
@@ -81,13 +103,16 @@
 		border-radius: var(--radius-s);
 		text-decoration: none;
 		color: var(--muted-foreground);
-		font-size: 11px;
+		/* rem, not px, so a reader's text-size setting reaches the labels. */
+		font-size: 0.6875rem;
 		font-family: var(--font-secondary);
 		transition: color 0.15s;
 	}
 
 	/* Keep multi-character JA labels (e.g. サイトについて) on one line; the reduced
-	   horizontal padding above lets all five tabs fit at 390px without wrapping. */
+	   horizontal padding above lets all five tabs fit at 390px without wrapping.
+	   When they cannot fit, the bar wraps whole tabs rather than breaking a
+	   label mid-word. */
 	.tab span {
 		white-space: nowrap;
 	}

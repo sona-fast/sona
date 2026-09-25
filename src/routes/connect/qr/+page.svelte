@@ -15,7 +15,7 @@
      screen whose colours are a scanning requirement instead of a style choice:
      it gets held at arm's length under bad hall lighting, and a dark-on-dark
      rendering in a fork's custom theme would simply fail to scan. -->
-<main class="handoff">
+<main id="main-content" tabindex="-1" class="handoff">
 	<a class="exit" href="/connect" aria-label={m.connect_qr_close()}>&#10005;</a>
 
 	<div class="plate">
