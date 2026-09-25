@@ -221,17 +221,23 @@ describe('R2 streaming put', () => {
 	it('a source that reuses one buffer across chunks still stores the bytes it sent', async () => {
 		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
 		const { stored, storage } = committingBucket(12);
-		// One backing buffer, rewritten before every enqueue. The held chunk is a
-		// copy, so the store sees 1,1,1,1,2,2,2,2,3,3,3,3 and not the last fill.
+		// One backing buffer, rewritten before every enqueue. With a zero high
+		// water mark the source is pulled only after the consumer took the last
+		// chunk, so each rewrite lands while the hold-back is still holding that
+		// chunk. The held chunk is a copy, so the store sees 1,1,1,1,2,2,2,2,3,3,3,3
+		// and not the last fill.
 		const buffer = new Uint8Array(4);
 		let fill = 0;
-		const stream = new ReadableStream<Uint8Array>({
-			pull(c) {
-				if (fill === 3) return c.close();
-				buffer.fill(++fill);
-				c.enqueue(buffer);
-			}
-		});
+		const stream = new ReadableStream<Uint8Array>(
+			{
+				pull(c) {
+					if (fill === 3) return c.close();
+					buffer.fill(++fill);
+					c.enqueue(buffer);
+				}
+			},
+			{ highWaterMark: 0 }
+		);
 		await storage.put({
 			suggestedKey: 'a/reuse.png',
 			body: stream,
