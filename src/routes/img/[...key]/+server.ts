@@ -71,12 +71,11 @@ export const GET: RequestHandler = async ({ params, request, platform }) => {
 		// R2 THROWS on an unsatisfiable range (offset at/past the end, bytes=-0)
 		// rather than returning null — unguarded, that surfaced as an anonymous
 		// 500 (R3-D1). RFC 9110 lets a server ignore Range, so fall back to the
-		// unranged full body; clearing `ranged` below then serves a 200.
+		// unranged full body, served as a 200.
 		// The fallback drops the conditional too, deliberately: whatever the
 		// options made R2 reject, a bare get still succeeds, and re-sending the
 		// option that just threw would turn this safety net into a repeat of the
 		// failure. It costs only the 304 on a conditional-plus-bad-range request.
-		// The Range is now ignored, so the response must be a plain 200.
 		ranged = false;
 		object = await platform?.env.IMAGES?.get(key);
 	}
@@ -113,12 +112,11 @@ export const GET: RequestHandler = async ({ params, request, platform }) => {
 	headers.set('etag', object.httpEtag);
 	headers.set('cache-control', IMG_CACHE_CONTROL);
 	headers.set('accept-ranges', 'bytes');
-	// Ranged read (gated on `ranged`, not on object.range, which real R2 sets
-	// even for an unranged get): a 206 with Content-Range, sized to the
-	// returned slice — Safari probes media with bytes=0-1 and refuses the clip
-	// if the origin ignores it. Offset and length are clamped from
-	// object.size/object.range (what R2 actually served), never taken from the
-	// client's numbers: a suffix longer than the object or a length running
+	// Ranged read (gated on `ranged`, see above): a 206 with Content-Range,
+	// sized to the returned slice — Safari probes media with bytes=0-1 and
+	// refuses the clip if the origin ignores it. Offset and length are clamped
+	// from object.size/object.range (what R2 actually served), never taken from
+	// the client's numbers: a suffix longer than the object or a length running
 	// past the end must not produce a Content-Range that lies about the body.
 	if (ranged && object.range) {
 		const rawOffset =

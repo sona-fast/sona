@@ -14,10 +14,9 @@ import { jpegFixture } from '../../src/lib/server/storage/scrub-metadata.fixture
 //  1. workerd drops a manually-set content-length header on a plain
 //     ReadableStream fetch body and sends chunked encoding; only a
 //     FixedLengthStream body carries a real Content-Length.
-//  2. An over-length source through FixedLengthStream can commit a truncated
-//     R2 object of exactly the declared size even though put() rejects (the
-//     provider now withholds the completing bytes; the suite pins that the
-//     key ends up absent).
+//  2. An over-length source through FixedLengthStream could commit a
+//     truncated R2 object even though put() rejected. The suite pins the fix:
+//     an over-length put rejects and leaves the key absent.
 // This suite pins both behaviors (and the happy paths) by bundling the REAL
 // provider code into a worker (tests/integration/worker-fixtures/
 // storage-worker.ts) and running it under Miniflare's workerd. Outbound

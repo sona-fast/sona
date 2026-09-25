@@ -76,18 +76,13 @@ export class R2Storage implements StorageProvider {
 			// Await both: the put consumes the readable side, and a pump failure
 			// (size mismatch, source error) must reject the call, not float.
 			// Guarantee (for a declared size above 0): a rejected put leaves
-			// nothing at the key. With size 0 the store can commit an empty
-			// object before any byte arrives; no caller streams a 0-byte
-			// declaration, so that case is left unguarded. The store
-			// commits once FixedLengthStream's readable reaches the declared
-			// length, and under workerd it does so even when its put() then
-			// rejects, so an over-length source must never let the declared
-			// length through. holdBackPastLength withholds each chunk until the
-			// next arrives and fails before forwarding one that would overrun, so
-			// the last bytes only reach the store once the source has ended at
-			// or under the declared size (see the SONA-140 harness). No cleanup
-			// delete: nothing of ours is ever committed, and a delete could
-			// destroy a live object under migrate's deterministic keys.
+			// nothing at the key, because holdBackPastLength keeps the completing
+			// bytes from the store until the source has ended without overrunning
+			// (see the SONA-140 harness). With size 0 the store can commit an
+			// empty object before any byte arrives; no caller streams a 0-byte
+			// declaration, so that case is left unguarded. No cleanup delete:
+			// nothing of ours is ever committed, and a delete could destroy a
+			// live object under migrate's deterministic keys.
 			// The cast bridges the DOM ReadableStream type to workers-types' (the
 			// same object at runtime; only the .d.ts lineages differ).
 			await Promise.all([

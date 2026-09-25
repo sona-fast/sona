@@ -36,21 +36,13 @@ function committingBucket(declared: number) {
 	const bucket = {
 		put: async (key: string, value: ReadableStream<Uint8Array>) => {
 			const reader = value.getReader();
-			const parts: Uint8Array[] = [];
 			let got = 0;
 			while (got < declared) {
 				const { done, value: chunk } = await reader.read();
 				if (done) throw new Error('put: body ended early');
-				parts.push(chunk);
 				got += chunk.length;
 			}
-			const bytes = new Uint8Array(declared);
-			let at = 0;
-			for (const part of parts) {
-				bytes.set(part.subarray(0, declared - at), at);
-				at += Math.min(part.length, declared - at);
-			}
-			stored.set(key, bytes);
+			stored.set(key, new Uint8Array(declared));
 			void (async () => {
 				for (;;) if ((await reader.read()).done) return;
 			})().catch(() => {});
