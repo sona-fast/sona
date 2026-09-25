@@ -55,7 +55,9 @@ test('NSFW poster mature-gates the detail page and hides the 3D entry', async ({
 	const overlay = page.locator('.nsfw-overlay');
 	await expect(overlay).toBeVisible();
 	await expect(overlay.getByRole('button', { name: /Show avatar/ })).toBeVisible();
-	await expect(overlay.locator('img.blurred')).toBeVisible();
+	const poster = overlay.locator('img.blurred');
+	await expect(poster).toBeVisible();
+	await expect(poster).toHaveCSS('filter', 'blur(32px)');
 	await expect(page.getByRole('button', { name: 'View in 3D' })).toHaveCount(0);
 
 	// The reveal click itself is deliberately not exercised here; this spec's
