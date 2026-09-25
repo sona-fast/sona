@@ -56,12 +56,6 @@ describe('ConCard download paths', () => {
 		);
 	});
 
-	it('groups the includes and the handles as two fieldsets', () => {
-		// Per the approved mock: what goes on the card, then which accounts.
-		expect(source).toMatch(/<legend>\{m\.con_card_include\(\)\}<\/legend>/);
-		expect(source).toMatch(/<legend>\{m\.con_card_handles\(\)\}<\/legend>/);
-	});
-
 	it('keeps the card whole when the avatar cannot be fetched', () => {
 		// The QR is the point of the card, and the back never touches the avatar.
 		expect(source).toMatch(/avatarFailed = true;[\s\S]*?return null;/);

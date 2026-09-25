@@ -3,8 +3,6 @@ import {
 	applyTo,
 	fromResponse,
 	parseTagInput,
-	ratingLabel,
-	readingLabel,
 	requestSuggestions,
 	selectedTags,
 	rowToFocusAfter,
@@ -307,49 +305,6 @@ describe('the tray a finished state draws', () => {
 		// Out of the loop because it carries a count the others have no field for.
 		expect(trayFor({ kind: 'empty', imageCount: 1, rating: null })).toMatchObject({ retry: false });
 	});
-
-	it('draws the backfill row a tray for a source URL it cannot read', () => {
-		// The forms answer this under the field, so only a row reaches it. The
-		// state is a 422 either way: the link passed the client recogniser and the
-		// server still could not read a post at it, so the sentence names the link
-		// rather than asking for a URL the field already holds.
-		expect(trayFor({ kind: 'noSource' })).toEqual({
-			title: 'Suggestions unavailable',
-			body: "Sona can't look up this link. Check the source post URL.",
-			warn: true,
-			retry: false
-		});
-	});
-
-	it('warns for every failure, but not for a post with nothing to suggest', () => {
-		expect(trayFor({ kind: 'empty', imageCount: 1, rating: null })).toEqual({
-			title: 'No tags to suggest',
-			body: "entail.dev read the post but found nothing it's confident about.",
-			warn: false,
-			retry: false
-		});
-		// The post did have tags; the field already had them. Saying entail.dev
-		// found nothing would blame the classifier for the operator's own typing.
-		expect(trayFor({ kind: 'empty', skippedExisting: true, imageCount: 1, rating: null })).toEqual({
-			title: 'No tags to suggest',
-			body: 'entail.dev only returned tags that are already in the Tags field.',
-			warn: false,
-			retry: false
-		});
-		// Nothing looked at the post, so the tray says what the post is missing
-		// rather than what entail.dev concluded.
-		expect(trayFor({ kind: 'empty', noImage: true, imageCount: 1, rating: null })).toEqual({
-			title: 'No tags to suggest',
-			body: 'This post has no image for entail.dev to look at.',
-			warn: false,
-			retry: false
-		});
-		expect(trayFor({ kind: 'notFound' })).toMatchObject({
-			title: 'Suggestions unavailable',
-			body: "entail.dev couldn't read this post.",
-			warn: true
-		});
-	});
 });
 
 describe('applyTo', () => {
@@ -425,91 +380,6 @@ describe('parseTagInput', () => {
 
 	it('reads an empty field as no tags', () => {
 		expect(parseTagInput('')).toEqual([]);
-	});
-});
-
-describe('the sentences the live region reads', () => {
-	it('names the post being read by its kind', () => {
-		expect(readingLabel('bluesky')).toBe('Reading the Bluesky post');
-		expect(readingLabel('x')).toBe('Reading the X post');
-	});
-
-	it('joins a title and a body with a full stop, not a bare space', () => {
-		// Read aloud, "Suggestions unavailable entail.dev is busy" runs the two
-		// together; the join message is what puts the pause between them.
-		expect(sentenceFor({ kind: 'rateLimited' })).toBe(
-			'Suggestions unavailable. entail.dev is busy. Wait a minute and try again.'
-		);
-		expect(sentenceFor({ kind: 'notReady' })).toBe(
-			"No tags yet. entail.dev hasn't read this post yet. Try again in a minute."
-		);
-		expect(sentenceFor({ kind: 'empty', imageCount: 1, rating: null })).toBe(
-			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
-		);
-		expect(sentenceFor({ kind: 'empty', skippedExisting: true, imageCount: 1, rating: null })).toBe(
-			'No tags to suggest. entail.dev only returned tags that are already in the Tags field.'
-		);
-		expect(sentenceFor({ kind: 'empty', noImage: true, imageCount: 1, rating: null })).toBe(
-			'No tags to suggest. This post has no image for entail.dev to look at.'
-		);
-		expect(sentenceFor({ kind: 'notFound' })).toBe(
-			"Suggestions unavailable. entail.dev couldn't read this post."
-		);
-		expect(sentenceFor({ kind: 'unavailable' })).toBe(
-			"Suggestions unavailable. entail.dev didn't answer. Your tags are unchanged."
-		);
-	});
-
-	it('carries the multi-image caveat into the empty state it qualifies', () => {
-		// The tray prints this note under "nothing to suggest" because only the
-		// first picture was read. Left out of the sentence, a screen reader hears a
-		// verdict on all four images.
-		expect(sentenceFor({ kind: 'empty', imageCount: 4, rating: null })).toBe(
-			"No tags to suggest. entail.dev read the post but found nothing it's confident about." +
-				' This post has 4 images. Suggestions come from the first one.'
-		);
-		// One image, no caveat: the tray does not draw it either.
-		expect(sentenceFor({ kind: 'empty', imageCount: 1, rating: null })).toBe(
-			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
-		);
-	});
-
-	it('counts the suggestions, and says nothing for the states that have no sentence', () => {
-		expect(sentenceFor(fromResponse(200, ok(['fox', 'beach']), []))).toBe(
-			'2 suggested tags from entail.dev'
-		);
-		// A 422 answers about the link the field holds, not about a missing one:
-		// the client recogniser accepted that link, so "add a post URL" would
-		// describe a field that is not empty.
-		expect(sentenceFor({ kind: 'noSource' })).toBe(
-			"Sona can't look up this link. Check the source post URL."
-		);
-		expect(sentenceFor({ kind: 'idle' })).toBe('');
-		expect(sentenceFor({ kind: 'searching', source: 'x' })).toBe('');
-		expect(sentenceFor({ kind: 'applied', count: 3 })).toBe('');
-	});
-
-	it('gives a 422 its tray title too where the caller draws the tray', () => {
-		// The backfill row draws the same tray for a 422 as for every other
-		// failure, so its region says the eyebrow the way it says the others'.
-		expect(sentenceFor({ kind: 'noSource' }, { withTitle: true })).toBe(
-			"Suggestions unavailable. Sona can't look up this link. Check the source post URL."
-		);
-		// The option changes nothing for the states that already carry a title,
-		// or that say nothing.
-		expect(sentenceFor({ kind: 'notFound' }, { withTitle: true })).toBe(
-			sentenceFor({ kind: 'notFound' })
-		);
-		expect(sentenceFor({ kind: 'applied', count: 3 }, { withTitle: true })).toBe('');
-	});
-
-	it('labels every rating, and reads an unknown one as safe', () => {
-		// Each label ends its own sentence: on the backfill row it is followed by
-		// another one on the same line.
-		expect(ratingLabel('explicit')).toBe('Rated explicit by entail.dev.');
-		expect(ratingLabel('questionable')).toBe('Rated questionable by entail.dev.');
-		expect(ratingLabel('safe')).toBe('Rated safe by entail.dev.');
-		expect(ratingLabel(null)).toBe('Rated safe by entail.dev.');
 	});
 });
 

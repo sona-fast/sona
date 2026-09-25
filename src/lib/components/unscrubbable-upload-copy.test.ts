@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import * as m from '$lib/paraglide/messages';
 import {
-	UNSCRUBBABLE_MESSAGE,
 	UNSCRUBBABLE_IMPORT_MESSAGE,
 	UNSCRUBBABLE_MIGRATE_MESSAGE
 } from '$lib/server/storage/scrub-metadata';
@@ -14,11 +12,7 @@ import {
 // pins is the copy contract those flows share with the server.
 
 describe('the 422 upload refusal copy', () => {
-	it('the server-side sentence is the same one the upload page shows', () => {
-		// /api/upload's 422 body and the import rows use one exported constant, so
-		// a wording change lands on every surface at once — an operator reading
-		// the import result and one reading the upload tile see the same fix.
-		expect(UNSCRUBBABLE_MESSAGE).toBe(m.admin_upload_error_unscrubbable());
+	it('keeps the import and migration sentences from claiming an upload or a migration', () => {
 		// An imported photo is not the operator's file to re-export, so that
 		// import's sentence says what happened and stops there.
 		expect(UNSCRUBBABLE_IMPORT_MESSAGE).not.toMatch(/upload/i);

@@ -15,7 +15,7 @@ import { expect, test, type Page } from '@playwright/test';
 //
 // csp-check.spec.ts's first test opts OUT via `{ realTurnstile: true }`: the
 // real widget's challenge iframe is the only RUNTIME coverage of the
-// `frame-src challenges.cloudflare.com` CSP directive (src/csp-config.test.ts:68
+// `frame-src challenges.cloudflare.com` CSP directive (src/csp-config.test.ts:75
 // already guards the directive declaratively). That one test therefore keeps the
 // genuine script — and its dependence on a reachable challenges.cloudflare.com,
 // which is exactly why the stub is the default everywhere else.

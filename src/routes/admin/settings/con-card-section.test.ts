@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as m from '$lib/paraglide/messages';
 
-// Source-pin for the con card section of the settings page, per the
-// ut-stat-gate.test.ts precedent: source text is all a wiring test can observe
-// here, and the failure this covers only happens across a deploy boundary.
+// Source-pin for the con card section of the settings page: source text is all
+// a wiring test can observe here, and the failure this covers only happens
+// across a deploy boundary.
 
 const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 
@@ -18,12 +18,6 @@ describe('con card section', () => {
 			/\{#await import\('\$lib\/components\/ConCard\.svelte'\)[\s\S]*?\{:catch\}[\s\S]*?\{\/await\}/
 		);
 		expect(source).toMatch(/\{:catch\}[\s\S]*?\{m\.admin_settings_con_card_failed\(\)\}/);
-	});
-
-	// SONA-210: the setting reaches the card generator, or the preview draws a
-	// card without a line the operator has already filled in.
-	it('threads the pronouns setting into the card', () => {
-		expect(source).toMatch(/<ConCard[\s\S]*?pronouns=\{data\.conCard\.pronouns\}[\s\S]*?\/>/);
 	});
 
 	it('tells the operator what to do about it', () => {

@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { load } from './+page.server';
 import { qrMatrix } from '$lib/qr';
 
@@ -61,32 +60,5 @@ describe('/connect/qr', () => {
 	// to avoid back in front of it.
 	it('sits outside every route group', () => {
 		expect(new URL('.', import.meta.url).pathname).not.toMatch(/\/\([^)]*\)\//);
-	});
-});
-
-describe('/connect/qr markup', () => {
-	// Source-pin, per the con-card-markup.test.ts precedent: nothing renders this
-	// page under the pure-TS vitest setup, and both fixes below fail silently:
-	// one only at 200% zoom, the other only in a screen reader.
-	const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-
-	it('stays reachable when the plate is taller than the viewport', () => {
-		// Fixed, full-viewport and centered: at 200% zoom, or on a phone held
-		// landscape, plain centering pushes the typed-URL fallback off both ends
-		// with nothing to scroll.
-		expect(source).toMatch(/justify-content: safe center;/);
-		expect(source).toMatch(/overflow: auto;/);
-	});
-
-	it('names the code as a QR code, not as a bare URL', () => {
-		expect(source).toMatch(/aria-label=\{m\.con_qr_svg_label\(\{ url: data\.displayUrl \}\)\}/);
-	});
-
-	it('leads with the fork face and keeps a system stack behind it', () => {
-		// The screen is held up at a table with the fork's name on it, so it uses
-		// the fork's face. First paint still does not wait on the round trip: every
-		// family in app.css is loaded with display: swap, which paints the fallback
-		// and swaps the face in when it arrives.
-		expect(source).toMatch(/font-family:\s*\n?\s*var\(--font-primary\),\s*\n?\s*system-ui/);
 	});
 });

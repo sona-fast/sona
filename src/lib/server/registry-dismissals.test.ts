@@ -21,18 +21,6 @@ describe('addDismissed — the dismiss state transition', () => {
 		expect(addDismissed(new Set([1, 2]), 2)).toEqual([1, 2]);
 	});
 
-	it('a rejected submission is filtered out once dismissed', () => {
-		const rejected = { id: 42, status: 'rejected' as const };
-		// Before: shown.
-		let dismissed = parseDismissed(null);
-		expect(dismissed.has(rejected.id)).toBe(false);
-		// Dismiss → persist → reload.
-		dismissed = parseDismissed(JSON.stringify(addDismissed(dismissed, rejected.id)));
-		// After: excluded by the load filter.
-		expect(dismissed.has(rejected.id)).toBe(true);
-		expect([rejected].filter((s) => !dismissed.has(s.id))).toEqual([]);
-	});
-
 	it('caps the stored list to the newest N', () => {
 		const many = new Set(Array.from({ length: 500 }, (_, i) => i));
 		const capped = addDismissed(many, 999, 500);

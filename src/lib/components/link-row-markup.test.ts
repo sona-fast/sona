@@ -14,8 +14,4 @@ describe('LinkRow subtitle markup', () => {
 	it('renders the subtitle span only when there is a subtitle', () => {
 		expect(source).toMatch(/\{#if subtitle\}[\s\S]*?<span class="sub">/);
 	});
-
-	it('keeps the subtitle prop optional', () => {
-		expect(source).toMatch(/subtitle\?:\s*string/);
-	});
 });

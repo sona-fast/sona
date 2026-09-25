@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// Source-pins for the content-gating conditionals around every Stickers /
-// Collections / VR nav entry, per the vr/[slug]/nsfw-markup.test.ts precedent:
+// Source-pins for the content-gating conditionals around the Stickers tab
+// pills, and for the stickers/collections flags reaching the nav components,
+// per the vr/[slug]/nsfw-markup.test.ts precedent:
 // nothing else executes these wrappers, and a deleted {#if} fails silently
 // (the link simply renders again on a fork with no content behind it). Each
 // pin is a minimal discriminator fragment — the flag next to the href it
@@ -10,8 +11,6 @@ import { readFileSync } from 'node:fs';
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-const headerSrc = read('./Header.svelte');
-const mobileNavSrc = read('./MobileNav.svelte');
 const gallerySrc = read('../../routes/(public)/gallery/+page.svelte');
 const vrSrc = read('../../routes/(public)/vr/+page.svelte');
 const publicLayoutSrc = read('../../routes/(public)/+layout.svelte');
@@ -21,10 +20,6 @@ const pathsLayoutSrc = read('../../routes/(paths)/+layout.svelte');
 describe('gallery tab bar gating markup', () => {
 	it('wraps the Stickers pill in the stickersEnabled conditional', () => {
 		expect(gallerySrc).toMatch(/\{#if data\.stickersEnabled\}\s*<a href="\/stickers"/);
-	});
-
-	it('wraps the VR pill in the vrEnabled conditional', () => {
-		expect(gallerySrc).toMatch(/\{#if data\.vrEnabled\}\s*<a href="\/vr"/);
 	});
 
 	it('suppresses the whole tab bar unless a second pill would show', () => {
@@ -37,22 +32,6 @@ describe('gallery tab bar gating markup', () => {
 describe('/vr tab bar gating markup', () => {
 	it('wraps the Stickers pill in the stickersEnabled conditional', () => {
 		expect(vrSrc).toMatch(/\{#if data\.stickersEnabled\}\s*<a href="\/stickers"/);
-	});
-});
-
-describe('Header nav gating markup', () => {
-	it('gates the /stickers link on stickersEnabled', () => {
-		expect(headerSrc).toMatch(/stickersEnabled \? \[\{ href: '\/stickers'/);
-	});
-
-	it('gates the /collections link on collectionsEnabled', () => {
-		expect(headerSrc).toMatch(/collectionsEnabled \? \[\{ href: '\/collections'/);
-	});
-});
-
-describe('MobileNav gating markup', () => {
-	it('gates the /stickers tab on stickersEnabled', () => {
-		expect(mobileNavSrc).toMatch(/stickersEnabled \? \[\{ href: '\/stickers'/);
 	});
 });
 

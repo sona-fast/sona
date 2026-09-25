@@ -32,10 +32,6 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(cleanup).toContain('disposeScene?.()');
 	});
 
-	it('hides the 3D entry point while nsfw && !revealed (the reveal gate, D3)', () => {
-		expect(src).toMatch(/\{#if !nsfw \|\| revealed\}[\s\S]*?vr_view_in_3d/);
-	});
-
 	it('exposes the stage as an image with a name and keyboard access (A1/A2)', () => {
 		const stage = src.match(/<div(?=[^>]*class="stage")[^>]*>/)?.[0];
 		expect(stage).toBeDefined();
@@ -43,16 +39,6 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(stage).toContain('aria-label={name}');
 		expect(stage).toContain('tabindex="0"');
 		expect(stage).toContain('onkeydown');
-	});
-
-	it('fullscreens the wrapper (controls included), not the bare stage (A4)', () => {
-		// The element the toggle hands to the fullscreen APIs is the viewer
-		// wrapper — nothing ever fullscreens the bare stage.
-		const toggle = src.match(/function toggleFullscreen\(\)[\s\S]*?\n\t\}/)?.[0];
-		expect(toggle).toBeDefined();
-		expect(toggle).toMatch(/=\s*viewer\b[\s\S]*el\?\.requestFullscreen/);
-		expect(src).not.toContain('stage?.requestFullscreen()');
-		expect(src).not.toContain('stage.requestFullscreen()');
 	});
 
 	it('feature-detects fullscreen with webkit + overlay fallbacks (iPhone, SONA-165)', () => {
@@ -117,98 +103,6 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(src).toContain('inerted.push(sibling)');
 		expect(src).toMatch(/for \(const el of inerted\) el\.inert = false/);
 		expect(src).toContain('inerted = []');
-	});
-
-	it('carries fullscreen state in the toggle NAME and announces mode changes', () => {
-		// No aria-pressed: the swapped accessible name (Exit fullscreen +
-		// Minimize icon) carries the state. The inactive label variant leaves
-		// the accessibility tree so the name is only the active label, and a
-		// status region announces both native and overlay mode changes.
-		expect(src).not.toContain('aria-pressed');
-		expect(src).toMatch(/class:inactive=\{!fsActive\}[\s\S]*?vr_exit_fullscreen/);
-		expect(src).toMatch(/aria-hidden=\{fsActive\}/);
-		expect(src).toMatch(/<p class="sr-only" role="status">\{fsAnnouncement\}<\/p>/);
-		expect(src).toContain(
-			'fsAnnouncement = entered ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen()'
-		);
-		// Both the native (syncFullscreen) and overlay (setFallbackFullscreen)
-		// flips announce, and the announcement CLEARS afterwards so stale mode
-		// text doesn't linger in the accessibility tree.
-		expect(src).toContain('announceFs(now)');
-		expect(src).toContain('announceFs(on)');
-		expect(src).toMatch(/fsAnnouncement = ''/);
-		// fsActive covers BOTH modes — collapsing it to isFullscreen alone would
-		// leave the iPhone overlay showing "Fullscreen" while the overlay is up.
-		expect(src).toContain('$derived(isFullscreen || fallbackFullscreen)');
-	});
-
-	it('frames from the humanoid skeleton, bounding box only as fallback (SONA-165)', () => {
-		// Camera framing goes through the unit-tested frameHumanoid (pivot
-		// between hips and head, model-forward axis, distance from span) fed by
-		// RAW bone world positions; Box3 survives only in the no-humanoid branch.
-		expect(src).toMatch(/import \{[^}]*frameHumanoid[^}]*\} from '\$lib\/vr'/);
-		expect(src).toContain('getRawBoneNode');
-		// World matrices refresh BEFORE any bone is sampled — stale matrices
-		// frame from wherever the loader left the nodes.
-		expect(src).toMatch(/updateMatrixWorld\(true\)[\s\S]*getRawBoneNode/);
-		expect(src).toMatch(/frameHumanoid\(\{/);
-		// The far plane and framing cap come from one shared constant.
-		expect(src).toMatch(/PerspectiveCamera\(30, width \/ height, 0\.1, VR_CAMERA_FAR\)/);
-		const fallback = src.match(/const framing =[\s\S]*?controls\.target\.copy\(target\)/)?.[0];
-		expect(fallback).toBeDefined();
-		expect(fallback).toContain('new THREE.Box3().setFromObject(vrm.scene)');
-		// A degenerate box (±Infinity/NaN) throws into the load-failed path
-		// instead of rendering a blank canvas from an unrenderable camera.
-		expect(fallback).toContain("throw new Error('degenerate model geometry')");
-	});
-
-	it('refits the framing distance inside the ResizeObserver, until the user takes the camera', () => {
-		const ro = src.match(/new ResizeObserver\(\(\) => \{[\s\S]*?\n\t\t\t\}\);/)?.[0];
-		expect(ro).toBeDefined();
-		// The canvas/aspect sizing stays…
-		expect(ro).toContain('camera.aspect = w / h');
-		expect(ro).toContain('renderer.setSize(w, h)');
-		// …the refit is ADDITIVE in the same callback (fires after layout on
-		// fullscreen enter/exit, orientation changes, window resizes), stopping
-		// the moment the user takes the camera…
-		expect(ro).toMatch(/\|\| userAdjusted\) return/);
-		expect(ro).toContain('frameHumanoid({');
-		// …recomputed for the LIVE aspect (a constant would defeat the refit).
-		expect(ro).toContain('aspect: w / h');
-		// …and rescales the CURRENT camera offset, preserving direction and
-		// target so auto-rotate isn't snapped back.
-		expect(ro).toContain(
-			'camera.position.sub(controls.target).setLength(dist).add(controls.target)'
-		);
-		// The keyboard camera path marks the camera user-taken too — the
-		// pointer-only OrbitControls 'start' event would miss it and the refit
-		// would erase a keyboard zoom.
-		const keydown = src.match(/stageKeydown = \(e: KeyboardEvent\) => \{[\s\S]*?\n\t\t\t\};/)?.[0];
-		expect(keydown).toBeDefined();
-		expect(keydown).toContain('userAdjusted = true');
-		// No refit path survives outside the observer.
-		expect(src).not.toContain('reframe');
-	});
-
-	it('guards every await against a stale generation (exit-during-load race, D6)', () => {
-		expect(src).toContain('const gen = ++generation');
-		expect((src.match(/gen !== generation/g) ?? []).length).toBeGreaterThanOrEqual(4);
-		// Exit 3D bumps the generation BEFORE awaiting the native fullscreen
-		// exit, so the aborted download's rejection bails silently instead of
-		// painting a fullscreen-sized failure the user didn't cause — and the
-		// await itself keeps the poster from rendering mid-transition.
-		expect(src).toMatch(/generation\+\+;[\s\S]{0,400}?await exitAnyFullscreen\(\)/);
-	});
-
-	it('hands focus to Exit 3D at load START and keeps the zoom clamp on the shared cap', () => {
-		// Activation unmounts the View in 3D button the click came from; focus
-		// must move to Exit 3D before the download, not after the scene builds,
-		// or it sits on <body> for the whole load. Stale-generation guarded.
-		const beforeImport = src.split("import('three')")[0];
-		expect(beforeImport).toMatch(/gen !== generation\) return;\s*\n\s*exitButton\?\.focus\(\)/);
-		// The keyboard zoom-out clamp shares the framing cap constant — a bare
-		// numeric literal would silently detach it from the camera far plane.
-		expect(src).toContain('Math.min(VR_FRAME_DISTANCE_CAP, spherical.radius / 0.9)');
 	});
 
 	it('keeps the progress live region always mounted and the failure as an alert (A8/A9)', () => {

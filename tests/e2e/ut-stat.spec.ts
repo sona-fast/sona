@@ -6,7 +6,7 @@ import { adminLogin } from './admin-login';
 // whenever UPLOADTHING_TOKEN is present REGARDLESS of the active provider, so on a
 // site that migrated UploadThing -> R2 the count is stale and only the provider
 // clause hides it. Unit tests (ut-stat-gate.test.ts) guard the predicate's value
-// and its single guarded call site, but they CANNOT catch someone adding a NEW
+// only, so they CANNOT catch the template skipping it or someone adding a NEW
 // unguarded render (a child component, a summary card, a tooltip) — only rendering
 // the page and asserting absence closes that class. That is this spec's whole job.
 //

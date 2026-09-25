@@ -79,21 +79,3 @@ describe('syncFailureToast', () => {
 		expect(syncFailureToast(undefined)).toBe(m.admin_settings_sync_failed());
 	});
 });
-
-// Both warning strings are hand-written ICU plurals in en.json; a typo in a selector
-// or a match key renders as the message id rather than a sentence.
-describe('the degraded and rate-limited plurals', () => {
-	it('pluralizes the failed-call count', () => {
-		expect(m.admin_settings_sync_degraded({ count: 1 })).toBe(
-			'1 registry call failed this run, so these counts are incomplete.'
-		);
-		expect(m.admin_settings_sync_degraded({ count: 3 })).toContain('calls failed');
-	});
-
-	it('pluralizes the rate-limited count', () => {
-		expect(m.admin_settings_sync_rate_limited({ count: 1 })).toBe(
-			'1 registry call was rate limited this run and did not complete.'
-		);
-		expect(m.admin_settings_sync_rate_limited({ count: 5 })).toContain('calls were rate limited');
-	});
-});

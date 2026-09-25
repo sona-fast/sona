@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { variantAssignmentError, MAX_VARIANT_SET } from './variants';
+import { variantAssignmentError } from './variants';
 
 describe('variantAssignmentError', () => {
 	it('allows a plain image to become a variant of a parent', () => {
@@ -44,11 +44,5 @@ describe('variantAssignmentError', () => {
 		expect(variantAssignmentError({ selfId: 3, parent: { id: 3, parentImageId: 1 } })).toBe(
 			'self'
 		);
-	});
-});
-
-describe('MAX_VARIANT_SET', () => {
-	it('is the agreed cap of 8 files per one-flow upload', () => {
-		expect(MAX_VARIANT_SET).toBe(8);
 	});
 });

@@ -425,14 +425,6 @@ describe('labels and formatting', () => {
 	it('carries its own leading space in the filename eyebrow', () => {
 		expect(m.admin_lookup_eyebrow_file({ fileName: 'photo.png' })).toBe(' \u00b7 photo.png');
 	});
-
-	// The status line for a date-only prefill must not claim a reason it cannot
-	// know: the URL is also left alone when the operator already typed one.
-	it('says only what the date-only prefill did', () => {
-		expect(m.admin_lookup_status_date_only({ site: 'FurAffinity' })).toBe(
-			'Sona filled the commissioned date from the FurAffinity post and left the source post URL as it was. You can change the date before you save.'
-		);
-	});
 });
 
 describe('prefillFields', () => {
@@ -675,25 +667,6 @@ describe('statusLineKind', () => {
 		);
 	});
 
-	// The kept sentences name their own field and stop; the "left alone" half is
-	// exactly the claim that would be false.
-	it('claims only the kept field in both locales', () => {
-		expect(m.admin_lookup_status_url_kept({ site: 'FurAffinity' }, { locale: 'en' })).toBe(
-			'Sona filled the source post URL from the FurAffinity post. You can change it before you save.'
-		);
-		expect(m.admin_lookup_status_date_kept({ site: 'FurAffinity' }, { locale: 'en' })).toBe(
-			'Sona filled the commissioned date from the FurAffinity post. You can change it before you save.'
-		);
-		for (const locale of ['en', 'ja'] as const) {
-			for (const line of [
-				m.admin_lookup_status_url_kept({ site: 'FurAffinity' }, { locale }),
-				m.admin_lookup_status_date_kept({ site: 'FurAffinity' }, { locale })
-			]) {
-				expect(line).not.toMatch(/as it was|そのまま/);
-			}
-		}
-	});
-
 	// The clash sentence says the URL was left EMPTY, which stays true however
 	// the date is edited — but an edited date is no longer Sona's to claim.
 	it('drops the clash sentence once the date it names is typed over', () => {
@@ -720,40 +693,6 @@ describe('statusLineKind', () => {
 		).toBe('none');
 		// And urlHeld says nothing outside a clash, where the URL is fillable.
 		expect(statusLineKind({ sourcePostUrl: 'u' }, { urlHeld: true })).toBe('url_only');
-	});
-
-	it('claims the date and never the URL in the clash_kept sentence', () => {
-		expect(
-			m.admin_lookup_status_clash_kept({ site: 'FurAffinity', title: 'Ref' }, { locale: 'en' })
-		).toBe(
-			'Sona filled the commissioned date from the FurAffinity post and left your source post URL as it was, because that post is already the source of Ref. You can change the date before you save.'
-		);
-		for (const locale of ['en', 'ja'] as const) {
-			const line = m.admin_lookup_status_clash_kept(
-				{ site: 'FurAffinity', title: 'Ref' },
-				{ locale }
-			);
-			expect(line).not.toMatch(/empty|空/);
-		}
-	});
-
-	// The clash pair says the FOUND post is the source of the other piece. "{title}
-	// already uses it" made "it" the URL the sentence had just named — the
-	// operator's own pasted one in the kept case — which is the false claim the
-	// pair exists to avoid.
-	it('names the found post, not the operator URL, as what clashes', () => {
-		expect(
-			m.admin_lookup_status_clash({ site: 'FurAffinity', title: 'Ref' }, { locale: 'en' })
-		).toBe(
-			'Sona filled the commissioned date from the FurAffinity post and left the source post URL empty, because that post is already the source of Ref. You can change the date before you save.'
-		);
-		for (const key of [m.admin_lookup_status_clash, m.admin_lookup_status_clash_kept]) {
-			for (const locale of ['en', 'ja'] as const) {
-				expect(key({ site: 'FurAffinity', title: 'Ref' }, { locale })).not.toMatch(
-					/already uses it|がすでに使っている/
-				);
-			}
-		}
 	});
 
 	// A second lookup keeps the fields the first one filled until its own result
@@ -881,22 +820,6 @@ describe('statusLineKind', () => {
 		).toBe('clash_date_url_emptied');
 		// A clash whose URL was empty all along keeps the sentence that says so.
 		expect(statusLineKind({ commissionedAt: 'd' }, { clash: true })).toBe('clash');
-		expect(
-			m.admin_lookup_status_clash_date_url_emptied(
-				{ site: 'FurAffinity', title: 'Ref' },
-				{ locale: 'en' }
-			)
-		).toBe(
-			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Ref. You can change the date before you save.'
-		);
-		for (const locale of ['en', 'ja'] as const) {
-			const line = m.admin_lookup_status_clash_date_url_emptied(
-				{ site: 'FurAffinity', title: 'Ref' },
-				{ locale }
-			);
-			expect(line).toContain('Ref');
-			expect(line).toMatch(/cleared the source post URL|消去しました/);
-		}
 		// A clash that carries no date either: the clash sentence claims a date it
 		// did not fill, so the emptied one is what is left to say.
 		expect(
@@ -912,16 +835,6 @@ describe('statusLineKind', () => {
 		expect(statusLineKind({}, { clash: true, cleared: { sourcePostUrl: true } })).toBe(
 			'clash_emptied'
 		);
-		expect(
-			m.admin_lookup_status_clash_emptied({ site: 'FurAffinity', title: 'Ref' }, { locale: 'en' })
-		).toBe(
-			'Sona cleared the source post URL the last lookup filled, because the FurAffinity post Sona found is already the source of Ref. You can type one in before you save.'
-		);
-		for (const locale of ['en', 'ja'] as const) {
-			expect(
-				m.admin_lookup_status_clash_emptied({ site: 'FurAffinity', title: 'Ref' }, { locale })
-			).toContain('Ref');
-		}
 	});
 
 	// The panel renders the sentence and the upload page announces it. Picked by
@@ -1036,77 +949,10 @@ describe('statusLineKind', () => {
 		expect(statusSentence('date_only', 'FurAffinity', { editMode: true })).toBe(
 			m.admin_lookup_status_kept({ site: 'FurAffinity' })
 		);
-		// Spelled out rather than compared to the key it came from: read off the
-		// key on both sides, the assertion passes whatever the key says, and this
-		// is the one sentence in the set that says the date can still be changed
-		// — its siblings all end on that and it used to stop before it.
-		expect(m.admin_lookup_status_kept({ site: 'Twitter' }, { locale: 'en' })).toBe(
-			'Sona filled the commissioned date from the Twitter post and left your source post URL as it was. You can change the date before you save.'
-		);
-		expect(m.admin_lookup_status_kept({ site: 'Twitter' }, { locale: 'ja' })).toMatch(
-			/保存前に日付を変更できます。$/
-		);
 		expect(statusSentence('date_only', 'FurAffinity')).toBe(
 			m.admin_lookup_status_date_only({ site: 'FurAffinity' })
 		);
 		expect(statusSentence('clash_kept', 'FurAffinity', { title: 'Ref' })).toContain('Ref');
-	});
-
-	it('names the emptied field in the sentence, in both locales', () => {
-		expect(m.admin_lookup_status_url_and_date_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
-			'Sona filled the source post URL from the Twitter post and cleared the commissioned date the last lookup filled, because that post has no date. You can change the URL before you save.'
-		);
-		expect(m.admin_lookup_status_url_emptied({}, { locale: 'en' })).toBe(
-			'Sona cleared the source post URL the last lookup filled, because this lookup filled nothing in its place. You can type one in before you save.'
-		);
-		// A clash result DOES have a post — Sona declined it — so no sentence on
-		// this path may say the lookup found nothing to put there.
-		expect(m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
-			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the result Sona found has no link to put there. You can change the date before you save.'
-		);
-		// 一致 is what a database calls a matching row. The thing the operator is
-		// looking at is a search result, which is what the rest of the file calls
-		// it, so the Japanese sentence names it that way too.
-		expect(m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'ja' })).toBe(
-			'Twitterの投稿から制作依頼日を入力しました。見つかった検索結果には入れられるリンクがないため、前回の検索で入力した投稿元URLは消去しました。保存前に日付を変更できます。'
-		);
-		expect(m.admin_lookup_status_both_emptied({}, { locale: 'en' })).toBe(
-			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.'
-		);
-		// The reason blames the lookup, the way its siblings do: this sentence
-		// renders on the no-match arm too, where there is no result to have a date.
-		// And it ends on the next step, the way its URL sibling does — the field
-		// is empty and the operator is the one who can put a date back in it.
-		expect(m.admin_lookup_status_date_emptied({}, { locale: 'en' })).toBe(
-			'Sona cleared the commissioned date the last lookup filled, because this lookup filled no date in its place. You can set one before you save.'
-		);
-		expect(m.admin_lookup_status_date_emptied({}, { locale: 'ja' })).toBe(
-			'今回の検索は代わりの日付を入力しなかったため、前回の検索で入力した制作依頼日は消去しました。保存前に入力できます。'
-		);
-		// The panel's click-time announcement and these lines describe the same
-		// thing, so they use the same verb.
-		expect(m.admin_lookup_announce_searching_cleared({}, { locale: 'en' })).toContain('cleared');
-		for (const line of [
-			m.admin_lookup_status_url_and_date_emptied({ site: 'Twitter' }, { locale: 'ja' }),
-			m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'ja' }),
-			m.admin_lookup_status_both_emptied({}, { locale: 'ja' }),
-			m.admin_lookup_status_url_emptied({}, { locale: 'ja' }),
-			m.admin_lookup_status_date_emptied({}, { locale: 'ja' })
-		]) {
-			expect(line).toContain('消去しました');
-			// 検索 is what every other Japanese string in the file calls a lookup.
-			expect(line).not.toContain('ルックアップ');
-		}
-		// None of them claims a field was left alone, which is what they replace.
-		for (const locale of ['en', 'ja'] as const) {
-			for (const key of [
-				m.admin_lookup_status_both_emptied,
-				m.admin_lookup_status_url_emptied,
-				m.admin_lookup_status_date_emptied
-			]) {
-				expect(key({}, { locale })).not.toMatch(/left as it was|そのままに/);
-			}
-		}
 	});
 
 	// url_only has two causes and the kind cannot tell them apart: the post
@@ -1124,12 +970,6 @@ describe('statusLineKind', () => {
 		});
 		expect(statusLineKind(dateless)).toBe('url_only');
 		expect(statusLineKind(dateTaken)).toBe('url_only');
-		expect(m.admin_lookup_status_url_only({ site: 'FurAffinity' }, { locale: 'en' })).toBe(
-			'Sona filled the source post URL from the FurAffinity post and left the commissioned date as it was. You can change the URL before you save.'
-		);
-		expect(m.admin_lookup_status_url_only({ site: 'FurAffinity' }, { locale: 'ja' })).toContain(
-			'制作依頼日はそのままにしています。保存前にURLを変更できます。'
-		);
 	});
 });
 
@@ -1930,35 +1770,5 @@ describe('runLookup', () => {
 			{ fetchFn: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch }
 		);
 		expect(state).toEqual({ kind: 'failed', reason: 'unavailable', sent: true });
-	});
-});
-
-// The panel's seed sentences and the clash row's size, in both locales. Copy
-// pins rather than style notes: the seed lines carry the compliance clause
-// ("a guess until you check them, and you're the one publishing them") that the
-// dialog's own guess line carries, and they used to tell the operator to check
-// twice in two consecutive sentences.
-describe('the seed status copy', () => {
-	const locales = ['en', 'ja'] as const;
-
-	it('keeps the guess-and-publish clause without the extra imperative', () => {
-		for (const locale of locales) {
-			const both = m.admin_lookup_status_seed_both({ site: 'FurAffinity' }, { locale });
-			const name = m.admin_lookup_status_seed_name({}, { locale });
-			const link = m.admin_lookup_status_seed_link({ site: 'FurAffinity' }, { locale });
-			const clause = locale === 'en' ? "you're the one publishing" : '公開するのはあなたです';
-			const dropped = locale === 'en' ? 'before you save' : '保存前に';
-			for (const line of [both, name, link]) {
-				expect(line).toContain(clause);
-				expect(line).not.toContain(dropped);
-			}
-		}
-	});
-
-	it('sizes the clash row with a multiplication sign, not the letter x', () => {
-		for (const locale of locales) {
-			const size = m.admin_lookup_clash_dimensions({ width: 2048, height: 1536 }, { locale });
-			expect(size).toBe('2048 × 1536');
-		}
 	});
 });

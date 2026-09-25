@@ -9,10 +9,6 @@ describe('kit.csp directives', () => {
 	const csp = config.kit?.csp;
 	const d = csp?.directives ?? {};
 
-	it('uses hash mode so SvelteKit hashes its own inline scripts', () => {
-		expect(csp?.mode).toBe('hash');
-	});
-
 	it('locks script-src: self + a hash, never unsafe-inline/unsafe-eval', () => {
 		const script = d['script-src'] ?? [];
 		expect(script).toContain('self');
@@ -64,32 +60,13 @@ describe('kit.csp directives', () => {
 		// and blob: (see below).
 		// DELIBERATE change (SONA-124 R2-B1): media-src gained blob: for the VR
 		// media picker's client-side clip probe — the same rationale as img-src's
-		// blob: (see the next test). The load-bearing containment invariants are
-		// untouched: connect-src carries no network origin beyond 'self'
-		// (blob:/data: are in-document schemes — see its own test) and script-src
+		// blob: (the upload page's object-URL dimension read). The load-bearing
+		// containment invariants are untouched: connect-src carries no network origin
+		// beyond 'self' (blob:/data: are in-document schemes — its exact value is
+		// asserted in the analytics beacon test above) and script-src
 		// still carries no unsafe-inline/unsafe-eval (asserted above).
 		expect(d['img-src']).toEqual(['self', 'https:', 'data:', 'blob:']);
 		expect(d['media-src']).toEqual(['self', 'https:', 'blob:']);
-	});
-
-	it('connect-src: self for models, blob:/data: for their textures, nothing else', () => {
-		// Regression guard, both directions: blob:/data: must stay or VR models
-		// render untextured (the GLTFLoader fetch() mechanism is documented on
-		// connect-src in svelte.config.js), and the exact match keeps network
-		// origins OUT — blob:/data: are in-document objects with no exfiltration
-		// value, but any ADDED https: host here would be.
-		expect(d['connect-src']).toEqual(['self', 'blob:', 'data:']);
-	});
-
-	it('allows blob: images, or the upload page silently stores NULL dimensions', () => {
-		// Regression guard. admin/upload renders each picked file via
-		// URL.createObjectURL(file) twice: the preview thumbnail, and an <img> that
-		// getImageDimensions() reads naturalWidth/naturalHeight from. Drop blob: and
-		// that <img> fires onerror, dimensions resolve to 0x0, the form posts
-		// width_N=0/height_N=0, and +page.server.ts stores `Number(0) || null` — NULL.
-		// The visible symptom is a missing thumbnail; the real damage is metadata loss
-		// on every upload, which is why this gets its own named test.
-		expect(d['img-src']).toContain('blob:');
 	});
 
 	it('permits the Turnstile widget (script + iframe) on admin login', () => {

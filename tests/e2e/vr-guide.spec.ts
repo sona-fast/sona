@@ -45,9 +45,8 @@ test('the guide renders its heading and the measured blendshape numbers', async 
 	).toHaveCount(6);
 
 	// The verified measurements from the blendshape step — the guide's core
-	// claim (the values are pinned in src/lib/vr-guide-copy.test.ts; this
-	// asserts each number renders IN ITS OWN row, not merely somewhere on the
-	// page).
+	// claim. This asserts each number renders IN ITS OWN row, not merely
+	// somewhere on the page.
 	await expect(
 		page.locator('.numbers > div', { hasText: 'Same model, stripped' })
 	).toContainText('7.28 MB');

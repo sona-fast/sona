@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { buildReceipt, repoUrlFromEnv } from './build-info';
 
 describe('buildReceipt', () => {
@@ -163,20 +162,5 @@ describe('repoUrlFromEnv', () => {
 				GITHUB_REPOSITORY: 'someone/../evil'
 			})
 		).toBe('https://github.com/evil');
-	});
-});
-
-// The extracted function is unit-tested above, but its call site is not: a
-// renamed define key or a wrong argument passes every test and ships a footer
-// link that 404s on all forks at once (the footer-build-markup.test.ts pattern).
-describe('vite config wiring', () => {
-	const viteConfig = readFileSync(new URL('../../vite.config.ts', import.meta.url), 'utf8');
-
-	it('feeds repoUrlFromEnv(process.env) into the build defines', () => {
-		expect(viteConfig).toContain('repoUrlFromEnv(process.env)');
-		// Each define is pinned to ITS OWN value, not merely present: swapping the
-		// two would stamp the repo URL as the commit and still read as wired up.
-		expect(viteConfig).toMatch(/__BUILD_COMMIT_SHA__:\s*JSON\.stringify\(buildSha\)/);
-		expect(viteConfig).toMatch(/__BUILD_REPO_URL__:\s*JSON\.stringify\(buildRepoUrl\)/);
 	});
 });

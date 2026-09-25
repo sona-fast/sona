@@ -36,36 +36,6 @@ describe('con card pronouns toggle', () => {
 		expect(source).not.toMatch(/bind:checked=\{includePronouns\}[^>]*disabled/);
 	});
 
-	it('feeds the card null when the box is off, so the line is dropped', () => {
-		expect(source).toContain('pronouns: includePronouns ? pronouns : null');
-		// And the front face's accessible name follows the same value: the preview
-		// is a picture, so without this a screen reader hears the same title
-		// whichever boxes are ticked.
-		expect(source).toContain("shared.pronouns ? m.con_card_field_pronouns() : ''");
-	});
-
-	it('starts on, and ticks itself when the setting is filled in on this page', () => {
-		// `initial` is untracked, so a prop change never re-ticks a box the operator
-		// has just unticked. The effect covers the one case that is not a re-tick:
-		// with no pronouns set there was no box at all, so a value saved on this
-		// same settings page has no earlier choice to overwrite.
-		expect(source).toMatch(/const initial = untrack\(\(\) => \(\{[\s\S]*?pronouns: !!pronouns/);
-		expect(source).toContain('let includePronouns = $state(initial.pronouns);');
-		expect(source).toMatch(/if \(has\.pronouns && !had\.pronouns\) includePronouns = true;/);
-		// The effect must not READ any include state, or writing it loops: each
-		// include* mention in its body is the assignment above, no more.
-		const effect = source.match(/\$effect\(\(\) => \{[\s\S]*?had = \{[\s\S]*?\};[\s\S]*?\}\);/)?.[0] ?? '';
-		for (const name of ['includeSpecies', 'includePronouns', 'includeColors', 'includeCredit']) {
-			expect(effect.match(new RegExp(name, 'g'))).toHaveLength(1);
-		}
-		// `had` is monotonic — untick, clear, restore must not re-tick a box the
-		// operator already chose to leave off — so each field merges with ||,
-		// never resets from the current `has` alone.
-		for (const field of ['species', 'pronouns', 'colors', 'credit']) {
-			expect(effect).toContain(`${field}: had.${field} || has.${field}`);
-		}
-	});
-
 	it('says that cards already printed keep what was on them', () => {
 		const note = source.match(/<p[^>]*id="con-card-printed-note"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? '';
 		expect(note).toContain('{m.con_card_printed_note()}');

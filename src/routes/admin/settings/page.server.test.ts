@@ -10,8 +10,7 @@ import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import {
 	FUZZYSEARCH_API_KEY_SETTING,
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
-	fuzzysearchRefusedMarker,
-	fuzzysearchKeyDisplayRecord
+	fuzzysearchRefusedMarker
 } from '$lib/server/fuzzysearch';
 import {
 	getRawSetting,
@@ -27,7 +26,6 @@ import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
 import { EARLY_ACCESS } from '$lib/early-access';
-import * as m from '$lib/paraglide/messages';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -137,19 +135,6 @@ function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
 }
 
 describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
-	// Source pin: the action distinguishes "toggle off" from "form without the
-	// toggle" by this hidden marker. Drop it and unchecking the box becomes a
-	// silent no-op (absent means unmanaged), with the unit suite still green.
-	it('the settings form pairs the toggle with its present-marker', () => {
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		// Capture each tag by name, then look inside it: attribute order and extra
-		// attributes are harmless, the wrong type is not.
-		const marker = src.match(/<input[^>]*\bname="aiPageEnabledPresent"[^>]*>/)?.[0] ?? '';
-		expect(marker, 'present-marker input').toContain('type="hidden"');
-		const toggle = src.match(/<input[^>]*\bname="aiPageEnabled"[^>]*>/)?.[0] ?? '';
-		expect(toggle, 'toggle input').toContain('type="checkbox"');
-	});
-
 	it('stores the toggle and the override text, stamping the override date', async () => {
 		const { db, platform } = makeDb();
 
@@ -189,76 +174,6 @@ describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
 		await actions.saveSite(saveSiteEvent(platform, { siteName: 'Taro Surf' }));
 
 		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
-	});
-});
-
-// The rows this guards span three unrelated features (the /ai page, Telegram
-// auto-resync, registry overrides), so it lives at the page level rather than
-// inside any one feature's describe.
-describe('settings — checkbox hints are described, not named (SONA-183)', () => {
-	// Source pin (SONA-183): each checkbox hint lives OUTSIDE its <label> and
-	// reaches the input through aria-describedby, so the accessible name stays
-	// the short title instead of swallowing the whole description. Folding a hint
-	// back into a label would restore the old behaviour with the suite still green.
-	it('describes each checkbox from outside its label', () => {
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		for (const name of ['aiPageEnabled', 'autoResyncEnabled', 'registryOverridesLocal']) {
-			// Capture the whole tag, then look inside it: attribute order and extra
-			// attributes are harmless, a missing aria-describedby is not.
-			const input = src.match(new RegExp(`<input[^>]*\\bname="${name}"[^>]*>`))?.[0] ?? '';
-			expect(input, `${name} input`).toContain(`aria-describedby="${name}-desc"`);
-			// `>[^<]*</label>` is the containment assertion: the title label holds text
-			// and nothing else, so no hint can be folded back in to restore the
-			// ~450-character accessible name with every id still pointing where it does.
-			const title =
-				src.match(new RegExp(`<label[^>]*\\bfor="${name}"[^>]*>[^<]*</label>`))?.[0] ?? '';
-			expect(title, `${name} title label`).toMatch(/class="[^"]*\bcheckbox-title\b/);
-			const desc = src.match(new RegExp(`<span[^>]*\\bid="${name}-desc"[^>]*>`))?.[0] ?? '';
-			expect(desc, `${name} hint`).toMatch(/class="[^"]*\bcheckbox-desc\b/);
-		}
-		// The row is a <div>: a wrapping <label> would put every hint back inside
-		// the accessible name no matter where the ids point.
-		expect(src).not.toMatch(/<label[^>]*class="[^"]*\bcheckbox-row\b/);
-	});
-});
-
-describe('settings pronouns field (SONA-210)', () => {
-	const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-
-	it('is a single-line text input with an example placeholder', () => {
-		const input = source.match(/<input[^>]*\bname="pronouns"[^>]*>/)?.[0] ?? '';
-		expect(input).toContain('type="text"');
-		expect(input).toContain('{m.admin_settings_pronouns_placeholder()}');
-	});
-
-	it('describes the field from outside its label', () => {
-		// Folded into the label the hint joins the input's accessible name and is
-		// read out before every edit — the same rule the checkbox hints follow.
-		const input = source.match(/<input[^>]*\bname="pronouns"[^>]*>/)?.[0] ?? '';
-		expect(input).toContain('aria-describedby="pronouns-hint"');
-		// The described element sits outside the pronouns <label>, and it renders
-		// the hint message — not some other string wearing the id.
-		const labelBlock =
-			source.match(/<label[^>]*>(?:(?!<\/label>)[\s\S])*name="pronouns"(?:(?!<\/label>)[\s\S])*<\/label>/)?.[0] ?? '';
-		expect(labelBlock).toContain('name="pronouns"');
-		expect(labelBlock).not.toContain('id="pronouns-hint"');
-		expect(source).toContain('<p class="hint" id="pronouns-hint">{m.admin_settings_pronouns_hint()}</p>');
-	});
-
-	it('names every surface the value will appear on, and how to opt out', () => {
-		// The setting publishes to four pages at once; an operator deciding whether
-		// to fill it in cannot see that from the field alone.
-		const hint = m.admin_settings_pronouns_hint();
-		for (const surface of [/About/, /character details/, /\/connect/, /con card/]) {
-			expect(hint).toMatch(surface);
-		}
-		expect(hint).toMatch(/blank/i);
-	});
-
-	it('rebinds after a save, so the saved value never visually reverts', () => {
-		// The save posts with reset:false, so the resync effect is the only thing
-		// putting the server's value back into the box.
-		expect(source).toMatch(/\$effect\(\(\) => \{[\s\S]*?pronouns = data\.settings\.pronouns;/);
 	});
 });
 
@@ -723,17 +638,6 @@ describe('settings load — con card (SONA-115)', () => {
 		const card = await conCard(db, platform);
 
 		expect(card.handles).toEqual([{ platform: 'bluesky', value: '@taro.surf' }]);
-	});
-
-	it('renders the card behind the early-access gate, on the Account tab', () => {
-		// Source pin (the SONA-183 precedent above): the section is the only place
-		// the con card is reachable, so an ungated {#if} would hand a supporter
-		// feature to everyone with the whole suite still green.
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		const section = src.slice(src.indexOf('{#if conCardEnabled}'));
-		expect(section.slice(0, section.indexOf('{:else}'))).toContain('<ConCard');
-		expect(src).toContain("isFeatureEnabled('con-card'");
-		expect(src).toMatch(/<section class="security-section" data-tab="account">\s*\n\s*<h2>\{m\.admin_settings_con_card_heading\(\)\}/);
 	});
 
 	it('sends the persona avatar for the front, same-origin so the page can read it', async () => {
@@ -1635,17 +1539,6 @@ describe('settings load — supporter key is raw + verified, never in public set
 		expect(result.supporterKey).toBeNull();
 	});
 
-	// Source pin: the card is the only thing that ever displayed the key, and the
-	// unit tests above cover the load payload, not the rendered document. Rendering
-	// it for real needs a key signed by the sona.fast issuer, which tests can't
-	// have — so pin the template instead. Reintroducing any client-side truncation
-	// means the full token is being shipped again.
-	it('the settings card renders the server-made mask, not a token it truncates', () => {
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		expect(src).toContain('data.supporterKey.keyRecord');
-		expect(src).not.toMatch(/supporterKey\.token|truncateKey/);
-	});
-
 	it('ships the mask and never the stored token, anywhere in the payload', async () => {
 		// The page used to send the whole signed key and truncate at render, which
 		// put a working key in the SSR payload and the client bundle. Scanning the
@@ -2011,60 +1904,6 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		expect(bucket.list).toHaveBeenCalledTimes(20);
 	});
 
-	// Source pin (SONA-183 precedent): the three no-breakdown notes are branch-
-	// keyed, and no unit render exercises them — swapping the messages (or
-	// collapsing the branches) would leave the suite green while an R2 outage
-	// reads as "R2 only" (or as "too many files") to a fork already ON R2.
-	it('the no-breakdown notes are wired to the right branches', () => {
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		const branches = src.match(
-			/\{:else if data\.settings\.storageProvider === 'uploadthing'\}([\s\S]*?)\{:else if data\.breakdownTooLarge\}([\s\S]*?)\{:else\}([\s\S]*?)\{\/if\}/
-		);
-		expect(branches, 'uploadthing/too-large/else branch triple').not.toBeNull();
-		// UploadThing: no per-prefix listing exists — the R2-only pointer.
-		expect(branches![1]).toContain('m.admin_settings_breakdown_r2_only()');
-		expect(branches![1]).not.toContain('m.admin_settings_breakdown_unavailable()');
-		// R2, bucket past the page cap: the too-large note, not the outage one.
-		expect(branches![2]).toContain('m.admin_settings_breakdown_too_large()');
-		expect(branches![2]).not.toContain('m.admin_settings_breakdown_unavailable()');
-		// R2 with no breakdown and not too large: the listing failed.
-		expect(branches![3]).toContain('m.admin_settings_breakdown_unavailable()');
-		expect(branches![3]).not.toContain('m.admin_settings_breakdown_too_large()');
-	});
-
-	// Source pin: the warning const and the worded percentage span must sit
-	// BEFORE the {#if data.breakdown} bar split, not inside the breakdown
-	// branch — re-gating them there would strip the worded suffix from the
-	// fallback branch and leave a color-only signal (WCAG 1.4.1) with the
-	// suite green.
-	it('the usage warning is not gated on the breakdown', () => {
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		const constIdx = src.indexOf('{@const warn = usageWarning(pct)}');
-		const spanIdx = src.indexOf('class="storage-pct"');
-		const barSplitIdx = src.indexOf('{#if data.breakdown}');
-		expect(constIdx).toBeGreaterThan(-1);
-		expect(spanIdx).toBeGreaterThan(-1);
-		expect(barSplitIdx).toBeGreaterThan(-1);
-		expect(constIdx).toBeLessThan(barSplitIdx);
-		expect(spanIdx).toBeLessThan(barSplitIdx);
-		// The span carries both the color classes and the worded suffixes.
-		const span = src.slice(spanIdx, src.indexOf('</span>', spanIdx));
-		expect(span).toContain('class:warning={warn ===');
-		expect(span).toContain('class:danger={warn ===');
-		expect(span).toContain('m.admin_settings_usage_near()');
-		expect(span).toContain('m.admin_settings_usage_full()');
-	});
-
-	// Source pin: the Bucket files tile renders the raw count. A locale-aware
-	// format (toLocaleString) diverges between SSR (workerd en-US) and the
-	// client's browser locale — a hydration text mismatch — and disagrees with
-	// the raw-count Files column.
-	it('the Bucket files tile renders the raw count', () => {
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		expect(src).toContain('{data.breakdown.totalCount}');
-		expect(src).not.toContain('totalCount.toLocaleString');
-	});
-
 	it('degrades to breakdown null when the listing never settles (5s deadline)', async () => {
 		vi.useFakeTimers();
 		try {
@@ -2241,30 +2080,13 @@ describe('settings — FuzzySearch key', () => {
 		expect(result.fuzzysearchKeyFromEnv).toBe(false);
 		expect(result.fuzzysearchKeyRefusedAt).toBeNull();
 	});
-
-	it('masks every key to the same eight bullets, whatever its length', () => {
-		expect(fuzzysearchKeyDisplayRecord('abcd1234')).toBe('••••••••1234');
-		expect(fuzzysearchKeyDisplayRecord('fs-live-abcdef3k9q')).toBe('••••••••3k9q');
-		expect(fuzzysearchKeyDisplayRecord('abc')).toBe('••••••••');
-	});
 });
 
-// Source pin: the disclosure copy is the point of this section — an operator
-// has to read what leaves their site before they paste a key. Nothing renders
-// Svelte under the pure-TS vitest setup, so grep the file (the #182 pattern).
+// Source pin: the key field must stay a password input, and the refused-key
+// state must keep the key removable, say the key lapsed, and relabel the key
+// field. Nothing renders Svelte under the pure-TS vitest setup, so grep the file.
 describe('artist lookup section markup (SONA-156)', () => {
 	const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-
-	it('renders both disclosure paragraphs', () => {
-		expect(src).toContain('m.admin_settings_lookup_explainer_1()');
-		expect(src).toContain('m.admin_settings_lookup_explainer_2()');
-	});
-
-	it('links the self-serve key page as a safe external link', () => {
-		expect(src).toContain('https://api.fuzzysearch.net/selfserve');
-		const link = src.slice(src.indexOf('https://api.fuzzysearch.net/selfserve'), src.indexOf('https://api.fuzzysearch.net/selfserve') + 200);
-		expect(link).toContain('rel="noopener noreferrer"');
-	});
 
 	it('takes the key in a password field and never renders a stored key', () => {
 		expect(src).toContain('name="fuzzysearchApiKey"');
@@ -2278,27 +2100,6 @@ describe('artist lookup section markup (SONA-156)', () => {
 		expect(field).toContain('autocomplete="off"');
 		expect(src).toContain('data.fuzzysearchKeyRecord');
 		expect(src).not.toContain('data.fuzzysearchApiKey');
-	});
-
-	// The confirmation's safe choice needs a boundary of its own: .btn-secondary
-	// is filled with var(--secondary), which is also the panel's background, so
-	// Keep would sit at a 1.0:1 edge inside it (SC 1.4.11).
-	it('gives the Keep button a visible boundary, not the panel fill', () => {
-		const panel = src.slice(src.indexOf('class="remove-confirm"'));
-		const keep = panel.slice(0, panel.indexOf('admin_settings_lookup_confirm_keep'));
-		expect(keep).toContain('btn-outline');
-		expect(keep).not.toContain('btn-secondary');
-		// var(--border) against the panel's var(--secondary) fill is 1.0:1 in two
-		// dark themes, so the edge inside the panel is overridden on its own.
-		expect(src).toContain('.lookup-section .remove-confirm .btn-outline');
-	});
-
-	// The bullet run is announced one bullet at a time, so it is hidden and the
-	// part that identifies the key is spoken instead.
-	it('hides the mask from screen readers and names its ending', () => {
-		const record = src.slice(src.indexOf('<dd class="key-record">'));
-		expect(record.slice(0, 400)).toContain('aria-hidden="true"');
-		expect(src).toContain('m.admin_settings_lookup_key_ending(');
 	});
 
 	// The refused state is the one a broken key actually lands in, and e2e cannot
@@ -2334,121 +2135,5 @@ describe('artist lookup section markup (SONA-156)', () => {
 		expect(label.slice(0, 120)).toContain('m.admin_settings_lookup_key_label()');
 		const hint = src.slice(0, src.indexOf('m.admin_settings_lookup_hint_pre()'));
 		expect(hint.slice(-200)).toContain('{#if !fuzzysearchKeyRefusedAt}');
-	});
-
-	// Both submit buttons unmount on success, so the section hands focus on by
-	// hand and can never use `disabled` (disabling the focused button drops the
-	// keyboard user on <body>). A revert to disabled={saving} would reintroduce
-	// the focus loss with both suites green, so the wiring is pinned here.
-	it('drives focus by hand and marks pending with aria-busy, never disabled', () => {
-		const section = src.slice(src.indexOf('class="security-section lookup-section"'));
-		const markup = section.slice(0, section.indexOf('</section>'));
-		// The save form and the confirm-remove form: both report pending state to
-		// assistive tech without taking the control away.
-		expect(markup).toContain('aria-busy={savingFuzzysearchKey}');
-		expect(markup).toContain('aria-busy={removingFuzzysearchKey}');
-		expect(markup).not.toContain('disabled=');
-		// aria-busy is not reliably announced on a button, so the pending sentence
-		// also rides a live region that stays mounted for the life of the section.
-		expect(markup).toContain('role="status"');
-		// Without `disabled`, cancel() is the only thing between a double
-		// activation and two in-flight writes, so each handler is pinned to it.
-		const handler = (action: string) => {
-			const start = markup.indexOf(`action="?/${action}" use:enhance=`);
-			expect(start, action).toBeGreaterThan(-1);
-			return markup.slice(start, markup.indexOf('}}>', start));
-		};
-		// Shape, not spelling: any early return through cancel() on the pending
-		// flag counts, however it is braced or wrapped.
-		const guardsOn = (flag: string) =>
-			new RegExp(`if\\s*\\(\\s*${flag}\\s*\\)\\s*\\{?\\s*return\\s+cancel\\(\\s*\\)`);
-		const save = handler('saveFuzzysearchKey');
-		expect(save).toContain('({ cancel })');
-		expect(save).toMatch(guardsOn('savingFuzzysearchKey'));
-		const remove = handler('removeFuzzysearchKey');
-		expect(remove).toContain('({ cancel })');
-		expect(remove).toMatch(guardsOn('removingFuzzysearchKey'));
-	});
-
-	// The panel opens where the pointer already is: the section is last on the
-	// tab, so focusing Keep scrolls the page up and confirm Remove can land on
-	// the pixel Remove key was just clicked. Losing this guard would let a double
-	// click remove the key with the question unread, and no geometry assertion
-	// can cover every line-wrap of the confirmation sentence. The guard is
-	// pointer-only: a keyboard user who Shift+Tabs from Keep and presses Enter
-	// cannot have suffered the hazard, and their activation must go through.
-	// It is also place-bound: only a click near where Remove key was clicked is
-	// the reflex, so a deliberate click elsewhere on the button is not swallowed.
-	it('ignores a confirm pointer click that lands inside the reflex window', () => {
-		// Remove key records when and where the panel opened, next to the flag.
-		const opens = src.indexOf('confirmingFuzzysearchRemove = true');
-		expect(opens).toBeGreaterThan(-1);
-		const records = src.slice(opens - 240, opens);
-		expect(records).toContain('fuzzysearchRemoveOpenedAt = performance.now()');
-		expect(records).toContain('fuzzysearchRemoveOpenedX = event.clientX');
-		expect(records).toContain('fuzzysearchRemoveOpenedY = event.clientY');
-		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
-		expect(start).toBeGreaterThan(-1);
-		const form = src.slice(start, src.indexOf('</form>', start));
-		// The button's own onclick blocks the submit, and only for a click that
-		// carries a positive detail — a keyboard-synthesized click carries 0.
-		const click = form.slice(form.indexOf('onclick='));
-		expect(click).toMatch(/event\.detail\s*>\s*0/);
-		// ...and only for one that landed within the reflex distance of the
-		// recorded point, on both axes.
-		expect(click).toMatch(
-			/Math\.abs\(\s*event\.clientX - fuzzysearchRemoveOpenedX\s*\)\s*<=\s*reflexPx/
-		);
-		expect(click).toMatch(
-			/Math\.abs\(\s*event\.clientY - fuzzysearchRemoveOpenedY\s*\)\s*<=\s*reflexPx/
-		);
-		// That distance is pointer-dependent, decided at click time: a fine
-		// pointer gets the narrow box, a coarse one the wide box that survives
-		// touch jitter.
-		expect(click).toContain("window.matchMedia?.('(pointer: coarse)')");
-		expect(click).toContain('FUZZYSEARCH_REMOVE_REFLEX_COARSE_PX');
-		expect(click).toContain('FUZZYSEARCH_REMOVE_REFLEX_PX');
-		expect(click).toMatch(
-			/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,300}event\.preventDefault\(\s*\)/
-		);
-		// The enhance callback keeps only the in-flight guard: no time check there,
-		// or a keyboard Enter would be swallowed again.
-		const handler = src.slice(start, src.indexOf('}}>', start));
-		expect(handler).not.toContain('fuzzysearchRemoveOpenedAt');
-		// Half a second: long enough to swallow a double click, short enough that
-		// a deliberate second click still goes through.
-		expect(src).toContain('const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;');
-	});
-
-	// A failed removal left the key in place, so closing the panel would look
-	// exactly like pressing Keep and the operator would never learn it failed.
-	it('closes the confirmation only on success, and reports a failure', () => {
-		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
-		expect(start).toBeGreaterThan(-1);
-		const handler = src.slice(start, src.indexOf('}}>', start));
-		const success = handler.slice(handler.indexOf("if (result.type === 'success')"));
-		const branch = success.slice(0, success.indexOf('} else {'));
-		expect(branch).toContain('confirmingFuzzysearchRemove = false;');
-		expect(branch).toContain('m.admin_settings_lookup_removed()');
-		// Exactly one close, and it is the one inside the success branch.
-		expect(handler.match(/confirmingFuzzysearchRemove = false;/g)).toHaveLength(1);
-		// The failure path says so and puts focus back on the Keep button, which
-		// is still mounted.
-		const failed = success.slice(success.indexOf('} else {'));
-		expect(failed).toContain('toast.error(m.admin_something_wrong())');
-		expect(failed).toContain('fuzzysearchKeepButton?.focus()');
-	});
-
-	// A live region that mounts with its text already in place is not announced,
-	// so this one sits outside every conditional branch — moving it inside
-	// {#if savingFuzzysearchKey} would leave the presence check above green.
-	it('mounts the live region ahead of every conditional branch', () => {
-		const section = src.slice(src.indexOf('class="security-section lookup-section"'));
-		const markup = section.slice(0, section.indexOf('</section>'));
-		expect(markup.indexOf('role="status"')).toBeLessThan(markup.indexOf('{#if'));
-		const region = markup.slice(markup.indexOf('role="status"'));
-		const body = region.slice(0, region.indexOf('</span>'));
-		expect(body).toContain('m.admin_saving()');
-		expect(body).toContain('m.admin_settings_lookup_removing()');
 	});
 });

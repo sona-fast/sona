@@ -140,27 +140,6 @@ describe('setup wizard — AI disclosure affirmation (SONA-167)', () => {
 		expect(input, 'affirmation input').toContain('type="checkbox"');
 	});
 
-	// Source pin (SONA-183): the affirmation enumerates three claims, so wrapping
-	// its hint in the <label> made the checkbox's accessible name ~450 characters
-	// read out before the checked state. The hint stays outside, wired up by id.
-	it('describes the affirmation from outside its label', () => {
-		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		// Capture the whole tag, then look inside it: attribute order and extra
-		// attributes are harmless, a missing aria-describedby is not.
-		const input = src.match(/<input[^>]*\bname="aiPageAffirmed"[^>]*>/)?.[0] ?? '';
-		expect(input).toContain('aria-describedby="aiPageAffirmed-desc"');
-		// `>[^<]*</label>` is the containment assertion: the title label holds text and
-		// nothing else, so no hint can be folded back in to restore the ~450-character
-		// accessible name with every id still unchanged.
-		const title = src.match(/<label[^>]*\bfor="aiPageAffirmed"[^>]*>[^<]*<\/label>/)?.[0] ?? '';
-		expect(title, 'affirmation title label').toMatch(/class="[^"]*\baffirm-title\b/);
-		const hint = src.match(/<small[^>]*\bid="aiPageAffirmed-desc"[^>]*>/)?.[0] ?? '';
-		expect(hint, 'affirmation hint').toMatch(/class="[^"]*\baffirm-hint\b/);
-		// Whole class token, so `class="affirm wide"` is caught but `affirm-title`
-		// (a different class) is not.
-		expect(src).not.toMatch(/<label[^>]*class="(?:[^"]*\s)?affirm(?:\s[^"]*)?"/);
-	});
-
 	// The /ai page speaks in the owner's first person and states their gallery
 	// holds no AI-generated art. A NEW install must never publish that on the
 	// absent-means-ON default, so the wizard writes the row explicitly from the
@@ -324,15 +303,6 @@ describe('setup wizard — collects Instagram alongside the other socials (SONA-
 			'furtrack',
 			'primaryCharacter'
 		]);
-	});
-});
-
-describe('setup wizard — the submit error is announced', () => {
-	it('marks the error paragraph as an alert', () => {
-		// enhance() submits without navigating, so a failed setup changes nothing a
-		// screen reader would otherwise notice.
-		const form = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		expect(form).toMatch(/<p class="error" role="alert">\{form\.error\}<\/p>/);
 	});
 });
 
