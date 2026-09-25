@@ -218,6 +218,30 @@ describe('R2 streaming put', () => {
 		expect(stored.get('a/exact.png')).toEqual(expected);
 	});
 
+	it('a source that reuses one buffer across chunks still stores the bytes it sent', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stored, storage } = committingBucket(12);
+		// One backing buffer, rewritten before every enqueue. The held chunk is a
+		// copy, so the store sees 1,1,1,1,2,2,2,2,3,3,3,3 and not the last fill.
+		const buffer = new Uint8Array(4);
+		let fill = 0;
+		const stream = new ReadableStream<Uint8Array>({
+			pull(c) {
+				if (fill === 3) return c.close();
+				buffer.fill(++fill);
+				c.enqueue(buffer);
+			}
+		});
+		await storage.put({
+			suggestedKey: 'a/reuse.png',
+			body: stream,
+			size: 12,
+			contentType: 'image/png',
+			filename: 'reuse.png'
+		});
+		expect(Array.from(stored.get('a/reuse.png') ?? [])).toEqual([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]);
+	});
+
 	it('a source that errors before the store commits leaves an existing object in place', async () => {
 		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
 		const { stored, storage } = committingBucket(16);

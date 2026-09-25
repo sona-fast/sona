@@ -36,7 +36,10 @@ function holdBackPastLength(size: number): TransformStream<Uint8Array, Uint8Arra
 			// and the integration harness match on it; no production caller does.
 			if (total > size) throw new TypeError(`r2: attempt to write too many bytes (${total} > ${size} declared)`);
 			if (held) controller.enqueue(held);
-			held = chunk;
+			// Copy: enqueue never copies, and a source that reuses its buffer for
+			// the next chunk would otherwise rewrite the held bytes before they
+			// are forwarded.
+			held = chunk.slice();
 		},
 		flush(controller) {
 			if (held) controller.enqueue(held);
