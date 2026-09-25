@@ -14,8 +14,10 @@ import { jpegFixture } from '../../src/lib/server/storage/scrub-metadata.fixture
 //  1. workerd drops a manually-set content-length header on a plain
 //     ReadableStream fetch body and sends chunked encoding; only a
 //     FixedLengthStream body carries a real Content-Length.
-//  2. An over-length source through FixedLengthStream leaves a truncated R2
-//     object of exactly the declared size even though put() rejects.
+//  2. An over-length source through FixedLengthStream can commit a truncated
+//     R2 object of exactly the declared size even though put() rejects (the
+//     provider now withholds the completing bytes; the suite pins that the
+//     key ends up absent).
 // This suite pins both behaviors (and the happy paths) by bundling the REAL
 // provider code into a worker (tests/integration/worker-fixtures/
 // storage-worker.ts) and running it under Miniflare's workerd. Outbound
@@ -152,18 +154,15 @@ describe('storage streaming under real workerd', () => {
 		expect(result.url).toBe('/img/it/exact.bin');
 	});
 
-	it('an over-length source rejects the put; any leftover is exactly the declared size', async () => {
+	it('an over-length source rejects the put and leaves the key absent', async () => {
 		const result = await run('r2-over-length');
 		expect(result.rejected).toBe('over-length');
-		// NOT reliably atomic: whether a truncated object commits is a race
-		// between the store completing its write (FixedLengthStream ends its
-		// readable at exactly byteLength) and the pump's rejection. Both
-		// outcomes have been observed on this stack. What must hold: the call
-		// rejected, and anything left behind is exactly the declared size —
-		// never a partial of some other length.
-		if (result.leftoverSize != null) {
-			expect(result.leftoverSize).toBe(2 * 1024 * 1024);
-		}
+		// Without the provider's hold-back, the store can commit a truncated
+		// object of exactly the declared size here (FixedLengthStream ends its readable
+		// at byteLength, and the store commits even though its put() then
+		// rejects). The hold-back never lets the completing bytes through ahead
+		// of an overrun, so nothing commits.
+		expect(result.leftoverSize).toBeNull();
 	});
 
 	it('the scrubbing decorator stores scrubbed bytes at the declared length', async () => {

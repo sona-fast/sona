@@ -138,9 +138,7 @@ export default {
 					});
 				}
 
-				// Over-length source: put() must reject — and per the documented
-				// (non-atomic) invariant, a truncated object of exactly the
-				// declared size persists at the key.
+				// Over-length source: put() must reject and leave the key absent.
 				case 'r2-over-length': {
 					const storage = new R2Storage({ bucket: env.IMAGES, publicBase: '/img' });
 					let rejected: string | null = null;
