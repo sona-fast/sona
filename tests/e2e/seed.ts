@@ -23,7 +23,7 @@ function thumbnailKeys(sqlFiles: string[]): string[] {
 	for (const file of sqlFiles) {
 		for (const m of readFileSync(file, 'utf8').matchAll(/'\/img\/(e2e\/[\w-]+-thumb\.png)'/g)) keys.add(m[1]);
 	}
-	return [...keys].sort();
+	return [...keys];
 }
 
 /**

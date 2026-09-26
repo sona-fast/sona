@@ -35,9 +35,12 @@
 	   own height as --mobile-nav-height; the nav wraps onto more rows when the
 	   text is enlarged, so a fixed gap would let it cover the page's last lines.
 	   Never less than the 88px the layouts were designed around, and that floor
-	   is 5.5rem so it grows with the reader's text size too: before hydration or
+	   is 5.5rem so it grows with the root font size too: before hydration or
 	   with JavaScript off the height is never published, and the floor alone
-	   has to clear a bar that wrapped under enlarged text. */
+	   has to clear a bar that wrapped under enlarged text. The html rule below
+	   pins the root at 16px, so a browser's default font-size setting does not
+	   reach rem here; a user style sheet or extension that overrides the root
+	   size does, and page zoom scales px and rem alike. */
 	--mobile-nav-clearance: max(5.5rem, calc(var(--mobile-nav-height, 0px) + 32px));
 }
 
@@ -132,16 +135,19 @@ input, select, textarea {
 
 /* "Skip to content": the first focusable element on every page (root layout).
    Off-screen until it takes keyboard focus, then pinned to the top-left corner
-   above the sticky header and the fixed mobile nav. --foreground on
-   --background is the highest-contrast pair every theme ships. */
+   above the sticky header and the fixed mobile nav. It sits on a card fill
+   with a hairline edge, like the site's other pills; --foreground on --card
+   is swept for contrast in theme-contrast.test.ts. The edge is an inset
+   shadow so the focus outline stays a separate ring. */
 .skip-link {
 	position: fixed;
 	top: 8px;
 	left: 8px;
 	z-index: 1000;
 	padding: 8px 16px;
-	border-radius: var(--radius-s);
-	background: var(--background);
+	border-radius: var(--radius-pill);
+	background: var(--card);
+	box-shadow: inset 0 0 0 1px var(--border);
 	color: var(--foreground);
 	font-family: var(--font-secondary);
 	font-size: 0.875rem;

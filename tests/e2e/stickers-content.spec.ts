@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { waitForNavHeight } from './site-chrome-helpers';
 
 // The ungated half of the nav content-gating rule, and the only end-to-end proof
 // that a sticker pack renders at all.
@@ -78,16 +79,7 @@ for (const { locale, stickers } of [
 		const bigSize = await nav.locator('.tab span').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
 		expect(bigSize).toBeCloseTo(baseSize * 2, 1);
 
-		// The bar publishes its height once hydrated; wait for it to match the
-		// wrapped bar before measuring what depends on it.
-		await expect
-			.poll(() =>
-				page.evaluate(() => {
-					const h = getComputedStyle(document.documentElement).getPropertyValue('--mobile-nav-height');
-					return h === `${(document.querySelector('nav.mobile-nav') as HTMLElement).offsetHeight}px`;
-				})
-			)
-			.toBe(true);
+		await waitForNavHeight(page);
 
 		const m = await nav.evaluate((el) => {
 			const tabs = [...el.querySelectorAll<HTMLElement>('.tab')].map((tab) => {
@@ -146,14 +138,7 @@ async function lastContentAgainstNav(page: Page) {
 				last = `${el.tagName.toLowerCase()}.${el.className} "${el.textContent?.trim().slice(0, 40)}"`;
 			}
 		}
-		const doc = document.documentElement;
-		const mainBox = main.getBoundingClientRect();
-		return {
-			lastBottom,
-			last,
-			navTop: document.querySelector('nav.mobile-nav')!.getBoundingClientRect().top,
-			debug: `scrollY ${scrollY} scrollH ${doc.scrollHeight} innerH ${innerHeight} main ${mainBox.top}-${mainBox.bottom} pb ${getComputedStyle(main).paddingBottom}`
-		};
+		return { lastBottom, last, navTop: document.querySelector('nav.mobile-nav')!.getBoundingClientRect().top };
 	});
 }
 
@@ -163,17 +148,10 @@ test('the connect page clears the wrapped bottom nav at 320px and 200% text', as
 	await page.setViewportSize({ width: 320, height: 800 });
 	await page.goto('/connect');
 	await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
-	await expect
-		.poll(() =>
-			page.evaluate(() => {
-				const h = getComputedStyle(document.documentElement).getPropertyValue('--mobile-nav-height');
-				return h === `${(document.querySelector('nav.mobile-nav') as HTMLElement).offsetHeight}px`;
-			})
-		)
-		.toBe(true);
-	const { lastBottom, last, navTop, debug } = await lastContentAgainstNav(page);
+	await waitForNavHeight(page);
+	const { lastBottom, last, navTop } = await lastContentAgainstNav(page);
 	expect(lastBottom).toBeGreaterThan(0);
-	expect(lastBottom, `${last} ends under the bar (${debug})`).toBeLessThanOrEqual(navTop);
+	expect(lastBottom, `${last} ends under the bar`).toBeLessThanOrEqual(navTop);
 });
 
 // Before hydration, or with JavaScript off, the bar never publishes its height
@@ -200,9 +178,9 @@ test.describe('with JavaScript off', () => {
 				.locator('nav.mobile-nav .tab')
 				.evaluateAll((tabs) => new Set(tabs.map((t) => Math.round(t.getBoundingClientRect().top))).size);
 			expect(rows, 'the bar wraps at this size, or this test proves nothing').toBeGreaterThan(1);
-			const { lastBottom, last, navTop, debug } = await lastContentAgainstNav(page);
+			const { lastBottom, last, navTop } = await lastContentAgainstNav(page);
 			expect(lastBottom).toBeGreaterThan(0);
-			expect(lastBottom, `${last} ends under the bar (${debug})`).toBeLessThanOrEqual(navTop);
+			expect(lastBottom, `${last} ends under the bar`).toBeLessThanOrEqual(navTop);
 		});
 	}
 });

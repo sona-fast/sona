@@ -1,28 +1,13 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { adminLogin, gotoAfterLogin } from './admin-login';
+import { expectSkipLinkReachesMain, firstTabStop, waitForNavHeight } from './site-chrome-helpers';
 
 // Site-chrome accessibility and seed checks from the SONA-229 review, on the
-// shared read-only server. No login and no writes.
-//
-// The skip link is driven with the real keyboard: a programmatic .focus() would
-// pass even if the link were not the first stop in the tab order, and a
-// programmatic click would pass even if activating it left focus in the header.
+// shared read-only server. No writes; the admin checks sign in with the legacy
+// password and only read.
 
-/** Tab once from a fresh page and return the focused element's class and text. */
-async function firstTabStop(page: Page, key: 'Tab' | 'Shift+Tab' = 'Tab') {
-	await page.keyboard.press(key);
-	return page.evaluate(() => {
-		const el = document.activeElement as HTMLElement | null;
-		return { className: el?.className ?? '', text: el?.textContent?.trim() ?? '' };
-	});
-}
-
-/** The focused element's box relative to the viewport. */
-async function focusedBox(page: Page) {
-	return page.evaluate(() => {
-		const r = (document.activeElement as HTMLElement).getBoundingClientRect();
-		return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, vw: innerWidth };
-	});
-}
+// Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
+const PASSWORD = 'e2e-admin-password';
 
 // One URL per layout that renders a <main>: the (public) layout, the mosaic
 // homepage (which escapes that layout), the (paths) layout, the connect QR
@@ -43,33 +28,42 @@ for (const { name, url, status, autofocus } of PAGES) {
 	test(`the ${name} starts with a skip link that moves focus into the main content`, async ({ page }) => {
 		const res = await page.goto(url);
 		expect(res?.status()).toBe(status);
-		await expect(page.locator('main#main-content')).toHaveCount(1);
-
-		// Off-screen before it has focus.
-		const hidden = await page.locator('.skip-link').boundingBox();
-		expect(hidden!.y + hidden!.height).toBeLessThanOrEqual(0);
-
-		// The first Tab lands on it, and it is on screen while focused.
-		if (autofocus) await expect(page.getByLabel(autofocus)).toBeFocused();
-		expect(await firstTabStop(page, autofocus ? 'Shift+Tab' : 'Tab')).toEqual({
-			className: 'skip-link',
-			text: 'Skip to content'
-		});
-		const box = await focusedBox(page);
-		expect(box.top).toBeGreaterThanOrEqual(0);
-		expect(box.left).toBeGreaterThanOrEqual(0);
-		expect(box.right).toBeLessThanOrEqual(box.vw);
-		expect(box.bottom).toBeGreaterThan(box.top);
-
-		// Enter follows it, and the next Tab starts inside the main landmark
-		// rather than back in the header.
-		await page.keyboard.press('Enter');
-		await expect(page).toHaveURL(/#main-content$/);
-		await page.keyboard.press('Tab');
-		const inMain = await page.evaluate(() => !!document.activeElement?.closest('main#main-content'));
-		expect(inMain).toBe(true);
+		await expectSkipLinkReachesMain(page, { autofocus });
 	});
 }
+
+// The signed-in admin shell is its own layout, with the sidebar ahead of its
+// main landmark.
+test('the signed-in admin shell starts with a skip link that moves focus into the main content', async ({
+	page
+}) => {
+	await adminLogin(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/images');
+	await expectSkipLinkReachesMain(page, { main: 'main.admin-content#main-content' });
+});
+
+// WCAG 1.4.4 and 1.4.10 on the admin images page: the floating upload button
+// shows only on phones and sits above the bottom nav by the same clearance the
+// layouts use, so at 320px with 200% text it must still clear the taller bar.
+test('the admin upload button clears the wrapped bottom nav at 320px and 200% text', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.setViewportSize({ width: 320, height: 800 });
+	await gotoAfterLogin(page, '/admin/images');
+	await expect(page.locator('.fab')).toBeVisible();
+	await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+	await waitForNavHeight(page);
+
+	const m = await page.evaluate(() => {
+		const tabs = [...document.querySelectorAll('nav.mobile-nav .tab')];
+		return {
+			rows: new Set(tabs.map((t) => Math.round(t.getBoundingClientRect().top))).size,
+			fabBottom: document.querySelector('.fab')!.getBoundingClientRect().bottom,
+			navTop: document.querySelector('nav.mobile-nav')!.getBoundingClientRect().top
+		};
+	});
+	expect(m.rows, 'the bar wraps at this size, or this test proves nothing').toBeGreaterThan(1);
+	expect(m.fabBottom).toBeLessThanOrEqual(m.navTop);
+});
 
 test('the skip link is translated', async ({ page }) => {
 	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);

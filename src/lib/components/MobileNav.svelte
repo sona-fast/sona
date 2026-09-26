@@ -103,7 +103,10 @@
 		border-radius: var(--radius-s);
 		text-decoration: none;
 		color: var(--muted-foreground);
-		/* rem, not px, so a reader's text-size setting reaches the labels. */
+		/* rem, not px, so the labels follow the root font size. The root is
+		   pinned at 16px in app.css, so a browser's default font-size setting
+		   does not reach them; a user style sheet or extension that overrides
+		   the root size does. */
 		font-size: 0.6875rem;
 		font-family: var(--font-secondary);
 		transition: color 0.15s;
