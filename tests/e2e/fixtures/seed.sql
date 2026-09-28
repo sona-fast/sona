@@ -246,3 +246,9 @@ INSERT OR REPLACE INTO conventions (id, name, location, start_date, end_date, ur
 VALUES
   (1, 'E2E Live Con', 'Denver, CO', date('now', '-1 day'), date('now', '+1 day'),
    NULL, 'confirmed', 'America/Denver', '2026-07-01T00:00:00.000Z');
+
+-- One VR avatar credit, so the admin Works label has a counter-word segment to
+-- wrap (admin-artists-works-label spec). Avatar Artist on the UNPUBLISHED draft
+-- (avatar 2): no public page shows it, and Avatar Artist already has image 10.
+INSERT INTO avatar_credits (avatar_id, artist_id, role, role_label, position)
+VALUES (2, 2, 'modeler', NULL, 0);

@@ -601,6 +601,21 @@
 			}
 		}
 	],
+	"admin_count_vr_avatars": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} VR avatar",
+				"countPlural=other": "{count} VR avatars"
+			}
+		}
+	],
 	"admin_count_characters": [
 		{
 			"declarations": [
@@ -673,7 +688,7 @@
 	"admin_artists_no_match": "No artists matching \"{search}\"",
 	"admin_artists_empty": "No artists yet.",
 	"admin_artists_delete_title": "Delete Artist",
-	"admin_artists_delete_message": "Delete artist \"{name}\"? You must remove their images first.",
+	"admin_artists_delete_message": "Delete artist \"{name}\"? You must remove them from all their works first.",
 	"admin_artists_edit_title": "Edit Artist",
 	"admin_artists_added": "Added {date}",
 	"admin_new_artist_create_failed": "Could not create artist.",
