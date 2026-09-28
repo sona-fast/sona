@@ -62,6 +62,53 @@ describe('normalizeSocialUrl', () => {
 		);
 	});
 
+	it('flattens a Patreon join or checkout link to the creator it names', () => {
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/join/BobArt')).toBe(
+			'https://www.patreon.com/BobArt'
+		);
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/checkout/Bob?rid=1')).toBe(
+			'https://www.patreon.com/Bob'
+		);
+	});
+
+	it('keeps a Patreon section link that carries an id rather than a creator', () => {
+		for (const url of [
+			'https://www.patreon.com/bePatron?u=123',
+			'https://www.patreon.com/m/12345',
+			'https://www.patreon.com/collection/9',
+			'https://www.patreon.com/profile/creators?id=5',
+			'https://www.patreon.com/join'
+		]) {
+			expect(normalizeSocialUrl('patreon', url)).toBe(url);
+		}
+	});
+
+	it('keeps the other Patreon spellings flattening, casing kept', () => {
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/cw/bob.art_X')).toBe(
+			'https://www.patreon.com/bob.art_X'
+		);
+		expect(normalizeSocialUrl('patreon', 'HTTPS://PATREON.COM/Bob')).toBe('https://www.patreon.com/Bob');
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/CW/Bob')).toBe(
+			'https://www.patreon.com/Bob'
+		);
+	});
+
+	it('flattens a protocol-relative Patreon link', () => {
+		expect(normalizeSocialUrl('patreon', '//patreon.com/bob')).toBe('https://www.patreon.com/bob');
+		expect(normalizeSocialUrl('patreon', '//www.patreon.com/cw/Bob')).toBe('https://www.patreon.com/Bob');
+	});
+
+	it('does not build a creator URL from an empty, dot-only, or out-of-charset name', () => {
+		expect(normalizeSocialUrl('patreon', 'https://patreon.com/')).toBe('https://patreon.com/');
+		expect(normalizeSocialUrl('patreon', 'patreon.com/bob%20x')).toBe('https://patreon.com/bob%20x');
+		expect(normalizeSocialUrl('patreon', 'patreon.com/..')).toBe('https://patreon.com/..');
+	});
+
+	it('does not store a flattened Patreon URL longer than the URL length cap', () => {
+		const out = normalizeSocialUrl('patreon', 'https://www.patreon.com/' + 'a'.repeat(3000));
+		expect(out).toBe('');
+	});
+
 	it('does not rewrite a non-patreon.com URL pasted into the Patreon field', () => {
 		// extractHandle alone would read "evil.example" off this as a handle.
 		expect(normalizeSocialUrl('patreon', 'https://evil.example/bob')).toBe('https://evil.example/bob');
@@ -144,6 +191,10 @@ describe('normalizeHandle (patreon)', () => {
 		expect(normalizeHandle('patreon', 'patreon.com/C/')).toBe('');
 	});
 
+	it('extracts the creator from a patreon.com/join/ link', () => {
+		expect(normalizeHandle('patreon', 'https://www.patreon.com/join/BobArt')).toBe('bobart');
+	});
+
 	it('keeps a bare creator whose name starts with "cw"', () => {
 		expect(normalizeHandle('patreon', 'patreon.com/cwolf')).toBe('cwolf');
 	});
@@ -165,6 +216,15 @@ describe('handlesOverlap (patreon /cw/)', () => {
 			handlesOverlap(
 				{ patreonUrl: 'https://www.patreon.com/user?u=1' },
 				{ patreonUrl: 'https://www.patreon.com/user?u=2' }
+			)
+		).toBe(false);
+	});
+
+	it('does not match two different bePatron?u= links', () => {
+		expect(
+			handlesOverlap(
+				{ patreonUrl: 'https://www.patreon.com/bePatron?u=1' },
+				{ patreonUrl: 'https://www.patreon.com/bePatron?u=2' }
 			)
 		).toBe(false);
 	});
