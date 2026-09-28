@@ -38,7 +38,8 @@ function canonicalLink(raw: string): string {
  *  canonical link under a 'link:' prefix so it can never equal a handle.
  *  Without that fallback every such link normalizes to '', so a changed or
  *  added one reads as unchanged and the submit guard hides it. Every other
- *  platform, and a Patreon value on another host, compares exactly as before. */
+ *  platform compares exactly as on main, since normalizeHandle reserves only
+ *  Patreon segments; a Patreon value on another host compares by handle alone. */
 function handleKey(platform: Platform, raw: string | null): string {
 	const handle = normalizeHandle(platform, raw);
 	if (handle !== '' || platform !== 'patreon' || raw == null) return handle;

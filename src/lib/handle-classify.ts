@@ -21,12 +21,14 @@ export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {
 };
 
 /** The matching form of a handle: {@link extractHandle}, case-folded, or ''
- *  when the segment names one of the platform's own sections rather than an
+ *  when a Patreon segment names one of Patreon's own sections rather than an
  *  account. patreon.com/user?u=1 and patreon.com/user?u=2 are two people, and
- *  matching them as the handle 'user' made them one. */
+ *  matching them as the handle 'user' made them one. Only Patreon: the
+ *  registry's normalize (PATREON_RESERVED) reserves no other platform's
+ *  segments, so other platforms keep the plain handle to stay in step with it. */
 export function normalizeHandle(platform: Platform, raw: string | null | undefined): string {
 	const handle = extractHandle(platform, raw).toLowerCase();
-	return RESERVED_SEGMENTS[platform]?.includes(handle) ? '' : handle;
+	return platform === 'patreon' && RESERVED_SEGMENTS.patreon?.includes(handle) ? '' : handle;
 }
 
 export type QueryKind = 'name' | 'handle';

@@ -158,28 +158,30 @@ describe('handlesOverlap (patreon /cw/)', () => {
 	});
 });
 
-// The reserved-segment check covers every platform with a list, not just Patreon.
-describe('normalizeHandle (reserved segments on other platforms)', () => {
-	it('yields no handle for a bare Telegram site path', () => {
-		expect(normalizeHandle('telegram', 'https://t.me/s')).toBe('');
+// The reserved-segment check covers Patreon only. Other platforms' site
+// segments are left as main had them (read as a plain handle) to stay in step
+// with the registry, whose normalize reserves only Patreon segments.
+describe('normalizeHandle (site segments on other platforms)', () => {
+	it('reads a bare Telegram site path as a plain handle', () => {
+		expect(normalizeHandle('telegram', 'https://t.me/s')).toBe('s');
 	});
 
 	it('reads the channel out of a Telegram t.me/s/ preview link', () => {
 		expect(normalizeHandle('telegram', 't.me/s/chan')).toBe('chan');
 	});
 
-	it('yields no handle for a Twitter site path', () => {
-		expect(normalizeHandle('twitter', 'twitter.com/home')).toBe('');
+	it('reads a Twitter site path as a plain handle', () => {
+		expect(normalizeHandle('twitter', 'twitter.com/home')).toBe('home');
 	});
 });
 
 describe('handlesOverlap (telegram sticker packs)', () => {
-	it('does not match two different t.me/addstickers/ links', () => {
+	it('matches two different t.me/addstickers/ links, as main did', () => {
 		expect(
 			handlesOverlap(
 				{ telegramUrl: 'https://t.me/addstickers/AlicePack' },
 				{ telegramUrl: 'https://t.me/addstickers/BobPack' }
 			)
-		).toBe(false);
+		).toBe(true);
 	});
 });

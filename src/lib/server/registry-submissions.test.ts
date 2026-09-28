@@ -118,14 +118,15 @@ describe('artistInCatalog', () => {
 		expect(artistInCatalog(artist, [entry])).toBe(false);
 	});
 
-	it('does not match two different Telegram sticker-pack links', () => {
-		// t.me/addstickers/<pack> names a pack, not an account; both read as the
-		// handle 'addstickers' before the reserved-segment check.
+	it('matches two different Telegram sticker-pack links, as main did', () => {
+		// Both read as the handle 'addstickers'. Non-Patreon site segments are
+		// left as main had them to stay in step with the registry, which
+		// reserves only Patreon segments.
 		const artist = { name: 'Bob', globalId: null, telegramUrl: 'https://t.me/addstickers/BobPack' };
 		const entry = catalogEntry({
 			displayName: 'Alice',
 			socials: { telegramUrl: 'https://t.me/addstickers/AlicePack' }
 		});
-		expect(artistInCatalog(artist, [entry])).toBe(false);
+		expect(artistInCatalog(artist, [entry])).toBe(true);
 	});
 });

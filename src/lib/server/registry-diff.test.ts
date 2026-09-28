@@ -83,8 +83,8 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 		// and the fallback must not start telling the two links apart.
 		const wrongHost = { name: 'Marrow', twitterUrl: 'https://instagram.com/a', aliases: null };
 		expect(registryDiffFields(wrongHost, reg({ socials: { twitterUrl: 'https://instagram.com/b' } }))).toEqual([]);
-		// A non-Patreon link that names no handle gets no raw-link fallback: two
-		// sticker-pack links compare as they did before, not as two links.
+		// A non-Patreon site-segment link reads as a plain handle, as on main:
+		// two sticker-pack links both compare as 'addstickers', not as two links.
 		const pack = { name: 'Marrow', telegramUrl: 'https://t.me/addstickers/PackA', aliases: null };
 		expect(registryDiffFields(pack, reg({ socials: { telegramUrl: 'https://t.me/addstickers/PackB' } }))).toEqual([]);
 		// A Patreon value on another host normalizes to that host as its handle
@@ -93,6 +93,17 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 		// test below are what exercise that check.
 		const offHost = { name: 'Marrow', patreonUrl: 'https://example.com/user?u=1', aliases: null };
 		expect(registryDiffFields(offHost, reg({ socials: { patreonUrl: 'https://example.com/user?u=2' } }))).toEqual([]);
+	});
+
+	it('shows a removed or added non-Patreon site-segment link as a change', () => {
+		// Only Patreon segments are reserved, matching the registry, so these keep
+		// their plain handle ('p', 'joinchat') and never compare equal to absent.
+		const cleared = { name: 'Marrow', instagramUrl: null, aliases: null };
+		expect(registryDiffFields(cleared, reg({ socials: { instagramUrl: 'https://instagram.com/p/abc' } }))).toEqual([
+			'socials.instagramUrl'
+		]);
+		const added = { name: 'Marrow', telegramUrl: 'https://t.me/joinchat/xyz', aliases: null };
+		expect(registryDiffFields(added, reg({ socials: {} }))).toEqual(['socials.telegramUrl']);
 	});
 
 	it('treats an alias link that names no handle, spelled two ways, as equal', () => {
