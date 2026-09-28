@@ -37,6 +37,13 @@ describe('normalizeSocialUrl', () => {
 		expect(normalizeSocialUrl('telegram', 't.me/sona.e2e.example')).toBe('https://t.me/sona.e2e.example');
 	});
 
+	it('keeps a legacy patreon.com/user?u= link as a URL', () => {
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/user?u=123')).toBe(
+			'https://www.patreon.com/user?u=123'
+		);
+		expect(normalizeSocialUrl('patreon', 'patreon.com/user?u=123')).toBe('https://patreon.com/user?u=123');
+	});
+
 	it('treats a bare Bluesky handle (name.bsky.social) as a handle, not a URL', () => {
 		expect(normalizeSocialUrl('bluesky', 'name.bsky.social')).toBe(
 			'https://bsky.app/profile/name.bsky.social'
@@ -78,9 +85,9 @@ describe('normalizeSocialUrl', () => {
 	});
 });
 
-// The regression this guards: Patreon's newer creator URLs are 'patreon.com/c/<user>'.
-// If the bare 'patreon.com/' prefix is checked first, the handle collapses to 'c', so
-// 'patreon.com/c/<user>' must be tried before 'patreon.com/'.
+// The regression this guards: Patreon's newer creator URLs are 'patreon.com/c/<user>'
+// and 'patreon.com/cw/<user>'. If the bare 'patreon.com/' prefix is checked first, the
+// handle collapses to 'c' or 'cw', so both must be tried before 'patreon.com/'.
 
 describe('normalizeHandle (patreon)', () => {
 	it('extracts the handle from a bare patreon.com URL', () => {
@@ -94,9 +101,17 @@ describe('normalizeHandle (patreon)', () => {
 	});
 
 	it('extracts the handle from a patreon.com/cw/ creator URL', () => {
-		expect(normalizeHandle('patreon', 'https://www.patreon.com/cw/dont_jinxit')).toBe('dont_jinxit');
-		expect(normalizeHandle('patreon', 'patreon.com/cw/Dont_Jinxit/')).toBe('dont_jinxit');
-		expect(normalizeHandle('patreon', 'https://www.patreon.com/cw/siplick/posts')).toBe('siplick');
+		expect(normalizeHandle('patreon', 'https://www.patreon.com/cw/alice-art')).toBe('alice-art');
+		expect(normalizeHandle('patreon', 'patreon.com/cw/Alice-Art/')).toBe('alice-art');
+		expect(normalizeHandle('patreon', 'https://www.patreon.com/cw/bob-art/posts')).toBe('bob-art');
+	});
+
+	it('yields no handle for a link whose path names a Patreon section, not a creator', () => {
+		expect(normalizeHandle('patreon', 'https://www.patreon.com/user?u=123')).toBe('');
+		expect(normalizeHandle('patreon', 'https://www.patreon.com/posts/some-post-42')).toBe('');
+		expect(normalizeHandle('patreon', 'https://patreon.com/cw')).toBe('');
+		expect(normalizeHandle('patreon', 'https://patreon.com/c')).toBe('');
+		expect(normalizeHandle('patreon', 'patreon.com/C/')).toBe('');
 	});
 
 	it('keeps a bare creator whose name starts with "cw"', () => {
@@ -108,8 +123,27 @@ describe('handlesOverlap (patreon /cw/)', () => {
 	it('does not match two different /cw/ creators', () => {
 		expect(
 			handlesOverlap(
-				{ patreonUrl: 'https://www.patreon.com/cw/dont_jinxit' },
-				{ patreonUrl: 'https://www.patreon.com/cw/siplick' }
+				{ patreonUrl: 'https://www.patreon.com/cw/alice-art' },
+				{ patreonUrl: 'https://www.patreon.com/cw/bob-art' }
+			)
+		).toBe(false);
+	});
+
+	it('does not match two different legacy user?u= links', () => {
+		// Both used to normalize to the handle 'user' and read as one creator.
+		expect(
+			handlesOverlap(
+				{ patreonUrl: 'https://www.patreon.com/user?u=1' },
+				{ patreonUrl: 'https://www.patreon.com/user?u=2' }
+			)
+		).toBe(false);
+	});
+
+	it('does not match two different /posts/ links', () => {
+		expect(
+			handlesOverlap(
+				{ patreonUrl: 'https://www.patreon.com/posts/first-post-1' },
+				{ patreonUrl: 'https://www.patreon.com/posts/second-post-2' }
 			)
 		).toBe(false);
 	});
@@ -117,8 +151,8 @@ describe('handlesOverlap (patreon /cw/)', () => {
 	it('matches the same /cw/ creator across spellings', () => {
 		expect(
 			handlesOverlap(
-				{ patreonUrl: 'https://www.patreon.com/cw/siplick' },
-				{ patreonUrl: 'patreon.com/cw/Siplick/' }
+				{ patreonUrl: 'https://www.patreon.com/cw/bob-art' },
+				{ patreonUrl: 'patreon.com/cw/Bob-Art/' }
 			)
 		).toBe(true);
 	});

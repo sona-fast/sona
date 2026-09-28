@@ -47,6 +47,17 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 		]);
 	});
 
+	it('detects an added or changed social link that names no handle', () => {
+		// patreon.com/user?u=<id> normalizes to no handle; comparing only handles
+		// read an added or changed one as unchanged and hid it from submission.
+		const added = { name: 'Marrow', patreonUrl: 'https://www.patreon.com/user?u=1', aliases: null };
+		expect(registryDiffFields(added, reg({ socials: {} }))).toEqual(['socials.patreonUrl']);
+		const changed = reg({ socials: { patreonUrl: 'https://www.patreon.com/user?u=2' } });
+		expect(registryDiffFields(added, changed)).toEqual(['socials.patreonUrl']);
+		const same = reg({ socials: { patreonUrl: 'https://www.patreon.com/user?u=1' } });
+		expect(artistDiffersFromRegistry(added, same)).toBe(false);
+	});
+
 	it('treats null/empty/absent socials as equivalent', () => {
 		const local = { name: 'Marrow', twitterUrl: '', blueskyUrl: null, aliases: null };
 		expect(artistDiffersFromRegistry(local, reg({ socials: {} }))).toBe(false);

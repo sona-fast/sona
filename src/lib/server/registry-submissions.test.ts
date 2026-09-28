@@ -100,10 +100,20 @@ describe('artistInCatalog', () => {
 	it('does not match two different Patreon /cw/ creators', () => {
 		// Both URLs once normalized to the handle 'cw', which marked a new artist
 		// as already in the catalog and disabled its submit button.
-		const artist = { name: 'Jinx', globalId: null, patreonUrl: 'https://www.patreon.com/cw/dont_jinxit' };
+		const artist = { name: 'Bob', globalId: null, patreonUrl: 'https://www.patreon.com/cw/bob-art' };
 		const entry = catalogEntry({
-			displayName: 'Siplick',
-			socials: { patreonUrl: 'https://www.patreon.com/cw/siplick' }
+			displayName: 'Alice',
+			socials: { patreonUrl: 'https://www.patreon.com/cw/alice-art' }
+		});
+		expect(artistInCatalog(artist, [entry])).toBe(false);
+	});
+
+	it('does not match two different legacy Patreon user?u= links', () => {
+		// Both normalized to the handle 'user', the same symptom as /cw/ above.
+		const artist = { name: 'Bob', globalId: null, patreonUrl: 'https://www.patreon.com/user?u=2' };
+		const entry = catalogEntry({
+			displayName: 'Alice',
+			socials: { patreonUrl: 'https://www.patreon.com/user?u=1' }
 		});
 		expect(artistInCatalog(artist, [entry])).toBe(false);
 	});

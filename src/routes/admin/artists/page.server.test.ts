@@ -350,6 +350,48 @@ describe('admin artists load — alias-linked share guard (#71)', () => {
 	});
 });
 
+describe('admin artists load — unlinked Patreon /cw/ artist share guard', () => {
+	function patreonEntry(patreonUrl: string) {
+		return {
+			globalId: 'g-alice',
+			displayName: 'Alice',
+			avatarUrl: null,
+			bio: null,
+			socials: { patreonUrl },
+			aliases: [],
+			status: 'active',
+			mergedInto: null,
+			version: 1,
+			updatedAt: '2026-01-01T00:00:00Z'
+		};
+	}
+
+	async function loadWithEntry(patreonUrl: string) {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		const [row] = await db
+			.insert(schema.artists)
+			.values({ name: 'Bob', patreonUrl: 'https://www.patreon.com/cw/bob-art' })
+			.returning({ id: schema.artists.id });
+		stubRegistryFetch({
+			'/v1/submissions/mine': { submissions: [] },
+			'/v1/artists?': { artists: [patreonEntry(patreonUrl)], nextCursor: null }
+		});
+		const result = (await load(loadEvent(platform))) as { upToDate: Record<number, boolean> };
+		return { id: row.id, upToDate: result.upToDate };
+	}
+
+	it('leaves a different /cw/ creator shareable (not marked already in the catalog)', async () => {
+		const { id, upToDate } = await loadWithEntry('https://www.patreon.com/cw/alice-art');
+		expect(upToDate[id]).toBeUndefined();
+	});
+
+	it('marks the same /cw/ creator as already in the catalog', async () => {
+		const { id, upToDate } = await loadWithEntry('patreon.com/cw/Bob-Art/');
+		expect(upToDate[id]).toBe(true);
+	});
+});
+
 describe('admin artists load — catalog refusal is surfaced, not silently empty', () => {
 	it('sets registryError (and still lists local artists) when the delta feed 401s', async () => {
 		const { db, platform } = makeDb();
