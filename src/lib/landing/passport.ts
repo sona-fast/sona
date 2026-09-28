@@ -50,7 +50,15 @@ export interface LiveStamp {
 export type ConventionStamp =
 	/** startDate is null when the stored date is not a calendar date. */
 	| { kind: 'next'; name: string; startDate: string | null; href: string }
-	| { kind: 'past'; name: string; month: string | null; photos: number; href: string };
+	| {
+			kind: 'past';
+			name: string;
+			month: string | null;
+			photos: number;
+			href: string;
+			/** Only on a linked convention's stamp, and only when it has one. */
+			location?: string;
+	  };
 
 export interface PassportStamps {
 	live: LiveStamp | null;
@@ -65,6 +73,10 @@ export interface PassportConvention extends ConventionWindow {
 	status: string;
 }
 
+/** The convention an operator linked to a FurTrack event in admin
+ *  (conventions.furtrack_event). Its window decides whether it is over. */
+export type PassportLinkedConvention = Omit<PassportConvention, 'id' | 'status'>;
+
 /** One event's displayable fursuit photos, grouped by the loader in SQL. */
 export interface PassportEventGroup {
 	/** The stored event value, exactly as the gallery's event filter compares it. */
@@ -72,6 +84,9 @@ export interface PassportEventGroup {
 	photos: number;
 	/** The newest photo's taken_at date part, as stored; validated here. */
 	latest: string | null;
+	/** The convention linked to this exact tag, if any. At most one: the
+	 *  column is unique. */
+	convention?: PassportLinkedConvention;
 }
 
 const positive = (n: number | null): n is number => n !== null && n > 0;
@@ -99,6 +114,14 @@ function fursuitEventHref(event: string): string {
 /**
  * Past-event stamps, built from the fursuit photos' own `event` values.
  *
+ * A tag the operator linked to a convention in admin reads as that
+ * convention: its name, its start month and its location, the way Here now
+ * and Next read, with the count still from the photos and the link still the
+ * tag's filtered view. The photos decide whether the stamp exists; the link
+ * only names it. Linking is the operator's own choice to publish that
+ * convention's month and location beside photos that already place them
+ * there. An unlinked tag reads as the tag, as before.
+ *
  * Deliberately NOT from past rows in the conventions table. /connect and
  * /about publish only upcoming and live conventions, so a stamp derived from
  * the table would publish a new record of where the operator has been. The
@@ -117,14 +140,14 @@ function fursuitEventHref(event: string): string {
  * event filter compares, and before the cap so it still fills.
  */
 export function pastEventStamps(groups: PassportEventGroup[], exclude?: ReadonlySet<string>): ConventionStamp[] {
-	const byEvent = new Map<string, { photos: number; latest: string | null }>();
+	const byEvent = new Map<string, PassportEventGroup>();
 	for (const group of groups) {
 		// Grouped and linked by the stored value: the gallery's event filter
 		// compares exactly, so a trimmed name would link to an empty view. trim()
 		// only skips an event that is all whitespace.
 		const event = group.event;
 		if (!event?.trim() || exclude?.has(event)) continue;
-		byEvent.set(event, { photos: group.photos, latest: calendarDate(group.latest) });
+		byEvent.set(event, { ...group, latest: calendarDate(group.latest) });
 	}
 	return [...byEvent]
 		.sort(([nameA, a], [nameB, b]) => {
@@ -136,13 +159,17 @@ export function pastEventStamps(groups: PassportEventGroup[], exclude?: Readonly
 			return nameA.localeCompare(nameB);
 		})
 		.slice(0, MAX_PAST_STAMPS)
-		.map(([name, { photos: count, latest }]) => ({
-			kind: 'past' as const,
-			name,
-			month: latest ? latest.slice(0, 7) : null,
-			photos: count,
-			href: fursuitEventHref(name)
-		}));
+		.map(([event, { photos: count, latest, convention }]): ConventionStamp => {
+			const href = fursuitEventHref(event);
+			if (!convention) {
+				return { kind: 'past', name: event, month: latest ? latest.slice(0, 7) : null, photos: count, href };
+			}
+			// The convention's own start month; the photos' month when its stored
+			// start date is not a calendar date.
+			const month = (calendarDate(convention.startDate) ?? latest)?.slice(0, 7) ?? null;
+			const location = convention.location?.trim();
+			return { kind: 'past', name: convention.name, month, photos: count, href, ...(location ? { location } : {}) };
+		});
 }
 
 /**
@@ -184,6 +211,12 @@ export function buildStamps(input: {
 	// Live and upcoming alike: photos tagged with a convention's name before it
 	// starts must not add a past stamp for the convention that reads Next.
 	const unfinishedNames = new Set(confirmed.filter((c) => !hasEnded(c, now)).map((c) => c.name));
+	// A tag linked to a convention that has not ended is not past either, by
+	// that convention's own dates and whatever its status: a stamp that reads
+	// "past" for a convention still ahead is wrong on its face.
+	for (const group of input.events) {
+		if (group.event && group.convention && !hasEnded(group.convention, now)) unfinishedNames.add(group.event);
+	}
 	// Not "not the live row": a second convention running at the same time is
 	// live too, and must never read as Next.
 	const nextRow = confirmed.find((c) => !isLiveNow(c, now) && !hasEnded(c, now)) ?? null;

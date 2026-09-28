@@ -1,12 +1,13 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { conventions } from '$lib/server/db/schema';
+import { conventions, fursuitPhotos } from '$lib/server/db/schema';
 import { eq, asc, and, isNull } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { fetchConsFyiEvents, findConsFyiEvent, fetchAttendingEvents, blueskyHandle } from '$lib/server/consfyi';
 import { getSettings } from '$lib/server/settings';
 import { isLiveNow } from '$lib/convention-window';
+import { taggedFursuitPhoto } from '$lib/server/passport';
 import type { Actions, PageServerLoad } from './$types';
 
 const STATUSES = ['confirmed', 'maybe', 'considering'] as const;
@@ -14,6 +15,54 @@ const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 
 function normStatus(raw: unknown): string {
 	return (STATUSES as readonly string[]).includes(raw as string) ? (raw as string) : 'confirmed';
+}
+
+type Db = ReturnType<typeof getDb>;
+
+/**
+ * The FurTrack event a convention form submitted, as the value to store: null
+ * for "none", else a tag some fursuit photo carries that no other convention is
+ * linked to. `self` is the row being edited (null on create); its current tag
+ * stays valid even once no photo carries it, so saving an unrelated change never
+ * fails on a link the operator did not touch.
+ */
+async function eventTagFrom(
+	db: Db,
+	raw: FormDataEntryValue | null,
+	self: { id: number; furtrackEvent: string | null } | null
+): Promise<{ tag: string | null } | { error: string }> {
+	if (typeof raw !== 'string' || !raw.trim()) return { tag: null };
+	if (raw !== self?.furtrackEvent) {
+		const onPhoto = await db
+			.select({ id: fursuitPhotos.id })
+			.from(fursuitPhotos)
+			.where(and(eq(fursuitPhotos.event, raw), taggedFursuitPhoto))
+			.limit(1)
+			.get();
+		if (!onPhoto) return { error: 'No fursuit photo has that FurTrack event. Pick one from the list.' };
+	}
+	const other = await db
+		.select({ id: conventions.id, name: conventions.name })
+		.from(conventions)
+		.where(eq(conventions.furtrackEvent, raw))
+		.get();
+	if (other && other.id !== self?.id) {
+		return { error: `That FurTrack event is already linked to ${other.name}. Set ${other.name} to None first.` };
+	}
+	return { tag: raw };
+}
+
+// The unique index on furtrack_event is the last word when two saves race past
+// eventTagFrom's check; this turns its error into a form error. Drizzle wraps
+// the driver's error ("UNIQUE constraint failed: conventions.furtrack_event"),
+// so the cause chain is searched, not only the top message.
+const TAG_RACE_ERROR = 'Another convention just took that FurTrack event. Reload the page to see which one.';
+
+function isTagConflict(err: unknown): boolean {
+	for (let e = err as { message?: unknown; cause?: unknown } | undefined; e; e = e.cause as typeof e) {
+		if (String(e.message ?? '').includes('conventions.furtrack_event')) return true;
+	}
+	return false;
 }
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -32,7 +81,16 @@ export const load: PageServerLoad = async ({ platform }) => {
 	const feed = await fetchConsFyiEvents();
 	const available = feed.filter((e) => e.endDate >= today && !addedSourceIds.has(e.id));
 
-	return { conventions: all, available, liveId };
+	// The tags the convention forms offer: every distinct event on the photos.
+	const eventTags = (
+		await db
+			.selectDistinct({ event: fursuitPhotos.event })
+			.from(fursuitPhotos)
+			.where(taggedFursuitPhoto)
+			.orderBy(asc(fursuitPhotos.event))
+	).map((r) => r.event as string);
+
+	return { conventions: all, available, liveId, eventTags };
 };
 
 export const actions = {
@@ -77,16 +135,58 @@ export const actions = {
 
 		const endRaw = ((data.get('endDate') as string) || '').slice(0, 10);
 
-		await db.insert(conventions).values({
-			name,
-			location: sanitizeText(data.get('location') as string, 120) || null,
-			startDate,
-			endDate: isoDate.test(endRaw) ? endRaw : null,
-			url: sanitizeUrl(data.get('url') as string) || null,
-			status: normStatus(data.get('status'))
-		});
+		const event = await eventTagFrom(db, data.get('furtrackEvent'), null);
+		if ('error' in event) return fail(400, { error: event.error });
+
+		try {
+			await db.insert(conventions).values({
+				name,
+				location: sanitizeText(data.get('location') as string, 120) || null,
+				startDate,
+				endDate: isoDate.test(endRaw) ? endRaw : null,
+				url: sanitizeUrl(data.get('url') as string) || null,
+				status: normStatus(data.get('status')),
+				furtrackEvent: event.tag
+			});
+		} catch (err) {
+			if (isTagConflict(err)) return fail(400, { error: TAG_RACE_ERROR });
+			throw err;
+		}
 
 		return { success: true };
+	},
+
+	// Link a convention to its FurTrack event, change the link, or clear it.
+	// A failure carries the row's id, so the page can tie the error to that
+	// row's select.
+	setEvent: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+		const id = Number(data.get('id'));
+		if (!id) return fail(400, { error: 'Convention ID is required' });
+
+		const con = await db
+			.select({ id: conventions.id, name: conventions.name, furtrackEvent: conventions.furtrackEvent })
+			.from(conventions)
+			.where(eq(conventions.id, id))
+			.get();
+		if (!con) return fail(400, { error: 'That convention is no longer on your schedule.' });
+
+		const event = await eventTagFrom(db, data.get('furtrackEvent'), con);
+		if ('error' in event) return fail(400, { error: event.error, eventId: id });
+
+		try {
+			await db.update(conventions).set({ furtrackEvent: event.tag }).where(eq(conventions.id, id));
+		} catch (err) {
+			if (isTagConflict(err)) return fail(400, { error: TAG_RACE_ERROR, eventId: id });
+			throw err;
+		}
+		return {
+			success: true,
+			message: event.tag
+				? `Linked ${con.name} to the FurTrack event “${event.tag}”.`
+				: `${con.name} is no longer linked to a FurTrack event.`
+		};
 	},
 
 	delete: async ({ request, platform }) => {

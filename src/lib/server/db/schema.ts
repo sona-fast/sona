@@ -278,6 +278,13 @@ export const conventions = sqliteTable('conventions', {
 	// server's and not the reader's. NULL for manual entries and for rows created
 	// before this column existed — see isConventionRunning for that fallback.
 	timezone: text('timezone'),
+	// The fursuit photos' `event` value this convention is, picked by the operator
+	// in admin (never matched automatically): an annual con keeps its name every
+	// year, so only the tag tells this year's photos from last year's. Stored
+	// exactly as the photos store it, untrimmed, because the gallery's event
+	// filter compares exactly. Unique so one tag names at most one convention;
+	// NULL (unlinked) on any number of rows.
+	furtrackEvent: text('furtrack_event').unique(),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

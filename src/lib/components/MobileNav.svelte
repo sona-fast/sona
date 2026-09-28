@@ -69,6 +69,13 @@
 			display: flex;
 			justify-content: space-around;
 		}
+
+		/* The fixed bottom nav (about 53px tall) covers the foot of the page.
+		   This padding makes a focused control or a scrolled-to panel stop
+		   above the nav instead of behind it. */
+		:global(html) {
+			scroll-padding-bottom: 72px;
+		}
 	}
 
 	.tab {

@@ -10,6 +10,7 @@ import {
 	type PassportConvention,
 	type PassportCounts,
 	type PassportEventGroup,
+	type PassportLinkedConvention,
 	type PassportStamps
 } from './passport';
 import { LANDING_LAYOUTS } from './index';
@@ -352,6 +353,116 @@ describe('passport convention stamps', () => {
 		const hrefs = allHrefs(stamps);
 		expect(hrefs.length).toBe(1 + 6 + 3);
 		for (const href of hrefs) expect(href).toMatch(/^\/[a-z]/);
+	});
+});
+
+// A tag the operator linked to a convention in admin. The photos still decide
+// whether a stamp exists and what it counts; the link only names it.
+describe('passport stamps for conventions linked to FurTrack events', () => {
+	const MFF: PassportLinkedConvention = {
+		name: 'Midwest FurFest 2024',
+		location: 'Rosemont, IL',
+		startDate: '2024-12-05',
+		endDate: '2024-12-08',
+		timezone: 'America/Chicago'
+	};
+
+	/** The photo groups, with each tag's linked convention attached the way the
+	 *  loader's join attaches it. */
+	function linked(photos: Photo[], links: Record<string, PassportLinkedConvention>): PassportEventGroup[] {
+		return groupPhotos(photos).map((g) => (g.event !== null && links[g.event] ? { ...g, convention: links[g.event] } : g));
+	}
+
+	function buildLinked(
+		photos: Photo[],
+		links: Record<string, PassportLinkedConvention>,
+		conventions: PassportConvention[] = []
+	): PassportStamps {
+		return buildStamps({ counts: NO_COUNTS, conventions, events: linked(photos, links), about: NO_ABOUT, now: NOW });
+	}
+
+	it("names the stamp after the convention, with its start month and place, and counts and links the tag's photos", () => {
+		const stamps = buildLinked(
+			[
+				{ event: 'MFF 2024 ', takenAt: '2024-12-06' },
+				{ event: 'MFF 2024 ', takenAt: '2025-01-15' },
+				{ event: 'Harbourfur 2025', takenAt: '2025-11-08' }
+			],
+			{ 'MFF 2024 ': MFF }
+		);
+		expect(stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025' },
+			// The month is the convention's, not the newest photo's (January), and
+			// the link is the stored tag, trailing space and all.
+			{
+				kind: 'past',
+				name: 'Midwest FurFest 2024',
+				month: '2024-12',
+				photos: 2,
+				href: '/gallery?view=fursuit&event=MFF%202024%20',
+				location: 'Rosemont, IL'
+			}
+		]);
+	});
+
+	it('leaves the place off when the convention has none, and falls back to the photos for a start date that is no date', () => {
+		const [blank] = buildLinked([{ event: 'T', takenAt: '2024-12-06' }], { T: { ...MFF, location: '  ' } }).conventions;
+		expect(blank).toEqual({ kind: 'past', name: 'Midwest FurFest 2024', month: '2024-12', photos: 1, href: '/gallery?view=fursuit&event=T' });
+		expect('location' in blank).toBe(false);
+
+		const [undated] = buildLinked([{ event: 'T', takenAt: '2024-11-30' }], { T: { ...MFF, startDate: '2024-13-05' } }).conventions;
+		expect(undated).toMatchObject({ name: 'Midwest FurFest 2024', month: '2024-11' });
+	});
+
+	// NOW is Saturday 17 October 2026.
+	it('gives a linked convention that is running no past stamp, whatever its status', () => {
+		const running = { ...MFF, name: 'Cinder Valley Con', startDate: '2026-10-16', endDate: '2026-10-19', timezone: 'UTC' };
+		const photos = [
+			{ event: 'CVC', takenAt: '2026-10-16' },
+			{ event: 'Harbourfur 2025', takenAt: '2025-11-08' }
+		];
+		// Considering: never Here now, and still not past.
+		expect(buildLinked(photos, { CVC: running }).conventions.map((c) => c.name)).toEqual(['Harbourfur 2025']);
+
+		// Confirmed: Here now, and not repeated as past.
+		const stamps = buildLinked(photos, { CVC: running }, [con({ id: 1, ...running, status: 'confirmed' })]);
+		expect(stamps.live?.name).toBe('Cinder Valley Con');
+		expect(stamps.conventions.map((c) => c.name)).toEqual(['Harbourfur 2025']);
+	});
+
+	it('gives a linked convention that has not started no past stamp, even with photos tagged ahead of it', () => {
+		const upcoming = { ...MFF, name: 'Lakeshore Den', startDate: '2027-03-05', endDate: null, timezone: null };
+		expect(buildLinked([{ event: 'LD', takenAt: '2026-09-01' }], { LD: upcoming }).conventions).toEqual([]);
+	});
+
+	it('keeps an unlinked tag as the tag, even when a past convention has its exact name', () => {
+		const stamps = buildLinked([{ event: 'Harbourfur 2025', takenAt: '2025-11-08' }], {}, [
+			con({ id: 1, name: 'Harbourfur 2025', location: 'Halifax, NS', startDate: '2025-11-07', endDate: '2025-11-09' })
+		]);
+		expect(stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025' }
+		]);
+	});
+
+	it('still leaves out a linked tag that names a confirmed convention not yet over', () => {
+		// The link says last year's; the tag text says this year's running con.
+		// Photos from the running con would land under it, so it waits.
+		const stamps = buildLinked([{ event: 'Cinder Valley Con', takenAt: '2025-10-17' }], { 'Cinder Valley Con': MFF }, [
+			con({ id: 1, name: 'Cinder Valley Con', startDate: '2026-10-16', endDate: '2026-10-19' })
+		]);
+		expect(stamps.conventions).toEqual([]);
+	});
+
+	it('orders linked and unlinked stamps together by their newest photo', () => {
+		const stamps = buildLinked(
+			[
+				{ event: 'Old Tag', takenAt: '2023-07-01' },
+				{ event: 'MFF 2024', takenAt: '2024-12-06' },
+				{ event: 'New Tag', takenAt: '2025-11-08' }
+			],
+			{ 'MFF 2024': MFF }
+		);
+		expect(stamps.conventions.map((c) => c.name)).toEqual(['New Tag', 'Midwest FurFest 2024', 'Old Tag']);
 	});
 });
 
