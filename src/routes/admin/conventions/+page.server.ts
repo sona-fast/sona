@@ -175,12 +175,21 @@ export const actions = {
 		const event = await eventTagFrom(db, data.get('furtrackEvent'), con);
 		if ('error' in event) return fail(400, { error: event.error, eventId: id });
 
+		let changed: number | undefined;
 		try {
-			await db.update(conventions).set({ furtrackEvent: event.tag }).where(eq(conventions.id, id));
+			const result = await db
+				.update(conventions)
+				.set({ furtrackEvent: event.tag })
+				.where(eq(conventions.id, id))
+				.run();
+			changed = result.meta?.changes;
 		} catch (err) {
 			if (isTagConflict(err)) return fail(400, { error: TAG_RACE_ERROR, eventId: id });
 			throw err;
 		}
+		// No row changed means the convention was deleted, in another tab say,
+		// between the read above and this write.
+		if (!changed) return fail(400, { error: 'That convention is no longer on your schedule.', eventId: id });
 		return {
 			success: true,
 			message: event.tag

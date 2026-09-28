@@ -641,6 +641,28 @@ describe('FurTrack event link', () => {
 		expect(await tagOf(db, target.id)).toBeNull();
 	});
 
+	it('answers a convention deleted between the check and the write with a form error, and writes nothing', async () => {
+		const { sqlite, db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, MANUAL);
+		const target = (await db.select().from(conventions).get())!;
+		const d1 = platform.env!.DB;
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = ((query: string) => {
+			if (/^update "conventions" set "furtrack_event"/.test(query)) {
+				sqlite.prepare('DELETE FROM conventions WHERE id = ?').run(target.id);
+			}
+			return realPrepare(query);
+		}) as typeof d1.prepare;
+
+		const res = await setEvent(platform, { id: String(target.id), furtrackEvent: 'MFF 2024' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('That convention is no longer on your schedule.');
+		expect(res.data?.eventId).toBe(target.id);
+		expect(await db.select().from(conventions)).toEqual([]);
+	});
+
 	it('turns a link that lands between the check and the insert into a form error, and adds nothing', async () => {
 		const { sqlite, db, platform } = makeDb();
 		await photos(db, ['MFF 2024']);

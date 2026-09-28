@@ -316,6 +316,16 @@ test.describe('populated passport', () => {
 		await page.goto('/gallery');
 		await expect(page.locator('nav.mobile-nav')).toBeVisible();
 		expect(await kept()).toBe('72px');
+		// A phone with a home indicator adds its inset to the nav's bottom
+		// padding, so the room kept grows by the same amount and still clears
+		// the whole bar. Chromium fakes the inset through the DevTools protocol.
+		const cdp = await page.context().newCDPSession(page);
+		await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { bottom: 34 } });
+		await expect.poll(kept).toBe('106px');
+		const navHeight = await page.locator('nav.mobile-nav').evaluate((nav) => (nav as HTMLElement).offsetHeight);
+		expect(navHeight).toBeGreaterThan(72);
+		expect(parseFloat(await kept())).toBeGreaterThanOrEqual(navHeight);
+		await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await expect(page.locator('nav.mobile-nav')).toBeHidden();
 		expect(await kept()).toBe('auto');
