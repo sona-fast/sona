@@ -96,4 +96,15 @@ describe('artistInCatalog', () => {
 		const artist = { name: 'Jinho', globalId: null };
 		expect(artistInCatalog(artist, [catalogEntry({ status: 'tombstoned' })])).toBe(false);
 	});
+
+	it('does not match two different Patreon /cw/ creators', () => {
+		// Both URLs once normalized to the handle 'cw', which marked a new artist
+		// as already in the catalog and disabled its submit button.
+		const artist = { name: 'Jinx', globalId: null, patreonUrl: 'https://www.patreon.com/cw/dont_jinxit' };
+		const entry = catalogEntry({
+			displayName: 'Siplick',
+			socials: { patreonUrl: 'https://www.patreon.com/cw/siplick' }
+		});
+		expect(artistInCatalog(artist, [entry])).toBe(false);
+	});
 });

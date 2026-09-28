@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeHandle, normalizeSocialUrl } from './handle-normalize';
+import { handlesOverlap, normalizeHandle, normalizeSocialUrl } from './handle-normalize';
 
 describe('normalizeSocialUrl', () => {
 	it('builds the canonical profile URL from a bare handle per platform', () => {
@@ -91,5 +91,35 @@ describe('normalizeHandle (patreon)', () => {
 	it('extracts the handle from a patreon.com/c/ creator URL', () => {
 		expect(normalizeHandle('patreon', 'https://patreon.com/c/sparky')).toBe('sparky');
 		expect(normalizeHandle('patreon', 'patreon.com/c/sparky/')).toBe('sparky');
+	});
+
+	it('extracts the handle from a patreon.com/cw/ creator URL', () => {
+		expect(normalizeHandle('patreon', 'https://www.patreon.com/cw/dont_jinxit')).toBe('dont_jinxit');
+		expect(normalizeHandle('patreon', 'patreon.com/cw/Dont_Jinxit/')).toBe('dont_jinxit');
+		expect(normalizeHandle('patreon', 'https://www.patreon.com/cw/siplick/posts')).toBe('siplick');
+	});
+
+	it('keeps a bare creator whose name starts with "cw"', () => {
+		expect(normalizeHandle('patreon', 'patreon.com/cwolf')).toBe('cwolf');
+	});
+});
+
+describe('handlesOverlap (patreon /cw/)', () => {
+	it('does not match two different /cw/ creators', () => {
+		expect(
+			handlesOverlap(
+				{ patreonUrl: 'https://www.patreon.com/cw/dont_jinxit' },
+				{ patreonUrl: 'https://www.patreon.com/cw/siplick' }
+			)
+		).toBe(false);
+	});
+
+	it('matches the same /cw/ creator across spellings', () => {
+		expect(
+			handlesOverlap(
+				{ patreonUrl: 'https://www.patreon.com/cw/siplick' },
+				{ patreonUrl: 'patreon.com/cw/Siplick/' }
+			)
+		).toBe(true);
 	});
 });

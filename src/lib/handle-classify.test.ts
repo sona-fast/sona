@@ -47,6 +47,7 @@ describe('classifyQuery — social URLs per platform', () => {
 		['https://www.deviantart.com/kuttoya', 'deviantart', 'kuttoya'],
 		['patreon.com/kuttoya', 'patreon', 'kuttoya'],
 		['patreon.com/c/kuttoya', 'patreon', 'kuttoya'],
+		['patreon.com/cw/kuttoya', 'patreon', 'kuttoya'],
 		['instagram.com/kuttoya', 'instagram', 'kuttoya']
 	];
 	for (const [input, platform, handle] of cases) {
@@ -108,6 +109,7 @@ describe('classifyQuery — URL edge cases', () => {
 describe('normalizeHandle', () => {
 	it('normalizes patreon creator URLs without collapsing to "c"', () => {
 		expect(normalizeHandle('patreon', 'https://patreon.com/c/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('patreon', 'https://patreon.com/cw/kuttoya')).toBe('kuttoya');
 	});
 
 	it('normalizes a Telegram channel-preview URL without collapsing to "s"', () => {

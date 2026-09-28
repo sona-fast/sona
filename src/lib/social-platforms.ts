@@ -26,9 +26,10 @@ export const HOST_PREFIXES: Record<Platform, string[]> = {
 	telegram: ['t.me/s/', 't.me/', 'telegram.me/'],
 	furaffinity: ['furaffinity.net/user/'],
 	deviantart: ['deviantart.com/'],
-	// 'patreon.com/c/<user>' (newer creator pages) must be tried before the bare
-	// 'patreon.com/' prefix, else the username collapses to 'c'.
-	patreon: ['patreon.com/c/', 'patreon.com/'],
+	// 'patreon.com/cw/<user>' and 'patreon.com/c/<user>' (newer creator pages)
+	// must be tried before the bare 'patreon.com/' prefix, else the username
+	// collapses to 'cw' or 'c'.
+	patreon: ['patreon.com/cw/', 'patreon.com/c/', 'patreon.com/'],
 	instagram: ['instagram.com/']
 };
 
@@ -116,7 +117,7 @@ export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
 	],
 	// 'user' is Patreon's legacy profile form, patreon.com/user?u=<id> — the
 	// account is in the query string, so the path segment names nobody.
-	patreon: ['posts', 'c', 'user', 'login', 'home', 'search', 'explore'],
+	patreon: ['posts', 'c', 'cw', 'user', 'login', 'home', 'search', 'explore'],
 	deviantart: ['tag', 'art', 'journal', 'search', 'shop', 'daily-deviations'],
 	// 'addstickers' matters here beyond tidiness: this repo imports sticker packs
 	// from t.me/addstickers/<pack> (see server/telegram.ts), so pasting one into
