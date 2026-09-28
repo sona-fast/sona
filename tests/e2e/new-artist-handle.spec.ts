@@ -61,3 +61,35 @@ test('a pasted patreon.com/user?u= link fires no registry search and blocks crea
 	await expect.poll(() => searches.map((r) => new URL(r.url()).search)).toContain('?q=Marrow%20Test');
 	await page.screenshot({ path: testInfo.outputPath('plain-name-enabled.png') });
 });
+
+// A patreon.com/cw/<user> link names its creator after the 'cw/' segment. Read
+// as patreon.com/<user>, the handle would be 'cw', a reserved segment that
+// normalizes to no handle, and the dialog would fire no search. So exactly one
+// handle search proves the dialog read 'kuttoya'. The request carries the pasted
+// URL as typed (the registry normalizes it), so its query holds 'cw' either way.
+test('a pasted patreon.com/cw/ link searches the registry by handle', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/artists');
+
+	const searches: Request[] = [];
+	page.on('request', (req) => {
+		if (new URL(req.url()).pathname === '/api/registry/search') searches.push(req);
+	});
+
+	const dialog = page.getByRole('dialog', { name: 'New Artist' });
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Add Artist' }).first().click();
+		await expect(dialog).toBeVisible({ timeout: 1_500 });
+	}).toPass({ timeout: 30_000 });
+
+	const cwLink = 'https://www.patreon.com/cw/kuttoya';
+	await dialog.getByLabel('Artist Name').fill(cwLink);
+	await page.waitForTimeout(PAST_DEBOUNCE_MS);
+
+	expect(searches.map((r) => new URL(r.url()).searchParams.get('handle'))).toEqual([cwLink]);
+	await expect(
+		dialog.getByText('Type at least 2 characters of a handle, or a name to add a new artist.')
+	).toBeHidden();
+	await expect(dialog.getByRole('button', { name: 'Create Artist' })).toBeDisabled();
+	await page.screenshot({ path: testInfo.outputPath('cw-link-handle-search.png') });
+});

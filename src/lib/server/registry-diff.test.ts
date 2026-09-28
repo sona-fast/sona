@@ -87,7 +87,10 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 		// sticker-pack links compare as they did before, not as two links.
 		const pack = { name: 'Marrow', telegramUrl: 'https://t.me/addstickers/PackA', aliases: null };
 		expect(registryDiffFields(pack, reg({ socials: { telegramUrl: 'https://t.me/addstickers/PackB' } }))).toEqual([]);
-		// A Patreon value on another host gets no fallback either.
+		// A Patreon value on another host normalizes to that host as its handle
+		// (here 'example.com' on both sides), so it compares by handle and never
+		// reaches the patreon.com check. The blank-value cases in the null/empty
+		// test below are what exercise that check.
 		const offHost = { name: 'Marrow', patreonUrl: 'https://example.com/user?u=1', aliases: null };
 		expect(registryDiffFields(offHost, reg({ socials: { patreonUrl: 'https://example.com/user?u=2' } }))).toEqual([]);
 	});
@@ -106,6 +109,11 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 	it('treats null/empty/absent socials as equivalent', () => {
 		const local = { name: 'Marrow', twitterUrl: '', blueskyUrl: null, aliases: null };
 		expect(artistDiffersFromRegistry(local, reg({ socials: {} }))).toBe(false);
+		// A blank Patreon value names no handle and is not a patreon.com link, so
+		// it must not fall back to a raw-link comparison and differ from absent.
+		expect(registryDiffFields({ name: 'Marrow', patreonUrl: '' }, reg({ socials: {} }))).toEqual([]);
+		expect(registryDiffFields({ name: 'Marrow', patreonUrl: '   ' }, reg({ socials: {} }))).toEqual([]);
+		expect(registryDiffFields({ name: 'Marrow', patreonUrl: null }, reg({ socials: { patreonUrl: '' } }))).toEqual([]);
 	});
 
 	it('ignores alias ordering and handle URL formatting', () => {
