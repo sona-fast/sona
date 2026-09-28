@@ -58,6 +58,15 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 		expect(artistDiffersFromRegistry(added, same)).toBe(false);
 	});
 
+	it('reads the flat stored Patreon form as equal to the registry\'s /cw/ spelling', () => {
+		// normalizeSocialUrl stores patreon.com/cw/<name> as patreon.com/<name>; the
+		// registry may still send the /cw/ form, which must not read as a change.
+		const local = { name: 'Marrow', patreonUrl: 'https://www.patreon.com/Bob_Art', aliases: null };
+		expect(registryDiffFields(local, reg({ socials: { patreonUrl: 'https://www.patreon.com/cw/bob_art' } }))).toEqual(
+			[]
+		);
+	});
+
 	it('treats spelling variants of a link that names no handle as the same link', () => {
 		const local = { name: 'Marrow', patreonUrl: 'https://www.patreon.com/user?u=5', aliases: null };
 		expect(artistDiffersFromRegistry(local, reg({ socials: { patreonUrl: 'patreon.com/user?u=5/' } }))).toBe(false);

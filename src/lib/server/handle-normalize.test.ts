@@ -44,6 +44,36 @@ describe('normalizeSocialUrl', () => {
 		expect(normalizeSocialUrl('patreon', 'patreon.com/user?u=123')).toBe('https://patreon.com/user?u=123');
 	});
 
+	it('stores every Patreon creator URL spelling as patreon.com/<name>, casing kept', () => {
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/cw/Bob_Art/')).toBe(
+			'https://www.patreon.com/Bob_Art'
+		);
+		expect(normalizeSocialUrl('patreon', 'patreon.com/c/bob')).toBe('https://www.patreon.com/bob');
+		expect(normalizeSocialUrl('patreon', 'https://patreon.com/bob?ref=x')).toBe('https://www.patreon.com/bob');
+		expect(normalizeSocialUrl('patreon', 'www.patreon.com/cw/bob/posts')).toBe('https://www.patreon.com/bob');
+		expect(normalizeSocialUrl('patreon', 'http://patreon.com/bob')).toBe('https://www.patreon.com/bob');
+		expect(normalizeSocialUrl('patreon', 'bob')).toBe('https://www.patreon.com/bob');
+	});
+
+	it('leaves a Patreon link with no creator in it as sanitizeUrl returns it', () => {
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/cw')).toBe('https://www.patreon.com/cw');
+		expect(normalizeSocialUrl('patreon', 'https://www.patreon.com/posts/some-post-42')).toBe(
+			'https://www.patreon.com/posts/some-post-42'
+		);
+	});
+
+	it('does not rewrite a non-patreon.com URL pasted into the Patreon field', () => {
+		// extractHandle alone would read "evil.example" off this as a handle.
+		expect(normalizeSocialUrl('patreon', 'https://evil.example/bob')).toBe('https://evil.example/bob');
+		expect(normalizeSocialUrl('patreon', 'https://notpatreon.com/bob')).toBe('https://notpatreon.com/bob');
+	});
+
+	it('does not flatten other platforms', () => {
+		expect(normalizeSocialUrl('twitter', 'https://twitter.com/Bob_Art/status/1?ref=x')).toBe(
+			'https://twitter.com/Bob_Art/status/1?ref=x'
+		);
+	});
+
 	it('treats a bare Bluesky handle (name.bsky.social) as a handle, not a URL', () => {
 		expect(normalizeSocialUrl('bluesky', 'name.bsky.social')).toBe(
 			'https://bsky.app/profile/name.bsky.social'

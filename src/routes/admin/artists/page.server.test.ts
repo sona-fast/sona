@@ -761,6 +761,19 @@ describe('update action — avatar clobber guard (#187)', () => {
 		expect(after!.avatarResolvedAt).toBeNull(); // nothing was resolved
 	});
 
+	it('stores a Patreon /cw/ link as the flat patreon.com/<name> form, casing kept', async () => {
+		const { db, platform } = makeDb();
+		const row = await db.insert(schema.artists).values({ name: 'Bob' }).returning({ id: schema.artists.id }).get();
+
+		const result = await actions.update(
+			updateEvent(platform, { id: String(row.id), name: 'Bob', patreon: 'https://www.patreon.com/cw/Bob_Art' })
+		);
+		expect(result).toEqual({ success: true });
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.patreonUrl).toBe('https://www.patreon.com/Bob_Art');
+	});
+
 	// Efficiency: identical avatar socials + an already-ours avatar → nothing the
 	// resolve could change, so the action must not re-fetch/re-host at all.
 	it('skips re-resolution when avatar socials are unchanged and the avatar is already ours', async () => {
