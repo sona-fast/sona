@@ -1,0 +1,63 @@
+import { test, expect, type Request } from '@playwright/test';
+import { gotoAfterLogin, loginRetrying } from './admin-login';
+
+// The admin New Artist dialog, with the shared registry turned on, fed a pasted
+// legacy Patreon link (patreon.com/user?u=<id>). That link names no creator: the
+// path segment 'user' is a Patreon site path. It once searched the registry for
+// the handle 'user'; now the dialog finds no handle, fires no search, shows the
+// too-short hint, and keeps Create blocked until a plain name is typed.
+//
+// Only a browser proves the wiring: classifyQuery's empty handle, the debounce
+// gate, the hint, and the button's disabled state all meet in the component.
+//
+// Runs on the registry-sync project (playwright.config.ts): the only server with
+// the registry turned on (wrangler.e2e-registry.toml) and the registry
+// interceptor preloaded. It writes no scenario file, so the interceptor answers
+// as a healthy, empty registry, and it creates nothing.
+
+// Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-registry.toml (throwaway value).
+const PASSWORD = 'e2e-admin-password';
+const LEGACY_PATREON = 'https://www.patreon.com/user?u=123';
+// Longer than the dialog's 250 ms search debounce, so a search that was going to
+// fire has fired.
+const PAST_DEBOUNCE_MS = 1_000;
+
+test('a pasted patreon.com/user?u= link fires no registry search and blocks create', async ({
+	page
+}, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/artists');
+
+	const searches: Request[] = [];
+	page.on('request', (req) => {
+		if (new URL(req.url()).pathname === '/api/registry/search') searches.push(req);
+	});
+
+	const dialog = page.getByRole('dialog', { name: 'New Artist' });
+	// The Add button is client-side; a click that lands before hydration does
+	// nothing, so retry until the dialog opens.
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Add Artist' }).first().click();
+		await expect(dialog).toBeVisible({ timeout: 1_500 });
+	}).toPass({ timeout: 30_000 });
+
+	const nameField = dialog.getByLabel('Artist Name');
+	const create = dialog.getByRole('button', { name: 'Create Artist' });
+
+	await nameField.fill(LEGACY_PATREON);
+	await page.waitForTimeout(PAST_DEBOUNCE_MS);
+
+	expect(searches.map((r) => r.url())).toEqual([]);
+	await expect(
+		dialog.getByText('Type at least 2 characters of a handle, or a name to add a new artist.')
+	).toBeVisible();
+	await expect(create).toBeDisabled();
+	await page.screenshot({ path: testInfo.outputPath('legacy-patreon-link-blocked.png') });
+
+	// A plain name unblocks create, and does search the registry by name, which
+	// also proves the request listener above would have seen a handle search.
+	await nameField.fill('Marrow Test');
+	await expect(create).toBeEnabled();
+	await expect.poll(() => searches.map((r) => new URL(r.url()).search)).toContain('?q=Marrow%20Test');
+	await page.screenshot({ path: testInfo.outputPath('plain-name-enabled.png') });
+});

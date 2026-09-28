@@ -219,8 +219,9 @@ const UPLOAD_SPECS = [
 // suggest-tags writes tag rows through its Save, so it takes neither the shared
 // server (read-only by convention) nor the upload one (SONA-220).
 const SUGGEST_TAGS_SPEC = '**/suggest-tags.spec.ts';
-// registry-sync needs the registry turned on, which no other server has.
-const REGISTRY_SPEC = '**/registry-sync.spec.ts';
+// registry-sync needs the registry turned on, which no other server has; so does
+// new-artist-handle, whose dialog only classifies handles with the registry on.
+const REGISTRY_SPECS = ['**/registry-sync.spec.ts', '**/new-artist-handle.spec.ts'];
 // tag-suggestions reads the two admin forms with the lookup endpoint
 // intercepted and writes no rows, but it cannot take the parallel project: its
 // tests log in and then navigate, and a SvelteKit client navigation landing
@@ -276,7 +277,7 @@ export default defineConfig({
 				SUGGEST_TAGS_SPEC,
 				THEME_SPEC,
 				STICKERS_SPEC,
-				REGISTRY_SPEC,
+				...REGISTRY_SPECS,
 				PASSPORT_SPEC
 			],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
@@ -318,7 +319,7 @@ export default defineConfig({
 		},
 		{
 			name: 'registry-sync',
-			testMatch: REGISTRY_SPEC,
+			testMatch: REGISTRY_SPECS,
 			// One scenario file steers the whole server, so the tests take turns.
 			workers: 1,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${REGISTRY_PORT}` }

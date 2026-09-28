@@ -157,3 +157,29 @@ describe('handlesOverlap (patreon /cw/)', () => {
 		).toBe(true);
 	});
 });
+
+// The reserved-segment check covers every platform with a list, not just Patreon.
+describe('normalizeHandle (reserved segments on other platforms)', () => {
+	it('yields no handle for a bare Telegram site path', () => {
+		expect(normalizeHandle('telegram', 'https://t.me/s')).toBe('');
+	});
+
+	it('reads the channel out of a Telegram t.me/s/ preview link', () => {
+		expect(normalizeHandle('telegram', 't.me/s/chan')).toBe('chan');
+	});
+
+	it('yields no handle for a Twitter site path', () => {
+		expect(normalizeHandle('twitter', 'twitter.com/home')).toBe('');
+	});
+});
+
+describe('handlesOverlap (telegram sticker packs)', () => {
+	it('does not match two different t.me/addstickers/ links', () => {
+		expect(
+			handlesOverlap(
+				{ telegramUrl: 'https://t.me/addstickers/AlicePack' },
+				{ telegramUrl: 'https://t.me/addstickers/BobPack' }
+			)
+		).toBe(false);
+	});
+});

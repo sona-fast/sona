@@ -117,4 +117,15 @@ describe('artistInCatalog', () => {
 		});
 		expect(artistInCatalog(artist, [entry])).toBe(false);
 	});
+
+	it('does not match two different Telegram sticker-pack links', () => {
+		// t.me/addstickers/<pack> names a pack, not an account; both read as the
+		// handle 'addstickers' before the reserved-segment check.
+		const artist = { name: 'Bob', globalId: null, telegramUrl: 'https://t.me/addstickers/BobPack' };
+		const entry = catalogEntry({
+			displayName: 'Alice',
+			socials: { telegramUrl: 'https://t.me/addstickers/AlicePack' }
+		});
+		expect(artistInCatalog(artist, [entry])).toBe(false);
+	});
 });

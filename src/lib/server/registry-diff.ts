@@ -21,12 +21,29 @@ function emptyToNull(v: unknown): string | null {
 	return s === '' ? null : s;
 }
 
-/** The comparable form of a social value: its normalized handle, or the trimmed
- *  raw value when the link names no handle (patreon.com/user?u=<id>). Without
- *  the fallback every such link normalizes to '', so a changed or added one
- *  reads as unchanged and the submit guard hides it. */
+/** Canonical form of a raw link: lowercased, trimmed, without a leading scheme
+ *  or www. and without trailing slashes. Must stay identical to the registry's
+ *  rule in sona-registry src/lib/diff.ts. */
+function canonicalLink(raw: string): string {
+	return raw
+		.toLowerCase()
+		.trim()
+		.replace(/^(?:https?:)?\/\//, '')
+		.replace(/^www\./, '')
+		.replace(/\/+$/, '');
+}
+
+/** The comparable form of a social value: its normalized handle, or, for a
+ *  patreon.com link that names no handle (patreon.com/user?u=<id>), the
+ *  canonical link under a 'link:' prefix so it can never equal a handle.
+ *  Without that fallback every such link normalizes to '', so a changed or
+ *  added one reads as unchanged and the submit guard hides it. Every other
+ *  platform, and a Patreon value on another host, compares exactly as before. */
 function handleKey(platform: Platform, raw: string | null): string {
-	return normalizeHandle(platform, raw) || (emptyToNull(raw) ?? '');
+	const handle = normalizeHandle(platform, raw);
+	if (handle !== '' || platform !== 'patreon' || raw == null) return handle;
+	const link = canonicalLink(raw);
+	return link.startsWith('patreon.com/') ? 'link:' + link : handle;
 }
 
 function handleEqual(platform: Platform, a: unknown, b: unknown): boolean {

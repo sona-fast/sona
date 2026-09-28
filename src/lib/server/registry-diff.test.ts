@@ -58,6 +58,51 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 		expect(artistDiffersFromRegistry(added, same)).toBe(false);
 	});
 
+	it('treats spelling variants of a link that names no handle as the same link', () => {
+		const local = { name: 'Marrow', patreonUrl: 'https://www.patreon.com/user?u=5', aliases: null };
+		expect(artistDiffersFromRegistry(local, reg({ socials: { patreonUrl: 'patreon.com/user?u=5/' } }))).toBe(false);
+		expect(artistDiffersFromRegistry(local, reg({ socials: { patreonUrl: 'HTTP://PATREON.COM/user?u=5' } }))).toBe(false);
+		expect(artistDiffersFromRegistry(local, reg({ socials: { patreonUrl: '//patreon.com/user?u=5' } }))).toBe(false);
+	});
+
+	it('still detects a changed or added link that names no handle after canonicalizing', () => {
+		const one = { name: 'Marrow', patreonUrl: 'patreon.com/user?u=1', aliases: null };
+		expect(artistDiffersFromRegistry(one, reg({ socials: { patreonUrl: 'patreon.com/user?u=2' } }))).toBe(true);
+		const added = { name: 'Marrow', patreonUrl: 'https://www.patreon.com/user?u=5', aliases: null };
+		expect(artistDiffersFromRegistry(added, reg({ socials: {} }))).toBe(true);
+	});
+
+	it('keeps the raw-link fallback to patreon.com links, so other values compare by handle alone', () => {
+		// These compare exactly as they did before the fallback existed: each
+		// side's normalized handle, and nothing else.
+		const bsky = { name: 'Marrow', blueskyUrl: 'https://sparky.bsky.social', aliases: null };
+		expect(registryDiffFields(bsky, reg({ socials: { blueskyUrl: 'sparky.bsky.social' } }))).toEqual([]);
+		const tw = { name: 'Marrow', twitterUrl: 'www.sparkyfen', aliases: null };
+		expect(registryDiffFields(tw, reg({ socials: { twitterUrl: 'sparkyfen' } }))).toEqual([]);
+		// A link on the wrong host: both sides normalize to the same non-handle,
+		// and the fallback must not start telling the two links apart.
+		const wrongHost = { name: 'Marrow', twitterUrl: 'https://instagram.com/a', aliases: null };
+		expect(registryDiffFields(wrongHost, reg({ socials: { twitterUrl: 'https://instagram.com/b' } }))).toEqual([]);
+		// A non-Patreon link that names no handle gets no raw-link fallback: two
+		// sticker-pack links compare as they did before, not as two links.
+		const pack = { name: 'Marrow', telegramUrl: 'https://t.me/addstickers/PackA', aliases: null };
+		expect(registryDiffFields(pack, reg({ socials: { telegramUrl: 'https://t.me/addstickers/PackB' } }))).toEqual([]);
+		// A Patreon value on another host gets no fallback either.
+		const offHost = { name: 'Marrow', patreonUrl: 'https://example.com/user?u=1', aliases: null };
+		expect(registryDiffFields(offHost, reg({ socials: { patreonUrl: 'https://example.com/user?u=2' } }))).toEqual([]);
+	});
+
+	it('treats an alias link that names no handle, spelled two ways, as equal', () => {
+		const local = {
+			name: 'Marrow',
+			aliases: JSON.stringify([{ displayName: 'B', socials: { patreonUrl: 'https://www.patreon.com/user?u=5' } }])
+		};
+		const r = reg({ aliases: [{ displayName: 'B', socials: { patreonUrl: 'patreon.com/user?u=5/' } }] });
+		expect(artistDiffersFromRegistry(local, r)).toBe(false);
+		const other = reg({ aliases: [{ displayName: 'B', socials: { patreonUrl: 'patreon.com/user?u=6' } }] });
+		expect(artistDiffersFromRegistry(local, other)).toBe(true);
+	});
+
 	it('treats null/empty/absent socials as equivalent', () => {
 		const local = { name: 'Marrow', twitterUrl: '', blueskyUrl: null, aliases: null };
 		expect(artistDiffersFromRegistry(local, reg({ socials: {} }))).toBe(false);
