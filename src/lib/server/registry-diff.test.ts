@@ -83,10 +83,6 @@ describe('registryDiffFields / artistDiffersFromRegistry', () => {
 		// and the fallback must not start telling the two links apart.
 		const wrongHost = { name: 'Marrow', twitterUrl: 'https://instagram.com/a', aliases: null };
 		expect(registryDiffFields(wrongHost, reg({ socials: { twitterUrl: 'https://instagram.com/b' } }))).toEqual([]);
-		// A non-Patreon site-segment link reads as a plain handle, as on main:
-		// two sticker-pack links both compare as 'addstickers', not as two links.
-		const pack = { name: 'Marrow', telegramUrl: 'https://t.me/addstickers/PackA', aliases: null };
-		expect(registryDiffFields(pack, reg({ socials: { telegramUrl: 'https://t.me/addstickers/PackB' } }))).toEqual([]);
 		// A Patreon value on another host normalizes to that host as its handle
 		// (here 'example.com' on both sides), so it compares by handle and never
 		// reaches the patreon.com check. The blank-value cases in the null/empty

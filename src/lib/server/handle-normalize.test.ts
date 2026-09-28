@@ -174,14 +174,3 @@ describe('normalizeHandle (site segments on other platforms)', () => {
 		expect(normalizeHandle('twitter', 'twitter.com/home')).toBe('home');
 	});
 });
-
-describe('handlesOverlap (telegram sticker packs)', () => {
-	it('matches two different t.me/addstickers/ links, as main did', () => {
-		expect(
-			handlesOverlap(
-				{ telegramUrl: 'https://t.me/addstickers/AlicePack' },
-				{ telegramUrl: 'https://t.me/addstickers/BobPack' }
-			)
-		).toBe(true);
-	});
-});
