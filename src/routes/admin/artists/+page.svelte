@@ -8,6 +8,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';
+	import { worksLabel } from './works-label';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -48,14 +49,6 @@
 		if (aliasOf) return m.admin_artists_alias_linked({ name: aliasOf });
 		if (data.upToDate?.[id]) return m.admin_artists_up_to_date();
 		return m.admin_artists_submit_registry();
-	}
-
-	// An artist may have drawn artworks, stickers, or both — show whatever's non-zero.
-	function worksLabel(a: { artworkCount: number; stickerCount: number }): string {
-		const parts: string[] = [];
-		if (a.artworkCount > 0) parts.push(m.admin_count_artworks({ count: a.artworkCount }));
-		if (a.stickerCount > 0) parts.push(m.admin_count_stickers({ count: a.stickerCount }));
-		return parts.length ? parts.join(' · ') : m.admin_artists_no_works();
 	}
 </script>
 
@@ -146,7 +139,7 @@
 						}}><input type="hidden" name="submissionId" value={data.registryStatus[artist.id].submissionId} /><button class="reg-dismiss" type="submit" aria-label={m.admin_artists_dismiss_rejection()} title={m.admin_artists_dismiss_rejection()}>×</button></form>{/if}
 						{#if artist.formerly.length}<span class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</span>{/if}
 					</td>
-					<td class="artwork-count">{worksLabel(artist)}</td>
+					<td class="artwork-count"><span class="works-label">{worksLabel(artist)}</span></td>
 					<td>
 						<div class="social-icons">
 							{#if artist.twitterUrl}
@@ -240,7 +233,7 @@
 					</div>
 				{/if}
 				<p class="mobile-artist-meta">
-					{worksLabel(artist)}
+					<span class="works-label">{worksLabel(artist)}</span>
 					{#if artist.twitterUrl}<span class="mobile-social-icon"><TwitterIcon size={10} /><span class="sr-only">Twitter</span></span>{/if}
 					{#if artist.blueskyUrl}<span class="mobile-social-icon"><BlueskyIcon size={10} /><span class="sr-only">Bluesky</span></span>{/if}
 					{#if artist.telegramUrl}<span class="mobile-social-icon"><TelegramIcon size={10} /><span class="sr-only">Telegram</span></span>{/if}
@@ -334,7 +327,7 @@
 				<ArtistAvatar name={editingArtist.name} avatarUrl={editingArtist.avatarUrl} size={48} />
 				<div>
 					<p class="modal-artist-name">{editingArtist.name}</p>
-					<p class="modal-artist-meta">{worksLabel(editingArtist)} &bull; {m.admin_artists_added({ date: formatDate(editingArtist.createdAt) })}</p>
+					<p class="modal-artist-meta"><span class="works-label">{worksLabel(editingArtist)}</span>&nbsp;&bull; {m.admin_artists_added({ date: formatDate(editingArtist.createdAt) })}</p>
 				</div>
 			</div>
 
@@ -544,6 +537,10 @@
 	.artwork-count {
 		color: var(--muted-foreground);
 		font-size: 13px;
+	}
+
+	.works-label {
+		word-break: keep-all;
 	}
 
 	.social-icons {
