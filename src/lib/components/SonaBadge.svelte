@@ -30,9 +30,11 @@
 		color: inherit;
 	}
 
+	/* No opacity dim: the host's --muted-foreground is already the quiet ink,
+	   and dimming it further dropped this 12px text under 4.5:1 on six of the
+	   ten theme modes. Guarded by theme-contrast.test.ts. */
 	.sona-badge .mw {
 		font-family: var(--font-secondary);
-		opacity: 0.72;
 	}
 
 	.sona-badge .wm {

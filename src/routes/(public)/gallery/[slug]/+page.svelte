@@ -180,7 +180,7 @@
 
 			{#if image.sourcePostUrl}
 				<div class="meta-section">
-					<h3>{m.gallery_source()}</h3>
+					<h2>{m.gallery_source()}</h2>
 					<a href={image.sourcePostUrl} target="_blank" rel="noopener" class="source-link">
 						<ExternalLink size={14} /> {m.gallery_view_original()}
 					</a>
@@ -189,7 +189,7 @@
 
 			{#if tags.length > 0}
 				<div class="meta-section">
-					<h3>{m.gallery_tags()}</h3>
+					<h2>{m.gallery_tags()}</h2>
 					<div class="tags">
 						{#each tags as tag}
 							<a href="/gallery?tag={tag}" class="tag">{tag}</a>
@@ -200,7 +200,7 @@
 
 			{#if data.characters.length > 0}
 				<div class="meta-section">
-					<h3>{m.gallery_featured_characters()}</h3>
+					<h2>{m.gallery_featured_characters()}</h2>
 					<div class="characters-list">
 						{#each data.characters as char}
 							<div class="character-row">
@@ -230,7 +230,7 @@
 			{/if}
 
 			<div class="meta-section">
-				<h3>{m.gallery_details()}</h3>
+				<h2>{m.gallery_details()}</h2>
 				<dl class="details">
 					{#if image.width && image.height}
 						<dt>{m.gallery_resolution()}</dt><dd>{image.width} x {image.height}</dd>
@@ -247,7 +247,7 @@
 
 			{#if data.variants.length > 0}
 				<div class="meta-section">
-					<h3>{m.gallery_variants()}</h3>
+					<h2>{m.gallery_variants()}</h2>
 					<div class="variant-strip">
 						{#each data.variants as variant}
 							<a
@@ -425,7 +425,7 @@
 		color: var(--foreground);
 	}
 
-	.meta-section h3 {
+	.meta-section h2 {
 		font-size: 12px;
 		color: var(--muted-foreground);
 		text-transform: uppercase;

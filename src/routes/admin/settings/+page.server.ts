@@ -391,15 +391,16 @@ export const actions = {
 			data.has(key) ? normalizeSocialUrl(platformKey, data.get(key) as string) : undefined;
 
 		// The avatar re-resolves only when this form carries the bluesky field;
-		// clearing bluesky clears the derived avatar with it (paired on purpose).
+		// clearing a stored bluesky handle clears the derived avatar with it
+		// (paired on purpose). A blank field with no stored handle leaves it alone.
 		let blueskyUrl: string | undefined;
 		let adminAvatarUrl: string | undefined;
 		if (data.has('bluesky')) {
 			blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string);
 			if (blueskyUrl) {
+				const current = await getSettings(db, { fresh: true });
 				// Re-host to our own CDN (same as artist avatars) so the owner avatar can't
 				// rot if the source changes. Uses the current storage config.
-				const current = await getSettings(db, { fresh: true });
 				const ours = (u: string) => isOurAvatarUrl(platform?.env, current, url.origin, u);
 				const currentOwned = !!current.adminAvatarUrl && ours(current.adminAvatarUrl);
 				const handleChanged = blueskyUrl !== current.blueskyUrl;
@@ -433,7 +434,21 @@ export const actions = {
 					}
 				}
 			} else {
-				adminAvatarUrl = '';
+				// Only a real clear (a stored handle going blank) takes the avatar
+				// with it. The site tab posts the field on every save, so a fork
+				// that never set a handle posts blank each time, and treating that
+				// as a clear wiped an avatar no handle produced. Read the raw row:
+				// getSettings answers a failed read with blank defaults, which would
+				// turn a real clear into "no stored handle" and strand the avatar.
+				let storedHandle: string | null;
+				try {
+					storedHandle = await getRawSetting(db, 'blueskyUrl');
+				} catch {
+					return fail(503, {
+						error: 'Could not read the saved Bluesky handle, so nothing was saved. Try again.'
+					});
+				}
+				if (storedHandle) adminAvatarUrl = '';
 			}
 		}
 
