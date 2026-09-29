@@ -17,6 +17,15 @@ function wrangler(args: string[]): void {
 	});
 }
 
+/** The bucket keys of every '/img/e2e/…-thumb.png' URL the given SQL files name. */
+function thumbnailKeys(sqlFiles: string[]): string[] {
+	const keys = new Set<string>();
+	for (const file of sqlFiles) {
+		for (const m of readFileSync(file, 'utf8').matchAll(/'\/img\/(e2e\/[\w-]+-thumb\.png)'/g)) keys.add(m[1]);
+	}
+	return [...keys];
+}
+
 /**
  * Build a hermetic local D1 for the browser tests: wipe the throwaway persist
  * dir, apply every drizzle migration in order, then load the seed fixture.
@@ -55,7 +64,8 @@ function seed(): void {
 	];
 	try {
 		wrangler(['d1', 'execute', ...target, `--file=${schemaPath}`]);
-		wrangler(['d1', 'execute', ...target, `--file=${path.join(repoRoot, 'tests/e2e/fixtures/seed.sql')}`]);
+		const seedSql = path.join(repoRoot, 'tests/e2e/fixtures/seed.sql');
+		wrangler(['d1', 'execute', ...target, `--file=${seedSql}`]);
 		// An optional second fixture, layered on top for ONE server. A spec that
 		// needs rows the shared fixture deliberately lacks gets them here rather
 		// than in seed.sql, where they would change what every other spec sees:
@@ -74,6 +84,28 @@ function seed(): void {
 				throw new Error(`SONA_E2E_SEED_OVERLAY must be a regular file, got ${overlay}`);
 			}
 			wrangler(['d1', 'execute', ...target, `--file=${overlay}`]);
+		}
+		// Gallery thumbnails. The fixtures point every row's thumbnail at
+		// '/img/e2e/<name>-thumb.png', and /img serves the local bucket, so one
+		// committed PNG goes in under each key the SQL names. The keys are read
+		// from the SQL rather than listed here, so a new row cannot 404 by being
+		// left off a list. Same-origin, so no spec reaches the network for them.
+		const thumbKeys = thumbnailKeys([seedSql, ...(overlay ? [overlay] : [])]);
+		if (thumbKeys.length > 0) {
+			const thumbFile = path.join(repoRoot, 'tests/e2e/fixtures/e2e-thumb.png');
+			const manifest = path.join(tmp, 'thumbs.json');
+			writeFileSync(manifest, JSON.stringify(thumbKeys.map((key) => ({ key, file: thumbFile }))));
+			wrangler([
+				'r2',
+				'bulk',
+				'put',
+				'sona-e2e-images',
+				`--filename=${manifest}`,
+				'--content-type=image/png',
+				'--local',
+				`--config=${E2E_WRANGLER_CONFIG}`,
+				`--persist-to=${persistTo}`
+			]);
 		}
 		// The seeded VR avatar's model must LOOK servable to the /vr/[slug] load
 		// (modelBytesServable HEADs the bucket key) so the View-in-3D control

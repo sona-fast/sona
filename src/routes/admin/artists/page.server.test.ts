@@ -32,7 +32,12 @@ function makeDb() {
 		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 	);
 	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
-	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
+	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
+	CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER);
+	CREATE TABLE avatar_credits (
+		avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL, role TEXT NOT NULL,
+		role_label TEXT, position INTEGER NOT NULL DEFAULT 0
+	);`);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
@@ -41,6 +46,11 @@ function loadEvent(platform: App.Platform, q?: string) {
 	const url = new URL('http://localhost/admin/artists');
 	if (q !== undefined) url.searchParams.set('q', q);
 	return { platform, url } as never;
+}
+
+async function seedArtist(db: ReturnType<typeof makeDb>['db'], name: string) {
+	const row = await db.insert(schema.artists).values({ name }).returning({ id: schema.artists.id }).get();
+	return row.id;
 }
 
 // The registry itself must never be hit from tests: fail every fetch so the
@@ -836,5 +846,85 @@ describe('refreshAvatars action — backfill (#187)', () => {
 		expect(hot!.avatarResolvedAt).toBeTruthy();
 		const noSocial = await db.select().from(schema.artists).where(eq(schema.artists.name, 'NoSocial')).get();
 		expect(noSocial!.avatarResolvedAt).toBeNull(); // untouched
+	});
+});
+
+describe('admin artists load — works counts', () => {
+	async function countsFor(platform: App.Platform, name: string) {
+		const data = (await load(loadEvent(platform))) as unknown as {
+			artists: { name: string; artworkCount: number; stickerCount: number; avatarCount: number }[];
+		};
+		const a = data.artists.find((x) => x.name === name)!;
+		return { artworkCount: a.artworkCount, stickerCount: a.stickerCount, avatarCount: a.avatarCount };
+	}
+
+	it('counts a VR avatar credit for an artist with no images or stickers', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Modeler');
+		await db.insert(schema.avatarCredits).values({ avatarId: 7, artistId: id, role: 'modeler' });
+
+		expect(await countsFor(platform, 'Modeler')).toEqual({ artworkCount: 0, stickerCount: 0, avatarCount: 1 });
+	});
+
+	it('counts distinct avatars, not credit rows', async () => {
+		const { db, platform } = makeDb();
+		const oneAvatar = await seedArtist(db, 'TwoRoles');
+		const twoAvatars = await seedArtist(db, 'TwoAvatars');
+		await db.insert(schema.avatarCredits).values([
+			{ avatarId: 7, artistId: oneAvatar, role: 'modeler', position: 0 },
+			{ avatarId: 7, artistId: oneAvatar, role: 'rigger', position: 1 },
+			{ avatarId: 7, artistId: twoAvatars, role: 'texture' },
+			{ avatarId: 8, artistId: twoAvatars, role: 'texture' }
+		]);
+
+		expect((await countsFor(platform, 'TwoRoles')).avatarCount).toBe(1);
+		expect((await countsFor(platform, 'TwoAvatars')).avatarCount).toBe(2);
+	});
+
+	it('returns zero for every count when nothing references the artist', async () => {
+		const { db, platform } = makeDb();
+		await seedArtist(db, 'Unused');
+		// Another artist's credit must not leak into this one's count.
+		const other = await seedArtist(db, 'Other');
+		await db.insert(schema.avatarCredits).values({ avatarId: 7, artistId: other, role: 'base' });
+
+		expect(await countsFor(platform, 'Unused')).toEqual({ artworkCount: 0, stickerCount: 0, avatarCount: 0 });
+	});
+});
+
+describe('delete action — VR avatar credits block deletion', () => {
+	function deleteEvent(platform: App.Platform, id: number) {
+		const body = new FormData();
+		body.append('id', String(id));
+		return {
+			platform,
+			url: new URL('http://localhost/admin/artists'),
+			request: new Request('http://localhost/admin/artists', { method: 'POST', body })
+		} as never;
+	}
+
+	// The test table has no FK, so without the explicit guard this delete would succeed.
+	it('refuses to delete an artist credited only on a VR avatar and keeps the row', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Rigger');
+		await db.insert(schema.avatarCredits).values({ avatarId: 7, artistId: id, role: 'rigger' });
+
+		const result = (await actions.delete(deleteEvent(platform, id))) as unknown as {
+			status: number;
+			data: { error: string };
+		};
+
+		expect(result.status).toBe(400);
+		expect(result.data.error).toMatch(/VR avatars/);
+		const still = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
+		expect(still?.name).toBe('Rigger');
+	});
+
+	it('still deletes an artist with no references', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Nobody');
+
+		expect(await actions.delete(deleteEvent(platform, id))).toEqual({ success: true });
+		expect(await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get()).toBeUndefined();
 	});
 });

@@ -15,7 +15,7 @@
 			collectionsEnabled={data.collectionsEnabled}
 		/>
 	</div>
-	<main>
+	<main id="main-content" tabindex="-1">
 		{@render children()}
 	</main>
 	<div class="desktop-footer">

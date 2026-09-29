@@ -2615,3 +2615,58 @@ describe('no state boundary draws with raw --primary (SONA-126)', () => {
 		).toEqual([]);
 	});
 });
+
+// The "made with" credit is 12px text, so it needs 4.5:1. The badge inherits its
+// ink from whichever footer hosts it and used to dim that ink further with
+// opacity, which composited it toward the page and put six of the ten theme
+// modes under the floor. This reads the badge rule and both hosts' ink from the
+// source, composites the ink at the badge's opacity over the page background (the
+// surface both footers sit on), and measures every theme × mode, so an opacity
+// or host-color change that drops any of them fails here.
+describe('"made with" credit badge WCAG AA contrast, every host × theme × mode (SONA-229)', () => {
+	const declared = (body: string, property: string) =>
+		body.match(new RegExp(`(?:^|[;{\\s])${property}:\\s*([^;]+);`))?.[1].trim();
+
+	const badge = ruleBody('./components/SonaBadge.svelte', '.sona-badge');
+	const label = ruleBody('./components/SonaBadge.svelte', '.sona-badge .mw');
+	// Opacity multiplies down the tree, so a dim on the badge counts as much as
+	// one on the label.
+	const opacityOf = (body: string) => Number(declared(body, 'opacity') ?? '1');
+	const opacity = opacityOf(badge) * opacityOf(label);
+
+	// The sweep below measures the host's ink, which is only the text's ink
+	// while the badge inherits it. A badge that paints its own colour needs its
+	// own sweep, so it fails here rather than passing on the wrong token.
+	it('takes its ink from the footer that hosts it', () => {
+		expect(declared(badge, 'color')).toBe('inherit');
+		expect(declared(label, 'color')).toBeUndefined();
+	});
+
+	const HOSTS = [
+		{ name: 'desktop footer', file: './components/Footer.svelte', selector: '.footer-cred' },
+		{ name: 'mobile credit', file: './components/MobileCredit.svelte', selector: '.mobile-credit' }
+	];
+
+	for (const host of HOSTS) {
+		const inkToken = () => {
+			const color = ruleBodies(host.file, host.selector)
+				.map((b) => declared(b, 'color'))
+				.filter(Boolean)
+				.at(-1);
+			const token = color?.match(/^var\(--([\w-]+)\)$/)?.[1];
+			if (!token) throw new Error(`${host.name}: the badge ink '${color}' is not a single theme token`);
+			return token;
+		};
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: the ${host.name}'s "made with" text meets 4.5:1 on --background`, () => {
+				const ground = blockToken(sel, 'background');
+				const ink = mix2(blockToken(sel, inkToken()), opacity * 100, ground);
+				const ratio = contrast(ink, ground);
+				expect(
+					ratio,
+					`"made with" measures ${ratio.toFixed(2)}:1 at opacity ${opacity} on ${name}`
+				).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+});

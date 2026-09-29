@@ -85,7 +85,11 @@
 </script>
 
 {#if isAdminAuthExempt($page.url.pathname)}
-	{@render children()}
+	<!-- The sign-in, setup and recovery pages bring no chrome of their own, so
+	     the skip link's target lives here. -->
+	<main id="main-content" tabindex="-1">
+		{@render children()}
+	</main>
 {:else}
 	<div class="admin-layout">
 		<aside class="sidebar">
@@ -133,7 +137,7 @@
 				</div>
 			</header>
 
-			<main class="admin-content" tabindex="-1" bind:this={mainEl}>
+			<main id="main-content" class="admin-content" tabindex="-1" bind:this={mainEl}>
 				<!-- Pre-exists any announcement (a live region injected together with
 				     its content is ignored by most screen readers). -->
 				<p class="sr-only" aria-live="polite">{noticeAnnouncement}</p>
@@ -430,7 +434,7 @@
 			display: flex;
 			flex-direction: column;
 			padding: 16px;
-			padding-bottom: 88px;
+			padding-bottom: var(--mobile-nav-clearance);
 		}
 
 		.mobile-only {
