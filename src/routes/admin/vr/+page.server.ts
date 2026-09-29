@@ -2,6 +2,7 @@ import { sql, eq, desc } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { vrAvatars, avatarPlatforms, characters, images } from '$lib/server/db/schema';
 import { R2_FREE_TIER_BYTES } from '$lib/config';
+import { firstShowcaseImages } from '$lib/server/vr-showcase';
 import type { PageServerLoad } from './$types';
 
 // Same DB-tracked usage mechanism as the settings Storage tab, against the
@@ -44,6 +45,12 @@ export const load: PageServerLoad = async ({ platform }) => {
 		.groupBy(avatarPlatforms.avatarId);
 	for (const p of platformRows) platformCounts.set(p.avatarId, p.n);
 
+	// Poster stand-in for avatars without one: their first showcase image.
+	const showcase = await firstShowcaseImages(
+		db,
+		rows.filter((r) => !r.posterUrl).map((r) => r.id)
+	);
+
 	// Storage line: DB-tracked totals, like the settings gauge (see R2_FREE_LIMIT
 	// note above). Models count toward the same bucket as images.
 	const imageBytes =
@@ -63,7 +70,8 @@ export const load: PageServerLoad = async ({ platform }) => {
 			slug: r.slug,
 			name: r.name,
 			characterName: r.characterName,
-			posterUrl: r.posterThumbUrl || r.posterUrl,
+			// Poster thumb, else the poster, else the first showcase image.
+			posterUrl: r.posterThumbUrl || r.posterUrl || showcase.get(r.id) || null,
 			hasModel: !!r.modelUrl,
 			modelFormat: r.modelFormat,
 			modelSizeBytes: r.modelSizeBytes,

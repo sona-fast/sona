@@ -214,6 +214,28 @@ VALUES
   (5, 'e2e-downloadable', 'E2E Downloadable Avatar', 1, '/img/vr-models/e2e-avatar.vrm', 'vrm', 1234567, 1,
    NULL, 'cc-by', 'e2e fixture grant', 1, 0, 1, NULL, '2026-06-28T00:00:00.000Z');
 
+-- Avatar 6 has NO poster and NO model: the showcase-image fallback's fixture.
+-- Its media leads with a clip so the fallback has to skip to the first IMAGE
+-- (position 1) on /vr, /admin/vr, and the detail page's opening frame.
+INSERT OR REPLACE INTO vr_avatars
+  (id, slug, name, character_id, model_url, model_format, model_size_bytes, poster_image_id,
+   external_url, license, permission_source, downloadable, nsfw, published, description, created_at)
+VALUES
+  (6, 'e2e-posterless', 'E2E Posterless Avatar', 1, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, 0, 0, 1, NULL, '2026-06-27T00:00:00.000Z');
+
+-- Avatar 7 is avatar 6's NSFW twin (nsfw=1, no poster, no model, one image):
+-- the fallback image must sit blurred under the mature gate. Its created_at is
+-- the oldest in the fixture, so /vr (newest first) lists it last. It never
+-- supplies the index og:image or changes which avatar other specs see first.
+-- Its image has no stored dimensions, so the detail frame reserves a 4 / 3 box.
+INSERT OR REPLACE INTO vr_avatars
+  (id, slug, name, character_id, model_url, model_format, model_size_bytes, poster_image_id,
+   external_url, license, permission_source, downloadable, nsfw, published, description, created_at)
+VALUES
+  (7, 'e2e-posterless-mature', 'E2E Posterless Mature', 1, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, 0, 1, 1, NULL, '2026-06-26T00:00:00.000Z');
+
 INSERT OR REPLACE INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat');
 
 -- Showcase media for avatar 1 (SONA-124 SP1): one image + one clip so the
@@ -221,7 +243,10 @@ INSERT OR REPLACE INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat
 -- are same-origin placeholders that 404 harmlessly, like the image fixtures.
 INSERT OR REPLACE INTO avatar_media (avatar_id, kind, url, width, height, position) VALUES
   (1, 'image', '/e2e/vr-media-shot.png', 900, 700, 0),
-  (1, 'video', '/e2e/vr-media-clip.webm', 640, 360, 1);
+  (1, 'video', '/e2e/vr-media-clip.webm', 640, 360, 1),
+  (6, 'video', '/e2e/vr-media-posterless-clip.webm', 640, 360, 0),
+  (6, 'image', '/e2e/vr-media-posterless-shot.png', 900, 700, 1),
+  (7, 'image', '/e2e/vr-media-posterless-mature-shot.png', NULL, NULL, 0);
 
 -- Tier-A visitor rollups for the observability spec (#193): enough pageview /
 -- device / referrer / country counters (dated today, inside the dashboard

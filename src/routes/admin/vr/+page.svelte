@@ -7,6 +7,7 @@
 		licenseLabel,
 		modelFormatDetailLabel
 	} from '$lib/vr';
+	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib/img';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -69,7 +70,10 @@
 						<td class="col-poster" data-label={m.vr_media_poster()}>
 							<div class="poster-thumb" class:has-poster={!!avatar.posterUrl}>
 								{#if avatar.posterUrl}
-									<img src={avatar.posterUrl} alt="" loading="lazy" />
+									<!-- Sized through the CDN: a showcase-image stand-in is a
+									     full-size upload, not a gallery thumbnail. THUMB_WIDTH reuses
+									     the shared thumbnail variant instead of minting a new size. -->
+									<img src={cdnImage(avatar.posterUrl, THUMB_WIDTH)} alt="" loading="lazy" use:rawFallback={avatar.posterUrl} />
 								{:else}
 									<!-- Box glyph, not a bare grey square (reads as broken). -->
 									<Box size={16} aria-hidden="true" />

@@ -108,6 +108,8 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// Viewer only for formats it consumes (no FBX path leak — nothing renders it).
 	const viewerPath =
 		servable && viewerSupports(avatar.modelFormat) ? `/vr/${avatar.slug}/model` : null;
+	// Posterless avatars open on their first showcase image (media is position-ordered).
+	const firstImage = avatar.posterUrl ? -1 : media.findIndex((item) => item.kind === 'image');
 
 	return {
 		avatar: {
@@ -140,6 +142,8 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			servable,
 		credits,
 		media,
+		// null when there is a poster or no image media.
+		fallbackMediaIndex: firstImage === -1 ? null : firstImage,
 		platforms: platforms.map((p) => p.platform)
 	};
 };
