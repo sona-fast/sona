@@ -47,7 +47,7 @@ function makeDb() {
 		CREATE TABLE conventions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, location TEXT, start_date TEXT NOT NULL,
 			end_date TEXT, url TEXT, status TEXT NOT NULL DEFAULT 'confirmed', source_id TEXT, timezone TEXT,
-			created_at TEXT NOT NULL DEFAULT ''
+			furtrack_event TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE fursuit_photos (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, furtrack_post_id INTEGER NOT NULL, character TEXT NOT NULL,
@@ -461,6 +461,48 @@ describe('passport load — counts', () => {
 			'Con B',
 			'Con A'
 		]);
+	});
+});
+
+// The link is joined inside the bounded event-group read, so it has to leave
+// the counts alone and still let unlinked tags read as they always have.
+describe('passport load — conventions linked to FurTrack events', () => {
+	it('reads a linked past convention by its own name, month and place, counted from its photos', async () => {
+		const { sqlite, platform } = makePassportDb('mock');
+		const addCon = sqlite.prepare(
+			'INSERT INTO conventions (name, location, start_date, end_date, status, timezone, furtrack_event) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		);
+		addCon.run('Midwest FurFest 2024', 'Rosemont, IL', '2024-12-05', '2024-12-08', 'confirmed', 'America/Chicago', 'MFF 2024 ');
+		// Named exactly like a photo event but not linked: its stamp stays the tag's.
+		addCon.run('Harbourfur 2025', 'Halifax, NS', '2025-11-07', '2025-11-09', 'confirmed', 'UTC', null);
+		// Linked, but none of its photos is displayable: no stamp to name.
+		addCon.run('Ghost Con', 'Nowhere', '2025-05-01', '2025-05-03', 'confirmed', 'UTC', 'Ghost Tag');
+		// Linked and still ahead, with photos tagged before it starts.
+		addCon.run('Soon Con', 'Denver, CO', isoDay(30), isoDay(32), 'maybe', 'UTC', 'Soon Tag');
+		const insert = sqlite.prepare(
+			"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at) VALUES (?, 'c', '/f.jpg', 'Lens', ?, ?, 'https://furtrack.example', ?)"
+		);
+		insert.run(1, 'MFF 2024 ', 'cc-by', '2024-12-06');
+		insert.run(2, 'MFF 2024 ', 'cc-by', '2024-12-07');
+		insert.run(3, 'MFF 2024 ', 'cc-by', '2024-12-07');
+		insert.run(4, 'Harbourfur 2025', 'cc-by', '2025-11-08');
+		insert.run(5, 'Ghost Tag', 'unknown', '2025-05-02');
+		insert.run(6, 'Soon Tag', 'cc-by', isoDay(-1));
+
+		const data = await loadPassportPage(platform);
+		expect(data.passport.stamps.conventions).toEqual([
+			{ kind: 'past', name: 'Harbourfur 2025', month: '2025-11', photos: 1, href: '/gallery?view=fursuit&event=Harbourfur%202025' },
+			{
+				kind: 'past',
+				name: 'Midwest FurFest 2024',
+				month: '2024-12',
+				photos: 3,
+				href: '/gallery?view=fursuit&event=MFF%202024%20',
+				location: 'Rosemont, IL'
+			}
+		]);
+		// The join adds no photo rows: five displayable photos, one photographer.
+		expect(data.passport.stamps.features).toContainEqual({ kind: 'fursuit', href: '/gallery?view=fursuit', counts: [5, 1] });
 	});
 });
 

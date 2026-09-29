@@ -211,6 +211,13 @@
       "when": 1788859140799,
       "tag": "0029_image_tags_image_id_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1790370586851,
+      "tag": "0030_convention_furtrack_event",
+      "breakpoints": true
     }
   ]
 }

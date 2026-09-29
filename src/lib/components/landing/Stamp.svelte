@@ -17,10 +17,13 @@
 		name: string;
 		/** The month line on a convention stamp. */
 		date?: string;
+		/** A linked past convention's place, on its own line under the month.
+		 *  Spoken as its own phrase, unlike the count lines, which read as one. */
+		place?: string;
 		lines?: string[];
 	}
 
-	let { href, shape, tilt = 0, wide = false, kicker, name, date, lines = [] }: Props = $props();
+	let { href, shape, tilt = 0, wide = false, kicker, name, date, place, lines = [] }: Props = $props();
 
 	// The visible text with punctuation between the lines, so a screen reader
 	// pauses: "Here now: Cinder Valley Con, Reno, until Monday 19 October". An
@@ -35,7 +38,7 @@
 	const label = $derived(
 		(
 			(kicker ? `${kicker}${ja ? '：' : ': '}` : '') +
-			[name, date, lines.join(ja ? '、' : ' ')].filter(Boolean).join(ja ? '、' : ', ')
+			[name, date, place, lines.join(ja ? '、' : ' ')].filter(Boolean).join(ja ? '、' : ', ')
 		).replace(/\u200b/g, '')
 	);
 </script>
@@ -44,6 +47,7 @@
 	{#if kicker}<span class="kicker">{kicker}</span>{/if}
 	<span class="name">{name}</span>
 	{#if date}<span class="date">{date}</span>{/if}
+	{#if place}<span class="line">{place}</span>{/if}
 	{#each lines as line}<span class="line">{line}</span>{/each}
 </a>
 
@@ -143,6 +147,14 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		margin-block: 2px;
+	}
+
+	/* Kana need no tracking, and 2024年11月 is one word: without these it
+	   breaks before 月 on the past stamp. */
+	.date:lang(ja) {
+		letter-spacing: 0;
+		word-break: keep-all;
+		overflow-wrap: anywhere;
 	}
 
 	/* The gallery leads: a wide oval with a larger name. */

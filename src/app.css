@@ -328,8 +328,7 @@ input, select, textarea {
 	}
 
 	/* An admin header action that has a duplicate in the page's mobile list, so
-	   it drops out of the header below the table breakpoint rather than showing
-	   twice. */
+	   it drops out of the header at phone width rather than showing twice. */
 	.btn-desktop-only {
 		display: none;
 	}

@@ -142,12 +142,19 @@ const shownPhoto = or(
 	sql`${fursuitPhotos.permissionSource} <> ''`
 );
 
+/** A photo with a real event tag. trim() only tests for a blank event (and
+ *  drops a NULL, since NULL <> '' is not true); the value itself is kept
+ *  exactly as stored, because the gallery's event filter compares it exactly.
+ *  Shared with the admin conventions page, which offers these tags. */
+export const taggedFursuitPhoto = sql`trim(${fursuitPhotos.event}) <> ''`;
+
 /** Room in the event-group read for events pastEventStamps drops because a
- *  confirmed convention of that name has not ended. The conventions load in
- *  the parallel batch, so the count is not known when this read starts. The
- *  limit bounds rows per event, not photos, so the slack is cheap: only a site
- *  with more than 50 confirmed unfinished conventions named after photo events
- *  could underfill MAX_PAST_STAMPS. */
+ *  confirmed convention of that name, or the convention linked to that tag,
+ *  has not ended. The conventions load in the parallel batch, so the count is
+ *  not known when this read starts. The limit bounds rows per event, not
+ *  photos, so the slack is cheap: only a site with more than 50 unfinished
+ *  conventions named after or linked to photo events could underfill
+ *  MAX_PAST_STAMPS. */
 const PAST_STAMP_SLACK = 50;
 
 export async function loadPassport(opts: {
@@ -188,7 +195,8 @@ export async function loadPassport(opts: {
 		// list a collection even when all its images are unpublished.
 		db.select({ n: count() }).from(collections),
 		// Upcoming and live confirmed rows only; past stamps come from the fursuit
-		// photos (see pastEventStamps). The day of slack is /connect's: a con still
+		// photos (see pastEventStamps), with a linked convention joined to its tag
+		// in the photo read below. The day of slack is /connect's: a con still
 		// running further west survives the UTC filter and isLiveNow/hasEnded judge
 		// it in its own zone.
 		db
@@ -228,6 +236,9 @@ export async function loadPassport(opts: {
 	// for pastEventStamps to drop up to PAST_STAMP_SLACK events named after a
 	// confirmed convention that has not ended and still fill MAX_PAST_STAMPS.
 	// Both in one batch, so they fail together: no counts without stamps.
+	// Each group carries the convention linked to its tag, joined on the exact
+	// stored value. furtrack_event is unique, so a photo joins at most one row
+	// and the count stays a count of photos.
 	// Only a real calendar date counts toward an event's latest day: date()
 	// returns NULL for '2025-13-05' and normalises '2026-02-30' to '2026-03-02',
 	// so neither round-trips. Otherwise a malformed date that sorts high would
@@ -243,11 +254,22 @@ export async function loadPassport(opts: {
 						.from(fursuitPhotos)
 						.where(shownPhoto),
 					db
-						.select({ event: fursuitPhotos.event, photos: count(), latest })
+						.select({
+							event: fursuitPhotos.event,
+							photos: count(),
+							latest,
+							convention: {
+								name: conventions.name,
+								location: conventions.location,
+								startDate: conventions.startDate,
+								endDate: conventions.endDate,
+								timezone: conventions.timezone
+							}
+						})
 						.from(fursuitPhotos)
-						// trim() drops a NULL event too: NULL <> '' is not true.
-						.where(and(shownPhoto, sql`trim(${fursuitPhotos.event}) <> ''`))
-						.groupBy(fursuitPhotos.event)
+						.leftJoin(conventions, eq(conventions.furtrackEvent, fursuitPhotos.event))
+						.where(and(shownPhoto, taggedFursuitPhoto))
+						.groupBy(fursuitPhotos.event, conventions.id)
 						.orderBy(sql`${latest} desc nulls last`, asc(fursuitPhotos.event))
 						.limit(MAX_PAST_STAMPS + PAST_STAMP_SLACK)
 				]),
@@ -302,7 +324,9 @@ export async function loadPassport(opts: {
 	const stamps = buildStamps({
 		counts,
 		conventions: conRows,
-		events: photoResult?.[1] ?? [],
+		// The left join reads an unlinked tag's convention as null; the stamps
+		// take it as absent.
+		events: (photoResult?.[1] ?? []).map(({ convention, ...group }) => (convention ? { ...group, convention } : group)),
 		about: {
 			links: socials.length > 0,
 			conventions: aboutConRows.length > 0
