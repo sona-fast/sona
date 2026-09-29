@@ -24,7 +24,7 @@
 			<LanguageToggle />
 		</div>
 	</header>
-	<main class="paths-page">
+	<main id="main-content" tabindex="-1" class="paths-page">
 		{@render children()}
 	</main>
 </div>
@@ -65,10 +65,6 @@
 		.topbar-toggles {
 			display: none;
 		}
-
-		.paths-page {
-			padding-bottom: 88px;
-		}
 	}
 
 	.back {
@@ -94,6 +90,14 @@
 		max-width: 600px;
 		margin: 0 auto;
 		padding-bottom: 40px;
+	}
+
+	/* Clear the fixed MobileNav. After the base rule on purpose: at equal
+	   specificity the later rule wins, and above it the 40px won on phones. */
+	@media (max-width: 768px) {
+		.paths-page {
+			padding-bottom: var(--mobile-nav-clearance);
+		}
 	}
 
 	/* ---- Shared section primitives used by /art, /connect, /share ---- */

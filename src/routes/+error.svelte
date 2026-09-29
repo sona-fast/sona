@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages';
 </script>
 
-<div class="error-page">
+<main id="main-content" class="error-page" tabindex="-1">
 	<p class="status-code">{page.status}</p>
 	{#if page.status === 404}
 		<h1>{m.error_404_title()}</h1>
@@ -16,7 +16,7 @@
 		<a href="/" class="btn btn-outline">{m.error_back_home()}</a>
 		<a href="/gallery" class="btn btn-primary">{m.error_browse_gallery()}</a>
 	</div>
-</div>
+</main>
 
 <style>
 	.error-page {

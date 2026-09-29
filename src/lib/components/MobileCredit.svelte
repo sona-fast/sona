@@ -40,8 +40,8 @@
 			align-items: center;
 			gap: 12px;
 			padding: 20px 16px;
-			/* Clear the fixed MobileNav (mirrors the splash's 88px bottom gap). */
-			padding-bottom: 88px;
+			/* Clear the fixed MobileNav (the same gap as the splash's). */
+			padding-bottom: var(--mobile-nav-clearance);
 			border-top: 1px solid var(--border);
 			/* Bare badge inherits this muted color; only the ember stays orange. */
 			color: var(--muted-foreground);

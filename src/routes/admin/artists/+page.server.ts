@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { artists, images, stickers, stickerPacks } from '$lib/server/db/schema';
+import { artists, images, stickers, stickerPacks, avatarCredits } from '$lib/server/db/schema';
 import { eq, sql, like, or } from 'drizzle-orm';
 import {
 	resolveAvatarUrl,
@@ -80,7 +80,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			aliases: artists.aliases,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
-			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`
+			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`,
+			// Distinct avatars: an artist credited in two roles on one avatar is one avatar.
+			avatarCount: sql<number>`(SELECT COUNT(DISTINCT avatar_id) FROM avatar_credits WHERE avatar_credits.artist_id = artists.id)`
 		})
 		.from(artists)
 		.where(whereClause)
@@ -451,6 +453,17 @@ export const actions = {
 			.get();
 		if (stickerCountRow && stickerCountRow.count > 0) {
 			return fail(400, { error: 'Cannot delete artist with existing stickers. Remove their stickers first.' });
+		}
+
+		// avatar_credits.artist_id is a non-cascading FK too; name the cause instead of
+		// leaving it to the generic backstop below.
+		const avatarCreditRow = await db
+			.select({ count: sql<number>`COUNT(*)` })
+			.from(avatarCredits)
+			.where(eq(avatarCredits.artistId, id))
+			.get();
+		if (avatarCreditRow && avatarCreditRow.count > 0) {
+			return fail(400, { error: 'Cannot delete artist credited on VR avatars. Remove their credit from each avatar first.' });
 		}
 
 		// A pack can list this artist as its manager with 0 stickers (e.g. a Telegram
