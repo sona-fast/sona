@@ -39,6 +39,19 @@ describe('firstShowcaseImages', () => {
 		expect(result.has(4)).toBe(false);
 	});
 
+	it('handles more ids than D1 allows bound parameters in one query', async () => {
+		// The D1 stub rejects >100 bound parameters, as D1 does; 120 posterless
+		// avatars must still each get their image.
+		const { db, ins } = makeDb();
+		const ids = Array.from({ length: 120 }, (_, i) => i + 1);
+		for (const id of ids) ins.run(id, 'image', `https://cdn.example.com/${id}.png`, null, null, 0);
+
+		const result = await firstShowcaseImages(db, ids);
+		expect(result.size).toBe(120);
+		expect(result.get(1)).toBe('https://cdn.example.com/1.png');
+		expect(result.get(120)).toBe('https://cdn.example.com/120.png');
+	});
+
 	it('returns an empty map for no ids without querying', async () => {
 		const { db } = makeDb();
 		expect((await firstShowcaseImages(db, [])).size).toBe(0);

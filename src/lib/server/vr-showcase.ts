@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { avatarMedia } from '$lib/server/db/schema';
+import { chunk } from '$lib/server/stickers';
 import type { Database } from '$lib/server/db';
 
 /**
@@ -15,13 +16,19 @@ export async function firstShowcaseImages(
 ): Promise<Map<number, string>> {
 	const result = new Map<number, string>();
 	if (avatarIds.length === 0) return result;
-	const rows = await db
-		.select({ avatarId: avatarMedia.avatarId, url: avatarMedia.url })
-		.from(avatarMedia)
-		.where(and(inArray(avatarMedia.avatarId, avatarIds), eq(avatarMedia.kind, 'image')))
-		.orderBy(asc(avatarMedia.position));
-	// Rows arrive in position order, so the first one seen per avatar wins.
-	for (const row of rows) {
+	// D1 caps bound parameters at ~100 per query, so the IN-list is batched
+	// (stickers.ts precedent). An avatar's rows all sit in one batch, and each
+	// batch arrives in position order, so the first row seen per avatar wins.
+	const batches = await Promise.all(
+		chunk(avatarIds).map((ids) =>
+			db
+				.select({ avatarId: avatarMedia.avatarId, url: avatarMedia.url })
+				.from(avatarMedia)
+				.where(and(inArray(avatarMedia.avatarId, ids), eq(avatarMedia.kind, 'image')))
+				.orderBy(asc(avatarMedia.position))
+		)
+	);
+	for (const row of batches.flat()) {
 		if (!result.has(row.avatarId)) result.set(row.avatarId, row.url);
 	}
 	return result;
