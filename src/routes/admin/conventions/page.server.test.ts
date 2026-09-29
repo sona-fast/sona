@@ -572,6 +572,20 @@ describe('FurTrack event link', () => {
 		expect(await tagOf(db, id)).toBeNull();
 	});
 
+	it('refuses a save that leaves out the event field, and keeps the link', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024' });
+		const id = (await db.select().from(conventions).get())!.id;
+
+		const res = await setEvent(platform, { id: String(id) });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('Pick a FurTrack event or None.');
+		expect(res.data?.eventId).toBe(id);
+		expect(await tagOf(db, id)).toBe('MFF 2024');
+	});
+
 	it('saves a convention with its own tag again without calling it a conflict', async () => {
 		const { db, platform } = makeDb();
 		await photos(db, ['MFF 2024']);

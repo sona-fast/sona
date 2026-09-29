@@ -172,7 +172,11 @@ export const actions = {
 			.get();
 		if (!con) return fail(400, { error: 'That convention is no longer on your schedule.' });
 
-		const event = await eventTagFrom(db, data.get('furtrackEvent'), con);
+		// An omitted field is not a choice; only the select's None ('') unlinks.
+		const raw = data.get('furtrackEvent');
+		if (typeof raw !== 'string') return fail(400, { error: 'Pick a FurTrack event or None.', eventId: id });
+
+		const event = await eventTagFrom(db, raw, con);
 		if ('error' in event) return fail(400, { error: event.error, eventId: id });
 
 		let changed: number | undefined;
