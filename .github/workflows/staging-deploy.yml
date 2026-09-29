@@ -1,0 +1,257 @@
+name: Deploy to Cloudflare Pages (staging)
+
+# Staging deploy for the canonical repo ONLY. This is the exact inverse of
+# deploy.yml's fork gate: deploy.yml runs on every fork and is gated OFF on
+# sona-fast/sona; this one runs ONLY on sona-fast/sona and never on a fork. The
+# two never fire on the same repo, so they can share the same repo vars/secrets
+# without clobbering each other (on sona-fast/sona the vars point at the
+# sona-staging project + DB; on a fork they point at that fork's own project).
+#
+# SECURITY — NEVER convert the trigger below to `pull_request_target`. This job
+# holds CLOUDFLARE_API_TOKEN, SETUP_TOKEN, CRON_SECRET and more; pull_request_target
+# runs with those secrets in the context of a PR's HEAD, which for an untrusted
+# fork PR means arbitrary attacker-controlled code (build scripts, deps, tests)
+# executes WITH our secrets and can exfiltrate them. Deploys must only ever run
+# from trusted refs already merged to main. Keep the triggers `push` + manual.
+
+on:
+  push:
+    branches: [main]
+  # GitHub's "Sync fork" button fast-forwards main WITHOUT emitting a push
+  # event; this also gives a manual "Run workflow" button in the Actions tab.
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Inverse of deploy.yml: staging runs ONLY on the canonical repo. A fork
+    # never deploys to staging (it has its own deploy.yml gated the other way).
+    if: github.repository == 'sona-fast/sona'
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run check
+
+      - run: npm test
+
+      - run: npm run build
+
+      # Fail fast with a clear, actionable message if staging runs without
+      # Cloudflare credentials (rather than a cryptic wrangler error later).
+      - name: Verify Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set — add both in Settings → Secrets and variables → Actions to enable the staging deploy"; exit 1
+          fi
+
+      # Per-deployment names. On sona-fast/sona set repo variables
+      # CLOUDFLARE_PAGES_PROJECT=sona-staging and D1_DATABASE_NAME=sona-staging-db.
+      # The fallbacks default to the STAGING names (not the prod 'sona'/'sona-db')
+      # so a missing var can never point this pipeline at production.
+      - name: Create Pages project if needed
+        env:
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
+        run: |
+          curl -s -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"${CLOUDFLARE_PAGES_PROJECT}\",\"production_branch\":\"main\"}" \
+            | jq '.success // .errors'
+
+      # Tracked migrations: a schema_migrations table records which files have run,
+      # so each is applied exactly once and a genuine SQL failure FAILS the deploy.
+      # Identical to deploy.yml — only the target DB (D1_DATABASE_NAME) differs.
+      - name: Run D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || 'sona-staging-db' }}
+        run: |
+          set -euo pipefail
+          DB="$D1_DATABASE_NAME"
+          npx wrangler d1 execute "$DB" --remote --command \
+            "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);"
+          applied=$(npx wrangler d1 execute "$DB" --remote --json \
+            --command "SELECT name FROM schema_migrations;" | jq -r '.[0].results[].name' 2>/dev/null || true)
+          for f in drizzle/*.sql; do
+            name=$(basename "$f")
+            if printf '%s\n' "$applied" | grep -qxF "$name"; then
+              echo "✓ already applied: $name"
+              continue
+            fi
+            echo "→ applying: $name"
+            npx wrangler d1 execute "$DB" --remote --file="$f"
+            npx wrangler d1 execute "$DB" --remote --command \
+              "INSERT INTO schema_migrations (name, applied_at) VALUES ('$name', datetime('now'));"
+          done
+
+      # Optional feature: FurTrack photo integration. Set repo variable
+      # FURTRACK_MODE to `live` or `mock`. Per-key PATCH (nothing else clobbered);
+      # unset = logged skip. Identical to deploy.yml.
+      - name: Sync FURTRACK_MODE to Pages project
+        env:
+          FURTRACK_MODE: ${{ vars.FURTRACK_MODE }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FURTRACK_MODE" ]; then
+            echo "FURTRACK_MODE repo variable not set — skipping env var sync (FurTrack stays off)"
+            exit 0
+          fi
+          payload=$(jq -n --arg v "$FURTRACK_MODE" \
+            '{deployment_configs: {production: {env_vars: {FURTRACK_MODE: {type: "plain_text", value: $v}}}}}')
+          resp=$(curl -s -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          if ! echo "$resp" | jq -e '.success' >/dev/null; then
+            echo "::error::Failed to set FURTRACK_MODE on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+            echo "$resp" | jq '.errors'
+            exit 1
+          fi
+          echo "FURTRACK_MODE=${FURTRACK_MODE} set on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+
+      # Optional feature: observability (issue #6). Set repo variable
+      # OBSERVABILITY_ENABLED=true. Same per-key PATCH; unset = logged skip.
+      - name: Sync OBSERVABILITY_ENABLED to Pages project
+        env:
+          OBSERVABILITY_ENABLED: ${{ vars.OBSERVABILITY_ENABLED }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$OBSERVABILITY_ENABLED" ]; then
+            echo "OBSERVABILITY_ENABLED repo variable not set — skipping env var sync (observability stays off)"
+            exit 0
+          fi
+          payload=$(jq -n --arg v "$OBSERVABILITY_ENABLED" \
+            '{deployment_configs: {production: {env_vars: {OBSERVABILITY_ENABLED: {type: "plain_text", value: $v}}}}}')
+          resp=$(curl -s -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          if ! echo "$resp" | jq -e '.success' >/dev/null; then
+            echo "::error::Failed to set OBSERVABILITY_ENABLED on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+            echo "$resp" | jq '.errors'
+            exit 1
+          fi
+          echo "OBSERVABILITY_ENABLED=${OBSERVABILITY_ENABLED} set on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+
+      # Optional feature: Telegram sticker import. Add repo secret
+      # TELEGRAM_BOT_TOKEN; synced to Pages here so this deploy binds it. Upsert
+      # (idempotent); unset = logged skip. Identical to deploy.yml.
+      - name: Sync TELEGRAM_BOT_TOKEN to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "TELEGRAM_BOT_TOKEN repo secret not set — skipping secret sync (Telegram stickers stay off)"
+            exit 0
+          fi
+          printf '%s' "$TELEGRAM_BOT_TOKEN" | \
+            npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          echo "TELEGRAM_BOT_TOKEN synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (binds on the deploy below)"
+
+      # Optional feature: admin password recovery email. Add repo secrets
+      # RESEND_API_KEY (required to enable) and optionally RESEND_FROM. Unset =
+      # logged skip. Identical to deploy.yml.
+      - name: Sync RESEND secrets to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM: ${{ secrets.RESEND_FROM }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RESEND_API_KEY" ]; then
+            echo "RESEND_API_KEY repo secret not set — skipping secret sync (email password reset stays off; use npm run reset-password)"
+            exit 0
+          fi
+          printf '%s' "$RESEND_API_KEY" | \
+            npx wrangler pages secret put RESEND_API_KEY --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          echo "RESEND_API_KEY synced to Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+          if [ -n "$RESEND_FROM" ]; then
+            printf '%s' "$RESEND_FROM" | \
+              npx wrangler pages secret put RESEND_FROM --project-name "$CLOUDFLARE_PAGES_PROJECT"
+            echo "RESEND_FROM synced to Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+          fi
+
+      # Bootstrap + cron secrets. Pages secrets bind at DEPLOY TIME, so re-put
+      # SETUP_TOKEN (first-run wizard gate) and CRON_SECRET (cron endpoint auth)
+      # right before the deploy so THIS deployment binds them. Idempotent upsert;
+      # unset = logged skip. Identical to deploy.yml.
+      - name: Sync SETUP_TOKEN + CRON_SECRET to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SETUP_TOKEN" ]; then
+            printf '%s' "$SETUP_TOKEN" | \
+              npx wrangler pages secret put SETUP_TOKEN --project-name "$CLOUDFLARE_PAGES_PROJECT"
+            echo "SETUP_TOKEN synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (binds on the deploy below)"
+          else
+            echo "SETUP_TOKEN repo secret not set — skipping (wizard already completed, or not wired)"
+          fi
+          if [ -n "$CRON_SECRET" ]; then
+            printf '%s' "$CRON_SECRET" | \
+              npx wrangler pages secret put CRON_SECRET --project-name "$CLOUDFLARE_PAGES_PROJECT"
+            echo "CRON_SECRET synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (binds on the deploy below)"
+          else
+            echo "CRON_SECRET repo secret not set — skipping"
+          fi
+
+      # Optional feature: the Cloudflare "edge traffic" panel on
+      # /admin/observability. Add repo secrets CLOUDFLARE_ANALYTICS_TOKEN and
+      # CLOUDFLARE_ZONE_ID. All three (incl. the account id, only a deploy secret
+      # otherwise) are put so the panel has them at runtime. Unset = logged skip.
+      - name: Sync Cloudflare analytics secrets to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ANALYTICS_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CLOUDFLARE_ANALYTICS_TOKEN" ] || [ -z "$CLOUDFLARE_ZONE_ID" ]; then
+            echo "CLOUDFLARE_ANALYTICS_TOKEN / CLOUDFLARE_ZONE_ID repo secrets not both set — skipping (Cloudflare edge panel stays hidden)"
+            exit 0
+          fi
+          printf '%s' "$CLOUDFLARE_ANALYTICS_TOKEN" | \
+            npx wrangler pages secret put CLOUDFLARE_ANALYTICS_TOKEN --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          printf '%s' "$CLOUDFLARE_ZONE_ID" | \
+            npx wrangler pages secret put CLOUDFLARE_ZONE_ID --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | \
+            npx wrangler pages secret put CLOUDFLARE_ACCOUNT_ID --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          echo "Cloudflare analytics secrets synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (bind on the deploy below)"
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy .svelte-kit/cloudflare --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona-staging' }}
