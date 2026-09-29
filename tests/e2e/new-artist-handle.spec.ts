@@ -62,11 +62,14 @@ test('a pasted patreon.com/user?u= link fires no registry search and blocks crea
 	await page.screenshot({ path: testInfo.outputPath('plain-name-enabled.png') });
 });
 
-// A patreon.com/cw/<user> link names its creator after the 'cw/' segment. Read
-// as patreon.com/<user>, the handle would be 'cw', a reserved segment that
-// normalizes to no handle, and the dialog would fire no search. So exactly one
-// handle search proves the dialog read 'kuttoya'. The request carries the pasted
-// URL as typed (the registry normalizes it), so its query holds 'cw' either way.
+// A patreon.com/cw/<user> link names its creator after the 'cw/' segment. The
+// request carries the pasted URL as typed (the registry normalizes it), so the
+// 'kuttoya' search alone can't tell which handle the dialog read: read as
+// patreon.com/<user>, the handle would be 'cw', which also meets the two-character
+// minimum and fires the same search. The '/cw/a' step is what distinguishes the
+// fix from the old behavior: read correctly the handle is 'a', below the minimum,
+// so no search fires and the hint shows; read the old way it would be 'cw' and a
+// second search would fire.
 test('a pasted patreon.com/cw/ link searches the registry by handle', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/artists');
@@ -92,4 +95,14 @@ test('a pasted patreon.com/cw/ link searches the registry by handle', async ({ p
 	).toBeHidden();
 	await expect(dialog.getByRole('button', { name: 'Create Artist' })).toBeDisabled();
 	await page.screenshot({ path: testInfo.outputPath('cw-link-handle-search.png') });
+
+	await dialog.getByLabel('Artist Name').fill('https://www.patreon.com/cw/a');
+	await page.waitForTimeout(PAST_DEBOUNCE_MS);
+
+	await expect(
+		dialog.getByText('Type at least 2 characters of a handle, or a name to add a new artist.')
+	).toBeVisible();
+	expect(searches).toHaveLength(1);
+	await expect(dialog.getByRole('button', { name: 'Create Artist' })).toBeDisabled();
+	await page.screenshot({ path: testInfo.outputPath('cw-short-handle-blocked.png') });
 });
