@@ -137,7 +137,8 @@ export function resolveStickerArtistIds(
 // per-sticker set (a pack can hold 100+ stickers/artists) must be chunked.
 const D1_MAX_PARAMS = 90;
 
-function chunk<T>(arr: T[], size = D1_MAX_PARAMS): T[][] {
+/** Split ids into D1-sized IN-list batches (shared with vr-showcase.ts). */
+export function chunk<T>(arr: T[], size = D1_MAX_PARAMS): T[][] {
 	const out: T[][] = [];
 	for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
 	return out;

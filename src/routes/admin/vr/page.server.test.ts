@@ -23,6 +23,10 @@ function makeDb() {
 			description TEXT, created_at TEXT NOT NULL
 		);
 		CREATE TABLE avatar_platforms (avatar_id INTEGER NOT NULL, platform TEXT NOT NULL);
+		CREATE TABLE avatar_media (
+			avatar_id INTEGER NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL,
+			width INTEGER, height INTEGER, position INTEGER NOT NULL DEFAULT 0
+		);
 		CREATE TABLE characters (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL
 		);
@@ -66,9 +70,22 @@ function addAvatar(
 		).lastInsertRowid as number;
 }
 
+function addMedia(
+	sqlite: ReturnType<typeof makeDb>['sqlite'],
+	avatarId: number,
+	kind: 'image' | 'video',
+	url: string,
+	position: number
+) {
+	sqlite
+		.prepare('INSERT INTO avatar_media (avatar_id, kind, url, position) VALUES (?, ?, ?, ?)')
+		.run(avatarId, kind, url, position);
+}
+
 type ListData = {
 	avatars: Array<{
 		slug: string;
+		posterUrl: string | null;
 		published: boolean;
 		platformCount: number;
 		hasModel: boolean;
@@ -166,5 +183,24 @@ describe('/admin/vr list load', () => {
 		expect((bySlug.granted as { hasPermission?: unknown }).hasPermission).toBe(true);
 		expect((bySlug.ungranted as { hasPermission?: unknown }).hasPermission).toBe(false);
 		expect(JSON.stringify(data.avatars)).not.toContain('Telegram DM');
+	});
+
+	it('uses a showcase image for a posterless avatar, and keeps a real poster', async () => {
+		// Ordering and video-skipping are covered in vr-showcase.test.ts; this
+		// pins the loader's wiring only.
+		const { sqlite, platform } = makeDb();
+		const bare = addAvatar(sqlite, { slug: 'bare' });
+		addMedia(sqlite, bare, 'image', 'https://cdn.example.com/shot.png', 0);
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, thumbnail_url) VALUES (1, ?, ?)')
+			.run('https://cdn.example.com/poster.png', 'https://cdn.example.com/poster-thumb.png');
+		const postered = addAvatar(sqlite, { slug: 'postered', posterImageId: 1 });
+		addMedia(sqlite, postered, 'image', 'https://cdn.example.com/ignored.png', 0);
+
+		const data = await loadData(platform);
+		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
+		expect(bySlug.bare.posterUrl).toBe('https://cdn.example.com/shot.png');
+		// A real poster still wins over showcase media.
+		expect(bySlug.postered.posterUrl).toBe('https://cdn.example.com/poster-thumb.png');
 	});
 });

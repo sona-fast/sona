@@ -32,6 +32,7 @@ function makeDb() {
 			status TEXT NOT NULL DEFAULT 'confirmed',
 			source_id TEXT,
 			timezone TEXT,
+			furtrack_event TEXT UNIQUE,
 			created_at TEXT NOT NULL
 		);`);
 	const d1 = makeD1(sqlite);

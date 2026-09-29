@@ -7,6 +7,7 @@ import { stickerTabEnabled } from '$lib/server/stickers';
 import { PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
 import { withTimeout } from '$lib/server/timeout';
 import { externalSiteName, modelFormatLabel } from '$lib/vr';
+import { firstShowcaseImages } from '$lib/server/vr-showcase';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -43,6 +44,12 @@ export const load: PageServerLoad = async ({ platform }) => {
 		}
 	}
 
+	// Poster stand-in for avatars without one: their first showcase image.
+	const showcase = await firstShowcaseImages(
+		db,
+		rows.filter((r) => !r.posterUrl).map((r) => r.id)
+	);
+
 	// Whether to show the Fursuit pill — gated on the FurTrack flag the same way
 	// the gallery and stickers pages are, so all tab bars agree; the shared
 	// cached probe replaces the old per-request COUNT so a D1 stall can't hang
@@ -65,7 +72,10 @@ export const load: PageServerLoad = async ({ platform }) => {
 			name: r.name,
 			// Effective public flag (avatar OR poster) — see the /vr/[slug] loader.
 			nsfw: r.nsfw || (r.posterNsfw ?? false),
-			posterUrl: r.posterThumbUrl || r.posterUrl,
+			// Poster thumb, else the poster, else the first showcase image. The
+			// avatar's own NSFW flag still governs the blur: showcase media
+			// carries no flag of its own.
+			posterUrl: r.posterThumbUrl || r.posterUrl || showcase.get(r.id) || null,
 			platforms: platformsByAvatar[r.id] ?? [],
 			hasModel,
 			formatLabel: hasModel ? modelFormatLabel(r.modelFormat) : null,
@@ -75,5 +85,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 		};
 	});
 
-	return { avatars, total: avatars.length, fursuitEnabled, stickersEnabled };
+	// Link preview: the newest SFW avatar that has an image, never an NSFW
+	// one's (null when no SFW avatar has an image).
+	const ogImage = avatars.find((a) => !a.nsfw && a.posterUrl)?.posterUrl ?? null;
+
+	return { avatars, total: avatars.length, ogImage, fursuitEnabled, stickersEnabled };
 };

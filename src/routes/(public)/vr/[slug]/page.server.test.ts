@@ -112,6 +112,7 @@ type DetailData = {
 	downloadAllowed: boolean;
 	credits: Array<{ artistName: string; role: string; roleLabel: string | null }>;
 	media: Array<{ kind: string; url: string }>;
+	fallbackMediaIndex: number | null;
 	platforms: string[];
 };
 
@@ -374,5 +375,38 @@ describe('/vr/[slug] load — credits, media, platforms', () => {
 		const data = await loadData(platform);
 		expect(data.media.map((mRow) => mRow.kind)).toEqual(['image', 'video']);
 		expect(data.platforms).toEqual(['vrchat']);
+	});
+
+	it('points a posterless avatar at its first showcase IMAGE, skipping leading clips', async () => {
+		const { sqlite, platform } = makeDb();
+		const id = addAvatar(sqlite);
+		const ins = sqlite.prepare(
+			'INSERT INTO avatar_media (avatar_id, kind, url, position) VALUES (?, ?, ?, ?)'
+		);
+		ins.run(id, 'video', 'https://cdn.example.com/clip.webm', 0);
+		ins.run(id, 'image', 'https://cdn.example.com/shot.png', 1);
+		ins.run(id, 'image', 'https://cdn.example.com/later.png', 2);
+
+		const data = await loadData(platform);
+		expect(data.avatar.posterUrl).toBeNull();
+		expect(data.fallbackMediaIndex).toBe(1);
+		expect(data.media[data.fallbackMediaIndex!].url).toBe('https://cdn.example.com/shot.png');
+	});
+
+	it('yields no fallback when the avatar has a poster, or only video media', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite.prepare('INSERT INTO images (id, image_url) VALUES (1, ?)').run('https://cdn.example.com/poster.png');
+		const postered = addAvatar(sqlite, { slug: 'postered', posterImageId: 1 });
+		const ins = sqlite.prepare(
+			'INSERT INTO avatar_media (avatar_id, kind, url, position) VALUES (?, ?, ?, ?)'
+		);
+		ins.run(postered, 'image', 'https://cdn.example.com/shot.png', 0);
+		const clips = addAvatar(sqlite, { slug: 'clips' });
+		ins.run(clips, 'video', 'https://cdn.example.com/clip.webm', 0);
+		addAvatar(sqlite, { slug: 'bare' });
+
+		expect((await loadData(platform, 'postered')).fallbackMediaIndex).toBeNull();
+		expect((await loadData(platform, 'clips')).fallbackMediaIndex).toBeNull();
+		expect((await loadData(platform, 'bare')).fallbackMediaIndex).toBeNull();
 	});
 });

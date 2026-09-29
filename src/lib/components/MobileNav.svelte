@@ -91,6 +91,14 @@
 			row-gap: 4px;
 			justify-content: space-around;
 		}
+
+		/* The fixed bottom nav (about 53px tall, plus the home-indicator inset
+		   its bottom padding adds) covers the foot of the page. This padding
+		   makes a focused control or a scrolled-to panel stop above the nav
+		   instead of behind it. */
+		:global(html) {
+			scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+		}
 	}
 
 	.tab {

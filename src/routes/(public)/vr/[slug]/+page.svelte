@@ -48,8 +48,29 @@
 
 	// Media strip selection: null = the poster. Selecting a thumbnail swaps the
 	// main display; the poster stays the initial render (and the page's LCP).
+	// A posterless avatar opens on its first showcase image instead (the
+	// loader's fallbackMediaIndex): null selection resolves to that item, and
+	// the strip has no poster thumb, so nothing ever shows the empty frame.
+	// Derived rather than seeded from data, so the slug-change reset below
+	// stays a plain null and no prop is read at init (reactivity-guard).
 	let selected = $state<number | null>(null);
-	const current = $derived(selected === null ? null : data.media[selected]);
+	const effectiveSelected = $derived(selected ?? data.fallbackMediaIndex);
+	const current = $derived(effectiveSelected === null ? null : data.media[effectiveSelected]);
+	const fallbackItem = $derived(
+		data.fallbackMediaIndex === null ? null : data.media[data.fallbackMediaIndex]
+	);
+	// What stands in for the poster where one image represents the avatar: the
+	// social preview and the 3D stage's aspect ratio. The fallback never widens
+	// link-preview exposure: an NSFW posterless avatar gets no og:image (as it
+	// had before the fallback existed), since link unfurlers skip the mature
+	// gate. The 3D stage then uses VrViewer's default aspect.
+	const preview = $derived(
+		avatar.posterUrl
+			? { url: avatar.posterUrl, width: avatar.posterWidth, height: avatar.posterHeight }
+			: avatar.nsfw
+				? null
+				: fallbackItem
+	);
 
 	// While the 3D stage covers the poster, selecting a strip thumb has no
 	// visible effect — the strip is disabled for the duration (R2-D12).
@@ -150,9 +171,9 @@
 	title={`${avatar.name} — ${siteName}`}
 	description={metaDescription}
 	url={canonicalUrl}
-	image={avatar.posterUrl}
-	imageWidth={avatar.posterWidth}
-	imageHeight={avatar.posterHeight}
+	image={preview?.url ?? null}
+	imageWidth={preview?.width ?? null}
+	imageHeight={preview?.height ?? null}
 	type="article"
 	{siteName}
 />
@@ -175,6 +196,18 @@
 					use:rawFallback={avatar.posterUrl}
 					class="blurred"
 				/>
+			{:else if fallbackItem}
+				<!-- Posterless: the showcase stand-in sits under the gate, blurred
+				     like a poster would be. -->
+				<img
+					src={cdnImage(fallbackItem.url, 1200)}
+					alt={avatar.name}
+					width={fallbackItem.width}
+					height={fallbackItem.height}
+					fetchpriority="high"
+					use:rawFallback={fallbackItem.url}
+					class="blurred"
+				/>
 			{:else}
 				<div class="poster-placeholder"><Box size={40} aria-hidden="true" /></div>
 			{/if}
@@ -192,7 +225,16 @@
 			     speech/audio, and the visible controls still allow unmuting. -->
 			<video src={current.url} controls muted playsinline width={current.width} height={current.height}></video>
 		{:else}
-			<img src={cdnImage(current.url, 1200)} alt={avatar.name} width={current.width} height={current.height} use:rawFallback={current.url} />
+			<!-- fetchpriority only on the opening frame (a posterless avatar's
+			     showcase stand-in, the page's LCP), never on a strip selection. -->
+			<img
+				src={cdnImage(current.url, 1200)}
+				alt={avatar.name}
+				width={current.width}
+				height={current.height}
+				fetchpriority={selected === null ? 'high' : undefined}
+				use:rawFallback={current.url}
+			/>
 		{/if}
 	{:else if avatar.posterUrl}
 		<img
@@ -235,8 +277,8 @@
 						name={avatar.name}
 						nsfw={avatar.nsfw}
 						{revealed}
-						posterWidth={avatar.posterWidth}
-						posterHeight={avatar.posterHeight}
+						posterWidth={preview?.width ?? null}
+						posterHeight={preview?.height ?? null}
 						bind:active={viewerActive}
 					>
 						<!-- tabindex="-1": the reveal handler lands focus here after its
@@ -256,23 +298,24 @@
 				<div class="media-strip">
 					<!-- Thumb buttons carry the accessible names: the video thumbs have
 					     no text at all, and an image alt would double-announce. -->
-					<button
-						class="media-thumb"
-						class:current={selected === null}
-						aria-current={selected === null}
-						aria-label={m.vr_media_poster()}
-						disabled={viewerActive}
-						onclick={() => (selected = null)}
-					>
-						{#if avatar.posterUrl}
+					<!-- No poster, no poster thumb: the showcase image already fills the frame, so a "Poster" button here would be empty. -->
+					{#if avatar.posterUrl}
+						<button
+							class="media-thumb"
+							class:current={selected === null}
+							aria-current={selected === null}
+							aria-label={m.vr_media_poster()}
+							disabled={viewerActive}
+							onclick={() => (selected = null)}
+						>
 							<img src={cdnImage(avatar.posterUrl, 200)} alt="" loading="lazy" class:blurred-thumb={avatar.nsfw && !revealed} use:rawFallback={avatar.posterUrl} />
-						{/if}
-					</button>
+						</button>
+					{/if}
 					{#each data.media as item, i}
 						<button
 							class="media-thumb"
-							class:current={selected === i}
-							aria-current={selected === i}
+							class:current={effectiveSelected === i}
+							aria-current={effectiveSelected === i}
 							aria-label={m.vr_media_item({ name: avatar.name, n: i + 1 })}
 							disabled={viewerActive}
 							onclick={() => (selected = i)}
@@ -463,6 +506,15 @@
 		max-height: min(70vh, 720px);
 		object-fit: contain;
 		display: block;
+	}
+
+	/* Media with no stored dimensions reserves the 3D stage's default box
+	   (VrViewer's 4 / 3) instead of collapsing until the image loads. The
+	   auto form applies 4 / 3 only until the image's own ratio is known, so a
+	   loaded image of any other shape is not letterboxed. Svelte omits a null
+	   width attribute, so a missing one marks the unsized case. */
+	.media-frame img:not([width]) {
+		aspect-ratio: auto 4 / 3;
 	}
 
 	.media-frame:focus-visible {

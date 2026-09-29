@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { gotoRetrying } from './admin-login';
 import { expectSkipLinkReachesMain } from './site-chrome-helpers';
 
 // The passport homepage (landingLayout = 'passport'), end to end. This file runs
@@ -7,10 +8,11 @@ import { expectSkipLinkReachesMain } from './site-chrome-helpers';
 //   passport        the shared fixture plus fixtures/passport.sql: four
 //                   published pieces by one artist, only one of them in the
 //                   picture pool (one NSFW, two tagged with a character who
-//                   is not the owner), four published VR avatars, two
+//                   is not the owner), six published VR avatars, two
 //                   socials, a confirmed convention running today and one
-//                   upcoming, and one fursuit photo from a past event
-//                   (FurTrack in mock mode).
+//                   upcoming, one fursuit photo from a past event, and one
+//                   from a past convention linked to its event tag (FurTrack
+//                   in mock mode).
 //   passport-empty  the same fixture with every piece, avatar, convention,
 //                   social and the pronouns taken away (fixtures/
 //                   passport-empty.sql): a fresh fork.
@@ -190,10 +192,10 @@ test.describe('populated passport', () => {
 		const site = stamps.getByRole('list', { name: 'On this site' });
 		await expect(site.getByRole('link')).toHaveCount(4);
 		await expect(site.getByRole('link', { name: 'Gallery, 4 pieces by 1 artist' })).toHaveAttribute('href', '/gallery');
-		const fursuit = site.getByRole('link', { name: 'Fursuit photos, 1 photo by 1 photographer' });
+		const fursuit = site.getByRole('link', { name: 'Fursuit photos, 2 photos by 1 photographer' });
 		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
 		await expect(fursuit).toHaveClass(/stamp--rect/);
-		await expect(site.getByRole('link', { name: 'VR avatars, 4 avatars' })).toHaveAttribute('href', '/vr');
+		await expect(site.getByRole('link', { name: 'VR avatars, 6 avatars' })).toHaveAttribute('href', '/vr');
 		await expect(site.getByRole('link', { name: 'About, Links and upcoming conventions' })).toHaveAttribute('href', '/about');
 
 		// No sticker pack and no collection in this fixture: those stamps are
@@ -201,10 +203,10 @@ test.describe('populated passport', () => {
 		await expect(stamps.getByRole('link', { name: /Stickers|Collections/ })).toHaveCount(0);
 		await expect(stamps).not.toContainText(/\b0 /);
 
-		// Next (dashed) before the past event; the live convention is not
-		// repeated here.
+		// Next (dashed) before the past events, newest photo first; the live
+		// convention is not repeated here.
 		const cons = stamps.getByRole('list', { name: 'Conventions' });
-		await expect(cons.getByRole('link')).toHaveCount(2);
+		await expect(cons.getByRole('link')).toHaveCount(3);
 		const next = cons.getByRole('link').nth(0);
 		await expect(next).toHaveAccessibleName(/^Next: E2E Next Con, [A-Z][a-z]{2} \d{4}$/);
 		await expect(next).toHaveAttribute('href', '/connect');
@@ -213,6 +215,17 @@ test.describe('populated passport', () => {
 		await expect(past).toHaveAccessibleName('E2E Past Con 2025, Jun 2025, 1 photo');
 		await expect(past).toHaveAttribute('href', '/gallery?view=fursuit&event=E2E%20Past%20Con%202025');
 		await expect(past).toHaveClass(/stamp--past/);
+		// The linked tag reads as its convention: the convention's name, start
+		// month and place, the tag's photo count, and the tag's filtered view.
+		// The month keeps the date line to itself; the place takes a line of its
+		// own above the count, spoken as its own phrase.
+		const linked = cons.getByRole('link').nth(2);
+		await expect(linked).toHaveAccessibleName('E2E Linked Con 2024, Nov 2024, Rosemont, IL, 1 photo');
+		await expect(linked).toHaveAttribute('href', '/gallery?view=fursuit&event=E2E%20Linked%20Tag%202024');
+		await expect(linked).toHaveClass(/stamp--past/);
+		await expect(linked.locator('.date')).toHaveText('Nov 2024');
+		await expect(linked.locator('.line')).toHaveText(['Rosemont, IL', '1 photo']);
+		await expect(cons).not.toContainText('E2E Linked Tag 2024');
 		await expect(cons).not.toContainText('E2E Live Con');
 		await expect(stamps.getByText('This passport has no stamps yet.')).toHaveCount(0);
 	});
@@ -231,6 +244,11 @@ test.describe('populated passport', () => {
 		).toHaveAttribute('href', '/gallery');
 		const next = stamps.locator('a.stamp--next');
 		await expect(next).toHaveAccessibleName(/^次回：E2E Next Con、\d{4}年\d{1,2}月$/);
+		// The place is its own phrase after the month, so a 読点 joins it on both
+		// sides; it keeps its own ASCII comma inside.
+		await expect(stamps.locator('a[href$="E2E%20Linked%20Tag%202024"]')).toHaveAccessibleName(
+			'E2E Linked Con 2024、2024年11月、Rosemont, IL、写真 1枚'
+		);
 		// The place keeps its own ASCII comma, so a space, not a 読点, joins it to
 		// the date.
 		await expect(stamps.locator('a.stamp--live')).toHaveAccessibleName(
@@ -254,6 +272,18 @@ test.describe('populated passport', () => {
 		await expect(data.locator('a.photo-frame')).toHaveAccessibleName('E2E Daily Piece');
 		await expect(data.locator('figcaption')).toHaveText('作者：Test Artist');
 		await expect(data).not.toContainText('設定画');
+
+		// At 1440 the linked stamp's month, 2024年11月, fills the past stamp's
+		// width: it keeps to one line instead of breaking before 月.
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto('/');
+		const date = stamps.locator('a[href$="E2E%20Linked%20Tag%202024"] .date');
+		await expect(date).toHaveText('2024年11月');
+		const box = await date.evaluate((el) => ({
+			height: el.getBoundingClientRect().height,
+			line: parseFloat(getComputedStyle(el).lineHeight)
+		}));
+		expect(box.height).toBeLessThan(box.line * 1.5);
 	});
 
 	// The header and the phone tab bar say which page this is ("page") on the
@@ -270,7 +300,7 @@ test.describe('populated passport', () => {
 		await expect(page.locator('nav.mobile-nav a[href="/"]')).toHaveAttribute('aria-current', 'page');
 		for (const link of links()) await expect(link).not.toHaveAttribute('aria-current');
 
-		await page.goto('/gallery');
+		await gotoRetrying(page, '/gallery');
 		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'page');
 		for (const link of aboutLinks()) await expect(link).not.toHaveAttribute('aria-current');
 		// The card titles sit straight under the page h1, so they are h2s.
@@ -283,6 +313,30 @@ test.describe('populated passport', () => {
 		await page.goto('/about');
 		for (const link of aboutLinks()) await expect(link).toHaveAttribute('aria-current', 'page');
 		for (const link of links()) await expect(link).not.toHaveAttribute('aria-current');
+	});
+
+	// A public page shows the same fixed bottom nav on a phone as admin does,
+	// so a fresh load keeps the same room clear above it for a focused control
+	// or a scrolled-to element; a wide screen has no nav and keeps none.
+	test('keeps room clear above the phone nav on a fresh public load', async ({ page }) => {
+		const kept = () => page.evaluate(() => getComputedStyle(document.documentElement).scrollPaddingBottom);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/gallery');
+		await expect(page.locator('nav.mobile-nav')).toBeVisible();
+		expect(await kept()).toBe('72px');
+		// A phone with a home indicator adds its inset to the nav's bottom
+		// padding, so the room kept grows by the same amount and still clears
+		// the whole bar. Chromium fakes the inset through the DevTools protocol.
+		const cdp = await page.context().newCDPSession(page);
+		await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { bottom: 34 } });
+		await expect.poll(kept).toBe('106px');
+		const navHeight = await page.locator('nav.mobile-nav').evaluate((nav) => (nav as HTMLElement).offsetHeight);
+		expect(navHeight).toBeGreaterThan(72);
+		expect(parseFloat(await kept())).toBeGreaterThanOrEqual(navHeight);
+		await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await expect(page.locator('nav.mobile-nav')).toBeHidden();
+		expect(await kept()).toBe('auto');
 	});
 
 	// The gallery's filter row: every input and select has a name, the view toggle says

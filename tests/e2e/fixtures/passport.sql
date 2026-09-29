@@ -4,14 +4,15 @@
 -- It switches the homepage to the passport layout, which is why it has its own
 -- server: on the shared one, every spec that visits / would see the passport.
 -- The shared fixture already carries most of what the spec reads: three
--- published parent pieces by one artist (image 5 NSFW), four published VR
+-- published parent pieces by one artist (image 5 NSFW), six published VR
 -- avatars, two social links, and one confirmed convention running today (so
 -- Here now leads). This overlay adds the data-page fields the fixture leaves
 -- blank, the passport picture's pool, and one row for each stamp shape the
 -- fixture can't reach: an upcoming confirmed convention (the dashed Next
 -- stamp) and a fursuit photo with an event (the fursuit rectangle and a
 -- past-event stamp; this server runs FurTrack in mock mode, see
--- wrangler.e2e-passport.toml).
+-- wrangler.e2e-passport.toml), plus a past convention linked to a second
+-- photo's event tag (the past stamp that reads as its convention).
 INSERT OR REPLACE INTO site_settings (key, value) VALUES
   ('landingLayout', 'passport'),
   ('sonaSpecies',   'Red fox'),
@@ -41,8 +42,16 @@ VALUES
   (2, 'E2E Next Con', 'Portland, OR', date('now', '+60 days'), date('now', '+62 days'),
    NULL, 'confirmed', 'America/Los_Angeles', '2026-07-01T00:00:00.000Z');
 
+-- Linked to the tag on photo 2 below, so its stamp reads as this convention.
+INSERT OR REPLACE INTO conventions (id, name, location, start_date, end_date, url, status, timezone, furtrack_event, created_at)
+VALUES
+  (3, 'E2E Linked Con 2024', 'Rosemont, IL', '2024-11-28', '2024-12-01',
+   NULL, 'confirmed', 'America/Chicago', 'E2E Linked Tag 2024', '2026-07-01T00:00:00.000Z');
+
 INSERT OR REPLACE INTO fursuit_photos
   (id, furtrack_post_id, character, image_url, photographer, event, license, furtrack_url, taken_at, created_at)
 VALUES
   (1, 9001, 'E2E', '/e2e-face.png', 'E2E Lens', 'E2E Past Con 2025', 'cc-by',
-   'https://www.furtrack.com/p/9001', '2025-06-14', '2026-07-01T00:00:00.000Z');
+   'https://www.furtrack.com/p/9001', '2025-06-14', '2026-07-01T00:00:00.000Z'),
+  (2, 9002, 'E2E', '/e2e-face.png', 'E2E Lens', 'E2E Linked Tag 2024', 'cc-by',
+   'https://www.furtrack.com/p/9002', '2024-11-30', '2026-07-01T00:00:00.000Z');

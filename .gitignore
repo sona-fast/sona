@@ -40,6 +40,7 @@ vite.config.ts.timestamp-*
 .wrangler-e2e-registry
 .wrangler-e2e-passport
 .wrangler-e2e-passport-empty
+.wrangler-e2e-conventions-event
 
 # Playwright
 /test-results

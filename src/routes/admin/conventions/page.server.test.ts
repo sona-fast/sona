@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { asc, eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { conventions, siteSettings } from '$lib/server/db/schema';
+import { conventions, fursuitPhotos, siteSettings } from '$lib/server/db/schema';
 import { clearSettingsCache } from '$lib/server/settings';
 import type { ConsFyiEvent } from '$lib/server/consfyi';
 
@@ -25,7 +25,7 @@ const { load, actions } = await import('./+page.server');
 const consfyi = await import('$lib/server/consfyi');
 
 type ConventionRow = typeof conventions.$inferSelect;
-type ConventionsData = { conventions: ConventionRow[]; liveId: number | null };
+type ConventionsData = { conventions: ConventionRow[]; liveId: number | null; eventTags: string[] };
 
 // The load result needs an explicit shape: PageServerLoad's declared return type
 // includes void, so property access on the raw result does not typecheck. Same
@@ -49,10 +49,17 @@ function makeDb() {
 			status TEXT NOT NULL DEFAULT 'confirmed',
 			source_id TEXT,
 			timezone TEXT,
+			furtrack_event TEXT UNIQUE,
 			created_at TEXT NOT NULL
+		);
+		CREATE TABLE fursuit_photos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, furtrack_post_id INTEGER NOT NULL UNIQUE, character TEXT NOT NULL,
+			description TEXT, image_url TEXT NOT NULL, width INTEGER, height INTEGER, photographer TEXT NOT NULL,
+			photographer_url TEXT, event TEXT, license TEXT NOT NULL, permission_source TEXT,
+			furtrack_url TEXT NOT NULL, taken_at TEXT, created_at TEXT NOT NULL DEFAULT ''
 		);`);
 	const d1 = makeD1(sqlite);
-	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+	return { sqlite, db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
 
 // Tails of Summer 2026: two days, America/Vancouver (UTC-7). Same fixture the
@@ -435,5 +442,252 @@ describe('cons.fyi ingest: url sanitizing', () => {
 		} as never);
 
 		expect(await db.select().from(conventions)).toMatchObject([{ url: 'https://furfest.org' }]);
+	});
+});
+
+// The FurTrack event link is what the passport's past stamps read a convention by,
+// so a bad link publishes the wrong convention on the homepage. The operator
+// picks it from the tags the photos carry; these pin what the actions accept.
+describe('FurTrack event link', () => {
+	/** One fursuit photo per event value, stored exactly as given. */
+	async function photos(db: ReturnType<typeof drizzle>, events: (string | null)[]) {
+		await db.insert(fursuitPhotos).values(
+			events.map((event, i) => ({
+				furtrackPostId: i + 1,
+				character: 'Taro',
+				imageUrl: `/f${i}.jpg`,
+				photographer: 'Lens',
+				event,
+				license: 'cc-by',
+				furtrackUrl: `https://www.furtrack.com/p/${i + 1}`
+			}))
+		);
+	}
+
+	function post(action: 'create' | 'setEvent', fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [key, value] of Object.entries(fields)) body.append(key, value);
+		return { request: new Request(`https://taro.surf/admin/conventions?/${action}`, { method: 'POST', body }) };
+	}
+
+	type Result = { status?: number; data?: { error?: string; eventId?: number }; message?: string };
+	const create = async (platform: App.Platform, fields: Record<string, string>) =>
+		(await actions.create({ platform, ...post('create', fields) } as never)) as Result;
+	const setEvent = async (platform: App.Platform, fields: Record<string, string>) =>
+		(await actions.setEvent({ platform, ...post('setEvent', fields) } as never)) as Result;
+
+	const MANUAL = { name: 'Midwest FurFest 2024', startDate: '2024-12-05', endDate: '2024-12-08' };
+
+	async function tagOf(db: ReturnType<typeof drizzle>, id: number) {
+		return (await db.select().from(conventions).where(eq(conventions.id, id)).get())?.furtrackEvent;
+	}
+
+	/** Another save links the racer at the moment a query matching `write`
+	 *  runs: the check has already passed, so only the unique index stands in
+	 *  the way. */
+	function raceOn(sqlite: ReturnType<typeof makeDb>['sqlite'], platform: App.Platform, write: RegExp, racerId: number) {
+		const d1 = platform.env!.DB;
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = ((query: string) => {
+			if (write.test(query)) {
+				sqlite.prepare('UPDATE conventions SET furtrack_event = ? WHERE id = ?').run('MFF 2024', racerId);
+			}
+			return realPrepare(query);
+		}) as typeof d1.prepare;
+	}
+
+	it('offers every distinct tag on the photos, exactly as stored, and nothing blank', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024', 'MFF 2024', 'MFF 2024 ', 'Anthrocon 2025', null, '', '   ']);
+		at('2026-01-01T00:00:00Z');
+
+		const res = await loadData(platform);
+		// The trailing space survives: it is a different tag to the gallery's
+		// exact event filter, and the passport groups it on its own.
+		expect(res.eventTags).toEqual(['Anthrocon 2025', 'MFF 2024', 'MFF 2024 ']);
+	});
+
+	it('stores the tag picked on the manual form', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024 ']);
+
+		const res = await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024 ' });
+
+		expect(res.status).toBeUndefined();
+		expect(await db.select().from(conventions)).toMatchObject([{ name: MANUAL.name, furtrackEvent: 'MFF 2024 ' }]);
+	});
+
+	it('stores no tag when the manual form picks none', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+
+		await create(platform, { ...MANUAL, furtrackEvent: '' });
+		await create(platform, { ...MANUAL, name: 'Second' });
+
+		// Two unlinked rows: NULL never collides with NULL under the unique index.
+		expect((await db.select().from(conventions)).map((c) => c.furtrackEvent)).toEqual([null, null]);
+	});
+
+	it('refuses a tag no photo carries, including a trimmed copy of one that does', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024 ']);
+
+		for (const furtrackEvent of ['Anthrocon 2025', 'MFF 2024']) {
+			const res = await create(platform, { ...MANUAL, furtrackEvent });
+			expect(res.status).toBe(400);
+			expect(res.data?.error).toMatch(/No fursuit photo has that FurTrack event/);
+		}
+		expect(await db.select().from(conventions)).toEqual([]);
+	});
+
+	it('refuses a tag already linked to another convention, and names that convention', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024' });
+
+		const res = await create(platform, { ...MANUAL, name: 'Midwest FurFest 2025', furtrackEvent: 'MFF 2024' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe(
+			'That FurTrack event is already linked to Midwest FurFest 2024. Set Midwest FurFest 2024 to None first.'
+		);
+		expect(await db.select().from(conventions)).toHaveLength(1);
+	});
+
+	it('links, relinks and clears an existing convention', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024', 'MFF 2023']);
+		await create(platform, MANUAL);
+		const id = (await db.select().from(conventions).get())!.id;
+
+		const linked = await setEvent(platform, { id: String(id), furtrackEvent: 'MFF 2023' });
+		expect(linked.message).toBe('Linked Midwest FurFest 2024 to the FurTrack event “MFF 2023”.');
+		expect(await tagOf(db, id)).toBe('MFF 2023');
+
+		await setEvent(platform, { id: String(id), furtrackEvent: 'MFF 2024' });
+		expect(await tagOf(db, id)).toBe('MFF 2024');
+
+		const cleared = await setEvent(platform, { id: String(id), furtrackEvent: '' });
+		expect(cleared.message).toBe('Midwest FurFest 2024 is no longer linked to a FurTrack event.');
+		expect(await tagOf(db, id)).toBeNull();
+	});
+
+	it('refuses a save that leaves out the event field, and keeps the link', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024' });
+		const id = (await db.select().from(conventions).get())!.id;
+
+		const res = await setEvent(platform, { id: String(id) });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('Pick a FurTrack event or None.');
+		expect(res.data?.eventId).toBe(id);
+		expect(await tagOf(db, id)).toBe('MFF 2024');
+	});
+
+	it('saves a convention with its own tag again without calling it a conflict', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024' });
+		const id = (await db.select().from(conventions).get())!.id;
+
+		const res = await setEvent(platform, { id: String(id), furtrackEvent: 'MFF 2024' });
+
+		expect(res.status).toBeUndefined();
+		expect(await tagOf(db, id)).toBe('MFF 2024');
+	});
+
+	it('keeps a link whose photos are gone when it is saved unchanged, and refuses it anywhere else', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024' });
+		await create(platform, { ...MANUAL, name: 'Other con' });
+		const [linked, other] = await db.select().from(conventions).orderBy(asc(conventions.id));
+		await db.delete(fursuitPhotos);
+
+		expect((await setEvent(platform, { id: String(linked.id), furtrackEvent: 'MFF 2024' })).status).toBeUndefined();
+		expect(await tagOf(db, linked.id)).toBe('MFF 2024');
+
+		const res = await setEvent(platform, { id: String(other.id), furtrackEvent: 'MFF 2024' });
+		expect(res.status).toBe(400);
+		expect(await tagOf(db, other.id)).toBeNull();
+	});
+
+	it('refuses to move a tag onto a second convention and leaves both rows as they were', async () => {
+		const { db, platform } = makeDb();
+		await photos(db, ['MFF 2024', 'MFF 2023']);
+		await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024' });
+		await create(platform, { ...MANUAL, name: 'Midwest FurFest 2023', furtrackEvent: 'MFF 2023' });
+		const [first, second] = await db.select().from(conventions).orderBy(asc(conventions.id));
+
+		const res = await setEvent(platform, { id: String(second.id), furtrackEvent: 'MFF 2024' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toContain('already linked to Midwest FurFest 2024');
+		// The refused row, so the page can tie the error to that row's select.
+		expect(res.data?.eventId).toBe(second.id);
+		expect(await tagOf(db, first.id)).toBe('MFF 2024');
+		expect(await tagOf(db, second.id)).toBe('MFF 2023');
+	});
+
+	it('answers a missing convention with a form error', async () => {
+		const { platform } = makeDb();
+		const gone = await setEvent(platform, { id: '99', furtrackEvent: '' });
+		expect(gone.status).toBe(400);
+		expect(gone.data?.error).toBe('That convention is no longer on your schedule.');
+		expect((await setEvent(platform, { furtrackEvent: '' })).status).toBe(400);
+	});
+
+	it('turns a link that lands between the check and the write into a form error, not a 500', async () => {
+		const { sqlite, db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, MANUAL);
+		await create(platform, { ...MANUAL, name: 'Racer' });
+		const [target, racer] = await db.select().from(conventions).orderBy(asc(conventions.id));
+		raceOn(sqlite, platform, /^update "conventions" set "furtrack_event"/, racer.id);
+
+		const res = await setEvent(platform, { id: String(target.id), furtrackEvent: 'MFF 2024' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('Another convention just took that FurTrack event. Reload the page to see which one.');
+		expect(res.data?.eventId).toBe(target.id);
+		expect(await tagOf(db, target.id)).toBeNull();
+	});
+
+	it('answers a convention deleted between the check and the write with a form error, and writes nothing', async () => {
+		const { sqlite, db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, MANUAL);
+		const target = (await db.select().from(conventions).get())!;
+		const d1 = platform.env!.DB;
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = ((query: string) => {
+			if (/^update "conventions" set "furtrack_event"/.test(query)) {
+				sqlite.prepare('DELETE FROM conventions WHERE id = ?').run(target.id);
+			}
+			return realPrepare(query);
+		}) as typeof d1.prepare;
+
+		const res = await setEvent(platform, { id: String(target.id), furtrackEvent: 'MFF 2024' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('That convention is no longer on your schedule.');
+		expect(res.data?.eventId).toBe(target.id);
+		expect(await db.select().from(conventions)).toEqual([]);
+	});
+
+	it('turns a link that lands between the check and the insert into a form error, and adds nothing', async () => {
+		const { sqlite, db, platform } = makeDb();
+		await photos(db, ['MFF 2024']);
+		await create(platform, { ...MANUAL, name: 'Racer' });
+		const racer = (await db.select().from(conventions).get())!;
+		raceOn(sqlite, platform, /^insert into "conventions"/, racer.id);
+
+		const res = await create(platform, { ...MANUAL, furtrackEvent: 'MFF 2024' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('Another convention just took that FurTrack event. Reload the page to see which one.');
+		expect((await db.select().from(conventions)).map((c) => c.name)).toEqual(['Racer']);
 	});
 });

@@ -259,6 +259,7 @@
 									tilt={CON_TILTS[i % CON_TILTS.length]}
 									name={con.name}
 									date={con.month ? monthYear(con.month) : undefined}
+									place={con.location}
 									lines={[m.passport_photos({ count: con.photos })]}
 								/>
 							{/if}

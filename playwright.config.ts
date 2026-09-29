@@ -33,7 +33,10 @@ import {
 	E2E_PLATFORM_PERSIST_PASSPORT,
 	E2E_PASSPORT_EMPTY_OVERLAY,
 	E2E_PERSIST_TO_PASSPORT_EMPTY,
-	E2E_PLATFORM_PERSIST_PASSPORT_EMPTY
+	E2E_PLATFORM_PERSIST_PASSPORT_EMPTY,
+	E2E_CONVENTIONS_EVENT_OVERLAY,
+	E2E_PERSIST_TO_CONVENTIONS_EVENT,
+	E2E_PLATFORM_PERSIST_CONVENTIONS_EVENT
 } from './tests/e2e/paths';
 
 // The shared read-only DB/server (gallery, palette), an isolated one for the
@@ -41,12 +44,13 @@ import {
 // spec (needs UPLOADTHING_TOKEN + the UT interceptor, which would perturb the
 // shared specs), an isolated one for the upload spec, and isolated ones for the
 // serial tag-suggestions and suggest-tags specs, and one for the registry-sync
-// spec (registry features on, registry interceptor preloaded), and two for the
-// passport homepage spec (populated and fresh-site) — see below.
+// spec (registry features on, registry interceptor preloaded), two for the
+// passport homepage spec (populated and fresh-site), and one for the admin
+// conventions FurTrack event spec — see below.
 //
-// The eleven ports are derived from one base so a concurrent run can take a
-// private block: set SONA_E2E_BASE_PORT and this run binds base..base+10 instead
-// of 4179-4189. Without it, every checkout and every agent binds the same eleven
+// The twelve ports are derived from one base so a concurrent run can take a
+// private block: set SONA_E2E_BASE_PORT and this run binds base..base+11 instead
+// of 4179-4190. Without it, every checkout and every agent binds the same twelve
 // ports, and a second run either dies on --strictPort or (worse) gets its
 // servers killed by whoever assumes the listener is their own stray (SONA-164).
 // `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
@@ -54,9 +58,9 @@ import {
 // explicitly invalid port still trips the check below rather than silently
 // falling back.)
 const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
-if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_525) {
+if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_524) {
 	throw new Error(
-		`SONA_E2E_BASE_PORT must be an integer in 1024-65525 (needs 11 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
+		`SONA_E2E_BASE_PORT must be an integer in 1024-65524 (needs 12 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
 	);
 }
 const PORT = BASE_PORT;
@@ -70,6 +74,7 @@ const STICKERS_PORT = BASE_PORT + 7;
 const REGISTRY_PORT = BASE_PORT + 8;
 const PASSPORT_PORT = BASE_PORT + 9;
 const PASSPORT_EMPTY_PORT = BASE_PORT + 10;
+const CONVENTIONS_EVENT_PORT = BASE_PORT + 11;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -201,6 +206,19 @@ const passportEmptyServerEnv = {
 	SONA_E2E_SEED_OVERLAY: E2E_PASSPORT_EMPTY_OVERLAY
 };
 
+// The admin conventions FurTrack event spec saves links and adds a convention,
+// so it takes neither the shared server (read-only by convention) nor another
+// spec's. Its own seeded DB + server; one worker, because each test starts
+// from the links the one before it saved (SONA-230).
+const CONVENTIONS_EVENT_SPEC = '**/admin-conventions-event.spec.ts';
+
+const conventionsEventServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_CONVENTIONS_EVENT,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_CONVENTIONS_EVENT,
+	SONA_E2E_SEED_OVERLAY: E2E_CONVENTIONS_EVENT_OVERLAY
+};
+
 const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 // storage-breakdown rides the ut-stat server: it also flips the storage
 // provider, which would race the shared server's specs (SONA-192).
@@ -278,7 +296,8 @@ export default defineConfig({
 				THEME_SPEC,
 				STICKERS_SPEC,
 				...REGISTRY_SPECS,
-				PASSPORT_SPEC
+				PASSPORT_SPEC,
+				CONVENTIONS_EVENT_SPEC
 			],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
@@ -310,6 +329,12 @@ export default defineConfig({
 			name: 'passport-empty',
 			testMatch: PASSPORT_SPEC,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PASSPORT_EMPTY_PORT}` }
+		},
+		{
+			name: 'conventions-event',
+			testMatch: CONVENTIONS_EVENT_SPEC,
+			workers: 1,
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${CONVENTIONS_EVENT_PORT}` }
 		},
 		{
 			name: 'theme-picker',
@@ -357,6 +382,7 @@ export default defineConfig({
 		webServer(STICKERS_PORT, stickersServerEnv),
 		webServer(REGISTRY_PORT, registryServerEnv),
 		webServer(PASSPORT_PORT, passportServerEnv),
-		webServer(PASSPORT_EMPTY_PORT, passportEmptyServerEnv)
+		webServer(PASSPORT_EMPTY_PORT, passportEmptyServerEnv),
+		webServer(CONVENTIONS_EVENT_PORT, conventionsEventServerEnv)
 	]
 });

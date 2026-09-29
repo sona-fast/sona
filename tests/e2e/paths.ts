@@ -122,6 +122,16 @@ export const E2E_PASSPORT_EMPTY_OVERLAY = path.join(here, 'fixtures', 'passport-
 export const E2E_PERSIST_TO_PASSPORT_EMPTY = path.join(persistRoot, '.wrangler-e2e-passport-empty');
 export const E2E_PLATFORM_PERSIST_PASSPORT_EMPTY = path.join(E2E_PERSIST_TO_PASSPORT_EMPTY, 'v3');
 
+// The admin conventions FurTrack event spec saves links and adds a convention,
+// and the shared servers are read-only by convention. Its own throwaway DB +
+// dev server, seeded with fixtures/admin-conventions-event.sql layered on the
+// shared fixture (two tagged fursuit photos and four conventions). The shared
+// wrangler config is enough: the admin page offers the photos' tags whether or
+// not FurTrack is on. See playwright.config.ts (SONA-230).
+export const E2E_CONVENTIONS_EVENT_OVERLAY = path.join(here, 'fixtures', 'admin-conventions-event.sql');
+export const E2E_PERSIST_TO_CONVENTIONS_EVENT = path.join(persistRoot, '.wrangler-e2e-conventions-event');
+export const E2E_PLATFORM_PERSIST_CONVENTIONS_EVENT = path.join(E2E_PERSIST_TO_CONVENTIONS_EVENT, 'v3');
+
 // The registry-sync spec clicks the admin "Sync now" button with the shared
 // registry turned ON (REGISTRY_API_KEY + REGISTRY_URL in
 // wrangler.e2e-registry.toml), which makes the settings and artists loads call
