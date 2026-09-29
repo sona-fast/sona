@@ -14,7 +14,7 @@ import { artists } from './db/schema';
 import { getRawSetting, setRawSetting } from './settings';
 import type { SiteSettings } from './settings';
 import { sanitizeUrl } from './validate';
-import { handlesOverlap } from './handle-normalize';
+import { flattenPatreonUrl, handlesOverlap } from './handle-normalize';
 import {
 	isFatalRefusal,
 	isRegistryEnabled,
@@ -92,8 +92,18 @@ export function socialsToColumns(socials: Record<string, string>): Record<string
 	// The registry payload is untrusted — `socials` may be null / not an object.
 	// Guard so a malformed record can't throw and wedge the whole sync batch.
 	const s = socials && typeof socials === 'object' ? socials : {};
-	for (const k of SOCIAL_URL_KEYS) out[k] = sanitizeUrl(s[k]);
+	for (const k of SOCIAL_URL_KEYS) out[k] = sanitizeSocialUrl(k, s[k]);
 	return out;
+}
+
+// sanitizeUrl, plus the ingest rule the artist forms apply: a Patreon link naming
+// a creator is stored as https://www.patreon.com/<name>, whatever spelling
+// (/c/, /cw/, /join/, ...) the registry sent. Anything flattenPatreonUrl refuses
+// keeps the sanitizeUrl result; other platforms are untouched.
+function sanitizeSocialUrl(key: string, value: string | null | undefined): string | null {
+	const url = sanitizeUrl(value);
+	if (url && key === 'patreonUrl') return flattenPatreonUrl(url) || url;
+	return url;
 }
 
 // Serialize a registry record's former identities for the local `aliases` column.
@@ -108,7 +118,7 @@ export function aliasesToColumn(aliases: RegistryArtist['aliases']): string | nu
 		.map((a) => {
 			const socials: Record<string, string> = {};
 			for (const [k, v] of Object.entries(a.socials ?? {})) {
-				const url = sanitizeUrl(v);
+				const url = sanitizeSocialUrl(k, v);
 				if (url) socials[k] = url;
 			}
 			return { displayName: a.displayName, socials };

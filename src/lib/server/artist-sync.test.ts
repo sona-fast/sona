@@ -300,6 +300,54 @@ describe('syncArtists delta feed — authentication', () => {
 	});
 });
 
+describe('syncArtists delta feed — Patreon links are stored flat', () => {
+	// Same ingest rule as the artist forms: every Patreon spelling that names a
+	// creator lands as https://www.patreon.com/<name>, so variants never collide.
+	async function syncOne(socials: Record<string, string>, aliasSocials: Record<string, string> = {}) {
+		const db = makeDb();
+		const now = new Date().toISOString();
+		await db.insert(artists).values({ name: 'Bob', globalId: 'g-bob', createdAt: now });
+		stubDeltaResponse(200, {
+			artists: [
+				{
+					...deltaArtist('g-bob', 3, now),
+					socials,
+					aliases: [{ displayName: 'Old Bob', socials: aliasSocials }]
+				}
+			],
+			nextCursor: null
+		});
+		await syncArtists(db, ENV, { registryOverridesLocal: true } as unknown as SiteSettings);
+		return (await db.select().from(artists).where(eq(artists.globalId, 'g-bob')).get())!;
+	}
+
+	it('stores a registry /cw/ link as the flat form', async () => {
+		const row = await syncOne({ patreonUrl: 'patreon.com/cw/Bob_Art' });
+		expect(row.patreonUrl).toBe('https://www.patreon.com/Bob_Art');
+	});
+
+	it('stores an alias /c/ link as the flat form', async () => {
+		const row = await syncOne({}, { patreonUrl: 'https://www.patreon.com/c/OldBob' });
+		expect(JSON.parse(row.aliases!)).toEqual([
+			{ displayName: 'Old Bob', socials: { patreonUrl: 'https://www.patreon.com/OldBob' } }
+		]);
+	});
+
+	it('keeps a Patreon link with no creator name as sanitizeUrl left it', async () => {
+		const row = await syncOne({ patreonUrl: 'patreon.com/user?u=1' });
+		expect(row.patreonUrl).toBe('https://patreon.com/user?u=1');
+	});
+
+	it('still drops a javascript: Patreon value and leaves other platforms alone', async () => {
+		const row = await syncOne({
+			patreonUrl: 'javascript:alert(1)',
+			twitterUrl: 'https://twitter.com/c/bob'
+		});
+		expect(row.patreonUrl).toBeNull();
+		expect(row.twitterUrl).toBe('https://twitter.com/c/bob');
+	});
+});
+
 describe('syncArtists backfill — identity verification', () => {
 	const now = new Date().toISOString();
 

@@ -126,7 +126,7 @@ export function normalizeSocialUrl(
 /** https://www.patreon.com/<name> for a patreon.com URL naming a creator, else ''.
  *  Requires the patreon.com host itself — extractHandle alone would read the first
  *  label of any other host (evil.com/x → "evil.com") as a handle. */
-function flattenPatreonUrl(url: string): string {
+export function flattenPatreonUrl(url: string): string {
 	const host = url
 		.toLowerCase()
 		.replace(/^https?:\/\//, '')
