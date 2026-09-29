@@ -16,7 +16,7 @@
 	title={m.vr_meta_title({ siteName })}
 	description={m.vr_meta_description({ countLabel: m.vr_count({ count: data.total }), siteName })}
 	url={`${pageState.url.origin}${pageState.url.pathname}`}
-	image={data.avatars[0]?.posterUrl ?? null}
+	image={data.ogImage}
 	{siteName}
 />
 

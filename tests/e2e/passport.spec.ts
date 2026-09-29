@@ -8,7 +8,7 @@ import { expectSkipLinkReachesMain } from './site-chrome-helpers';
 //   passport        the shared fixture plus fixtures/passport.sql: four
 //                   published pieces by one artist, only one of them in the
 //                   picture pool (one NSFW, two tagged with a character who
-//                   is not the owner), four published VR avatars, two
+//                   is not the owner), six published VR avatars, two
 //                   socials, a confirmed convention running today and one
 //                   upcoming, one fursuit photo from a past event, and one
 //                   from a past convention linked to its event tag (FurTrack
@@ -195,7 +195,7 @@ test.describe('populated passport', () => {
 		const fursuit = site.getByRole('link', { name: 'Fursuit photos, 2 photos by 1 photographer' });
 		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
 		await expect(fursuit).toHaveClass(/stamp--rect/);
-		await expect(site.getByRole('link', { name: 'VR avatars, 4 avatars' })).toHaveAttribute('href', '/vr');
+		await expect(site.getByRole('link', { name: 'VR avatars, 6 avatars' })).toHaveAttribute('href', '/vr');
 		await expect(site.getByRole('link', { name: 'About, Links and upcoming conventions' })).toHaveAttribute('href', '/about');
 
 		// No sticker pack and no collection in this fixture: those stamps are

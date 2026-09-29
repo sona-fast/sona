@@ -4,7 +4,7 @@
 -- It switches the homepage to the passport layout, which is why it has its own
 -- server: on the shared one, every spec that visits / would see the passport.
 -- The shared fixture already carries most of what the spec reads: three
--- published parent pieces by one artist (image 5 NSFW), four published VR
+-- published parent pieces by one artist (image 5 NSFW), six published VR
 -- avatars, two social links, and one confirmed convention running today (so
 -- Here now leads). This overlay adds the data-page fields the fixture leaves
 -- blank, the passport picture's pool, and one row for each stamp shape the

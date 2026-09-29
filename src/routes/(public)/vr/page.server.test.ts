@@ -23,6 +23,10 @@ function makeDb() {
 			description TEXT, created_at TEXT NOT NULL
 		);
 		CREATE TABLE avatar_platforms (avatar_id INTEGER NOT NULL, platform TEXT NOT NULL);
+		CREATE TABLE avatar_media (
+			avatar_id INTEGER NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL,
+			width INTEGER, height INTEGER, position INTEGER NOT NULL DEFAULT 0
+		);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT,
 			nsfw INTEGER NOT NULL DEFAULT 0
@@ -43,6 +47,7 @@ function addAvatar(
 		externalUrl?: string | null;
 		posterImageId?: number | null;
 		nsfw?: number;
+		createdAt?: string;
 	}
 ) {
 	return sqlite
@@ -58,8 +63,20 @@ function addAvatar(
 			opts.posterImageId ?? null,
 			opts.nsfw ?? 0,
 			opts.published ?? 1,
-			NOW
+			opts.createdAt ?? NOW
 		).lastInsertRowid as number;
+}
+
+function addMedia(
+	sqlite: ReturnType<typeof makeDb>['sqlite'],
+	avatarId: number,
+	kind: 'image' | 'video',
+	url: string,
+	position: number
+) {
+	sqlite
+		.prepare('INSERT INTO avatar_media (avatar_id, kind, url, position) VALUES (?, ?, ?, ?)')
+		.run(avatarId, kind, url, position);
 }
 
 type IndexData = {
@@ -73,6 +90,7 @@ type IndexData = {
 		externalName: string | null;
 	}>;
 	total: number;
+	ogImage: string | null;
 	stickersEnabled: boolean;
 };
 
@@ -173,5 +191,84 @@ describe('/vr index load', () => {
 		// A hosted model wins the badge; the external home shows on the detail page.
 		expect(bySlug.both.hasModel).toBe(true);
 		expect(bySlug.both.externalName).toBeNull();
+	});
+
+	it('uses a showcase image for a posterless avatar, and keeps a real poster', async () => {
+		// Ordering and video-skipping are covered in vr-showcase.test.ts; this
+		// pins the loader's wiring only.
+		const { sqlite, platform } = makeDb();
+		const bare = addAvatar(sqlite, { slug: 'bare' });
+		addMedia(sqlite, bare, 'image', 'https://cdn.example.com/shot.png', 0);
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, thumbnail_url) VALUES (1, ?, ?)')
+			.run('https://cdn.example.com/poster.png', 'https://cdn.example.com/poster-thumb.png');
+		const postered = addAvatar(sqlite, { slug: 'postered', posterImageId: 1 });
+		addMedia(sqlite, postered, 'image', 'https://cdn.example.com/ignored.png', 0);
+
+		const data = await loadData(platform);
+		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
+		expect(bySlug.bare.posterUrl).toBe('https://cdn.example.com/shot.png');
+		expect(bySlug.postered.posterUrl).toBe('https://cdn.example.com/poster-thumb.png');
+	});
+
+	it('takes the link preview from the newest SFW avatar, skipping a newer NSFW one', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, thumbnail_url) VALUES (1, ?, ?)')
+			.run('https://cdn.example.com/sfw.png', 'https://cdn.example.com/sfw-thumb.png');
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, thumbnail_url) VALUES (2, ?, ?)')
+			.run('https://cdn.example.com/mature.png', 'https://cdn.example.com/mature-thumb.png');
+		addAvatar(sqlite, { slug: 'older-sfw', posterImageId: 1, createdAt: '2026-01-01T00:00:00.000Z' });
+		addAvatar(sqlite, { slug: 'newest-nsfw', posterImageId: 2, nsfw: 1, createdAt: '2026-02-01T00:00:00.000Z' });
+
+		const data = await loadData(platform);
+		// The NSFW avatar leads the list, so a "first avatar" preview would leak it.
+		expect(data.avatars[0].slug).toBe('newest-nsfw');
+		expect(data.ogImage).toBe('https://cdn.example.com/sfw-thumb.png');
+	});
+
+	it('takes the link preview from an older SFW avatar when the newest SFW one has no image', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, thumbnail_url) VALUES (1, ?, ?)')
+			.run('https://cdn.example.com/older.png', 'https://cdn.example.com/older-thumb.png');
+		addAvatar(sqlite, { slug: 'older-sfw', posterImageId: 1, createdAt: '2026-01-01T00:00:00.000Z' });
+		const newest = addAvatar(sqlite, { slug: 'newest-video', createdAt: '2026-02-01T00:00:00.000Z' });
+		addMedia(sqlite, newest, 'video', 'https://cdn.example.com/clip.mp4', 0);
+
+		const data = await loadData(platform);
+		expect(data.avatars[0].slug).toBe('newest-video');
+		expect(data.avatars[0].posterUrl).toBeNull();
+		expect(data.ogImage).toBe('https://cdn.example.com/older-thumb.png');
+	});
+
+	it('has no link preview when every avatar is NSFW', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, thumbnail_url) VALUES (1, ?, ?)')
+			.run('https://cdn.example.com/mature.png', 'https://cdn.example.com/mature-thumb.png');
+		addAvatar(sqlite, { slug: 'a', posterImageId: 1, nsfw: 1, createdAt: '2026-01-01T00:00:00.000Z' });
+		const b = addAvatar(sqlite, { slug: 'b', nsfw: 1, createdAt: '2026-02-01T00:00:00.000Z' });
+		addMedia(sqlite, b, 'image', 'https://cdn.example.com/b.png', 0);
+
+		const data = await loadData(platform);
+		expect(data.ogImage).toBeNull();
+	});
+
+	it('keeps a fallback-image avatar out of the blur unless the avatar itself is NSFW', async () => {
+		// Showcase media carries no NSFW flag of its own, so the avatar's flag is
+		// the only gate — and it must still apply to the stand-in image.
+		const { sqlite, platform } = makeDb();
+		const clean = addAvatar(sqlite, { slug: 'clean' });
+		addMedia(sqlite, clean, 'image', 'https://cdn.example.com/a.png', 0);
+		const mature = addAvatar(sqlite, { slug: 'mature', nsfw: 1 });
+		addMedia(sqlite, mature, 'image', 'https://cdn.example.com/b.png', 0);
+
+		const data = await loadData(platform);
+		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
+		expect(bySlug.clean.nsfw).toBe(false);
+		expect(bySlug.mature.nsfw).toBe(true);
+		expect(bySlug.mature.posterUrl).toBe('https://cdn.example.com/b.png');
 	});
 });
