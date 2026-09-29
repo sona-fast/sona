@@ -26,9 +26,17 @@ export const HOST_PREFIXES: Record<Platform, string[]> = {
 	telegram: ['t.me/s/', 't.me/', 'telegram.me/'],
 	furaffinity: ['furaffinity.net/user/'],
 	deviantart: ['deviantart.com/'],
-	// 'patreon.com/c/<user>' (newer creator pages) must be tried before the bare
-	// 'patreon.com/' prefix, else the username collapses to 'c'.
-	patreon: ['patreon.com/c/', 'patreon.com/'],
+	// 'patreon.com/cw/<user>' and 'patreon.com/c/<user>' (newer creator pages),
+	// and the 'patreon.com/join/<user>' and 'patreon.com/checkout/<user>' pledge
+	// links, must be tried before the bare 'patreon.com/' prefix, else the
+	// username collapses to 'cw', 'c', 'join', or 'checkout'. Longest first.
+	patreon: [
+		'patreon.com/checkout/',
+		'patreon.com/join/',
+		'patreon.com/cw/',
+		'patreon.com/c/',
+		'patreon.com/'
+	],
 	instagram: ['instagram.com/']
 };
 
@@ -115,8 +123,29 @@ export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
 		'compose'
 	],
 	// 'user' is Patreon's legacy profile form, patreon.com/user?u=<id> — the
-	// account is in the query string, so the path segment names nobody.
-	patreon: ['posts', 'c', 'user', 'login', 'home', 'search', 'explore'],
+	// account is in the query string, so the path segment names nobody. The same
+	// goes for bePatron?u=<id>, m/<id>, collection/<id>, and profile/creators?id=<id>;
+	// a bare /join or /checkout (no creator after it) is a section too.
+	patreon: [
+		'posts',
+		'c',
+		'cw',
+		'user',
+		'login',
+		'home',
+		'search',
+		'explore',
+		'bepatron',
+		'join',
+		'checkout',
+		'm',
+		'collection',
+		'profile',
+		'membership',
+		'messages',
+		'settings',
+		'notifications'
+	],
 	deviantart: ['tag', 'art', 'journal', 'search', 'shop', 'daily-deviations'],
 	// 'addstickers' matters here beyond tidiness: this repo imports sticker packs
 	// from t.me/addstickers/<pack> (see server/telegram.ts), so pasting one into

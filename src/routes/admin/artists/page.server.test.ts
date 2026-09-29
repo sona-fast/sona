@@ -360,6 +360,48 @@ describe('admin artists load — alias-linked share guard (#71)', () => {
 	});
 });
 
+describe('admin artists load — unlinked Patreon /cw/ artist share guard', () => {
+	function patreonEntry(patreonUrl: string) {
+		return {
+			globalId: 'g-alice',
+			displayName: 'Alice',
+			avatarUrl: null,
+			bio: null,
+			socials: { patreonUrl },
+			aliases: [],
+			status: 'active',
+			mergedInto: null,
+			version: 1,
+			updatedAt: '2026-01-01T00:00:00Z'
+		};
+	}
+
+	async function loadWithEntry(patreonUrl: string) {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		const [row] = await db
+			.insert(schema.artists)
+			.values({ name: 'Bob', patreonUrl: 'https://www.patreon.com/cw/bob-art' })
+			.returning({ id: schema.artists.id });
+		stubRegistryFetch({
+			'/v1/submissions/mine': { submissions: [] },
+			'/v1/artists?': { artists: [patreonEntry(patreonUrl)], nextCursor: null }
+		});
+		const result = (await load(loadEvent(platform))) as { upToDate: Record<number, boolean> };
+		return { id: row.id, upToDate: result.upToDate };
+	}
+
+	it('leaves a different /cw/ creator shareable (not marked already in the catalog)', async () => {
+		const { id, upToDate } = await loadWithEntry('https://www.patreon.com/cw/alice-art');
+		expect(upToDate[id]).toBeUndefined();
+	});
+
+	it('marks the same /cw/ creator as already in the catalog', async () => {
+		const { id, upToDate } = await loadWithEntry('patreon.com/cw/Bob-Art/');
+		expect(upToDate[id]).toBe(true);
+	});
+});
+
 describe('admin artists load — catalog refusal is surfaced, not silently empty', () => {
 	it('sets registryError (and still lists local artists) when the delta feed 401s', async () => {
 		const { db, platform } = makeDb();
@@ -657,17 +699,17 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 	});
 });
 
-describe('update action — avatar clobber guard (#187)', () => {
-	function updateEvent(platform: App.Platform, fields: Record<string, string>) {
-		const body = new FormData();
-		for (const [k, v] of Object.entries(fields)) body.append(k, v);
-		return {
-			platform,
-			url: new URL('http://localhost/admin/artists'),
-			request: new Request('http://localhost/admin/artists', { method: 'POST', body })
-		} as never;
-	}
+function updateEvent(platform: App.Platform, fields: Record<string, string>) {
+	const body = new FormData();
+	for (const [k, v] of Object.entries(fields)) body.append(k, v);
+	return {
+		platform,
+		url: new URL('http://localhost/admin/artists'),
+		request: new Request('http://localhost/admin/artists', { method: 'POST', body })
+	} as never;
+}
 
+describe('update action — avatar clobber guard (#187)', () => {
 	// The default beforeEach stub fails every fetch, so re-resolution comes back null.
 	it('keeps the existing avatar when re-resolution fails during an edit', async () => {
 		const { db, platform } = makeDb();
@@ -756,6 +798,21 @@ describe('update action — avatar clobber guard (#187)', () => {
 		expect(after!.name).toBe('Nyx Prime');
 		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg');
 		expect(after!.avatarResolvedAt).toBeNull(); // untouched — nothing was written
+	});
+});
+
+describe('update action — Patreon link normalization', () => {
+	it('stores a Patreon /cw/ link as the flat patreon.com/<name> form, casing kept', async () => {
+		const { db, platform } = makeDb();
+		const row = await db.insert(schema.artists).values({ name: 'Bob' }).returning({ id: schema.artists.id }).get();
+
+		const result = await actions.update(
+			updateEvent(platform, { id: String(row.id), name: 'Bob', patreon: 'https://www.patreon.com/cw/Bob_Art' })
+		);
+		expect(result).toEqual({ success: true });
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.patreonUrl).toBe('https://www.patreon.com/Bob_Art');
 	});
 });
 

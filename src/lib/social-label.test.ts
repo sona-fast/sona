@@ -245,6 +245,7 @@ describe('rule 2: no hostname is ever shown as a handle', () => {
 		expect(socialLabel('instagram', 'https://instagram.com/Reels/C8xYz')).toBe('Instagram');
 		expect(socialLabel('telegram', 'https://t.me/s')).toBe('Telegram');
 		expect(socialLabel('patreon', 'https://patreon.com/c')).toBe('Patreon');
+		expect(socialLabel('patreon', 'https://www.patreon.com/cw')).toBe('Patreon');
 	});
 
 	it('covers the browse and account sections these two platforms also serve', () => {
@@ -283,6 +284,18 @@ describe('rule 3: the handle is the first profile segment', () => {
 
 	it('takes the Patreon creator-page username, not the /c/ marker', () => {
 		expect(socialLabel('patreon', 'https://www.patreon.com/c/taro/posts')).toBe('@taro');
+	});
+
+	it('takes the Patreon creator-page username, not the /cw/ marker', () => {
+		expect(socialLabel('patreon', 'https://www.patreon.com/cw/taro')).toBe('@taro');
+	});
+
+	it('takes the creator from a Patreon join link, not the /join/ marker', () => {
+		expect(socialLabel('patreon', 'https://www.patreon.com/join/bob')).toBe('@bob');
+	});
+
+	it('renders a Patreon bePatron?u= link as the platform name', () => {
+		expect(socialLabel('patreon', 'https://www.patreon.com/bePatron?u=1')).toBe('Patreon');
 	});
 
 	it('takes the Telegram channel name, not the /s/ preview marker', () => {

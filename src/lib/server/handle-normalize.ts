@@ -9,9 +9,23 @@
 
 import { sanitizeUrl, stripControlChars } from './validate';
 import { SOCIAL_KEY_TO_PLATFORM, normalizeHandle } from '../handle-classify';
-import { platformDomains, type Platform, type SocialPlatform } from '../social-platforms';
+import {
+	RESERVED_SEGMENTS,
+	extractHandle,
+	platformDomains,
+	type Platform,
+	type SocialPlatform
+} from '../social-platforms';
 
 export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform };
+
+/** Letters, digits, and . _ - — what a bare handle may contain (Bluesky handles
+ *  contain dots). */
+const HANDLE_CHARS = /^[A-Za-z0-9._-]+$/;
+
+/** sanitizeUrl's length cap (validate.ts), mirrored for the flattened Patreon URL,
+ *  which is returned without passing through sanitizeUrl. Keep the two equal. */
+const MAX_URL_LENGTH = 2048;
 
 export interface NormalizedHandle {
 	platform: Platform;
@@ -62,6 +76,11 @@ const PROFILE_URL_PREFIX: Record<SocialPlatform, string> = {
  *
  * A bare Bluesky handle such as `name.bsky.social` has dots but no scheme/slash/known
  * domain, so it is deliberately treated as a handle → https://bsky.app/profile/name.bsky.social.
+ *
+ * Patreon creator links come in several spellings (patreon.com/<name>, /c/<name>,
+ * /cw/<name>, /join/<name>, /checkout/<name>); a patreon.com URL that names a creator is stored as the one form
+ * https://www.patreon.com/<name>, casing kept. One with no creator in it
+ * (user?u=<id>, bePatron?u=<id>, posts/<slug>, bare /cw) keeps the sanitizeUrl result.
  */
 export function normalizeSocialUrl(
 	platform: SocialPlatform,
@@ -90,10 +109,35 @@ export function normalizeSocialUrl(
 		lower.startsWith('https://') ||
 		trimmed.includes('/') ||
 		domains.some((d) => lower.includes(d));
-	if (looksLikeUrl) return sanitizeUrl(trimmed) ?? '';
+	if (looksLikeUrl) {
+		if (platform === 'patreon') {
+			const flat = flattenPatreonUrl(trimmed);
+			if (flat) return flat;
+		}
+		return sanitizeUrl(trimmed) ?? '';
+	}
 
 	// Bare handle: keep letters, digits, and . _ - (Bluesky handles contain dots).
 	const handle = trimmed.replace(/^@+/, '');
-	if (!handle || !/^[A-Za-z0-9._-]+$/.test(handle)) return '';
+	if (!handle || !HANDLE_CHARS.test(handle)) return '';
 	return PROFILE_URL_PREFIX[platform] + handle;
+}
+
+/** https://www.patreon.com/<name> for a patreon.com URL naming a creator, else ''.
+ *  Requires the patreon.com host itself — extractHandle alone would read the first
+ *  label of any other host (evil.com/x → "evil.com") as a handle. */
+export function flattenPatreonUrl(url: string): string {
+	const host = url
+		.toLowerCase()
+		.replace(/^https?:\/\//, '')
+		.replace(/^\/\//, '')
+		.replace(/^www\./, '');
+	if (!host.startsWith('patreon.com/')) return '';
+	const handle = extractHandle('patreon', url);
+	if (!HANDLE_CHARS.test(handle)) return '';
+	// '.' and '..' are path navigation, not a creator.
+	if (/^\.+$/.test(handle)) return '';
+	if (RESERVED_SEGMENTS.patreon?.includes(handle.toLowerCase())) return '';
+	const flat = PROFILE_URL_PREFIX.patreon + handle;
+	return flat.length > MAX_URL_LENGTH ? '' : flat;
 }

@@ -7,7 +7,7 @@
 
 // The platform tables and the extraction itself live in ./social-platforms, so
 // the public pages can bundle them without this module's search classifier.
-import { HOST_PREFIXES, extractHandle, type Platform } from './social-platforms';
+import { HOST_PREFIXES, RESERVED_SEGMENTS, extractHandle, type Platform } from './social-platforms';
 
 /** Maps the artist *Url column / payload keys to platforms. */
 export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {
@@ -20,9 +20,15 @@ export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {
 	instagramUrl: 'instagram'
 };
 
-/** The matching form of a handle: {@link extractHandle}, case-folded. */
+/** The matching form of a handle: {@link extractHandle}, case-folded, or ''
+ *  when a Patreon segment names one of Patreon's own sections rather than an
+ *  account. patreon.com/user?u=1 and patreon.com/user?u=2 are two people, and
+ *  matching them as the handle 'user' made them one. Only Patreon: the
+ *  registry's normalize (PATREON_RESERVED) reserves no other platform's
+ *  segments, so other platforms keep the plain handle to stay in step with it. */
 export function normalizeHandle(platform: Platform, raw: string | null | undefined): string {
-	return extractHandle(platform, raw).toLowerCase();
+	const handle = extractHandle(platform, raw).toLowerCase();
+	return platform === 'patreon' && RESERVED_SEGMENTS.patreon?.includes(handle) ? '' : handle;
 }
 
 export type QueryKind = 'name' | 'handle';

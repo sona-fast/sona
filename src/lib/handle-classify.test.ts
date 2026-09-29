@@ -47,6 +47,7 @@ describe('classifyQuery — social URLs per platform', () => {
 		['https://www.deviantart.com/kuttoya', 'deviantart', 'kuttoya'],
 		['patreon.com/kuttoya', 'patreon', 'kuttoya'],
 		['patreon.com/c/kuttoya', 'patreon', 'kuttoya'],
+		['patreon.com/cw/kuttoya', 'patreon', 'kuttoya'],
 		['instagram.com/kuttoya', 'instagram', 'kuttoya']
 	];
 	for (const [input, platform, handle] of cases) {
@@ -95,6 +96,14 @@ describe('classifyQuery — URL edge cases', () => {
 		expect(c.kind).toBe('handle');
 		expect(c.platform).toBe('twitter');
 	});
+	it('a legacy patreon.com/user?u= link names no handle, not the handle "user"', () => {
+		// Same "too short" gate as the bare domain below: nothing to search on, and
+		// the pasted link still must not become the artist's name.
+		const c = classifyQuery('patreon.com/user?u=123');
+		expect(c.kind).toBe('handle');
+		expect(c.platform).toBe('patreon');
+		expect(c.handle).toBe('');
+	});
 	it('a bare domain with no username yields a handle with an EMPTY normalized handle', () => {
 		// Drives the client "too short" gate: platform detected but nothing to
 		// search on, so the UI must not fire a request or claim it is searching.
@@ -108,6 +117,7 @@ describe('classifyQuery — URL edge cases', () => {
 describe('normalizeHandle', () => {
 	it('normalizes patreon creator URLs without collapsing to "c"', () => {
 		expect(normalizeHandle('patreon', 'https://patreon.com/c/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('patreon', 'https://patreon.com/cw/kuttoya')).toBe('kuttoya');
 	});
 
 	it('normalizes a Telegram channel-preview URL without collapsing to "s"', () => {

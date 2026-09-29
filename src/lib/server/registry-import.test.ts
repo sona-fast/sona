@@ -187,6 +187,29 @@ describe('importRegistryCatalog', () => {
 		expect(JSON.parse(row!.aliases!)).toEqual([{ displayName: 'Old Name', socials: {} }]);
 	});
 
+	it('creates a local artist with a registry Patreon /cw/ link in the flat form', async () => {
+		const db = makeDb();
+		catalogPages = [
+			{
+				artists: [
+					ra({
+						globalId: 'g-bob',
+						socials: { patreonUrl: 'https://www.patreon.com/cw/Bob_Art' },
+						aliases: [{ displayName: 'Old Bob', socials: { patreonUrl: 'patreon.com/c/OldBob' } }]
+					})
+				],
+				nextCursor: null
+			}
+		];
+		await importRegistryCatalog(db, env);
+
+		const row = await db.select().from(artists).where(eq(artists.globalId, 'g-bob')).get();
+		expect(row!.patreonUrl).toBe('https://www.patreon.com/Bob_Art');
+		expect(JSON.parse(row!.aliases!)).toEqual([
+			{ displayName: 'Old Bob', socials: { patreonUrl: 'https://www.patreon.com/OldBob' } }
+		]);
+	});
+
 	it('skips linked and handle-matched artists without modifying any local row', async () => {
 		const db = makeDb();
 		const now = new Date().toISOString();

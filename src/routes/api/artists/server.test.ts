@@ -135,4 +135,17 @@ describe('POST /api/artists — explicit registry import overrides the local cop
 		const row = await db.select().from(artists).where(eq(artists.globalId, GID)).get();
 		expect(row!.name).toBe('Brand New');
 	});
+
+	it('created: stores a Patreon /cw/ link as the flat patreon.com/<name> form', async () => {
+		const { db, platform } = makeDb();
+		const res = await post(platform, {
+			name: 'Bob',
+			globalId: GID,
+			registryVersion: 1,
+			patreon: 'https://www.patreon.com/cw/Bob_Art'
+		});
+		expect(((await res.json()) as { status: string }).status).toBe('created');
+		const row = await db.select().from(artists).where(eq(artists.globalId, GID)).get();
+		expect(row!.patreonUrl).toBe('https://www.patreon.com/Bob_Art');
+	});
 });
