@@ -22,6 +22,7 @@
 	"legal_last_updated": "Last updated {date}",
 	"footer_legal_label": "Site links",
 	"nav_main_label": "Main",
+	"nav_skip_to_content": "Skip to content",
 	"footer_privacy": "Privacy",
 	"footer_terms": "Terms",
 	"footer_build": "build {sha}",

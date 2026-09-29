@@ -82,7 +82,7 @@
 			/>
 		</div>
 
-		<main class="splash">
+		<main id="main-content" tabindex="-1" class="splash">
 			<div class="hub">
 				<div class="avatar">
 					{#if data.settings.adminAvatarUrl}
@@ -128,7 +128,7 @@
 				collectionsEnabled={data.collectionsEnabled}
 			/>
 		</div>
-		<main class="passport container">
+		<main id="main-content" tabindex="-1" class="passport container">
 			<Passport {passport} />
 		</main>
 		<div class="desktop-footer">
@@ -146,7 +146,7 @@
 				collectionsEnabled={data.collectionsEnabled}
 			/>
 		</div>
-		<main>
+		<main id="main-content" tabindex="-1">
 			<MosaicBanner
 				images={data.mosaicImageUrls}
 				subtitle={data.settings.aboutText}
@@ -212,7 +212,7 @@
 		}
 
 		.splash {
-			padding-bottom: 88px;
+			padding-bottom: var(--mobile-nav-clearance);
 		}
 	}
 

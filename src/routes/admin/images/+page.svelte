@@ -630,7 +630,7 @@
 			align-items: center;
 			justify-content: center;
 			position: fixed;
-			bottom: 88px;
+			bottom: var(--mobile-nav-clearance);
 			right: 20px;
 			width: 56px;
 			height: 56px;

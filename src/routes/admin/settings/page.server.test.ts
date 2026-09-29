@@ -1134,6 +1134,54 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(resolveAvatarUrl).not.toHaveBeenCalled();
 	});
 
+	// The site tab posts the bluesky field on every save, blank when no handle
+	// is set. A fork with an avatar but no handle (the e2e seed is one) used to
+	// lose it to any unrelated save, because blank-to-blank read as a clear.
+	it('a blank bluesky with no stored handle keeps the avatar', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/face.jpg');
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'Taro Surf', bluesky: '' }));
+
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/face.jpg');
+		expect(await getRawSetting(db, 'siteName')).toBe('Taro Surf');
+		expect(resolveAvatarUrl).not.toHaveBeenCalled();
+	});
+
+	// getSettings answers a failed read with blank defaults, so deciding the clear
+	// from it read a D1 error as "no stored handle": the handle blanked and the
+	// avatar it produced stayed. A failed read must stop the save instead.
+	it('a blank bluesky whose stored-handle read fails saves nothing', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/face.jpg');
+
+		// Fail the first settings read, the way a transient D1 error would.
+		const d1 = platform.env!.DB;
+		const realPrepare = d1.prepare.bind(d1);
+		let failed = false;
+		d1.prepare = ((query: string) => {
+			if (!failed && /^select\b.*"site_settings"/i.test(query)) {
+				failed = true;
+				throw new Error('D1_ERROR: network connection lost');
+			}
+			return realPrepare(query);
+		}) as typeof d1.prepare;
+
+		const result = await actions.saveSite(
+			saveSiteEvent(platform, { siteName: 'Taro Surf', bluesky: '' })
+		);
+		d1.prepare = realPrepare;
+
+		expect(result).toMatchObject({ status: 503 });
+		expect(await getRawSetting(db, 'blueskyUrl')).toBe(
+			'https://bsky.app/profile/sunday.bsky.social'
+		);
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/face.jpg');
+		expect(await getRawSetting(db, 'siteName')).toBeNull();
+	});
+
 	// Unchanged-handle guard (#187): the site tab posts bluesky on EVERY save, so
 	// an unrelated save (a transient resolve failure included) must not degrade an
 	// owned re-hosted copy — the refresh cron would heal it back, but a day later

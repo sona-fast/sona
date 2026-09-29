@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { expectSkipLinkReachesMain } from './site-chrome-helpers';
 
 // The passport homepage (landingLayout = 'passport'), end to end. This file runs
 // under two projects, each on its own seeded server (see playwright.config.ts):
@@ -31,6 +32,13 @@ async function expectArtistEmptyState(page: Page, label: string, expectedText: s
 test.describe('populated passport', () => {
 	test.beforeEach(({}, info) => {
 		test.skip(info.project.name !== 'passport', 'runs on the populated passport server');
+	});
+
+	// The passport homepage escapes the (public) layout, so it carries its own
+	// main landmark, which the skip link has to reach.
+	test('starts with a skip link that moves focus into the main content', async ({ page }) => {
+		await page.goto('/');
+		await expectSkipLinkReachesMain(page, { main: 'main.passport#main-content' });
 	});
 
 	test('renders the data page: one h1, the details, and the piece of the day', async ({ page }) => {

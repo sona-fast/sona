@@ -3,6 +3,7 @@
 	import { onNavigate } from '$app/navigation';
 	import { createThemeState } from '$lib/theme.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { children, data } = $props();
 
@@ -40,6 +41,10 @@
 		/>
 	{/if}
 </svelte:head>
+
+<!-- The first focusable element on every page. Every layout's <main> carries
+     id="main-content", and tabindex="-1" there lets the jump move focus too. -->
+<a class="skip-link" href="#main-content">{m.nav_skip_to_content()}</a>
 
 {@render children()}
 
