@@ -147,6 +147,24 @@ describe('mosaicSlots', () => {
 		});
 	});
 
+	it('cycles the list, starts each row three images further on, and reverses odd rows', () => {
+		const rows = [
+			{ height: 1, marginLeft: 0, widths: [1, 1, 1] },
+			{ height: 1, marginLeft: 0, widths: [1, 1] },
+			{ height: 1, marginLeft: 0, widths: [1, 1] }
+		];
+		// Cells are numbered straight through (0..6). Row r reads image
+		// (cell + 3r) mod 4, and odd rows are then reversed:
+		//   row 0: cells 0,1,2 + 0 -> a b c
+		//   row 1: cells 3,4   + 3 -> c d, reversed -> d c
+		//   row 2: cells 5,6   + 6 -> d a
+		expect(mosaicSlots(['a', 'b', 'c', 'd'], rows)).toEqual([
+			['a', 'b', 'c'],
+			['d', 'c'],
+			['d', 'a']
+		]);
+	});
+
 	it('yields empty rows when there are no images', () => {
 		const layout = mosaicLayout();
 		expect(mosaicSlots([], layout.rows)).toEqual(layout.rows.map(() => []));
