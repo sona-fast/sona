@@ -214,14 +214,14 @@ const section = (page: Page) => page.locator('section.lookup-section');
 // (admin-login.ts) caps the beforeAll's login. The beforeAll's timeout is their
 // sum plus HOOK_MARGIN, so the loop always gets its full budget. The afterAll's
 // login is capped the same way.
-const SAVE_KEY_BUDGET = 85_000;
+const SAVE_KEY_BUDGET = 90_000;
 // Opening and closing the hook's own page.
 const HOOK_MARGIN = 5_000;
 // What the afterAll gets past its login, to remove a key left behind: 10s goto,
-// 15s hydration, 5s for the section, 2.5s for each of the two clicks, the 0.55s
-// pause between them and 15s for the key field to come back is 50.55s, plus
-// HOOK_MARGIN.
-const REMOVE_KEY_MARGIN = 51_000 + HOOK_MARGIN;
+// 15s hydration, 2.5s for the tab click, 5s for the section, 2.5s for each of
+// the two clicks, the 0.55s pause between them and 15s for the key field to
+// come back is 53.05s, plus HOOK_MARGIN.
+const REMOVE_KEY_MARGIN = 54_000 + HOOK_MARGIN;
 
 /** Log in from a hook, retried within LOGIN_BUDGET. A cold run can bounce back
  * to /admin/login; each attempt starts signed out and is capped at
@@ -241,14 +241,15 @@ async function hookLogin(page: Page) {
  * that never hydrates. Every attempt is bounded, so a stuck one hands control
  * back for a fresh load, and every attempt starts by checking for the saved
  * key, so a save that landed late is not made twice.
- * One attempt is at most 40s: 10s goto (the login has already warmed the
- * server), 15s hydration, 5s for the section, 2.5s each for the fill and the
- * click, and 5s for the connected state. Two fit SAVE_KEY_BUDGET with 5s over. */
+ * One attempt is at most 42.5s: 10s goto (the login has already warmed the
+ * server), 15s hydration, 2.5s for the tab click, 5s for the section, 2.5s each
+ * for the fill and the click, and 5s for the connected state. Two fit
+ * SAVE_KEY_BUDGET with 5s over. */
 async function saveLookupKey(page: Page) {
 	await expect(async () => {
 		await page.goto('/admin/settings', { timeout: 10_000 });
 		// 15s rather than the default 30s, so two attempts fit in the budget.
-		await openConnectionsTab(page, section(page), 15_000);
+		await openConnectionsTab(page, section(page), 15_000, 2_500);
 		if ((await section(page).locator('button.btn-remove').count()) > 0) return;
 		await section(page)
 			.locator('input[name="fuzzysearchApiKey"]')
@@ -4074,7 +4075,7 @@ test.describe('with a key saved', () => {
 		try {
 			await hookLogin(page);
 			await page.goto('/admin/settings', { timeout: 10_000 });
-			await openConnectionsTab(page, section(page), 15_000);
+			await openConnectionsTab(page, section(page), 15_000, 2_500);
 			// The test above already removed it on a run that got that far.
 			if ((await section(page).locator('button.btn-remove').count()) === 0) return;
 			console.warn('artist-lookup: the serial chain left the key behind; removing it here');

@@ -91,8 +91,8 @@ export async function stubTurnstile(page: Page) {
 /** Per-step caps for one bounded login attempt. The Turnstile token wait is
  * capped at `token` in every login, bounded or not. The worst case of one
  * attempt is the sum, 65s, so LOGIN_BUDGET below fits two attempts: toPass
- * abandons an attempt still running at its deadline and then reports only its
- * own timeout, so a second attempt has to be able to start and finish. */
+ * abandons an attempt still running at its deadline, so a second attempt has to
+ * be able to start and finish. */
 export const LOGIN_ATTEMPT = {
 	goto: 20_000,
 	fill: 2_500,
@@ -144,9 +144,10 @@ export async function adminLogin(
  * projects' pages at the same time. Each attempt is capped at LOGIN_ATTEMPT,
  * 65s at worst, so the budget always leaves room for a second full attempt.
  * When an attempt fails inside its caps, toPass reports that attempt's error,
- * so a genuine login failure still reads as itself. The report shows only the
- * overall timeout if the second attempt is still running at 135s, which needs
- * both attempts to use nearly all of their caps.
+ * so a genuine login failure still reads as itself. If the second attempt is
+ * still running at 135s, toPass abandons it and reports the first attempt's
+ * error followed by its own timeout line, so the report names the first
+ * failure but says nothing about what the second attempt was stuck on.
  * The test timeout raised on the first line of the function is the budget plus
  * 45s for the spec's own work. */
 export async function loginRetrying(page: Page, password: string) {
@@ -227,9 +228,15 @@ export async function openSiteTab(page: Page) {
 
 /** Open the Connections tab of /admin/settings once the page has hydrated.
  * The tab is a client-side swap: `shown` is in the DOM but hidden until the tab
- * handler runs, so after the wait one click shows it. */
-export async function openConnectionsTab(page: Page, shown: Locator, hydrationTimeout?: number) {
+ * handler runs, so after the wait one click shows it. The click is capped at
+ * clickTimeout so a caller can add the whole step into its own budget. */
+export async function openConnectionsTab(
+	page: Page,
+	shown: Locator,
+	hydrationTimeout?: number,
+	clickTimeout = 2_500
+) {
 	await waitForHydration(page, hydrationTimeout);
-	await page.getByRole('tab', { name: 'Connections', exact: true }).click();
+	await page.getByRole('tab', { name: 'Connections', exact: true }).click({ timeout: clickTimeout });
 	await expect(shown).toBeVisible();
 }

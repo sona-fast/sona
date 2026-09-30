@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { adminLogin, gotoAfterLogin } from './admin-login';
+import { adminLogin, gotoAfterLogin, loginRetrying } from './admin-login';
 import {
 	expectHeaderToggles,
 	expectHeaderTogglesWork,
@@ -402,7 +402,7 @@ test('the phone header lines the site name up with the page gutter', async ({ pa
 // The admin shell drops its sidebar on a phone and shows the same bottom nav,
 // so its header has to stay for the toggles too.
 test('the admin shell keeps the theme and language toggles on a phone', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await gotoAfterLogin(page, '/admin/images');
 	await expectHeaderToggles(page);
@@ -468,7 +468,7 @@ for (const url of ['/gallery', '/art']) {
 test('the admin theme toggle keeps a 44px target on a phone', async ({ page }, testInfo) => {
 	const badgeSize = () =>
 		page.locator('header .admin-badge').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	// On one row at 390px, the badge starts the header's content and the
 	// toggles end it.
 	await page.setViewportSize({ width: 390, height: 844 });
