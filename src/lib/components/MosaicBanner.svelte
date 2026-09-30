@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
+	import { mosaicLayout, mosaicSlots, SSR_BANNER_WIDTH } from '$lib/mosaic-layout';
 
 	interface Props {
 		images: string[];
@@ -10,43 +11,27 @@
 
 	let { images, subtitle, siteName }: Props = $props();
 
-	// Row configs matching the mockup: varied widths per slot, different row heights
-	const rowConfigs = [
-		{ height: 185, padLeft: 0, widths: [340, 180, 280, 220, 310, 190, 300, 250] },
-		{ height: 130, padLeft: 80, widths: [260, 350, 200, 290, 170, 320, 240, 280] },
-		{ height: 170, padLeft: 0, widths: [200, 330, 240, 370, 190, 310, 260] },
-		{ height: 145, padLeft: 120, widths: [300, 210, 350, 180, 290, 230, 320] }
-	];
-
-	// Distribute images across slots, alternating direction per row
-	let slots = $derived.by(() => {
-		if (images.length === 0) return rowConfigs.map(() => []);
-
-		const result: string[][] = [];
-		let imgIdx = 0;
-
-		for (let r = 0; r < rowConfigs.length; r++) {
-			const row: string[] = [];
-			// Offset each row's starting image to avoid repeating patterns
-			const rowOffset = r * 3;
-			for (let s = 0; s < rowConfigs[r].widths.length; s++) {
-				row.push(images[(imgIdx + rowOffset) % images.length]);
-				imgIdx++;
-			}
-			// Reverse odd rows for alternating direction
-			if (r % 2 === 1) row.reverse();
-			result.push(row);
-		}
-		return result;
-	});
+	// The server lays the strip out for SSR_BANNER_WIDTH and the stylesheet
+	// draws that same geometry, which also covers every narrower banner. A
+	// client whose banner measures wider re-lays the strip for its own size and
+	// overrides the stylesheet inline; nothing else ever emits the inline
+	// style, so the phone media query keeps its own numbers.
+	let bannerWidth: number | undefined = $state();
+	let bannerHeight: number | undefined = $state();
+	let wide = $derived(bannerWidth !== undefined && bannerWidth > SSR_BANNER_WIDTH);
+	let layout = $derived(wide ? mosaicLayout(bannerWidth, bannerHeight) : mosaicLayout());
+	let slots = $derived(mosaicSlots(images, layout.rows));
 </script>
 
-<section class="mosaic-banner">
-	<div class="mosaic-tilt">
-		{#each rowConfigs as row, rowIdx}
+<section class="mosaic-banner" bind:clientWidth={bannerWidth} bind:clientHeight={bannerHeight}>
+	<div
+		class="mosaic-tilt"
+		style={wide ? `width: ${layout.stripWidth}px; top: ${layout.top}px; left: ${layout.left}px;` : undefined}
+	>
+		{#each layout.rows as row, rowIdx}
 			<div
 				class="mosaic-row"
-				style="height: {row.height}px; padding-left: {row.padLeft}px;"
+				style="height: {row.height}px; margin-left: {row.marginLeft}px;"
 			>
 				{#each row.widths as width, colIdx}
 					<div class="mosaic-cell" style="width: {width}px; min-width: {width}px;">
@@ -77,11 +62,16 @@
 		background: var(--background);
 	}
 
+	/* The geometry mosaicLayout() produces for SSR_BANNER_WIDTH (1920): the
+	   strip reaches 140px past that banner's right edge, and the top edge sits
+	   high enough that the 3-degree tilt, which drops the strip's left end,
+	   still keeps the top-left corner covered. Wider banners get these three
+	   values inline from the component instead. */
 	.mosaic-tilt {
 		position: absolute;
-		top: -40px;
+		top: -60px;
 		left: -60px;
-		width: 1700px;
+		width: 2120px;
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
@@ -187,9 +177,12 @@
 			height: 360px;
 		}
 
+		/* Five server-rendered rows make the strip taller than the four the
+		   phone used to get, so its centre, and with it the tilt's drop at the
+		   left end, moves down: -30px keeps the top-left corner covered. */
 		.mosaic-tilt {
 			width: 1000px;
-			top: -20px;
+			top: -30px;
 			left: -100px;
 		}
 
