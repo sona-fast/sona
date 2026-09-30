@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { adminLogin, waitForHydration } from './admin-login';
 import { dropOn, waitForDropAttachment } from './drop-files';
 import { stubSuggestions } from './tag-suggestions-helpers';
 
@@ -217,28 +217,36 @@ async function gotoEditHydrated(page: Page, path = EDIT_IMAGE) {
 
 const section = (page: Page) => page.locator('section.lookup-section');
 
-// The tab is a client-side swap, so the section is in the DOM but hidden until
-// hydration has attached the tab handler — retry the click until it shows.
+// The tab is a client-side swap: the section is in the DOM but hidden until the
+// tab handler runs. Wait for hydration once, then one click shows it.
 async function openConnectionsTab(page: Page) {
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Connections', exact: true }).click();
-		await expect(section(page)).toBeVisible({ timeout: 1500 });
-	}).toPass();
+	await waitForHydration(page);
+	await page.getByRole('tab', { name: 'Connections', exact: true }).click();
+	await expect(section(page)).toBeVisible();
 }
 
+// What saveLookupKey may spend, and what the hooks around it allow for a
+// login. The beforeAll's timeout is built from these, so it always covers the
+// loop it holds.
+const SAVE_KEY_BUDGET = 60_000;
+const LOGIN_ALLOWANCE = 30_000;
+
 /** Save the throwaway key on the settings page, unless it is already there.
- * Hydration-sensitive the same way the tab is: a click that lands before
- * use:enhance is attached posts natively, and the reload resets the tab, leaving
- * the connected state in the DOM but hidden. */
+ * openConnectionsTab has waited for hydration, so the submit goes through
+ * use:enhance rather than posting natively. The retry covers what that gate
+ * cannot: a D1 write slower than the 5s the connected state gets, or a load
+ * that never hydrates. Every attempt is bounded, so a stuck one hands control
+ * back for a fresh load, and every attempt starts by checking for the saved
+ * key, so a save that landed late is not made twice. */
 async function saveLookupKey(page: Page) {
 	await expect(async () => {
-		await page.goto('/admin/settings');
+		await page.goto('/admin/settings', { timeout: 30_000 });
 		await openConnectionsTab(page);
 		if ((await section(page).locator('button.btn-remove').count()) > 0) return;
 		await section(page).locator('input[name="fuzzysearchApiKey"]').fill(FAKE_KEY);
 		await section(page).locator('button[type="submit"]').click();
-		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible({ timeout: 1500 });
-	}).toPass();
+		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible({ timeout: 5_000 });
+	}).toPass({ timeout: SAVE_KEY_BUDGET });
 }
 
 const pill = (page: Page) => page.locator('button.lookup-pill');
@@ -310,8 +318,9 @@ test.describe('with a key saved', () => {
 	// saved. It used to be the first test that saved it, which made a filtered
 	// run (`-g`) fail on whatever it selected: the row was never written.
 	test.beforeAll(async ({ browser }) => {
-		// The retry loop inside runs until the hook's own budget, not the test's.
-		test.setTimeout(90_000);
+		// A beforeAll has its own timeout, separate from the tests', and this is
+		// it: a login, then the whole of saveLookupKey's loop.
+		test.setTimeout(LOGIN_ALLOWANCE + SAVE_KEY_BUDGET);
 		const page = await browser.newPage();
 		try {
 			await adminLogin(page, PASSWORD);
@@ -4048,6 +4057,10 @@ test.describe('with a key saved', () => {
 	// do with it. The hook runs whether or not the chain finished, and it says
 	// what it did rather than removing the key silently.
 	test.afterAll(async ({ browser }) => {
+		// On the 30s default this hook timed out inside its own login after a
+		// failed beforeAll, and the key it exists to remove stayed behind for the
+		// retry: "without a key there is no button" then failed on it.
+		test.setTimeout(90_000);
 		const page = await browser.newPage();
 		try {
 			await adminLogin(page, PASSWORD);

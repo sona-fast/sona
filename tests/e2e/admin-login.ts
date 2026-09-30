@@ -91,7 +91,9 @@ export async function stubTurnstile(page: Page) {
 export async function adminLogin(
 	page: Page,
 	password: string,
-	opts: { realTurnstile?: boolean } = {}
+	// timeout bounds the wait for the landing page. Unset, it is whatever is left
+	// of the test's own budget.
+	opts: { realTurnstile?: boolean; timeout?: number } = {}
 ) {
 	if (!opts.realTurnstile) await stubTurnstile(page);
 	await page.goto('/admin/login');
@@ -107,7 +109,7 @@ export async function adminLogin(
 		);
 	}
 	await page.click('button[type="submit"]');
-	await page.waitForURL(/\/admin\/images/);
+	await page.waitForURL(/\/admin\/images/, { timeout: opts.timeout });
 }
 
 /** adminLogin, retried. A cold run occasionally bounces back to /admin/login
@@ -125,7 +127,12 @@ export async function adminLogin(
  * time. The test timeout raised on the first line of the function is 120s, so
  * the retry budget fits inside it with room for the spec's own work.
  * toPass reports the last attempt's error, so a genuine login failure still
- * reads as itself. */
+ * reads as itself.
+ * Each attempt gets 40s to land rather than the whole 90s. toPass cannot cut
+ * short an attempt that is still waiting, so with an unbounded waitForURL one
+ * attempt that never landed spent the entire budget: main's CI failed that
+ * way, a 90s timeout with no attempt's error in it, in runs 36636551971 and
+ * 36752681806. */
 export async function loginRetrying(page: Page, password: string) {
 	test.setTimeout(120_000);
 	await expect(async () => {
@@ -135,7 +142,7 @@ export async function loginRetrying(page: Page, password: string) {
 		// /admin/images once the cookie exists, so the retry would fail on the form
 		// rather than on the login.
 		await page.context().clearCookies();
-		await adminLogin(page, password);
+		await adminLogin(page, password, { timeout: 40_000 });
 	}).toPass({ timeout: 90_000 });
 }
 
@@ -157,13 +164,46 @@ export async function gotoRetrying(page: Page, path: string) {
 	}).toPass({ timeout: 15_000 });
 }
 
-/** Open the Site tab of /admin/settings once the page has hydrated. A
- * client-only tab switch is the hydration gate, because an unhydrated form
- * does a real navigation and that aborts the goto which follows. */
+/** Wait until the page a goto just loaded has hydrated.
+ *
+ * The admin shell and the public layouts mount the bottom nav (MobileNav),
+ * which writes --mobile-nav-height onto <html> from a ResizeObserver. The
+ * server never renders that property, and the observer first reports after
+ * Svelte has mounted the whole tree, so once it is there every click handler
+ * and every use:enhance on the page is attached. It is published even while
+ * the nav is hidden on a wide screen, as 0px.
+ *
+ * Waiting on this once replaces clicking a client-only control until it
+ * "takes". That loop spends its budget re-clicking, and each click that lands
+ * before use:enhance on a form posts natively and reloads the page, which
+ * starts hydration over again.
+ *
+ * Only a gate for a fresh document: after a client-side navigation the old
+ * value is still on <html>, but then the app was hydrated already. The login
+ * page has no bottom nav; adminLogin waits for the Turnstile token instead,
+ * which that page also only issues once it has mounted. */
+export async function waitForHydration(page: Page, timeout = 30_000) {
+	await expect
+		.poll(
+			() =>
+				page
+					.evaluate(
+						() => document.documentElement.style.getPropertyValue('--mobile-nav-height') !== ''
+					)
+					// A navigation in progress destroys the context mid-evaluate; that is
+					// "not yet", not a failure.
+					.catch(() => false),
+			{ message: 'the page hydrates (MobileNav publishes --mobile-nav-height)', timeout }
+		)
+		.toBe(true);
+}
+
+/** Open the Site tab of /admin/settings once the page has hydrated. The gate
+ * matters for what follows more than for the tab: an unhydrated form does a
+ * real navigation, and that aborts the goto which follows. */
 export async function openSiteTab(page: Page) {
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
-	await page.getByRole('tab', { name: 'Site', exact: true }).click();
+	await waitForHydration(page);
+	const site = page.getByRole('tab', { name: 'Site', exact: true });
+	await site.click();
+	await expect(site).toHaveAttribute('aria-selected', 'true');
 }

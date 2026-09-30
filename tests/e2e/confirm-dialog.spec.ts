@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 
 // ConfirmDialog smoke (SONA-124 R2-T2): the dialog was rewritten onto the
 // shared focus-trap action and serves ~10 destructive admin flows — this pins
@@ -16,19 +16,20 @@ const PASSWORD = 'e2e-admin-password';
 test('delete confirm: dialog semantics, safe initial focus, Esc closes and restores focus', async ({
 	page
 }) => {
-	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/vr/1/edit');
+	// On a loaded runner the login can land late or not at all, and a goto issued
+	// while the landing page settles aborts; both helpers retry for that.
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/vr/1/edit');
 	await expect(page.getByRole('heading', { name: 'Edit avatar' })).toBeVisible();
 
 	const openButton = page.getByRole('button', { name: 'Delete avatar' });
 
-	// Hydration-retry shape (see upload.spec.ts): clicking before Svelte attaches
-	// its listeners silently does nothing, so retry until the dialog appears.
+	// A click before Svelte attaches its listeners silently does nothing, so wait
+	// for hydration once, and then one click opens the dialog.
 	const dialog = page.getByRole('dialog');
-	await expect(async () => {
-		await openButton.click();
-		await expect(dialog).toBeVisible({ timeout: 2000 });
-	}).toPass({ timeout: 20_000 });
+	await waitForHydration(page);
+	await openButton.click();
+	await expect(dialog).toBeVisible();
 
 	// ARIA dialog contract: modal, labelled by its title, described by the message.
 	await expect(dialog).toHaveAttribute('aria-modal', 'true');
