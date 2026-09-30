@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { adminLogin, openConnectionsTab, waitForHydration } from './admin-login';
+import { adminLogin, LOGIN_BUDGET, openConnectionsTab, waitForHydration } from './admin-login';
 import { dropOn, waitForDropAttachment } from './drop-files';
 import { stubSuggestions } from './tag-suggestions-helpers';
 
@@ -210,21 +210,27 @@ async function gotoEditHydrated(page: Page, path = EDIT_IMAGE) {
 
 const section = (page: Page) => page.locator('section.lookup-section');
 
-// SAVE_KEY_BUDGET caps saveLookupKey's retry loop, and LOGIN_BUDGET caps the
-// beforeAll's login. The beforeAll's timeout is their sum, so the loop always
-// gets its full budget. The afterAll's login is capped the same way.
-const SAVE_KEY_BUDGET = 60_000;
-const LOGIN_BUDGET = 90_000;
-// What the afterAll gets past its login, to remove a key left behind.
-const REMOVE_KEY_MARGIN = 30_000;
+// SAVE_KEY_BUDGET caps saveLookupKey's retry loop, and LOGIN_BUDGET
+// (admin-login.ts) caps the beforeAll's login. The beforeAll's timeout is their
+// sum plus HOOK_MARGIN, so the loop always gets its full budget. The afterAll's
+// login is capped the same way.
+const SAVE_KEY_BUDGET = 85_000;
+// Opening and closing the hook's own page.
+const HOOK_MARGIN = 5_000;
+// What the afterAll gets past its login, to remove a key left behind: 10s goto,
+// 15s hydration, 5s for the section, 2.5s for each of the two clicks, the 0.55s
+// pause between them and 15s for the key field to come back is 50.55s, plus
+// HOOK_MARGIN.
+const REMOVE_KEY_MARGIN = 51_000 + HOOK_MARGIN;
 
 /** Log in from a hook, retried within LOGIN_BUDGET. A cold run can bounce back
- * to /admin/login; each attempt starts signed out and gets 40s to land. Not
- * loginRetrying: its test.setTimeout would replace the hook's own timeout. */
+ * to /admin/login; each attempt starts signed out and is capped at
+ * LOGIN_ATTEMPT, so two attempts fit the budget. Not loginRetrying: its
+ * test.setTimeout would replace the hook's own timeout. */
 async function hookLogin(page: Page) {
 	await expect(async () => {
 		await page.context().clearCookies();
-		await adminLogin(page, PASSWORD, { timeout: 40_000 });
+		await adminLogin(page, PASSWORD, { bounded: true });
 	}).toPass({ timeout: LOGIN_BUDGET });
 }
 
@@ -234,15 +240,20 @@ async function hookLogin(page: Page) {
  * cannot: a D1 write slower than the 5s the connected state gets, or a load
  * that never hydrates. Every attempt is bounded, so a stuck one hands control
  * back for a fresh load, and every attempt starts by checking for the saved
- * key, so a save that landed late is not made twice. */
+ * key, so a save that landed late is not made twice.
+ * One attempt is at most 40s: 10s goto (the login has already warmed the
+ * server), 15s hydration, 5s for the section, 2.5s each for the fill and the
+ * click, and 5s for the connected state. Two fit SAVE_KEY_BUDGET with 5s over. */
 async function saveLookupKey(page: Page) {
 	await expect(async () => {
-		await page.goto('/admin/settings', { timeout: 30_000 });
+		await page.goto('/admin/settings', { timeout: 10_000 });
 		// 15s rather than the default 30s, so two attempts fit in the budget.
 		await openConnectionsTab(page, section(page), 15_000);
 		if ((await section(page).locator('button.btn-remove').count()) > 0) return;
-		await section(page).locator('input[name="fuzzysearchApiKey"]').fill(FAKE_KEY);
-		await section(page).locator('button[type="submit"]').click();
+		await section(page)
+			.locator('input[name="fuzzysearchApiKey"]')
+			.fill(FAKE_KEY, { timeout: 2_500 });
+		await section(page).locator('button[type="submit"]').click({ timeout: 2_500 });
 		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible({ timeout: 5_000 });
 	}).toPass({ timeout: SAVE_KEY_BUDGET });
 }
@@ -318,7 +329,7 @@ test.describe('with a key saved', () => {
 	test.beforeAll(async ({ browser }) => {
 		// A beforeAll has its own timeout, separate from the tests'. This one covers
 		// a login plus saveLookupKey's full retry loop.
-		test.setTimeout(LOGIN_BUDGET + SAVE_KEY_BUDGET);
+		test.setTimeout(LOGIN_BUDGET + SAVE_KEY_BUDGET + HOOK_MARGIN);
 		const page = await browser.newPage();
 		try {
 			await hookLogin(page);
@@ -4062,17 +4073,17 @@ test.describe('with a key saved', () => {
 		const page = await browser.newPage();
 		try {
 			await hookLogin(page);
-			await page.goto('/admin/settings');
-			await openConnectionsTab(page, section(page));
+			await page.goto('/admin/settings', { timeout: 10_000 });
+			await openConnectionsTab(page, section(page), 15_000);
 			// The test above already removed it on a run that got that far.
 			if ((await section(page).locator('button.btn-remove').count()) === 0) return;
 			console.warn('artist-lookup: the serial chain left the key behind; removing it here');
-			await section(page).locator('button.btn-remove').click();
+			await section(page).locator('button.btn-remove').click({ timeout: 2_500 });
 			await page.waitForTimeout(550);
 			await section(page)
 				.locator('.remove-confirm')
 				.getByRole('button', { name: 'Remove', exact: true })
-				.click();
+				.click({ timeout: 2_500 });
 			await expect(section(page).locator('input[name="fuzzysearchApiKey"]')).toBeVisible({
 				timeout: 15_000
 			});

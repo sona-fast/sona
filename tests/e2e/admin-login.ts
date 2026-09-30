@@ -88,16 +88,34 @@ export async function stubTurnstile(page: Page) {
 	);
 }
 
+/** Per-step caps for one bounded login attempt. The Turnstile token wait is
+ * capped at `token` in every login, bounded or not. The worst case of one
+ * attempt is the sum, 65s, so LOGIN_BUDGET below fits two attempts: toPass
+ * abandons an attempt still running at its deadline and then reports only its
+ * own timeout, so a second attempt has to be able to start and finish. */
+export const LOGIN_ATTEMPT = {
+	goto: 20_000,
+	fill: 2_500,
+	token: 15_000,
+	click: 2_500,
+	url: 25_000
+};
+export const LOGIN_ATTEMPT_MAX = Object.values(LOGIN_ATTEMPT).reduce((a, b) => a + b, 0);
+/** Two worst-case attempts plus 5s for toPass's own pauses between them. */
+export const LOGIN_BUDGET = 2 * LOGIN_ATTEMPT_MAX + 5_000;
+
 export async function adminLogin(
 	page: Page,
 	password: string,
-	// timeout bounds the goto to the form and the wait for the landing page.
-	// Unset, each is whatever is left of the test's own budget.
-	opts: { realTurnstile?: boolean; timeout?: number } = {}
+	// bounded caps every step at LOGIN_ATTEMPT, for a caller that retries.
+	// Unset, the goto, fill, click and landing wait each get whatever is left of
+	// the test's own budget.
+	opts: { realTurnstile?: boolean; bounded?: boolean } = {}
 ) {
+	const cap = opts.bounded ? LOGIN_ATTEMPT : undefined;
 	if (!opts.realTurnstile) await stubTurnstile(page);
-	await page.goto('/admin/login', { timeout: opts.timeout });
-	await page.fill('input[name="password"]', password);
+	await page.goto('/admin/login', { timeout: cap?.goto });
+	await page.fill('input[name="password"]', password, { timeout: cap?.fill });
 	if (await page.locator('.turnstile').count()) {
 		// The stub prefix doubles as proof the stub is actually in effect: the real
 		// widget can never mint an `e2e-stub-token-` value, so a broken route glob
@@ -105,11 +123,11 @@ export async function adminLogin(
 		// reverting to the flaky real widget.
 		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(
 			opts.realTurnstile ? /.+/ : new RegExp('^' + STUB_TOKEN_PREFIX),
-			{ timeout: 15_000 }
+			{ timeout: LOGIN_ATTEMPT.token }
 		);
 	}
-	await page.click('button[type="submit"]');
-	await page.waitForURL(/\/admin\/images/, { timeout: opts.timeout });
+	await page.click('button[type="submit"]', { timeout: cap?.click });
+	await page.waitForURL(/\/admin\/images/, { timeout: cap?.url });
 }
 
 /** adminLogin, retried. A cold run occasionally bounces back to /admin/login
@@ -121,18 +139,18 @@ export async function adminLogin(
  * gets its own budget raised above it first: without that, a cold start dies at
  * 30s with a bare timeout and no second attempt. The 120_000 in
  * playwright.config.ts is the webServer boot timeout, not the per-test one.
- * The toPass budget below is 90s rather than the 60s it started at: a full run
- * boots six dev servers at once, and one login exhausted the shorter budget
- * waiting on a box that was compiling five other projects' pages at the same
- * time. The test timeout raised on the first line of the function is 120s, so
- * the retry budget fits inside it with room for the spec's own work.
- * toPass reports the last attempt's error, so a genuine login failure still
- * reads as itself.
- * Each attempt gets 40s to land. Without that bound, one stuck attempt uses
- * the whole budget and the report shows only the overall timeout with no
- * attempt's error. */
+ * The toPass budget is LOGIN_BUDGET, 135s: a full run boots six dev servers at
+ * once, and a 60s budget once ran out on a box that was compiling five other
+ * projects' pages at the same time. Each attempt is capped at LOGIN_ATTEMPT,
+ * 65s at worst, so the budget always leaves room for a second full attempt.
+ * When an attempt fails inside its caps, toPass reports that attempt's error,
+ * so a genuine login failure still reads as itself. The report shows only the
+ * overall timeout if the second attempt is still running at 135s, which needs
+ * both attempts to use nearly all of their caps.
+ * The test timeout raised on the first line of the function is the budget plus
+ * 45s for the spec's own work. */
 export async function loginRetrying(page: Page, password: string) {
-	test.setTimeout(120_000);
+	test.setTimeout(LOGIN_BUDGET + 45_000);
 	await expect(async () => {
 		// Each attempt starts from a signed-out browser. An attempt that set the
 		// session cookie and then lost its own waitForURL would otherwise leave the
@@ -140,8 +158,8 @@ export async function loginRetrying(page: Page, password: string) {
 		// /admin/images once the cookie exists, so the retry would fail on the form
 		// rather than on the login.
 		await page.context().clearCookies();
-		await adminLogin(page, password, { timeout: 40_000 });
-	}).toPass({ timeout: 90_000 });
+		await adminLogin(page, password, { bounded: true });
+	}).toPass({ timeout: LOGIN_BUDGET });
 }
 
 /** adminLogin resolves as soon as the login navigation commits, so the admin

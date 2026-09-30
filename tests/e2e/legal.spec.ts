@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { adminLogin, openSiteTab } from './admin-login';
+import { adminLogin, LOGIN_ATTEMPT_MAX, openSiteTab } from './admin-login';
 
 // E2E coverage for the /privacy + /terms legal pages (and their footer / mobile
 // discoverability). Runs against the shared read-only seed (siteName
@@ -70,7 +70,17 @@ test('legal pages are reachable on mobile (footer hidden < 768px)', async ({ pag
 test('an owner override replaces the defaults and is rendered as escaped text', async ({ page }) => {
 	const override = "First paragraph.\n\nSecond paragraph <script>window.__xssRan = true</script>";
 
-	await login(page);
+	// Under parallel load the save POST below has been seen with no response
+	// after more than 20s: the button stays on "Saving…", and the test hit the
+	// 30s default. It happens on the base commit too, and only under load.
+	// The wait is registered before the click and its predicate matches the
+	// ?/saveSite POST, so the test is not missing the response. Why the action
+	// stalls on a loaded `vite dev` server is still open. Until that is known,
+	// the budget covers the whole path: a bounded login (LOGIN_ATTEMPT_MAX, 65s),
+	// the 30s hydration wait, 30s for the save, and 20s for the settings goto,
+	// the nudge loop and the /privacy checks.
+	test.setTimeout(LOGIN_ATTEMPT_MAX + 80_000);
+	await adminLogin(page, PASSWORD, { bounded: true });
 	await page.goto('/admin/settings'); // opens on the "site" tab
 
 	// Submit only once the page has hydrated. Before hydration the form is a plain
@@ -106,7 +116,8 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// resolves the override is persisted.
 	const [resp] = await Promise.all([
 		page.waitForResponse(
-			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
+			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings'),
+			{ timeout: 30_000 }
 		),
 		page.getByRole('button', { name: 'Save site settings' }).click()
 	]);
