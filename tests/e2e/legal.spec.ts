@@ -77,15 +77,10 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// POST, so the browser navigates to /admin/settings?/saveSite and the goto below
 	// aborts with "interrupted by another navigation" — awaiting the POST response
 	// does not help, because the response arrives mid-navigation. Hydrated, SvelteKit
-	// submits via fetch and no navigation happens at all. The tab switch is a client
-	// handler, so it only works once hydrated; retry it as the hydration gate (same
-	// idiom as palette-settings.spec.ts). This branch's third e2e webServer widens
-	// the hydration window past the nudge loop's 5s cap below, so gate first.
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
-	await page.getByRole('tab', { name: 'Site', exact: true }).click();
+	// submits via fetch and no navigation happens at all. openSiteTab waits for
+	// hydration first, which also keeps the nudge loop's 5s cap below from being
+	// spent on a page that has not hydrated.
+	await openSiteTab(page);
 
 	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
 	// shows next to the field — the CCPA rights channel prompt (item 2).

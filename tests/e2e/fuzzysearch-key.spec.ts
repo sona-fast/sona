@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { adminLogin, openConnectionsTab } from './admin-login';
 import { waitForNavHeight } from './site-chrome-helpers';
 
 // Artist lookup key settings (SONA-156), driven in a real browser: the four
@@ -118,16 +118,6 @@ async function openConfirmAndReflexClick(page: Page) {
 	await expect(replaceLine(page), `the block held still ${where}`).toBeVisible();
 }
 
-// The connections sections are hidden by CSS until the tab is active, and the
-// toggle is client JS — so the click only "takes" once hydrated (the
-// supporter-key spec's retry shape).
-async function openConnectionsTab(page: Page) {
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Connections', exact: true }).click();
-		await expect(section(page)).toBeVisible({ timeout: 1500 });
-	}).toPass();
-}
-
 // Take the key away if one is saved, leaving the section unconnected. The
 // Connections tab has to be open already. Returns whether it removed anything,
 // so a caller can say where the leftover came from.
@@ -154,10 +144,10 @@ test.describe('admin settings artist lookup key', () => {
 	test.beforeEach(async ({ page }) => {
 		await adminLogin(page, PASSWORD);
 		await page.goto('/admin/settings');
-		await openConnectionsTab(page);
+		await openConnectionsTab(page, section(page));
 		if (await removeSavedKey(page)) {
 			console.warn('fuzzysearch-key: a key was saved before this test; removed it');
-			await openConnectionsTab(page);
+			await openConnectionsTab(page, section(page));
 		}
 	});
 
@@ -201,10 +191,10 @@ test.describe('admin settings artist lookup key', () => {
 			// removal confirmation open would otherwise never see the Remove
 			// button (it lives in the panel's else branch) and spin to the timeout.
 			await page.goto('/admin/settings');
-			await openConnectionsTab(page);
+			await openConnectionsTab(page, section(page));
 			// The aborted attempt saved the key: put the section back to
 			// unconnected before trying again.
-			if (await removeSavedKey(page)) await openConnectionsTab(page);
+			if (await removeSavedKey(page)) await openConnectionsTab(page, section(page));
 			await page.evaluate(() => {
 				(window as unknown as Record<string, boolean>).__sonaSaveMarker = true;
 			});
@@ -294,7 +284,7 @@ test.afterAll(async ({ browser }) => {
 	try {
 		await adminLogin(page, PASSWORD);
 		await page.goto('/admin/settings');
-		await openConnectionsTab(page);
+		await openConnectionsTab(page, section(page));
 		if (await removeSavedKey(page)) {
 			console.warn('fuzzysearch-key: the serial chain left the key behind; removed it here');
 		}

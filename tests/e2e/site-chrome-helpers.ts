@@ -121,7 +121,8 @@ export async function serveScaled(page: Page, url: string, scale: number, edit =
 
 /** The bottom nav publishes its height as --mobile-nav-height once hydrated.
  * Wait until that matches the bar as rendered, so anything measured against
- * the clearance sees the wrapped bar rather than the one before it. */
+ * the clearance sees the wrapped bar rather than the one before it.
+ * waitForHydration (admin-login.ts) reads the same property as a hydration gate. */
 export async function waitForNavHeight(page: Page) {
 	await expect
 		.poll(() =>

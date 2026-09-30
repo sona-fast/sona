@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // Shared admin-login step for the E2E specs. The e2e env configures Turnstile
 // with Cloudflare's always-pass TEST keys (see wrangler.e2e*.toml), so the login
@@ -91,12 +91,12 @@ export async function stubTurnstile(page: Page) {
 export async function adminLogin(
 	page: Page,
 	password: string,
-	// timeout bounds the wait for the landing page. Unset, it is whatever is left
-	// of the test's own budget.
+	// timeout bounds the goto to the form and the wait for the landing page.
+	// Unset, each is whatever is left of the test's own budget.
 	opts: { realTurnstile?: boolean; timeout?: number } = {}
 ) {
 	if (!opts.realTurnstile) await stubTurnstile(page);
-	await page.goto('/admin/login');
+	await page.goto('/admin/login', { timeout: opts.timeout });
 	await page.fill('input[name="password"]', password);
 	if (await page.locator('.turnstile').count()) {
 		// The stub prefix doubles as proof the stub is actually in effect: the real
@@ -128,11 +128,9 @@ export async function adminLogin(
  * the retry budget fits inside it with room for the spec's own work.
  * toPass reports the last attempt's error, so a genuine login failure still
  * reads as itself.
- * Each attempt gets 40s to land rather than the whole 90s. toPass cannot cut
- * short an attempt that is still waiting, so with an unbounded waitForURL one
- * attempt that never landed spent the entire budget: main's CI failed that
- * way, a 90s timeout with no attempt's error in it, in runs 36636551971 and
- * 36752681806. */
+ * Each attempt gets 40s to land. Without that bound, one stuck attempt uses
+ * the whole budget and the report shows only the overall timeout with no
+ * attempt's error. */
 export async function loginRetrying(page: Page, password: string) {
 	test.setTimeout(120_000);
 	await expect(async () => {
@@ -173,15 +171,18 @@ export async function gotoRetrying(page: Page, path: string) {
  * and every use:enhance on the page is attached. It is published even while
  * the nav is hidden on a wide screen, as 0px.
  *
- * Waiting on this once replaces clicking a client-only control until it
- * "takes". That loop spends its budget re-clicking, and each click that lands
+ * Wait on this once instead of clicking a client-only control in a retry
+ * loop. That loop spends its budget re-clicking, and each click that lands
  * before use:enhance on a form posts natively and reloads the page, which
  * starts hydration over again.
  *
  * Only a gate for a fresh document: after a client-side navigation the old
  * value is still on <html>, but then the app was hydrated already. The login
  * page has no bottom nav; adminLogin waits for the Turnstile token instead,
- * which that page also only issues once it has mounted. */
+ * which that page also only issues once it has mounted.
+ *
+ * waitForNavHeight (site-chrome-helpers.ts) reads the same property to measure
+ * the bar, not to gate on hydration. */
 export async function waitForHydration(page: Page, timeout = 30_000) {
 	await expect
 		.poll(
@@ -198,12 +199,19 @@ export async function waitForHydration(page: Page, timeout = 30_000) {
 		.toBe(true);
 }
 
-/** Open the Site tab of /admin/settings once the page has hydrated. The gate
- * matters for what follows more than for the tab: an unhydrated form does a
- * real navigation, and that aborts the goto which follows. */
+/** Open the Site tab of /admin/settings once the page has hydrated. The wait
+ * is mostly for the caller's next step: an unhydrated form submits as a real
+ * navigation, and that aborts the caller's next goto. */
 export async function openSiteTab(page: Page) {
 	await waitForHydration(page);
-	const site = page.getByRole('tab', { name: 'Site', exact: true });
-	await site.click();
-	await expect(site).toHaveAttribute('aria-selected', 'true');
+	await page.getByRole('tab', { name: 'Site', exact: true }).click();
+}
+
+/** Open the Connections tab of /admin/settings once the page has hydrated.
+ * The tab is a client-side swap: `shown` is in the DOM but hidden until the tab
+ * handler runs, so after the wait one click shows it. */
+export async function openConnectionsTab(page: Page, shown: Locator, hydrationTimeout?: number) {
+	await waitForHydration(page, hydrationTimeout);
+	await page.getByRole('tab', { name: 'Connections', exact: true }).click();
+	await expect(shown).toBeVisible();
 }

@@ -29,8 +29,9 @@ const PASSWORD = 'e2e-admin-password';
  *
  * Then the page's own save has to finish too. When the theme is already the
  * one asked for, the server check passes at once, and a goto issued while the
- * save is still in flight came back net::ERR_ABORTED on CI. The save button
- * reads "Saving…" until the enhanced submit has its answer.
+ * save is in flight aborts with net::ERR_ABORTED. While saving, the button is
+ * disabled and reads "Saving…", so waiting for an enabled "Save site settings"
+ * button waits for the save to finish.
  */
 async function chooseTheme(page: Page, label: string, id: string) {
 	await loginRetrying(page, PASSWORD);

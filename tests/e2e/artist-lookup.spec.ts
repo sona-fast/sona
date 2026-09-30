@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { adminLogin, waitForHydration } from './admin-login';
+import { adminLogin, openConnectionsTab, waitForHydration } from './admin-login';
 import { dropOn, waitForDropAttachment } from './drop-files';
 import { stubSuggestions } from './tag-suggestions-helpers';
 
@@ -187,8 +187,8 @@ const EDIT_IMAGE = '/admin/images/10/edit';
 
 /** In `vite dev` the client modules stream in, so a click fired right after
  * goto can land before Svelte attaches its handlers — and a value typed before
- * hydration is thrown away by it. Toggling the artist control and back is a
- * probe that leaves the form exactly as it was found. */
+ * hydration is thrown away by it. Wait for hydration before handing the page
+ * back. */
 async function gotoEditHydrated(page: Page, path = EDIT_IMAGE) {
 	// The first request to this route compiles it, which can outrun goto's own
 	// timeout and leave nothing to click. Three tries, and the compile the timed
@@ -202,34 +202,31 @@ async function gotoEditHydrated(page: Page, path = EDIT_IMAGE) {
 		}
 	}
 	// A goto that timed out on the route compile can leave that navigation still
-	// in flight; waiting for the page's own select once settles it, so the click
-	// retry below is not absorbing a late navigation that detaches the button.
+	// in flight; waiting for the page's own select once settles it, so the
+	// hydration wait below reads the document that stays.
 	await expect(page.locator('select[name="artistId"]')).toBeVisible({ timeout: 30_000 });
-	// Past the navigation, retry the CLICK and not the navigation: re-navigating
-	// would throw away the hydration this is waiting on and start it over.
-	await expect(async () => {
-		await page.getByRole('button', { name: 'Add New Artist' }).click();
-		await expect(page.locator('input[name="artistName"]')).toBeVisible({ timeout: 1000 });
-	}).toPass({ timeout: 30_000 });
-	await page.getByRole('button', { name: 'Select Existing' }).click();
-	await expect(page.locator('select[name="artistId"]')).toBeVisible();
+	await waitForHydration(page);
 }
 
 const section = (page: Page) => page.locator('section.lookup-section');
 
-// The tab is a client-side swap: the section is in the DOM but hidden until the
-// tab handler runs. Wait for hydration once, then one click shows it.
-async function openConnectionsTab(page: Page) {
-	await waitForHydration(page);
-	await page.getByRole('tab', { name: 'Connections', exact: true }).click();
-	await expect(section(page)).toBeVisible();
-}
-
-// What saveLookupKey may spend, and what the hooks around it allow for a
-// login. The beforeAll's timeout is built from these, so it always covers the
-// loop it holds.
+// SAVE_KEY_BUDGET caps saveLookupKey's retry loop, and LOGIN_BUDGET caps the
+// beforeAll's login. The beforeAll's timeout is their sum, so the loop always
+// gets its full budget. The afterAll's login is capped the same way.
 const SAVE_KEY_BUDGET = 60_000;
-const LOGIN_ALLOWANCE = 30_000;
+const LOGIN_BUDGET = 90_000;
+// What the afterAll gets past its login, to remove a key left behind.
+const REMOVE_KEY_MARGIN = 30_000;
+
+/** Log in from a hook, retried within LOGIN_BUDGET. A cold run can bounce back
+ * to /admin/login; each attempt starts signed out and gets 40s to land. Not
+ * loginRetrying: its test.setTimeout would replace the hook's own timeout. */
+async function hookLogin(page: Page) {
+	await expect(async () => {
+		await page.context().clearCookies();
+		await adminLogin(page, PASSWORD, { timeout: 40_000 });
+	}).toPass({ timeout: LOGIN_BUDGET });
+}
 
 /** Save the throwaway key on the settings page, unless it is already there.
  * openConnectionsTab has waited for hydration, so the submit goes through
@@ -241,7 +238,8 @@ const LOGIN_ALLOWANCE = 30_000;
 async function saveLookupKey(page: Page) {
 	await expect(async () => {
 		await page.goto('/admin/settings', { timeout: 30_000 });
-		await openConnectionsTab(page);
+		// 15s rather than the default 30s, so two attempts fit in the budget.
+		await openConnectionsTab(page, section(page), 15_000);
 		if ((await section(page).locator('button.btn-remove').count()) > 0) return;
 		await section(page).locator('input[name="fuzzysearchApiKey"]').fill(FAKE_KEY);
 		await section(page).locator('button[type="submit"]').click();
@@ -318,12 +316,12 @@ test.describe('with a key saved', () => {
 	// saved. It used to be the first test that saved it, which made a filtered
 	// run (`-g`) fail on whatever it selected: the row was never written.
 	test.beforeAll(async ({ browser }) => {
-		// A beforeAll has its own timeout, separate from the tests', and this is
-		// it: a login, then the whole of saveLookupKey's loop.
-		test.setTimeout(LOGIN_ALLOWANCE + SAVE_KEY_BUDGET);
+		// A beforeAll has its own timeout, separate from the tests'. This one covers
+		// a login plus saveLookupKey's full retry loop.
+		test.setTimeout(LOGIN_BUDGET + SAVE_KEY_BUDGET);
 		const page = await browser.newPage();
 		try {
-			await adminLogin(page, PASSWORD);
+			await hookLogin(page);
 			await saveLookupKey(page);
 		} finally {
 			await page.close();
@@ -337,7 +335,7 @@ test.describe('with a key saved', () => {
 
 	test('the saved key puts the button on the upload page', async ({ page }) => {
 		await page.goto('/admin/settings');
-		await openConnectionsTab(page);
+		await openConnectionsTab(page, section(page));
 		// What the save left behind: the section reports the connection and offers
 		// to take it away again.
 		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible();
@@ -4034,7 +4032,7 @@ test.describe('with a key saved', () => {
 	// this test never gets to happen.
 	test('removing the key takes the button away again', async ({ page }) => {
 		await page.goto('/admin/settings');
-		await openConnectionsTab(page);
+		await openConnectionsTab(page, section(page));
 		await section(page).locator('button.btn-remove').click();
 		// The confirmation ignores a click for its first half second.
 		await page.waitForTimeout(550);
@@ -4057,15 +4055,15 @@ test.describe('with a key saved', () => {
 	// do with it. The hook runs whether or not the chain finished, and it says
 	// what it did rather than removing the key silently.
 	test.afterAll(async ({ browser }) => {
-		// On the 30s default this hook timed out inside its own login after a
-		// failed beforeAll, and the key it exists to remove stayed behind for the
-		// retry: "without a key there is no button" then failed on it.
-		test.setTimeout(90_000);
+		// The 30s default is too short. After a failed beforeAll, the login here can
+		// use all of it, and then the key stays saved and the retry of "without a
+		// key there is no button" fails on it.
+		test.setTimeout(LOGIN_BUDGET + REMOVE_KEY_MARGIN);
 		const page = await browser.newPage();
 		try {
-			await adminLogin(page, PASSWORD);
+			await hookLogin(page);
 			await page.goto('/admin/settings');
-			await openConnectionsTab(page);
+			await openConnectionsTab(page, section(page));
 			// The test above already removed it on a run that got that far.
 			if ((await section(page).locator('button.btn-remove').count()) === 0) return;
 			console.warn('artist-lookup: the serial chain left the key behind; removing it here');
