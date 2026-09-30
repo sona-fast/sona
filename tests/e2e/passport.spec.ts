@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoRetrying } from './admin-login';
-import { expectSkipLinkReachesMain } from './site-chrome-helpers';
+import { expectHeaderTogglesWork, expectSkipLinkReachesMain, waitForNavHeight } from './site-chrome-helpers';
 
 // The passport homepage (landingLayout = 'passport'), end to end. This file runs
 // under two projects, each on its own seeded server (see playwright.config.ts):
@@ -97,21 +97,27 @@ test.describe('populated passport', () => {
 	});
 
 	// The mock puts the card 28px below the header on desktop and 16px below
-	// the top on mobile, where the header is hidden.
+	// it on mobile, where the header keeps only the name and the toggles.
 	test('places the card where the mock does', async ({ page }) => {
+		const gap = () =>
+			page.evaluate(
+				() =>
+					document.querySelector('.book')!.getBoundingClientRect().top -
+					document.querySelector('header')!.getBoundingClientRect().bottom
+			);
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await page.goto('/');
-		const gap = await page.evaluate(
-			() =>
-				document.querySelector('.book')!.getBoundingClientRect().top -
-				document.querySelector('header')!.getBoundingClientRect().bottom
-		);
-		expect(gap).toBe(28);
+		expect(await gap()).toBe(28);
 
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/');
-		const top = await page.evaluate(() => document.querySelector('.book')!.getBoundingClientRect().top);
-		expect(top).toBe(16);
+		expect(await gap()).toBe(16);
+
+		await waitForNavHeight(page);
+		// The gap is measured from a header that is really there on a phone, with
+		// both toggles in it and working.
+		await expect(page.getByRole('banner')).toBeVisible();
+		await expectHeaderTogglesWork(page);
 	});
 
 	// With the Stamps heading hidden and no note under it, the stamps page's
@@ -316,23 +322,27 @@ test.describe('populated passport', () => {
 	});
 
 	// A public page shows the same fixed bottom nav on a phone as admin does,
-	// so a fresh load keeps the same room clear above it for a focused control
-	// or a scrolled-to element; a wide screen has no nav and keeps none.
+	// so a fresh load keeps room clear above it for a focused control or a
+	// scrolled-to element, as tall as the bar itself plus 6px for a focus ring;
+	// a wide screen has no nav and keeps none.
 	test('keeps room clear above the phone nav on a fresh public load', async ({ page }) => {
 		const kept = () => page.evaluate(() => getComputedStyle(document.documentElement).scrollPaddingBottom);
+		const navHeight = () =>
+			page.locator('nav.mobile-nav').evaluate((nav) => (nav as HTMLElement).offsetHeight);
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/gallery');
 		await expect(page.locator('nav.mobile-nav')).toBeVisible();
-		expect(await kept()).toBe('72px');
+		await waitForNavHeight(page);
+		expect(await kept()).toBe(`${(await navHeight()) + 6}px`);
 		// A phone with a home indicator adds its inset to the nav's bottom
 		// padding, so the room kept grows by the same amount and still clears
 		// the whole bar. Chromium fakes the inset through the DevTools protocol.
+		const before = await navHeight();
 		const cdp = await page.context().newCDPSession(page);
 		await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { bottom: 34 } });
-		await expect.poll(kept).toBe('106px');
-		const navHeight = await page.locator('nav.mobile-nav').evaluate((nav) => (nav as HTMLElement).offsetHeight);
-		expect(navHeight).toBeGreaterThan(72);
-		expect(parseFloat(await kept())).toBeGreaterThanOrEqual(navHeight);
+		await expect.poll(navHeight).toBeGreaterThan(before);
+		await waitForNavHeight(page);
+		expect(await kept()).toBe(`${(await navHeight()) + 6}px`);
 		await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await expect(page.locator('nav.mobile-nav')).toBeHidden();

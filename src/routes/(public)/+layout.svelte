@@ -8,13 +8,11 @@
 </script>
 
 <div class="public-layout">
-	<div class="desktop-header">
-		<Header
-			siteName={data.settings.siteName}
-			stickersEnabled={data.stickersEnabled}
-			collectionsEnabled={data.collectionsEnabled}
-		/>
-	</div>
+	<Header
+		siteName={data.settings.siteName}
+		stickersEnabled={data.stickersEnabled}
+		collectionsEnabled={data.collectionsEnabled}
+	/>
 	<main id="main-content" tabindex="-1">
 		{@render children()}
 	</main>
@@ -37,10 +35,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.desktop-header {
-			display: none;
-		}
-
 		.desktop-footer {
 			display: none;
 		}

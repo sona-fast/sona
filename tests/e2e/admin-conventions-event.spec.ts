@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { gotoAfterLogin, loginRetrying } from './admin-login';
+import { waitForNavHeight } from './site-chrome-helpers';
 
 // Linking a convention to its FurTrack event on /admin/conventions, end to end
 // (SONA-230): a row's Save, the result announced in the page's live regions, a
@@ -495,8 +496,15 @@ test('brings the add panel into view from the foot of a long list on a phone', a
 	await expect(listAdd).toBeFocused();
 	const tabbed = (await listAdd.boundingBox())!;
 	expect(tabbed.y + tabbed.height).toBeLessThanOrEqual(navTop + 0.5);
-	// The nav's own padding does that, so it is on the page while the nav shows.
-	expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollPaddingBottom)).toBe('72px');
+	// The nav's own padding does that, as tall as the bar plus 6px for the focus
+	// ring once the bar has published its height, so it is on the page while
+	// the nav shows.
+	await waitForNavHeight(page);
+	const kept = await page.evaluate(() => ({
+		padding: getComputedStyle(document.documentElement).scrollPaddingBottom,
+		nav: `${(document.querySelector('.mobile-nav') as HTMLElement).offsetHeight}px`
+	}));
+	expect(kept.padding).toBe(`${parseFloat(kept.nav) + 6}px`);
 	await listAdd.scrollIntoViewIfNeeded();
 	// The panel opens under the header, and the header is above the screen.
 	const header = (await page.locator('.page-header').boundingBox())!;

@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
 import { adminLogin } from './admin-login';
+import { waitForNavHeight } from './site-chrome-helpers';
 
 // Artist lookup key settings (SONA-156), driven in a real browser: the four
 // states of the section on the Connections tab, and the two transitions that
@@ -242,6 +243,9 @@ test.describe('admin settings artist lookup key', () => {
 		// Again at 390, where the block is taller and the shift used to be larger.
 		const desktop = page.viewportSize();
 		await page.setViewportSize({ width: 390, height: 844 });
+		// The page reflows after the resize, as the bottom nav publishes its
+		// height; measuring before that reads a frame the click never lands in.
+		await waitForNavHeight(page);
 		await openConfirmAndReflexClick(page);
 		await confirmPanel(page).getByRole('button', { name: 'Keep', exact: true }).click();
 		await expect(confirmPanel(page)).toHaveCount(0);

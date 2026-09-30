@@ -1,18 +1,16 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
-	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Sun, Moon, Camera, Sticker, Box, CalendarDays, Activity, X } from 'lucide-svelte';
-	import { getTheme } from '$lib/theme.svelte';
+	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Camera, Sticker, Box, CalendarDays, Activity, X } from 'lucide-svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { isAdminAuthExempt } from '$lib/admin-routes';
 	import { VIEWER_TZ_COOKIE } from '$lib/config';
 
 	let { children, data } = $props();
-
-	const theme = getTheme();
 
 	// Publish the operator's timezone to the server (SONA-119). The supporter-key
 	// expiry date and the countdown beside it are rendered server-side so SSR and
@@ -120,20 +118,18 @@
 		</aside>
 
 		<div class="admin-main">
-			<header class="admin-header desktop-header">
+			<header class="admin-header">
 				<div class="admin-badge">{m.admin_badge()}</div>
-				<LanguageToggle />
-				<button class="theme-toggle" onclick={theme.toggle} aria-label={m.theme_toggle()}>
-					{#if theme.current === 'dark'}
-						<Sun size={16} />
-					{:else}
-						<Moon size={16} />
-					{/if}
-				</button>
-				<div class="admin-avatar">
-					{#if data.adminAvatarUrl}
-						<img src={data.adminAvatarUrl} alt={m.nav_admin()} />
-					{/if}
+				<!-- One group, so on a narrow screen the controls and the avatar
+				     wrap together rather than leaving the avatar alone on a row. -->
+				<div class="admin-header-end">
+					<LanguageToggle />
+					<ThemeToggle />
+					<div class="admin-avatar">
+						{#if data.adminAvatarUrl}
+							<img src={data.adminAvatarUrl} alt={m.nav_admin()} />
+						{/if}
+					</div>
 				</div>
 			</header>
 
@@ -270,38 +266,25 @@
 		min-width: 0;
 	}
 
-	.desktop-header {
+	.admin-header,
+	.admin-header-end {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: flex-end;
 		gap: 12px;
+	}
+
+	.admin-header {
 		padding: 12px 24px;
 		border-bottom: 1px solid var(--border);
 	}
 
 	.admin-badge {
-		font-size: 12px;
+		font-size: 0.75rem;
 		color: var(--primary-text);
 		font-weight: 600;
 		font-family: var(--font-primary);
-	}
-
-	.theme-toggle {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 32px;
-		height: 32px;
-		border-radius: var(--radius-pill);
-		border: none;
-		background: var(--secondary);
-		color: var(--foreground);
-		cursor: pointer;
-		transition: background 0.15s;
-	}
-
-	.theme-toggle:hover {
-		background: var(--muted);
 	}
 
 	.admin-avatar {
@@ -426,8 +409,15 @@
 			display: none;
 		}
 
-		.desktop-header {
-			display: none;
+		/* The header stays on phones: the bottom nav holds destinations only,
+		   so the theme and language toggles live here. */
+		.admin-header {
+			padding: 8px 16px;
+		}
+
+		/* When the header wraps, the badge keeps to the start of its row. */
+		.admin-badge {
+			margin-inline-end: auto;
 		}
 
 		.admin-content {

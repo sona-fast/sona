@@ -31,9 +31,10 @@
 		border: none;
 		background: transparent;
 		color: var(--muted-foreground);
-		font-size: 12px;
+		/* rem, not px, so the labels follow the text size like the nav's. */
+		font-size: 0.75rem;
 		font-weight: 600;
-		padding: 4px 10px;
+		padding: 6px 10px;
 		cursor: pointer;
 		transition:
 			background 0.15s,

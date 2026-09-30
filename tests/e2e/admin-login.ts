@@ -156,3 +156,14 @@ export async function gotoRetrying(page: Page, path: string) {
 		await page.goto(path);
 	}).toPass({ timeout: 15_000 });
 }
+
+/** Open the Site tab of /admin/settings once the page has hydrated. A
+ * client-only tab switch is the hydration gate, because an unhydrated form
+ * does a real navigation and that aborts the goto which follows. */
+export async function openSiteTab(page: Page) {
+	await expect(async () => {
+		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
+		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
+	}).toPass();
+	await page.getByRole('tab', { name: 'Site', exact: true }).click();
+}

@@ -1,8 +1,24 @@
 import { expect, type Page } from '@playwright/test';
 
-// Site-chrome checks shared by site-chrome.spec.ts, passport.spec.ts and
-// stickers-content.spec.ts. A module rather than a spec, so importing it does
-// not register another file's tests.
+// Site-chrome checks shared by several e2e specs. A module rather than a spec,
+// so importing it does not register another file's tests.
+
+/**
+ * Resolve CSS values that use the theme's tokens: apply them to a probe
+ * element and read its computed style back, so a check holds on every theme.
+ * Keys are CSS property names, such as 'background-color'.
+ */
+export function resolveStyle<K extends string>(page: Page, style: Record<K, string>) {
+	return page.evaluate((style) => {
+		const probe = document.createElement('div');
+		for (const [prop, value] of Object.entries(style)) probe.style.setProperty(prop, value);
+		document.body.append(probe);
+		const s = getComputedStyle(probe);
+		const out = Object.fromEntries(Object.keys(style).map((prop) => [prop, s.getPropertyValue(prop)]));
+		probe.remove();
+		return out;
+	}, style as Record<string, string>) as Promise<Record<K, string>>;
+}
 
 /** Tab once from a fresh page and return the focused element's class and text. */
 export async function firstTabStop(page: Page, key: 'Tab' | 'Shift+Tab' = 'Tab') {
@@ -56,29 +72,25 @@ export async function expectSkipLinkReachesMain(
 	// It reads as a pill on the card surface with a hairline edge, and the focus
 	// ring stays its own outline. The expected colors are the theme's tokens,
 	// resolved on a probe element, so this holds on every theme.
+	const tokens = await resolveStyle(page, {
+		'background-color': 'var(--card)',
+		'box-shadow': 'inset 0 0 0 1px var(--border)',
+		'outline-color': 'var(--ring)'
+	});
 	const look = await page.evaluate(() => {
 		const link = getComputedStyle(document.activeElement as HTMLElement);
-		const probe = document.createElement('div');
-		probe.style.cssText =
-			'background: var(--card); box-shadow: inset 0 0 0 1px var(--border); outline: 2px solid var(--ring)';
-		document.body.append(probe);
-		const want = getComputedStyle(probe);
-		const tokens = { background: want.backgroundColor, edge: want.boxShadow, ring: want.outlineColor };
-		probe.remove();
 		return {
 			background: link.backgroundColor,
 			edge: link.boxShadow,
 			radius: link.borderTopLeftRadius,
-			ring: `${link.outlineStyle} ${link.outlineWidth} ${link.outlineColor} ${link.outlineOffset}`,
-			tokens
+			ring: `${link.outlineStyle} ${link.outlineWidth} ${link.outlineColor} ${link.outlineOffset}`
 		};
 	});
 	expect(look).toEqual({
-		background: look.tokens.background,
-		edge: look.tokens.edge,
+		background: tokens['background-color'],
+		edge: tokens['box-shadow'],
 		radius: '999px',
-		ring: `solid 2px ${look.tokens.ring} 2px`,
-		tokens: look.tokens
+		ring: `solid 2px ${tokens['outline-color']} 2px`
 	});
 
 	// Enter follows it, and the next Tab starts inside the main landmark rather
@@ -88,6 +100,23 @@ export async function expectSkipLinkReachesMain(
 	await page.keyboard.press('Tab');
 	const inMain = await page.evaluate((sel) => !!document.activeElement?.closest(sel), main);
 	expect(inMain).toBe(true);
+}
+
+/**
+ * Serve `url` with the root text size set to `scale` times the default, and
+ * any other `edit` applied, written into the HTML itself. Use it when the
+ * style has to be there from the first paint: with script off, or before the
+ * page hydrates.
+ */
+export async function serveScaled(page: Page, url: string, scale: number, edit = (html: string) => html) {
+	await page.route(url, async (route) => {
+		const res = await route.fetch();
+		const body = edit(await res.text()).replace(
+			'</head>',
+			`<style>html { font-size: ${scale * 100}% !important; }</style></head>`
+		);
+		await route.fulfill({ response: res, body });
+	});
 }
 
 /** The bottom nav publishes its height as --mobile-nav-height once hydrated.
@@ -102,4 +131,62 @@ export async function waitForNavHeight(page: Page) {
 			})
 		)
 		.toBe(true);
+}
+
+/** How many rows the bottom nav's tabs sit on. */
+export function navRowCount(page: Page) {
+	return page
+		.locator('nav.mobile-nav .tab')
+		.evaluateAll((tabs) => new Set(tabs.map((t) => Math.round(t.getBoundingClientRect().top))).size);
+}
+
+// The theme button is named by what it does, so its name is one of these two
+// and swaps when it is pressed.
+const TO_LIGHT = 'Switch to light theme';
+const TO_DARK = 'Switch to dark theme';
+export const THEME_NAME = /^Switch to (light|dark) theme$/;
+
+/**
+ * The page has one header, the bottom nav holds no buttons, and the header
+ * shows the only theme toggle and the language toggle.
+ */
+export async function expectHeaderToggles(page: Page) {
+	await expect(page.getByRole('banner')).toHaveCount(1);
+	const banner = page.getByRole('banner');
+	await expect(page.locator('nav.mobile-nav button')).toHaveCount(0);
+
+	const theme = banner.getByRole('button', { name: THEME_NAME });
+	await expect(theme).toBeVisible();
+	await expect(page.getByRole('button', { name: THEME_NAME })).toHaveCount(1);
+	const lang = banner.getByRole('group', { name: 'Switch language' });
+	await expect(lang).toBeVisible();
+	return { theme, lang };
+}
+
+/**
+ * expectHeaderToggles, and the toggles work: language comes before theme, the
+ * theme button flips the theme and its name both ways, and JP switches the
+ * page to Japanese. Leaves the page in Japanese.
+ */
+export async function expectHeaderTogglesWork(page: Page) {
+	const { theme, lang } = await expectHeaderToggles(page);
+
+	// Language first, then theme, in every header.
+	expect(
+		await lang.evaluate(
+			(group, button) => !!(group.compareDocumentPosition(button!) & Node.DOCUMENT_POSITION_FOLLOWING),
+			await theme.elementHandle()
+		)
+	).toBe(true);
+
+	const before = await page.locator('html').getAttribute('data-theme');
+	const nameBefore = await theme.getAttribute('aria-label');
+	await theme.click();
+	await expect(page.locator('html')).not.toHaveAttribute('data-theme', before ?? '');
+	await expect(theme).toHaveAccessibleName(nameBefore === TO_LIGHT ? TO_DARK : TO_LIGHT);
+	await theme.click();
+	await expect(theme).toHaveAccessibleName(nameBefore!);
+
+	await lang.getByRole('button', { name: 'JP' }).click();
+	await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
 }
