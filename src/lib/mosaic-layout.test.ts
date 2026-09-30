@@ -9,14 +9,16 @@ import {
 	type MosaicLayout
 } from './mosaic-layout';
 
-// The strip is rotated about the centre of its box by the tilt; a banner
-// point is covered when, mapped back into the strip's own frame, it lands on
-// some cell. This walks a grid over the banner and finds every cell the same
-// way the browser lays them out: rows stacked with the gap, each row's cells
-// laid left to right from its (possibly negative) margin. A point that lands
-// in a gap between cells counts as covered when a neighbour 8px away is on a
-// cell, since the gaps are 6px and the visitor sees the background through
-// them by design.
+/**
+ * The strip is rotated about the centre of its box by the tilt; a banner
+ * point is covered when, mapped back into the strip's own frame, it lands on
+ * some cell. This walks a grid over the banner and finds every cell the same
+ * way the browser lays them out: rows stacked with the gap, each row's cells
+ * laid left to right from its (possibly negative) margin. A point that lands
+ * in a gap between cells counts as covered when a neighbour 8px away is on a
+ * cell, since the gaps are 6px and the visitor sees the background through
+ * them by design.
+ */
 function uncoveredPoints(layout: MosaicLayout, bannerWidth: number, bannerHeight: number) {
 	const height =
 		layout.rows.reduce((sum, r) => sum + r.height, 0) + MOSAIC_GAP * (layout.rows.length - 1);

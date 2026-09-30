@@ -65,6 +65,7 @@ const RIGHT_OVERSHOOT = 140;
 const EDGE_MARGIN = 8;
 const MAX_ROWS = 40;
 
+/** How far a row with these cells reaches from the strip's left edge. */
 function rowSpan(pattern: MosaicRowPattern, widths: number[]): number {
 	return pattern.padLeft + widths.reduce((sum, w) => sum + w, 0) + MOSAIC_GAP * (widths.length - 1);
 }
@@ -91,6 +92,7 @@ function buildRow(pattern: MosaicRowPattern, stripWidth: number): MosaicRow {
 	};
 }
 
+/** The strip box's height: the rows stacked with the gap between them. */
 function stripHeight(rows: MosaicRow[]): number {
 	return rows.reduce((sum, r) => sum + r.height, 0) + MOSAIC_GAP * (rows.length - 1);
 }

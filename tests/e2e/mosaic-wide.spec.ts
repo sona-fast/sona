@@ -10,8 +10,11 @@ import { test, expect, type Page } from '@playwright/test';
 // Read-only throughout. This asserts geometry, not pixels: it samples a grid
 // of points over the banner and asks the browser what is under each one.
 
-// A point is covered when a mosaic cell is under it or under a neighbour 8px
-// away: the 6px gaps between cells show the background by design.
+/**
+ * Samples a grid over the banner and returns the points with no mosaic cell
+ * under them. A point is covered when a cell is under it or under a neighbour
+ * 8px away: the 6px gaps between cells show the background by design.
+ */
 async function uncoveredPoints(page: Page) {
 	return page.evaluate(() => {
 		const banner = document.querySelector('.mosaic-banner')!.getBoundingClientRect();
