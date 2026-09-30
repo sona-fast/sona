@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { loginRetrying, gotoAfterLogin } from './admin-login';
+import { loginRetrying, gotoAfterLogin, openSiteTab } from './admin-login';
 
 // SONA-227: the end-to-end proof that picking a theme in admin settings reaches
 // the public page. theme-tokens.spec.ts already proves the generated stylesheet
@@ -18,17 +18,6 @@ test.describe.configure({ mode: 'serial' });
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
-
-// The same dance legal.spec.ts does for its saveSite cases: a client-only tab
-// switch is the hydration gate, because an unhydrated form does a real
-// navigation and that aborts the goto which follows.
-async function openSiteTab(page: Page) {
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
-	await page.getByRole('tab', { name: 'Site', exact: true }).click();
-}
 
 /**
  * Log in, pick a theme by its visible label, save the Site tab, and wait until

@@ -74,13 +74,11 @@
 
 {#if splash}
 	<div class="landing">
-		<div class="desktop-header">
-			<Header
-				siteName={data.settings.siteName}
-				stickersEnabled={data.stickersEnabled}
-				collectionsEnabled={data.collectionsEnabled}
-			/>
-		</div>
+		<Header
+			siteName={data.settings.siteName}
+			stickersEnabled={data.stickersEnabled}
+			collectionsEnabled={data.collectionsEnabled}
+		/>
 
 		<main id="main-content" tabindex="-1" class="splash">
 			<div class="hub">
@@ -121,13 +119,11 @@
 {:else if passport}
 	<!-- The passport composes the same chrome as the mosaic branch below. -->
 	<div class="public-layout">
-		<div class="desktop-header">
-			<Header
-				siteName={data.settings.siteName}
-				stickersEnabled={data.stickersEnabled}
-				collectionsEnabled={data.collectionsEnabled}
-			/>
-		</div>
+		<Header
+			siteName={data.settings.siteName}
+			stickersEnabled={data.stickersEnabled}
+			collectionsEnabled={data.collectionsEnabled}
+		/>
 		<main id="main-content" tabindex="-1" class="passport container">
 			<Passport {passport} />
 		</main>
@@ -139,13 +135,11 @@
 	</div>
 {:else}
 	<div class="public-layout">
-		<div class="desktop-header">
-			<Header
-				siteName={data.settings.siteName}
-				stickersEnabled={data.stickersEnabled}
-				collectionsEnabled={data.collectionsEnabled}
-			/>
-		</div>
+		<Header
+			siteName={data.settings.siteName}
+			stickersEnabled={data.stickersEnabled}
+			collectionsEnabled={data.collectionsEnabled}
+		/>
 		<main id="main-content" tabindex="-1">
 			<MosaicBanner
 				images={data.mosaicImageUrls}
@@ -207,10 +201,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.desktop-header {
-			display: none;
-		}
-
 		.splash {
 			padding-bottom: var(--mobile-nav-clearance);
 		}
@@ -259,12 +249,21 @@
 		letter-spacing: 4px;
 		color: var(--foreground);
 		line-height: 1;
+		/* The owner name, or the site name when that is empty, breaks rather than
+		   widening a phone screen. This uses anywhere rather than break-word
+		   because the heading sits in a column that shrinks to fit its content,
+		   and only anywhere lets that column narrow. */
+		overflow-wrap: anywhere;
+		text-align: center;
 	}
 
 	.subtitle {
 		font-family: var(--font-secondary);
 		font-size: 13px;
 		color: var(--muted-foreground);
+		/* Admin free text: a long single word (a URL, say) breaks too. */
+		overflow-wrap: anywhere;
+		text-align: center;
 	}
 
 	.prompt {
@@ -326,6 +325,8 @@
 		gap: 3px;
 		flex: 1;
 		min-width: 0;
+		/* The artist and photos card descriptions carry the persona name, which can be one long word. */
+		overflow-wrap: anywhere;
 	}
 
 	.card-title {
@@ -352,11 +353,15 @@
 	.footer-mark {
 		font-family: var(--font-primary);
 		font-weight: 700;
-		font-size: 11px;
+		font-size: 0.6875rem;
 		letter-spacing: 3px;
+		/* No opacity dim: like the "made with" badge, the muted ink alone keeps
+		   this small text at 4.5:1. */
 		color: var(--muted-foreground);
-		opacity: 0.5;
 		text-transform: lowercase;
+		/* A long one-word site name breaks rather than widening a phone screen. */
+		overflow-wrap: anywhere;
+		text-align: center;
 	}
 
 	/* Desktop: larger identity, cards laid out in a row */

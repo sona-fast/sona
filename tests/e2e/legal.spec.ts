@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { adminLogin, openSiteTab } from './admin-login';
 
 // E2E coverage for the /privacy + /terms legal pages (and their footer / mobile
 // discoverability). Runs against the shared read-only seed (siteName
@@ -15,18 +15,7 @@ async function login(page: Page) {
 	await adminLogin(page, PASSWORD);
 }
 
-// The three saveSite-submitting tests in this file share one dance: wait for
-// hydration (a client-only tab switch is the gate), return to the Site tab,
-// then POST and assert the response. Hydration matters because an unhydrated
-// form does a real navigation, which aborts the goto that follows.
-async function openSiteTab(page: Page) {
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
-	await page.getByRole('tab', { name: 'Site', exact: true }).click();
-}
-
+// The three saveSite-submitting tests in this file share one sequence: openSiteTab, which waits for hydration, then POST and check the response.
 async function saveSiteSettings(page: Page) {
 	const [resp] = await Promise.all([
 		page.waitForResponse(

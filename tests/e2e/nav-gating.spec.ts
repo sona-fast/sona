@@ -20,7 +20,7 @@ test('desktop header hides the gated Stickers/Collections links but keeps Galler
 	await expect(nav.locator('a[href="/collections"]')).toHaveCount(0);
 });
 
-test('mobile bottom nav drops the Stickers tab (header hidden < 768px)', async ({ page }) => {
+test('mobile bottom nav drops the Stickers tab (header links hidden < 768px)', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto('/gallery');
 

@@ -7,6 +7,7 @@
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { children, data } = $props();
 
@@ -16,12 +17,12 @@
 <div class="paths-shell">
 	<header class="topbar">
 		<div class="topbar-left">
-			<a href="/" class="back" aria-label="Back"><ArrowLeft size={20} /></a>
+			<a href="/" class="back" aria-label={m.error_back_home()}><ArrowLeft size={20} /></a>
 			<a href="/" class="wordmark">{wordmark}</a>
 		</div>
 		<div class="topbar-toggles">
-			<ThemeToggle />
 			<LanguageToggle />
+			<ThemeToggle />
 		</div>
 	</header>
 	<main id="main-content" tabindex="-1" class="paths-page">
@@ -38,11 +39,14 @@
 		background: var(--background);
 	}
 
+	/* A long site name wraps, and the toggles move under it, rather than
+	   pushing the page wider than a phone screen. */
 	.topbar {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
-		gap: 12px;
+		gap: 8px 12px;
 		max-width: 600px;
 		margin: 0 auto;
 		padding: 16px 20px;
@@ -52,23 +56,23 @@
 		display: flex;
 		align-items: center;
 		gap: 12px;
+		min-width: 0;
 	}
 
 	.topbar-toggles {
 		display: flex;
 		align-items: center;
 		gap: 8px;
+		margin-left: auto;
 	}
 
-	/* On mobile the toggles live in the bottom nav bar instead. */
-	@media (max-width: 768px) {
-		.topbar-toggles {
-			display: none;
-		}
-	}
-
+	/* A 24px target around the 20px arrow; the negative margin keeps the
+	   wordmark where it was. */
 	.back {
 		display: flex;
+		padding: 2px;
+		margin: -2px;
+		border-radius: 6px;
 		color: var(--muted-foreground);
 		text-decoration: none;
 	}
@@ -82,6 +86,7 @@
 		font-weight: 700;
 		font-size: 14px;
 		letter-spacing: 2px;
+		overflow-wrap: anywhere;
 		color: var(--foreground);
 		text-decoration: none;
 	}

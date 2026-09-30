@@ -228,11 +228,13 @@ const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
 // on the shared server that would race every other spec (SONA-156).
 // fuzzysearch-key writes and removes that same row from the settings page, so
 // it belongs on the same single-worker server rather than racing artist-lookup
-// over the key from the shared one.
+// over the key from the shared one. splash-header switches the homepage to the
+// three-path splash, which no seeded server renders, and switches it back.
 const UPLOAD_SPECS = [
 	'**/upload.spec.ts',
 	'**/artist-lookup.spec.ts',
-	'**/fuzzysearch-key.spec.ts'
+	'**/fuzzysearch-key.spec.ts',
+	'**/splash-header.spec.ts'
 ];
 // suggest-tags writes tag rows through its Save, so it takes neither the shared
 // server (read-only by convention) nor the upload one (SONA-220).
