@@ -34,14 +34,17 @@
 	/* How much bottom space clears the fixed mobile nav. MobileNav publishes its
 	   own height as --mobile-nav-height; the nav wraps onto more rows when the
 	   text is enlarged, so a fixed gap would let it cover the page's last lines.
-	   Never less than the 88px the layouts were designed around, and that floor
-	   is 5.5rem so it grows with the root font size too: before hydration or
-	   with JavaScript off the height is never published, and the floor alone
-	   has to clear a bar that wrapped under enlarged text. The html rule below
+	   The floor is 6.5rem (104px at 16px text) so it grows with the root font
+	   size too: before hydration or with JavaScript off the height is never
+	   published, and the floor alone has to clear a four-tab bar wrapped onto
+	   two rows at 200% text on any fallback font. CI's Japanese fallback font
+	   made that bar 183px, past the 176px an older 5.5rem floor gave. At
+	   normal size the floor also beats a one-row bar's own 67px + 32px, so the
+	   clearance there is 104px rather than 99px. The html rule below
 	   pins the root at 16px, so a browser's default font-size setting does not
 	   reach rem here; a user style sheet or extension that overrides the root
 	   size does, and page zoom scales px and rem alike. */
-	--mobile-nav-clearance: max(5.5rem, calc(var(--mobile-nav-height, 0px) + 32px));
+	--mobile-nav-clearance: max(6.5rem, calc(var(--mobile-nav-height, 0px) + 32px));
 }
 
 /* Reset */

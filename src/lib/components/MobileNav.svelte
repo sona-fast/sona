@@ -97,13 +97,16 @@
 		/* The fixed bottom nav covers the foot of the page. This padding makes a
 		   focused control or a scrolled-to panel stop above the nav instead of
 		   behind it. It follows the bar's published height, which grows when the
-		   tabs wrap. Before that height is set, the 4.5rem fallback covers a
-		   one-row bar (about 67px at 16px text) plus the home-indicator inset. It
-		   is in rem so it grows with the text. The extra 6px keeps a focused
-		   control's ring (2px offset, 2px wide) above the bar after whole-pixel
-		   scrolling. */
+		   tabs wrap. Before that height is set, or with JavaScript off, the
+		   6.5rem fallback plus the home-indicator inset stands in for it. It
+		   matches the clearance floor in app.css and is in rem so it grows with
+		   the text: it has to cover a four-tab bar wrapped onto two rows at 200%
+		   text on any fallback font (CI's Japanese font made that bar 183px, more
+		   than the 150px an older 4.5rem fallback gave). The extra 6px keeps a
+		   focused control's ring (2px offset, 2px wide) above the bar after
+		   whole-pixel scrolling. */
 		:global(html) {
-			scroll-padding-bottom: calc(var(--mobile-nav-height, calc(4.5rem + env(safe-area-inset-bottom, 0px))) + 6px);
+			scroll-padding-bottom: calc(var(--mobile-nav-height, calc(6.5rem + env(safe-area-inset-bottom, 0px))) + 6px);
 		}
 	}
 

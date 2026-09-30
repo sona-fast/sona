@@ -207,9 +207,32 @@ test.describe('with JavaScript off', () => {
 			await page.goto(url);
 			const rows = await navRowCount(page);
 			expect(rows, 'the bar wraps at this size, or this test proves nothing').toBeGreaterThan(1);
+			const m = await page.evaluate(() => {
+				const root = getComputedStyle(document.documentElement);
+				return {
+					navHeight: (document.querySelector('nav.mobile-nav') as HTMLElement).offsetHeight,
+					scrollPadding: parseFloat(root.scrollPaddingBottom),
+					rootSize: parseFloat(root.fontSize)
+				};
+			});
+			// The clearance floor (6.5rem) has to hold the bar with a 20px gap to
+			// spare. The bar's height depends on the Japanese fallback font the
+			// machine has: CI's made it 183px, a Mac's about 159px. If a font
+			// change grows the bar past this, raise the floor in app.css and the
+			// scroll-padding fallback in MobileNav.svelte together.
+			expect(
+				m.navHeight + 20,
+				'the wrapped bar outgrew the no-script clearance floor; a fallback font change can do this'
+			).toBeLessThanOrEqual(6.5 * m.rootSize);
+			// A focused control at the foot of the page stops above the wrapped bar.
+			expect(m.scrollPadding, 'the scroll-padding fallback is shorter than the bar').toBeGreaterThanOrEqual(
+				m.navHeight + 6
+			);
 			const { lastBottom, last, navTop } = await lastContentAgainstNav(page);
 			expect(lastBottom).toBeGreaterThan(0);
 			expect(lastBottom, `${last} ends under the bar`).toBeLessThanOrEqual(navTop);
+			// The floor leaves a visible gap above the bar, not a touch.
+			expect(navTop - lastBottom, `${last} ends too close to the bar`).toBeGreaterThanOrEqual(20);
 		});
 	}
 });
