@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { adminLogin, gotoAfterLogin, loginRetrying } from './admin-login';
+import { gotoAfterLogin, loginRetrying } from './admin-login';
 import {
 	expectHeaderToggles,
 	expectHeaderTogglesWork,
@@ -47,7 +47,7 @@ for (const { name, url, status, autofocus } of PAGES) {
 test('the signed-in admin shell starts with a skip link that moves focus into the main content', async ({
 	page
 }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/images');
 	await expectSkipLinkReachesMain(page, { main: 'main.admin-content#main-content' });
 });
@@ -57,7 +57,7 @@ test('the signed-in admin shell starts with a skip link that moves focus into th
 // layouts use, so at 320px with 200% text it must still clear the taller bar.
 // Japanese, because at 200% the four English tabs fit one row.
 test('the admin upload button clears the wrapped bottom nav at 320px and 200% text', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
 	await page.setViewportSize({ width: 320, height: 800 });
 	await gotoAfterLogin(page, '/admin/images');
