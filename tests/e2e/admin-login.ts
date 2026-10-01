@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // Shared admin-login step for the E2E specs. The e2e env configures Turnstile
 // with Cloudflare's always-pass TEST keys (see wrangler.e2e*.toml), so the login
@@ -88,14 +88,34 @@ export async function stubTurnstile(page: Page) {
 	);
 }
 
+/** Per-step caps for one bounded login attempt. The Turnstile token wait is
+ * capped at `token` in every login, bounded or not. The worst case of one
+ * attempt is the sum, 65s, so LOGIN_BUDGET below fits two attempts: toPass
+ * abandons an attempt still running at its deadline, so a second attempt has to
+ * be able to start and finish. */
+export const LOGIN_ATTEMPT = {
+	goto: 20_000,
+	fill: 2_500,
+	token: 15_000,
+	click: 2_500,
+	url: 25_000
+};
+export const LOGIN_ATTEMPT_MAX = Object.values(LOGIN_ATTEMPT).reduce((a, b) => a + b, 0);
+/** Two worst-case attempts plus 5s for toPass's own pauses between them. */
+export const LOGIN_BUDGET = 2 * LOGIN_ATTEMPT_MAX + 5_000;
+
 export async function adminLogin(
 	page: Page,
 	password: string,
-	opts: { realTurnstile?: boolean } = {}
+	// bounded caps every step at LOGIN_ATTEMPT, for a caller that retries.
+	// Unset, the goto, fill, click and landing wait each get whatever is left of
+	// the test's own budget.
+	opts: { realTurnstile?: boolean; bounded?: boolean } = {}
 ) {
+	const cap = opts.bounded ? LOGIN_ATTEMPT : undefined;
 	if (!opts.realTurnstile) await stubTurnstile(page);
-	await page.goto('/admin/login');
-	await page.fill('input[name="password"]', password);
+	await page.goto('/admin/login', { timeout: cap?.goto });
+	await page.fill('input[name="password"]', password, { timeout: cap?.fill });
 	if (await page.locator('.turnstile').count()) {
 		// The stub prefix doubles as proof the stub is actually in effect: the real
 		// widget can never mint an `e2e-stub-token-` value, so a broken route glob
@@ -103,11 +123,11 @@ export async function adminLogin(
 		// reverting to the flaky real widget.
 		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(
 			opts.realTurnstile ? /.+/ : new RegExp('^' + STUB_TOKEN_PREFIX),
-			{ timeout: 15_000 }
+			{ timeout: LOGIN_ATTEMPT.token }
 		);
 	}
-	await page.click('button[type="submit"]');
-	await page.waitForURL(/\/admin\/images/);
+	await page.click('button[type="submit"]', { timeout: cap?.click });
+	await page.waitForURL(/\/admin\/images/, { timeout: cap?.url });
 }
 
 /** adminLogin, retried. A cold run occasionally bounces back to /admin/login
@@ -119,15 +139,19 @@ export async function adminLogin(
  * gets its own budget raised above it first: without that, a cold start dies at
  * 30s with a bare timeout and no second attempt. The 120_000 in
  * playwright.config.ts is the webServer boot timeout, not the per-test one.
- * The toPass budget below is 90s rather than the 60s it started at: a full run
- * boots six dev servers at once, and one login exhausted the shorter budget
- * waiting on a box that was compiling five other projects' pages at the same
- * time. The test timeout raised on the first line of the function is 120s, so
- * the retry budget fits inside it with room for the spec's own work.
- * toPass reports the last attempt's error, so a genuine login failure still
- * reads as itself. */
+ * The toPass budget is LOGIN_BUDGET, 135s: a full run boots six dev servers at
+ * once, and a 60s budget once ran out on a box that was compiling five other
+ * projects' pages at the same time. Each attempt is capped at LOGIN_ATTEMPT,
+ * 65s at worst, so the budget always leaves room for a second full attempt.
+ * When an attempt fails inside its caps, toPass reports that attempt's error,
+ * so a genuine login failure still reads as itself. If the second attempt is
+ * still running at 135s, toPass abandons it and reports the first attempt's
+ * error followed by its own timeout line, so the report names the first
+ * failure but says nothing about what the second attempt was stuck on.
+ * The test timeout raised on the first line of the function is the budget plus
+ * 45s for the spec's own work. */
 export async function loginRetrying(page: Page, password: string) {
-	test.setTimeout(120_000);
+	test.setTimeout(LOGIN_BUDGET + 45_000);
 	await expect(async () => {
 		// Each attempt starts from a signed-out browser. An attempt that set the
 		// session cookie and then lost its own waitForURL would otherwise leave the
@@ -135,8 +159,8 @@ export async function loginRetrying(page: Page, password: string) {
 		// /admin/images once the cookie exists, so the retry would fail on the form
 		// rather than on the login.
 		await page.context().clearCookies();
-		await adminLogin(page, password);
-	}).toPass({ timeout: 90_000 });
+		await adminLogin(page, password, { bounded: true });
+	}).toPass({ timeout: LOGIN_BUDGET });
 }
 
 /** adminLogin resolves as soon as the login navigation commits, so the admin
@@ -157,13 +181,62 @@ export async function gotoRetrying(page: Page, path: string) {
 	}).toPass({ timeout: 15_000 });
 }
 
-/** Open the Site tab of /admin/settings once the page has hydrated. A
- * client-only tab switch is the hydration gate, because an unhydrated form
- * does a real navigation and that aborts the goto which follows. */
+/** Wait until the page a goto just loaded has hydrated.
+ *
+ * The admin shell and the public layouts mount the bottom nav (MobileNav),
+ * which writes --mobile-nav-height onto <html> from a ResizeObserver. The
+ * server never renders that property, and the observer first reports after
+ * Svelte has mounted the whole tree, so once it is there every click handler
+ * and every use:enhance on the page is attached. It is published even while
+ * the nav is hidden on a wide screen, as 0px.
+ *
+ * Wait on this once instead of clicking a client-only control in a retry
+ * loop. That loop spends its budget re-clicking, and each click that lands
+ * before use:enhance on a form posts natively and reloads the page, which
+ * starts hydration over again.
+ *
+ * Only a gate for a fresh document: after a client-side navigation the old
+ * value is still on <html>, but then the app was hydrated already. The login
+ * page has no bottom nav; adminLogin waits for the Turnstile token instead,
+ * which that page also only issues once it has mounted.
+ *
+ * waitForNavHeight (site-chrome-helpers.ts) reads the same property to measure
+ * the bar, not to gate on hydration. */
+export async function waitForHydration(page: Page, timeout = 30_000) {
+	await expect
+		.poll(
+			() =>
+				page
+					.evaluate(
+						() => document.documentElement.style.getPropertyValue('--mobile-nav-height') !== ''
+					)
+					// A navigation in progress destroys the context mid-evaluate; that is
+					// "not yet", not a failure.
+					.catch(() => false),
+			{ message: 'the page hydrates (MobileNav publishes --mobile-nav-height)', timeout }
+		)
+		.toBe(true);
+}
+
+/** Open the Site tab of /admin/settings once the page has hydrated. The wait
+ * is mostly for the caller's next step: an unhydrated form submits as a real
+ * navigation, and that aborts the caller's next goto. */
 export async function openSiteTab(page: Page) {
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
+	await waitForHydration(page);
 	await page.getByRole('tab', { name: 'Site', exact: true }).click();
+}
+
+/** Open the Connections tab of /admin/settings once the page has hydrated.
+ * The tab is a client-side swap: `shown` is in the DOM but hidden until the tab
+ * handler runs, so after the wait one click shows it. The click is capped at
+ * clickTimeout so a caller can add the whole step into its own budget. */
+export async function openConnectionsTab(
+	page: Page,
+	shown: Locator,
+	hydrationTimeout?: number,
+	clickTimeout = 2_500
+) {
+	await waitForHydration(page, hydrationTimeout);
+	await page.getByRole('tab', { name: 'Connections', exact: true }).click({ timeout: clickTimeout });
+	await expect(shown).toBeVisible();
 }

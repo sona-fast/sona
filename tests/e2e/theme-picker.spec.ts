@@ -26,17 +26,25 @@ const PASSWORD = 'e2e-admin-password';
  * go out as a plain form navigation while the response listener is still
  * arming, so the theme changes and the listener never resolves. Reading the
  * server's own HTML back is true whichever way the submit went.
+ *
+ * Then the page's own save has to finish too. When the theme is already the
+ * one asked for, the server check passes at once, and a goto issued while the
+ * save is in flight aborts with net::ERR_ABORTED. While saving, the button is
+ * disabled and reads "Saving…", so waiting for an enabled "Save site settings"
+ * button waits for the save to finish.
  */
 async function chooseTheme(page: Page, label: string, id: string) {
 	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/settings');
 	await openSiteTab(page);
 	await page.selectOption('select[name="themeId"]', { label });
-	await page.getByRole('button', { name: 'Save site settings' }).click();
+	const save = page.getByRole('button', { name: 'Save site settings' });
+	await save.click();
 	await expect(async () => {
 		const res = await page.request.get('/');
 		expect(await res.text()).toContain(`data-theme-id="${id}"`);
 	}).toPass({ timeout: 30_000 });
+	await expect(save).toBeEnabled({ timeout: 15_000 });
 }
 
 /** The resolved --background on the public home page. */

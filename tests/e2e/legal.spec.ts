@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { adminLogin, openSiteTab } from './admin-login';
+import { gotoAfterLogin, LOGIN_BUDGET, loginRetrying, openSiteTab } from './admin-login';
 
 // E2E coverage for the /privacy + /terms legal pages (and their footer / mobile
 // discoverability). Runs against the shared read-only seed (siteName
@@ -11,19 +11,40 @@ test.describe.configure({ mode: 'serial' });
 
 const PASSWORD = 'e2e-admin-password'; // legacy ADMIN_PASSWORD login path (see seed.sql)
 
-async function login(page: Page) {
-	await adminLogin(page, PASSWORD);
-}
+// How long a save gets to answer. Under parallel load the ?/saveSite POST has
+// been seen with no response after more than 30s: the button stays on
+// "Saving…". It happens on the base commit too, and only under load. The wait
+// is registered before the click and its predicate matches the POST, so the
+// test is not missing the response. The action writes each Site-tab setting
+// on its own (saveSettings in src/lib/server/settings.ts): about 30 settings at
+// two D1 round trips each. Timed on a loaded dev server, a save took 3 to 6s,
+// spread evenly over those round trips with none of them blocked, so its time
+// grows with the load on every one. That is the likeliest cause of the longer
+// stalls, but no save past 30s has been timed yet. Until the writes are
+// batched, a save that runs past this wait fails the test, and one that passes
+// slowly is reported rather than hidden: see SLOW_SAVE.
+const SAVE_RESPONSE_WAIT = 30_000;
+// A save slower than this passes but is annotated 'slow-save' and logged.
+const SLOW_SAVE = 10_000;
 
-// The three saveSite-submitting tests in this file share one sequence: openSiteTab, which waits for hydration, then POST and check the response.
+// Every saveSite-submitting step in this file: openSiteTab has waited for
+// hydration, then POST and check the response.
 async function saveSiteSettings(page: Page) {
+	const started = Date.now();
 	const [resp] = await Promise.all([
 		page.waitForResponse(
-			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
+			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings'),
+			{ timeout: SAVE_RESPONSE_WAIT }
 		),
 		page.getByRole('button', { name: 'Save site settings' }).click()
 	]);
 	expect(resp.ok()).toBeTruthy();
+	const took = Date.now() - started;
+	if (took > SLOW_SAVE) {
+		const description = `the site settings save took ${took}ms`;
+		test.info().annotations.push({ type: 'slow-save', description });
+		console.warn(`legal.spec: ${description}`);
+	}
 }
 
 test('default legal pages render and are reachable from the footer', async ({ page }) => {
@@ -70,22 +91,24 @@ test('legal pages are reachable on mobile (footer hidden < 768px)', async ({ pag
 test('an owner override replaces the defaults and is rendered as escaped text', async ({ page }) => {
 	const override = "First paragraph.\n\nSecond paragraph <script>window.__xssRan = true</script>";
 
-	await login(page);
-	await page.goto('/admin/settings'); // opens on the "site" tab
+	// loginRetrying sets its own timeout, so the whole test's budget is set
+	// after it: LOGIN_BUDGET for the login, then 15s for the settings goto's
+	// retry, 30s for hydration, nine 5s waits (eight expects and the nudge
+	// loop's toPass), SAVE_RESPONSE_WAIT for the save and 10s for the /privacy
+	// goto, which is 130s. The 5s over covers the steps with no cap of their own:
+	// the wait for the landed page's load, the tab click and the fills.
+	await loginRetrying(page, PASSWORD);
+	test.setTimeout(LOGIN_BUDGET + 135_000);
+	await gotoAfterLogin(page, '/admin/settings'); // opens on the "site" tab
 
 	// Submit only once the page has hydrated. Before hydration the form is a plain
 	// POST, so the browser navigates to /admin/settings?/saveSite and the goto below
 	// aborts with "interrupted by another navigation" — awaiting the POST response
 	// does not help, because the response arrives mid-navigation. Hydrated, SvelteKit
-	// submits via fetch and no navigation happens at all. The tab switch is a client
-	// handler, so it only works once hydrated; retry it as the hydration gate (same
-	// idiom as palette-settings.spec.ts). This branch's third e2e webServer widens
-	// the hydration window past the nudge loop's 5s cap below, so gate first.
-	await expect(async () => {
-		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
-	await page.getByRole('tab', { name: 'Site', exact: true }).click();
+	// submits via fetch and no navigation happens at all. openSiteTab waits for
+	// hydration first, which also keeps the nudge loop's 5s cap below from being
+	// spent on a page that has not hydrated.
+	await openSiteTab(page);
 
 	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
 	// shows next to the field — the CCPA rights channel prompt (item 2).
@@ -109,13 +132,7 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	await page.fill('textarea[name="privacyPolicy"]', override);
 	// The action writes the setting server-side before returning, so once the POST
 	// resolves the override is persisted.
-	const [resp] = await Promise.all([
-		page.waitForResponse(
-			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
-		),
-		page.getByRole('button', { name: 'Save site settings' }).click()
-	]);
-	expect(resp.ok()).toBeTruthy();
+	await saveSiteSettings(page);
 
 	// Fail loudly if the override ever executes as HTML rather than rendering as text.
 	page.on('dialog', async (d) => {
@@ -123,7 +140,7 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 		throw new Error('override executed as HTML — XSS');
 	});
 
-	await page.goto('/privacy');
+	await page.goto('/privacy', { timeout: 10_000 });
 	// The override text shows; the default sections are gone.
 	await expect(page.getByText('First paragraph.')).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Your privacy rights' })).toHaveCount(0);
@@ -201,8 +218,13 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 }) => {
 	const override = "My own words.\n\nSecond paragraph <script>window.__aiXssRan = true</script>";
 
-	await login(page);
-	await page.goto('/admin/settings');
+	// Set after loginRetrying, which sets its own: LOGIN_BUDGET, then 15s for the
+	// settings goto's retry, two 30s hydration waits, two SAVE_RESPONSE_WAITs,
+	// five 10s gotos and nine 5s expect waits, which is 230s. The 5s over covers
+	// the load wait, the tab clicks and the fills, which have no cap of their own.
+	await loginRetrying(page, PASSWORD);
+	test.setTimeout(LOGIN_BUDGET + 235_000);
+	await gotoAfterLogin(page, '/admin/settings');
 
 	await openSiteTab(page);
 	await page.fill('textarea[name="aiPageText"]', override);
@@ -213,7 +235,7 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 		throw new Error('AI page override executed as HTML — XSS');
 	});
 
-	await page.goto('/ai');
+	await page.goto('/ai', { timeout: 10_000 });
 	await expect(page.getByText('My own words.')).toBeVisible();
 	// The default copy is gone.
 	await expect(page.getByRole('heading', { name: 'The software.' })).toHaveCount(0);
@@ -228,7 +250,7 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 
 	// Turning the page off removes BOTH the footer link and the route itself —
 	// the disclosure never lingers as an unlinked page.
-	await page.goto('/admin/settings');
+	await page.goto('/admin/settings', { timeout: 10_000 });
 	await openSiteTab(page);
 	await page.uncheck('input[name="aiPageEnabled"]');
 	// Clear the privacy override the earlier case in this serial file left
@@ -238,15 +260,15 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await page.fill('textarea[name="privacyPolicy"]', '');
 	await saveSiteSettings(page);
 
-	await page.goto('/');
+	await page.goto('/', { timeout: 10_000 });
 	await expect(page.locator('.footer .legal-links a[href="/ai"]')).toHaveCount(0);
-	const gone = await page.goto('/ai');
+	const gone = await page.goto('/ai', { timeout: 10_000 });
 	expect(gone?.status()).toBe(404);
 
 	// Declining the disclosure also drops the vendor names from the default
 	// privacy policy, so the owner is not left publishing processors they may
 	// not use. The category disclosure stays, because it still might be true.
-	await page.goto('/privacy');
+	await page.goto('/privacy', { timeout: 10_000 });
 	await expect(page.getByText('CodeRabbit')).toHaveCount(0);
 	await expect(page.getByText('Anthropic')).toHaveCount(0);
 	await expect(page.getByText(/development or code-review tools/)).toBeVisible();
@@ -259,8 +281,12 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 // untouched — and it runs LAST because this file is serial: a flake here would
 // otherwise skip the mutating cases above.
 test('the AI toggle is named by its title and described by its hint', async ({ page }) => {
-	await login(page);
-	await page.goto('/admin/settings');
+	// Set after loginRetrying, which sets its own: LOGIN_BUDGET, then 15s for the
+	// settings goto's retry, 30s for hydration and two 5s expect waits, which is
+	// 55s. The 5s over covers the load wait and the two clicks.
+	await loginRetrying(page, PASSWORD);
+	test.setTimeout(LOGIN_BUDGET + 60_000);
+	await gotoAfterLogin(page, '/admin/settings');
 	await openSiteTab(page);
 
 	const toggle = page.locator('input[name="aiPageEnabled"]');
@@ -280,8 +306,13 @@ test('the AI toggle is named by its title and described by its hint', async ({ p
 test.afterAll(async ({ browser }) => {
 	const page = await browser.newPage();
 	try {
-		await login(page);
-		await page.goto('/admin/settings');
+		// Set after loginRetrying, which sets its own; in a hook it sets the hook's
+		// timeout. LOGIN_BUDGET, then 15s for the settings goto's retry, 30s for
+		// hydration and SAVE_RESPONSE_WAIT, which is 75s. The 5s over covers the
+		// load wait, the tab click, the fills and opening and closing the page.
+		await loginRetrying(page, PASSWORD);
+		test.setTimeout(LOGIN_BUDGET + 80_000);
+		await gotoAfterLogin(page, '/admin/settings');
 		await openSiteTab(page);
 		await page.fill('textarea[name="aiPageText"]', '');
 		await page.fill('textarea[name="privacyPolicy"]', '');

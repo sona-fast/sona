@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { adminLogin, gotoAfterLogin } from './admin-login';
+import { gotoAfterLogin, loginRetrying } from './admin-login';
 import {
 	expectHeaderToggles,
 	expectHeaderTogglesWork,
@@ -47,7 +47,7 @@ for (const { name, url, status, autofocus } of PAGES) {
 test('the signed-in admin shell starts with a skip link that moves focus into the main content', async ({
 	page
 }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/images');
 	await expectSkipLinkReachesMain(page, { main: 'main.admin-content#main-content' });
 });
@@ -57,7 +57,7 @@ test('the signed-in admin shell starts with a skip link that moves focus into th
 // layouts use, so at 320px with 200% text it must still clear the taller bar.
 // Japanese, because at 200% the four English tabs fit one row.
 test('the admin upload button clears the wrapped bottom nav at 320px and 200% text', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
 	await page.setViewportSize({ width: 320, height: 800 });
 	await gotoAfterLogin(page, '/admin/images');
@@ -402,7 +402,7 @@ test('the phone header lines the site name up with the page gutter', async ({ pa
 // The admin shell drops its sidebar on a phone and shows the same bottom nav,
 // so its header has to stay for the toggles too.
 test('the admin shell keeps the theme and language toggles on a phone', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await gotoAfterLogin(page, '/admin/images');
 	await expectHeaderToggles(page);
@@ -468,7 +468,7 @@ for (const url of ['/gallery', '/art']) {
 test('the admin theme toggle keeps a 44px target on a phone', async ({ page }, testInfo) => {
 	const badgeSize = () =>
 		page.locator('header .admin-badge').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	// On one row at 390px, the badge starts the header's content and the
 	// toggles end it.
 	await page.setViewportSize({ width: 390, height: 844 });
