@@ -488,10 +488,10 @@ describe('saveSettings — batched upsert (SONA-235)', () => {
 		const { db, rows, seed } = sqliteSettingsDb();
 		seed('siteName', 'Old');
 
-		await saveSettings(db, { siteName: 'New', ownerName: 'Sunday' });
+		await saveSettings(db, { siteName: 'New', ownerName: 'Test Owner' });
 
 		expect(rows()).toEqual([
-			{ key: 'ownerName', value: 'Sunday' },
+			{ key: 'ownerName', value: 'Test Owner' },
 			{ key: 'siteName', value: 'New' }
 		]);
 	});
@@ -532,7 +532,7 @@ describe('saveSettings — batched upsert (SONA-235)', () => {
 		sqlite.exec(`CREATE TRIGGER refuse_owner BEFORE INSERT ON site_settings
 			WHEN NEW.key = 'ownerName' BEGIN SELECT RAISE(ABORT, 'refused'); END;`);
 
-		await expect(saveSettings(db, { siteName: 'New', ownerName: 'Sunday' })).rejects.toThrow(
+		await expect(saveSettings(db, { siteName: 'New', ownerName: 'Test Owner' })).rejects.toThrow(
 			/refused/
 		);
 

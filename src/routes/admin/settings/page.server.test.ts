@@ -946,7 +946,7 @@ describe('settings syncNow — a refusal is a localizable reason, not a raw mess
 // form doesn't manage that setting) from a field PRESENT but blank (deliberate
 // clear). Conditionally-rendered fields (splash subtitle, sona sheet, theme
 // pickers) were otherwise silently blanked by saves from forms that don't
-// render them (#60 — Sunday's splash subtitle kept reverting to the fallback).
+// render them (#60: a splash subtitle kept reverting to the fallback).
 async function seed(db: ReturnType<typeof makeDb>['db'], key: string, value: string) {
 	await db.insert(siteSettings).values({ key, value });
 }
@@ -976,7 +976,7 @@ describe('saveSite — absent fields are skipped, blank fields clear (#60)', () 
 		await seed(db, 'themeId', 'terracotta');
 		await seed(db, 'landingLayout', 'threePath');
 
-		await actions.saveSite(saveSiteEvent(platform, { ownerName: 'Sunday' }));
+		await actions.saveSite(saveSiteEvent(platform, { ownerName: 'Test Owner' }));
 
 		expect(await getRawSetting(db, 'themeId')).toBe('terracotta');
 		expect(await getRawSetting(db, 'landingLayout')).toBe('threePath');
