@@ -11,32 +11,31 @@ test.describe.configure({ mode: 'serial' });
 
 const PASSWORD = 'e2e-admin-password'; // legacy ADMIN_PASSWORD login path (see seed.sql)
 
-// How long a save gets to answer. Under parallel load the ?/saveSite POST has
-// been seen with no response after more than 30s: the button stays on
-// "Saving…". It happens on the base commit too, and only under load. The wait
-// is registered before the click and its predicate matches the POST, so the
-// test is not missing the response. The action writes each Site-tab setting
-// on its own (saveSettings in src/lib/server/settings.ts): about 30 settings at
-// two D1 round trips each. Timed on a loaded dev server, a save took 3 to 6s,
-// spread evenly over those round trips with none of them blocked, so its time
-// grows with the load on every one. That is the likeliest cause of the longer
-// stalls, but no save past 30s has been timed yet. Until the writes are
-// batched, a save that runs past this wait fails the test, and one that passes
-// slowly is reported rather than hidden: see SLOW_SAVE.
+// How long a save gets to answer. The ?/saveSite action writes every Site-tab
+// setting in one D1 batch (saveSettings in src/lib/server/settings.ts), so a
+// save should answer well inside this wait. The wait and the 'slow-save'
+// annotation stay as a guard: a save that slows down again is reported, and
+// one that stalls past this wait fails the test.
 const SAVE_RESPONSE_WAIT = 30_000;
 // A save slower than this passes but is annotated 'slow-save' and logged.
 const SLOW_SAVE = 10_000;
+// How long the form gets to settle after the POST answers. The enhance callback
+// reloads the page data before it re-enables the button, and navigating while
+// that reload is in flight aborts one of the two.
+const SAVE_SETTLE_WAIT = 15_000;
 
 // Every saveSite-submitting step in this file: openSiteTab has waited for
-// hydration, then POST and check the response.
+// hydration, then POST, check the response, and wait for the button to come
+// back so the next navigation does not race the data reload.
 async function saveSiteSettings(page: Page) {
+	const save = page.getByRole('button', { name: 'Save site settings' });
 	const started = Date.now();
 	const [resp] = await Promise.all([
 		page.waitForResponse(
 			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings'),
 			{ timeout: SAVE_RESPONSE_WAIT }
 		),
-		page.getByRole('button', { name: 'Save site settings' }).click()
+		save.click()
 	]);
 	expect(resp.ok()).toBeTruthy();
 	const took = Date.now() - started;
@@ -45,6 +44,9 @@ async function saveSiteSettings(page: Page) {
 		test.info().annotations.push({ type: 'slow-save', description });
 		console.warn(`legal.spec: ${description}`);
 	}
+	// While the save settles the button reads "Saving…" and is disabled, so this
+	// name only matches again once the reload has finished.
+	await expect(save).toBeEnabled({ timeout: SAVE_SETTLE_WAIT });
 }
 
 test('default legal pages render and are reachable from the footer', async ({ page }) => {
@@ -94,11 +96,12 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// loginRetrying sets its own timeout, so the whole test's budget is set
 	// after it: LOGIN_BUDGET for the login, then 15s for the settings goto's
 	// retry, 30s for hydration, nine 5s waits (eight expects and the nudge
-	// loop's toPass), SAVE_RESPONSE_WAIT for the save and 10s for the /privacy
-	// goto, which is 130s. The 5s over covers the steps with no cap of their own:
-	// the wait for the landed page's load, the tab click and the fills.
+	// loop's toPass), SAVE_RESPONSE_WAIT and SAVE_SETTLE_WAIT for the save and
+	// 10s for the /privacy goto, which is 145s. The 5s over covers the steps with
+	// no cap of their own: the wait for the landed page's load, the tab click and
+	// the fills.
 	await loginRetrying(page, PASSWORD);
-	test.setTimeout(LOGIN_BUDGET + 135_000);
+	test.setTimeout(LOGIN_BUDGET + 150_000);
 	await gotoAfterLogin(page, '/admin/settings'); // opens on the "site" tab
 
 	// Submit only once the page has hydrated. Before hydration the form is a plain
@@ -220,10 +223,11 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 
 	// Set after loginRetrying, which sets its own: LOGIN_BUDGET, then 15s for the
 	// settings goto's retry, two 30s hydration waits, two SAVE_RESPONSE_WAITs,
-	// five 10s gotos and nine 5s expect waits, which is 230s. The 5s over covers
-	// the load wait, the tab clicks and the fills, which have no cap of their own.
+	// two SAVE_SETTLE_WAITs, five 10s gotos and nine 5s expect waits, which is
+	// 260s. The 5s over covers the load wait, the tab clicks and the fills, which
+	// have no cap of their own.
 	await loginRetrying(page, PASSWORD);
-	test.setTimeout(LOGIN_BUDGET + 235_000);
+	test.setTimeout(LOGIN_BUDGET + 265_000);
 	await gotoAfterLogin(page, '/admin/settings');
 
 	await openSiteTab(page);
@@ -308,10 +312,11 @@ test.afterAll(async ({ browser }) => {
 	try {
 		// Set after loginRetrying, which sets its own; in a hook it sets the hook's
 		// timeout. LOGIN_BUDGET, then 15s for the settings goto's retry, 30s for
-		// hydration and SAVE_RESPONSE_WAIT, which is 75s. The 5s over covers the
-		// load wait, the tab click, the fills and opening and closing the page.
+		// hydration, SAVE_RESPONSE_WAIT and SAVE_SETTLE_WAIT, which is 90s. The 5s
+		// over covers the load wait, the tab click, the fills and opening and
+		// closing the page.
 		await loginRetrying(page, PASSWORD);
-		test.setTimeout(LOGIN_BUDGET + 80_000);
+		test.setTimeout(LOGIN_BUDGET + 95_000);
 		await gotoAfterLogin(page, '/admin/settings');
 		await openSiteTab(page);
 		await page.fill('textarea[name="aiPageText"]', '');

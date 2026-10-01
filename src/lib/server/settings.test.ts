@@ -2,17 +2,24 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	getSettings,
 	saveSettings,
+	setRawSetting,
 	clearSettingsCache,
 	getSupporterKeyStatus,
 	getVerifiedSupporterKey,
 	NO_SUPPORTER_KEY,
 	clearSupporterKeyStatusCache,
 	parseSonaColors,
-	parseLines
+	parseLines,
+	type SiteSettings
 } from './settings';
 import { verifySupporterKey } from './supporter-key';
 import { fakeKeyDb, throwingKeyDb } from './test/supporter-key-db';
-import type { Database } from './db';
+import { getDb, type Database } from './db';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import SqliteDatabase from 'better-sqlite3';
+import type { D1Database } from '@cloudflare/workers-types';
+import { makeD1 } from './test/d1';
 
 // Verification is stubbed (a passing token needs the sona.fast PRIVATE key); the
 // resolver keeps the real shaping, so the countdown these tests assert on is the
@@ -386,69 +393,164 @@ describe('getSupporterKeyStatus — caching', () => {
 	});
 });
 
+/**
+ * A real SQLite-backed D1 (the shared better-sqlite3 shim) with a counter on
+ * every round trip drizzle makes: each statement run on its own, and each
+ * batch. A batch counts once however many statements it carries, which is what
+ * D1 serves as one request.
+ */
+function sqliteSettingsDb() {
+	const sqlite = new SqliteDatabase(':memory:');
+	sqlite.exec('CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
+	const real = makeD1(sqlite) as unknown as {
+		prepare: (sql: string) => { bind: (...p: unknown[]) => Record<string, (...a: unknown[]) => unknown> };
+		batch: (stmts: unknown[]) => Promise<unknown>;
+	};
+	const trips = { single: 0, batches: 0 };
+	const d1 = {
+		prepare: (sql: string) => ({
+			bind: (...params: unknown[]) => {
+				const bound = real.prepare(sql).bind(...params);
+				const counted =
+					(name: string) =>
+					(...a: unknown[]) => {
+						trips.single += 1;
+						return bound[name](...a);
+					};
+				return { ...bound, run: counted('run'), all: counted('all'), raw: counted('raw') };
+			}
+		}),
+		batch: (stmts: unknown[]) => {
+			trips.batches += 1;
+			return real.batch(stmts);
+		}
+	} as unknown as D1Database;
+	const rows = (): Array<{ key: string; value: string }> =>
+		sqlite.prepare('SELECT key, value FROM site_settings ORDER BY key').all();
+	const seed = (key: string, value: string) =>
+		sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)').run(key, value);
+	return { sqlite, db: getDb(d1), trips, rows, seed };
+}
+
 describe('saveSettings — invalidation', () => {
 	it('clears the cache so a subsequent read reflects the write', async () => {
-		// Prime the cache with the "old" value.
-		const before = fakeReadDb([{ key: 'siteName', value: 'Old' }]);
-		expect((await getSettings(before.db)).siteName).toBe('Old');
+		const { db, seed } = sqliteSettingsDb();
+		seed('siteName', 'Old');
+		// Prime the cache with the stored "old" value.
+		expect((await getSettings(db)).siteName).toBe('Old');
 
-		// A write DB that reports "no existing row" so saveSettings takes the insert
-		// path; the actual persistence is irrelevant here — we're asserting the
-		// cache is dropped on save.
-		const writeDb = {
-			select: () => ({ from: () => ({ where: () => ({ get: async () => undefined }) }) }),
-			insert: () => ({ values: async () => undefined })
-		} as unknown as Database;
-		await saveSettings(writeDb, { siteName: 'New' });
+		await saveSettings(db, { siteName: 'New' });
 
-		// Cache must have been invalidated → this read hits the DB and sees "New".
-		const after = fakeReadDb([{ key: 'siteName', value: 'New' }]);
-		expect((await getSettings(after.db)).siteName).toBe('New');
-		expect(after.calls.count).toBe(1);
+		// Same database, warm cache: only a dropped cache lets this read see "New".
+		expect((await getSettings(db)).siteName).toBe('New');
 	});
 
 	it('persists a boolean setting as the string value the TEXT column requires', async () => {
 		// The value column is TEXT, so a boolean toggle must be stored as 'true' and
 		// then round-trips back through getSettings's parser to a real boolean.
-		const inserted: Array<{ key: string; value: unknown }> = [];
-		const writeDb = {
-			select: () => ({ from: () => ({ where: () => ({ get: async () => undefined }) }) }),
-			insert: () => ({ values: async (row: { key: string; value: unknown }) => void inserted.push(row) })
-		} as unknown as Database;
+		const { db, rows } = sqliteSettingsDb();
 
-		await saveSettings(writeDb, { autoResyncEnabled: true });
-		expect(inserted).toEqual([{ key: 'autoResyncEnabled', value: 'true' }]);
+		await saveSettings(db, { autoResyncEnabled: true, registryOverridesLocal: false });
 
-		// And the stored string reads back as a boolean.
-		const { db } = fakeReadDb(inserted as Array<{ key: string; value: string }>);
-		expect((await getSettings(db)).autoResyncEnabled).toBe(true);
-	});
-
-	it('leaves existing string settings unchanged through the String() coercion', async () => {
-		const inserted: Array<{ key: string; value: unknown }> = [];
-		const writeDb = {
-			select: () => ({ from: () => ({ where: () => ({ get: async () => undefined }) }) }),
-			insert: () => ({ values: async (row: { key: string; value: unknown }) => void inserted.push(row) })
-		} as unknown as Database;
-
-		await saveSettings(writeDb, { siteName: 'My Gallery' });
-		expect(inserted).toEqual([{ key: 'siteName', value: 'My Gallery' }]);
+		expect(rows()).toEqual([
+			{ key: 'autoResyncEnabled', value: 'true' },
+			{ key: 'registryOverridesLocal', value: 'false' }
+		]);
+		const s = await getSettings(db);
+		expect(s.autoResyncEnabled).toBe(true);
+		expect(s.registryOverridesLocal).toBe(false);
 	});
 
 	it('writes only the keys it is given — the per-tab save actions rely on this', async () => {
 		// The settings page saves one tab at a time (saveSite / saveConnections /
 		// saveStorage); a tab's subset must never touch another tab's keys.
-		const inserted: Array<{ key: string; value: unknown }> = [];
-		const writeDb = {
-			select: () => ({ from: () => ({ where: () => ({ get: async () => undefined }) }) }),
-			insert: () => ({ values: async (row: { key: string; value: unknown }) => void inserted.push(row) })
-		} as unknown as Database;
+		// An explicitly undefined key is skipped the same way an absent one is.
+		const { db, rows, seed } = sqliteSettingsDb();
+		seed('siteName', 'Kept');
+		seed('ownerName', 'Kept too');
 
-		await saveSettings(writeDb, { autoResyncEnabled: false, registryOverridesLocal: true });
-		expect(inserted).toEqual([
+		await saveSettings(db, {
+			autoResyncEnabled: false,
+			registryOverridesLocal: true,
+			ownerName: undefined
+		});
+		expect(rows()).toEqual([
 			{ key: 'autoResyncEnabled', value: 'false' },
-			{ key: 'registryOverridesLocal', value: 'true' }
+			{ key: 'ownerName', value: 'Kept too' },
+			{ key: 'registryOverridesLocal', value: 'true' },
+			{ key: 'siteName', value: 'Kept' }
 		]);
+	});
+});
+
+describe('saveSettings — batched upsert (SONA-235)', () => {
+	it('updates an existing key and inserts a new one without duplicating rows', async () => {
+		const { db, rows, seed } = sqliteSettingsDb();
+		seed('siteName', 'Old');
+
+		await saveSettings(db, { siteName: 'New', ownerName: 'Test Owner' });
+
+		expect(rows()).toEqual([
+			{ key: 'ownerName', value: 'Test Owner' },
+			{ key: 'siteName', value: 'New' }
+		]);
+	});
+
+	it('makes no database call for an empty or all-undefined save, and still drops the cache', async () => {
+		const { sqlite, db, trips, seed } = sqliteSettingsDb();
+		seed('siteName', 'Old');
+		expect((await getSettings(db)).siteName).toBe('Old');
+		const before = { single: trips.single, batches: trips.batches };
+		// Changed behind the warm cache, so only a dropped cache lets a read see it.
+		sqlite.prepare('UPDATE site_settings SET value = ? WHERE key = ?').run('Changed', 'siteName');
+
+		await expect(saveSettings(db, {})).resolves.toBeUndefined();
+		await expect(saveSettings(db, { siteName: undefined })).resolves.toBeUndefined();
+
+		expect(trips.single).toBe(before.single);
+		expect(trips.batches).toBe(before.batches);
+		expect((await getSettings(db)).siteName).toBe('Changed');
+	});
+
+	it('sends a sixty-plus key save as exactly one batch, not a round trip per key', async () => {
+		const { db, trips, rows } = sqliteSettingsDb();
+		const many: Record<string, string> = {};
+		for (let i = 0; i < 65; i++) many[`key${String(i).padStart(2, '0')}`] = `v${i}`;
+
+		await saveSettings(db, many as Partial<SiteSettings>);
+
+		expect(trips.batches).toBe(1);
+		expect(trips.single).toBe(0);
+		expect(rows()).toHaveLength(65);
+	});
+
+	it('propagates the error and stores no key when the batch fails', async () => {
+		const { sqlite, db, rows, seed } = sqliteSettingsDb();
+		seed('siteName', 'Old');
+		// The second statement of the batch fails inside the database, after the
+		// first one has already run in the same transaction.
+		sqlite.exec(`CREATE TRIGGER refuse_owner BEFORE INSERT ON site_settings
+			WHEN NEW.key = 'ownerName' BEGIN SELECT RAISE(ABORT, 'refused'); END;`);
+
+		await expect(saveSettings(db, { siteName: 'New', ownerName: 'Test Owner' })).rejects.toThrow(
+			/refused/
+		);
+
+		// All or nothing: the siteName update rolled back with the failed insert.
+		expect(rows()).toEqual([{ key: 'siteName', value: 'Old' }]);
+	});
+});
+
+describe('setRawSetting — single-statement upsert', () => {
+	it('inserts a new key, then updates it in place, one statement each', async () => {
+		const { db, trips, rows } = sqliteSettingsDb();
+
+		await setRawSetting(db, 'registryCursor', 'a');
+		await setRawSetting(db, 'registryCursor', 'b');
+
+		expect(rows()).toEqual([{ key: 'registryCursor', value: 'b' }]);
+		expect(trips.single).toBe(2);
+		expect(trips.batches).toBe(0);
 	});
 });
 
