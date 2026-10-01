@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isConventionRunning, isLiveNow, dateInZone } from './convention-window';
+import { isConventionRunning, isLiveNow, dateInZone, ianaZone, zoneChoices, zoneGroups } from './convention-window';
 
 // Tails of Summer 2026, the event this was built against: two days, UTC-7.
 const TAILS = { startDate: '2026-08-08', endDate: '2026-08-09', timezone: 'America/Vancouver' };
@@ -96,5 +96,34 @@ describe('isLiveNow', () => {
 		expect(isLiveNow({ ...TAILS, status: 'confirmed' }, new Date('2026-09-01T12:00:00Z'))).toBe(
 			false
 		);
+	});
+});
+
+describe('zoneChoices', () => {
+	it('offers only zones the validator accepts, UTC among them, sorted and without repeats', () => {
+		const zones = zoneChoices();
+		expect(zones).toContain('UTC');
+		expect(zones).toContain('America/Los_Angeles');
+		// Anything offered must survive the save: a choice the server refuses
+		// would be a dead option in the select.
+		expect(zones.filter((z) => ianaZone(z) !== z)).toEqual([]);
+		expect(zones).toEqual([...new Set(zones)].sort());
+	});
+});
+
+describe('zoneGroups', () => {
+	it('groups by region and labels each zone by its city, keeping every value', () => {
+		const zones = ['America/Argentina/Buenos_Aires', 'America/Los_Angeles', 'Asia/Tokyo', 'UTC'];
+		expect(zoneGroups(zones)).toEqual([
+			{
+				region: 'America',
+				zones: [
+					{ value: 'America/Argentina/Buenos_Aires', label: 'Argentina / Buenos Aires' },
+					{ value: 'America/Los_Angeles', label: 'Los Angeles' }
+				]
+			},
+			{ region: 'Asia', zones: [{ value: 'Asia/Tokyo', label: 'Tokyo' }] },
+			{ region: null, zones: [{ value: 'UTC', label: 'UTC' }] }
+		]);
 	});
 });

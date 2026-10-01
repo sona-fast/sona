@@ -25,7 +25,7 @@ const { load, actions } = await import('./+page.server');
 const consfyi = await import('$lib/server/consfyi');
 
 type ConventionRow = typeof conventions.$inferSelect;
-type ConventionsData = { conventions: ConventionRow[]; liveId: number | null; eventTags: string[] };
+type ConventionsData = { conventions: ConventionRow[]; liveId: number | null; eventTags: string[]; zones: string[] };
 
 // The load result needs an explicit shape: PageServerLoad's declared return type
 // includes void, so property access on the raw result does not typecheck. Same
@@ -689,5 +689,142 @@ describe('FurTrack event link', () => {
 		expect(res.status).toBe(400);
 		expect(res.data?.error).toBe('Another convention just took that FurTrack event. Reload the page to see which one.');
 		expect((await db.select().from(conventions)).map((c) => c.name)).toEqual(['Racer']);
+	});
+});
+
+describe('manual convention timezone', () => {
+	function post(action: 'create' | 'setTimezone', fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [key, value] of Object.entries(fields)) body.append(key, value);
+		return { request: new Request(`https://taro.surf/admin/conventions?/${action}`, { method: 'POST', body }) };
+	}
+
+	type Result = { status?: number; data?: { error?: string; zoneId?: number }; message?: string };
+	const create = async (platform: App.Platform, fields: Record<string, string>) =>
+		(await actions.create({ platform, ...post('create', fields) } as never)) as Result;
+	const setTimezone = async (platform: App.Platform, fields: Record<string, string>) =>
+		(await actions.setTimezone({ platform, ...post('setTimezone', fields) } as never)) as Result;
+
+	// Furlandia 2026: Portland, OR, a manual entry in UTC-7.
+	const MANUAL = { name: 'Furlandia 2026', startDate: '2026-05-22', endDate: '2026-05-24' };
+
+	async function zoneOf(db: ReturnType<typeof drizzle>, id: number) {
+		return (await db.select().from(conventions).where(eq(conventions.id, id)).get())?.timezone;
+	}
+
+	it('stores the zone picked on the manual form, and null when none is picked', async () => {
+		const { db, platform } = makeDb();
+
+		expect((await create(platform, { ...MANUAL, timezone: 'America/Los_Angeles' })).status).toBeUndefined();
+		await create(platform, { ...MANUAL, name: 'No zone', timezone: '' });
+		await create(platform, { ...MANUAL, name: 'Field left out' });
+
+		const rows = await db.select().from(conventions).orderBy(asc(conventions.id));
+		expect(rows.map((r) => r.timezone)).toEqual(['America/Los_Angeles', null, null]);
+	});
+
+	it('refuses a zone Intl cannot resolve, and adds nothing', async () => {
+		const { db, platform } = makeDb();
+
+		const res = await create(platform, { ...MANUAL, timezone: 'Foo/Bar' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('That timezone is not one this site recognizes. Pick one from the list.');
+		expect(await db.select().from(conventions)).toEqual([]);
+	});
+
+	it('sets, changes and clears the zone on a manual row', async () => {
+		const { db, platform } = makeDb();
+		await create(platform, MANUAL);
+		const id = (await db.select().from(conventions).get())!.id;
+
+		const set = await setTimezone(platform, { id: String(id), timezone: 'America/Los_Angeles' });
+		expect(set.message).toBe('Set the timezone for Furlandia 2026 to America/Los_Angeles.');
+		expect(await zoneOf(db, id)).toBe('America/Los_Angeles');
+
+		await setTimezone(platform, { id: String(id), timezone: 'UTC' });
+		expect(await zoneOf(db, id)).toBe('UTC');
+
+		const cleared = await setTimezone(platform, { id: String(id), timezone: '' });
+		expect(cleared.message).toBe('Cleared the timezone for Furlandia 2026.');
+		expect(await zoneOf(db, id)).toBeNull();
+	});
+
+	it('refuses a junk zone or a missing field on a row, and keeps the saved zone', async () => {
+		const { db, platform } = makeDb();
+		await create(platform, { ...MANUAL, timezone: 'America/Los_Angeles' });
+		const id = (await db.select().from(conventions).get())!.id;
+
+		const junk = await setTimezone(platform, { id: String(id), timezone: 'Foo/Bar' });
+		expect(junk.status).toBe(400);
+		expect(junk.data?.zoneId).toBe(id);
+
+		const missing = await setTimezone(platform, { id: String(id) });
+		expect(missing.status).toBe(400);
+		expect(missing.data?.error).toBe('Pick a timezone or Not set.');
+
+		expect(await zoneOf(db, id)).toBe('America/Los_Angeles');
+	});
+
+	it('leaves a cons.fyi row alone: the feed owns its zone', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(conventions).values({ ...TAILS, sourceId: 'tails-of-summer-2026' });
+		const id = (await db.select().from(conventions).get())!.id;
+
+		const res = await setTimezone(platform, { id: String(id), timezone: 'UTC' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('Tails of Summer 2026 gets its timezone from cons.fyi.');
+		expect(res.data?.zoneId).toBe(id);
+		expect(await zoneOf(db, id)).toBe('America/Vancouver');
+	});
+
+	it('answers a missing convention with a form error', async () => {
+		const { platform } = makeDb();
+		const gone = await setTimezone(platform, { id: '99', timezone: 'UTC' });
+		expect(gone.status).toBe(400);
+		expect(gone.data?.error).toBe('That convention is no longer on your schedule.');
+		expect((await setTimezone(platform, { timezone: 'UTC' })).status).toBe(400);
+	});
+
+	it('answers a convention deleted between the check and the write with a form error', async () => {
+		const { sqlite, db, platform } = makeDb();
+		await create(platform, MANUAL);
+		const target = (await db.select().from(conventions).get())!;
+		const d1 = platform.env!.DB;
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = ((query: string) => {
+			if (/^update "conventions" set "timezone"/.test(query)) {
+				sqlite.prepare('DELETE FROM conventions WHERE id = ?').run(target.id);
+			}
+			return realPrepare(query);
+		}) as typeof d1.prepare;
+
+		const res = await setTimezone(platform, { id: String(target.id), timezone: 'UTC' });
+
+		expect(res.status).toBe(400);
+		expect(res.data?.error).toBe('That convention is no longer on your schedule.');
+		expect(res.data?.zoneId).toBe(target.id);
+	});
+
+	it('takes the exact live window once a manual row has a zone', async () => {
+		const { db, platform } = makeDb();
+		await create(platform, MANUAL);
+		const id = (await db.select().from(conventions).get())!.id;
+		// 10:00 on the 25th in Portland: the day after the closing day.
+		at('2026-05-25T17:00:00Z');
+
+		// Without a zone, the day of grace still calls it live.
+		expect((await loadData(platform)).liveId).toBe(id);
+
+		await setTimezone(platform, { id: String(id), timezone: 'America/Los_Angeles' });
+		expect((await loadData(platform)).liveId).toBeNull();
+	});
+
+	it('sends the zone list with the page', async () => {
+		const { platform } = makeDb();
+		const res = await loadData(platform);
+		expect(res.zones).toContain('America/Los_Angeles');
+		expect(res.zones).toContain('UTC');
 	});
 });

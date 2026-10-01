@@ -6,7 +6,7 @@ import type { BatchItem } from 'drizzle-orm/batch';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { fetchConsFyiEvents, findConsFyiEvent, fetchAttendingEvents, blueskyHandle } from '$lib/server/consfyi';
 import { getSettings } from '$lib/server/settings';
-import { isLiveNow } from '$lib/convention-window';
+import { isLiveNow, ianaZone, zoneChoices } from '$lib/convention-window';
 import { taggedFursuitPhoto } from '$lib/server/passport';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -52,6 +52,17 @@ async function eventTagFrom(
 	return { tag: raw };
 }
 
+/**
+ * The timezone a convention form submitted, as the value to store: null for
+ * "not set", else a zone Intl resolves. Only manual rows take one from a form;
+ * a cons.fyi row's zone comes from the feed.
+ */
+function zoneFrom(raw: FormDataEntryValue | null): { zone: string | null } | { error: string } {
+	if (typeof raw !== 'string' || !raw) return { zone: null };
+	const zone = ianaZone(raw);
+	return zone ? { zone } : { error: 'That timezone is not one this site recognizes. Pick one from the list.' };
+}
+
 // The unique index on furtrack_event is the last word when two saves race past
 // eventTagFrom's check; this turns its error into a form error. Drizzle wraps
 // the driver's error ("UNIQUE constraint failed: conventions.furtrack_event"),
@@ -90,7 +101,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 			.orderBy(asc(fursuitPhotos.event))
 	).map((r) => r.event as string);
 
-	return { conventions: all, available, liveId, eventTags };
+	return { conventions: all, available, liveId, eventTags, zones: zoneChoices() };
 };
 
 export const actions = {
@@ -135,6 +146,9 @@ export const actions = {
 
 		const endRaw = ((data.get('endDate') as string) || '').slice(0, 10);
 
+		const zone = zoneFrom(data.get('timezone'));
+		if ('error' in zone) return fail(400, { error: zone.error });
+
 		const event = await eventTagFrom(db, data.get('furtrackEvent'), null);
 		if ('error' in event) return fail(400, { error: event.error });
 
@@ -146,6 +160,7 @@ export const actions = {
 				endDate: isoDate.test(endRaw) ? endRaw : null,
 				url: sanitizeUrl(data.get('url') as string) || null,
 				status: normStatus(data.get('status')),
+				timezone: zone.zone,
 				furtrackEvent: event.tag
 			});
 		} catch (err) {
@@ -199,6 +214,48 @@ export const actions = {
 			message: event.tag
 				? `Linked ${con.name} to the FurTrack event “${event.tag}”.`
 				: `${con.name} is no longer linked to a FurTrack event.`
+		};
+	},
+
+	// Set, change or clear a manual convention's timezone. A failure carries the
+	// row's id, so the page can tie the error to that row's select.
+	setTimezone: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+		const id = Number(data.get('id'));
+		if (!id) return fail(400, { error: 'Convention ID is required' });
+
+		const con = await db
+			.select({ id: conventions.id, name: conventions.name, sourceId: conventions.sourceId })
+			.from(conventions)
+			.where(eq(conventions.id, id))
+			.get();
+		if (!con) return fail(400, { error: 'That convention is no longer on your schedule.' });
+		// The feed owns a synced row's zone, and a sync only fills a missing one,
+		// so a hand-picked zone here would never be corrected.
+		if (con.sourceId) {
+			return fail(400, { error: `${con.name} gets its timezone from cons.fyi.`, zoneId: id });
+		}
+
+		// An omitted field is not a choice; only the select's Not set ('') clears.
+		const raw = data.get('timezone');
+		if (typeof raw !== 'string') return fail(400, { error: 'Pick a timezone or Not set.', zoneId: id });
+		const zone = zoneFrom(raw);
+		if ('error' in zone) return fail(400, { error: zone.error, zoneId: id });
+
+		const result = await db
+			.update(conventions)
+			.set({ timezone: zone.zone })
+			.where(and(eq(conventions.id, id), isNull(conventions.sourceId)))
+			.run();
+		// No row changed means the convention was deleted, in another tab say,
+		// between the read above and this write.
+		if (!result.meta?.changes) {
+			return fail(400, { error: 'That convention is no longer on your schedule.', zoneId: id });
+		}
+		return {
+			success: true,
+			message: zone.zone ? `Set the timezone for ${con.name} to ${zone.zone}.` : `Cleared the timezone for ${con.name}.`
 		};
 	},
 

@@ -3,6 +3,8 @@
 // public site reads cons from our own D1 table (a picked con is copied in).
 // See the cons.fyi repo: data is a JSONL stream of events, one per line.
 
+import { ianaZone } from '$lib/convention-window';
+
 export interface ConsFyiEvent {
 	id: string;
 	name: string;
@@ -54,26 +56,6 @@ function deriveLocation(address?: string, venue?: string): string {
 		.filter(Boolean);
 	if (parts.length >= 2) return `${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
 	return venue ?? address;
-}
-
-/** An IANA zone name and nothing else. The zone the feed hands us is stored on
- *  the convention row and then fed to Intl to decide whether a con is running
- *  now, so it is worth rejecting a junk value from a third party here.
- *
- *  Asking Intl rather than matching a shape, because Intl is what consumes the
- *  stored value: a shape check both accepts names Intl cannot resolve
- *  (`Foo/Bar`) and rejects single-segment names that are real zones (`UTC`,
- *  `Japan`). Those are the two answers that matter and a regex gets both wrong.
- *  Unresolvable zones are not fatal downstream — `dateInZone` catches and the
- *  window widens — but a con with a real zone should take the exact path. */
-function ianaZone(value: unknown): string | undefined {
-	if (typeof value !== 'string' || value === '') return undefined;
-	try {
-		new Intl.DateTimeFormat('en-CA', { timeZone: value });
-		return value;
-	} catch {
-		return undefined;
-	}
 }
 
 /** Fetch + parse the feed (cached). Returns [] on any failure so the admin
