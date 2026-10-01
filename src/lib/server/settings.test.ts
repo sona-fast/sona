@@ -542,24 +542,14 @@ describe('saveSettings — batched upsert (SONA-235)', () => {
 });
 
 describe('setRawSetting — single-statement upsert', () => {
-	it('inserts a new key in one statement', async () => {
+	it('inserts a new key, then updates it in place, one statement each', async () => {
 		const { db, trips, rows } = sqliteSettingsDb();
 
 		await setRawSetting(db, 'registryCursor', 'a');
-
-		expect(rows()).toEqual([{ key: 'registryCursor', value: 'a' }]);
-		expect(trips.single).toBe(1);
-		expect(trips.batches).toBe(0);
-	});
-
-	it('updates an existing key in one statement without adding a row', async () => {
-		const { db, trips, rows, seed } = sqliteSettingsDb();
-		seed('registryCursor', 'a');
-
 		await setRawSetting(db, 'registryCursor', 'b');
 
 		expect(rows()).toEqual([{ key: 'registryCursor', value: 'b' }]);
-		expect(trips.single).toBe(1);
+		expect(trips.single).toBe(2);
 		expect(trips.batches).toBe(0);
 	});
 });

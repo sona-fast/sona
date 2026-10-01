@@ -1119,6 +1119,36 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/derived.jpg');
 	});
 
+	// healOwnerAvatar in avatar.ts re-reads blueskyUrl alone before it writes
+	// adminAvatarUrl. That guard is safe only while a save writes both keys in
+	// one D1 batch, so a reader never sees the new handle with the old avatar.
+	it('writes blueskyUrl and adminAvatarUrl in one batch, which the avatar heal guard relies on', async () => {
+		const { platform } = makeDb();
+		// Record the first bound parameter (the site_settings key) of each
+		// statement, grouped by the batch call that runs it.
+		const d1 = platform.env!.DB;
+		const realPrepare = d1.prepare.bind(d1);
+		const realBatch = d1.batch.bind(d1);
+		const batches: unknown[][] = [];
+		d1.prepare = ((query: string) => {
+			const stmt = realPrepare(query);
+			return {
+				...stmt,
+				bind: (...params: unknown[]) => ({ ...stmt.bind(...params), key: params[0] })
+			};
+		}) as typeof d1.prepare;
+		d1.batch = ((stmts: Array<{ key: unknown }>) => {
+			batches.push(stmts.map((s) => s.key));
+			return realBatch(stmts as never);
+		}) as typeof d1.batch;
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		const withHandle = batches.filter((keys) => keys.includes('blueskyUrl'));
+		expect(withHandle).toHaveLength(1);
+		expect(withHandle[0]).toContain('adminAvatarUrl');
+	});
+
 	it('a present-but-blank bluesky clears both blueskyUrl and the avatar', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
