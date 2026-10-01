@@ -28,6 +28,64 @@ export function dateInZone(now: Date, timeZone: string): string | null {
 	}
 }
 
+/** An IANA zone name and nothing else. A stored zone is fed to Intl to decide
+ *  whether a con is running now, so a junk value, from the cons.fyi feed or
+ *  from a posted form, is rejected before it is stored.
+ *
+ *  Asking Intl rather than matching a shape, because Intl is what consumes the
+ *  stored value: a shape check both accepts names Intl cannot resolve
+ *  (`Foo/Bar`) and rejects single-segment names that are real zones (`UTC`,
+ *  `Japan`). Those are the two answers that matter and a regex gets both wrong.
+ *  Unresolvable zones are not fatal downstream — `dateInZone` catches and the
+ *  window widens — but a con with a real zone should take the exact path. */
+export function ianaZone(value: unknown): string | undefined {
+	if (typeof value !== 'string' || value === '') return undefined;
+	try {
+		new Intl.DateTimeFormat('en-CA', { timeZone: value });
+		return value;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The zones the admin forms offer, sorted. Built once on the server and sent
+ *  with the page, so the server pass and hydration render the same options
+ *  whatever the browser's own list holds. UTC is added because V8 leaves it
+ *  out of the list while still accepting it. */
+export function zoneChoices(): string[] {
+	let zones: string[] = [];
+	try {
+		zones = Intl.supportedValuesOf('timeZone');
+	} catch {
+		// A runtime without the list still gets UTC; a stored zone keeps
+		// showing through the row's own option.
+	}
+	return [...new Set([...zones, 'UTC'])].sort();
+}
+
+export interface ZoneGroup {
+	/** The zone's first segment ('America'), or null for a zone with none ('UTC'). */
+	region: string | null;
+	zones: { value: string; label: string }[];
+}
+
+/** Zones grouped by region for a select's optgroups, each labelled by the rest
+ *  of its name ('America/Los_Angeles' reads 'Los Angeles' under 'America'),
+ *  so a narrow closed select shows the city rather than cutting it off.
+ *  Keeps the order it is given. */
+export function zoneGroups(zones: string[]): ZoneGroup[] {
+	const groups: ZoneGroup[] = [];
+	for (const value of zones) {
+		const cut = value.indexOf('/');
+		const region = cut === -1 ? null : value.slice(0, cut);
+		const label = (cut === -1 ? value : value.slice(cut + 1)).replaceAll('_', ' ').replaceAll('/', ' / ');
+		let group = groups.find((g) => g.region === region);
+		if (!group) groups.push((group = { region, zones: [] }));
+		group.zones.push({ value, label });
+	}
+	return groups;
+}
+
 /** Shift a bare YYYY-MM-DD by whole days. Used only for the no-zone margin. */
 function shiftDate(date: string, days: number): string {
 	const ms = Date.parse(`${date}T00:00:00Z`);
@@ -38,14 +96,14 @@ function shiftDate(date: string, days: number): string {
 export interface ConventionWindow {
 	startDate: string;
 	endDate?: string | null;
-	/** IANA zone, or null for manual entries and rows predating the column. */
+	/** IANA zone, or null for a manual entry left unset and rows predating the column. */
 	timezone?: string | null;
 }
 
 /**
  * Whether `now` falls inside the convention, inclusive of the first and last day.
  *
- * With a zone, the comparison is exact. Without one (manual entries, rows created
+ * With a zone, the comparison is exact. Without one (manual entries left unset, rows created
  * before the column existed, or an unrecognised zone string) it falls back to UTC
  * and widens the window by a day at each end. That errs toward showing the state:
  * a banner that appears a few hours early is a much smaller failure than one that
@@ -57,7 +115,8 @@ export interface ConventionWindow {
  * Trimming that side would drop the banner at 17:00 local on the closing day of a
  * zoneless western-zone con, which is exactly the failure above. Rows synced from
  * cons.fyi carry a real zone and take the exact path, so this only ever applies to
- * hand-entered and pre-migration rows, and a sync heals them.
+ * hand-entered rows with no zone picked, which admin can set, and pre-migration
+ * rows, which a sync heals.
  */
 export function isConventionRunning(con: ConventionWindow, now: Date): boolean {
 	const end = con.endDate || con.startDate;

@@ -484,7 +484,7 @@ test('brings the add panel into view from the foot of a long list on a phone', a
 	// Tabbing to the list's Add while it sits on screen but behind the fixed
 	// bottom nav scrolls it clear of the nav. Start from the control before
 	// it, with the page scrolled so the Add is wholly behind the nav.
-	const before = page.locator('.mobile-list .mobile-item').last().getByRole('combobox');
+	const before = page.locator('.mobile-list .mobile-item').last().getByRole('combobox').last();
 	await before.evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
 	await listAdd.evaluate((el) => {
 		const r = el.getBoundingClientRect();
@@ -590,4 +590,54 @@ test("asks before the list's delete removes a convention", async ({ page }) => {
 	await page.reload();
 	await expect(items).toHaveCount(before - 1);
 	await expect(items.filter({ hasText: 'E2E Spare Con' })).toHaveCount(0);
+});
+
+test.describe('manual convention timezone', () => {
+	// The browser's zone, which the manual form starts on.
+	test.use({ timezoneId: 'America/Los_Angeles' });
+
+	const zoneSelect = (scope: Locator, con: string) =>
+		scope.getByRole('combobox', { name: `Timezone for ${con}`, exact: true });
+
+	test('saves a manual row zone, and the add form starts on the browser zone', async ({ page }) => {
+		await page.setViewportSize({ width: 1280, height: 900 });
+		const table = page.locator('table');
+		const one = zoneSelect(table, 'E2E Row One Con');
+		const save = tableRow(page, 'E2E Row One Con').locator('.zone-save');
+		// A retry of this serial file starts from whatever the last attempt saved.
+		if ((await one.inputValue()) !== 'America/Chicago') {
+			await pickAndSave(one, save, 'America/Chicago');
+			await page.reload();
+		}
+		await expect(one).toHaveValue('America/Chicago');
+		await expect(save).toBeHidden();
+
+		await pickAndSave(one, save, 'America/Denver');
+		await expect(page.getByRole('status')).toHaveText('Set the timezone for E2E Row One Con to America/Denver.');
+		await expect(save).toBeHidden();
+		await expect(one).toBeFocused();
+		await page.reload();
+		await expect(one).toHaveValue('America/Denver');
+		// The closed select names the city, not a cut-off 'America/Den…', and
+		// fits it whole.
+		await expect(one.locator('option:checked')).toHaveText('Denver');
+		const shown = await widths(one);
+		expect(shown.actual).toBeGreaterThanOrEqual(shown.needed - 0.5);
+		await page.screenshot({ path: path.join(SHOTS, 'admin-conventions-timezone-desktop.png'), fullPage: true });
+
+		// The phone list labels the select, since it has no column header.
+		await page.setViewportSize({ width: 390, height: 900 });
+		const item = page.locator('.mobile-item').filter({ hasText: 'E2E Row One Con' });
+		await expect(item.getByText('Timezone', { exact: true })).toBeVisible();
+		await expect(zoneSelect(page.locator('.mobile-list'), 'E2E Row One Con')).toHaveValue('America/Denver');
+		await page.screenshot({ path: path.join(SHOTS, 'admin-conventions-timezone-390.png'), fullPage: true });
+
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await pickAndSave(one, save, 'America/Chicago');
+		await expect(page.getByRole('status')).toContainText('America/Chicago');
+
+		await openManual(page);
+		const manualZone = page.locator('.add-form').getByRole('combobox', { name: 'Timezone', exact: true });
+		await expect(manualZone).toHaveValue('America/Los_Angeles');
+	});
 });

@@ -272,10 +272,11 @@ export const conventions = sqliteTable('conventions', {
 	status: text('status').notNull().default('confirmed'),
 	// cons.fyi event id when picked from the feed (null for manual entries); used to dedupe.
 	sourceId: text('source_id'),
-	// IANA zone of the event itself (e.g. 'America/Denver'), from the cons.fyi feed.
+	// IANA zone of the event itself (e.g. 'America/Denver'), from the cons.fyi feed or,
+	// for a manual entry, picked in admin.
 	// Decides whether the convention is happening *now*: start/end are bare calendar
 	// dates, so "is it running" has to be asked in the event's own zone, not the
-	// server's and not the reader's. NULL for manual entries and for rows created
+	// server's and not the reader's. NULL for a manual entry left unset and for rows created
 	// before this column existed — see isConventionRunning for that fallback.
 	timezone: text('timezone'),
 	// The fursuit photos' `event` value this convention is, picked by the operator

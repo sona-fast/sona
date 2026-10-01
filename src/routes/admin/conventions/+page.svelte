@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { Plus, Trash2, ExternalLink, RefreshCw, QrCode } from 'lucide-svelte';
 	import { formatDate, formatDateRange } from '$lib';
+	import { zoneGroups } from '$lib/convention-window';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -26,6 +27,15 @@
 	let picked = $state<Record<string, string>>({});
 	let syncForm: HTMLFormElement;
 	let addPanel = $state<HTMLDivElement>();
+	// The manual form starts on the browser's own zone: the operator is most
+	// likely adding a con where they are. Set after hydration, since the server
+	// cannot know it, and only when the server's list offers it.
+	let defaultZone = $state('');
+	const zoneOptions = $derived(zoneGroups(data.zones));
+	onMount(() => {
+		const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		if (data.zones.includes(zone)) defaultZone = zone;
+	});
 
 	// The panel renders above the list, so an Add pressed at the foot of a long
 	// list would open it out of sight: bring it into view and put focus in it.
@@ -147,6 +157,13 @@
 					<input type="text" class="input" name="location" placeholder="Chicago, IL" />
 				</label>
 				<label>
+					<span>{m.admin_conventions_field_timezone()}</span>
+					<select class="input" name="timezone" value={defaultZone}>
+						<option value="">{m.admin_conventions_timezone_unset()}</option>
+						{@render zoneChoices()}
+					</select>
+				</label>
+				<label>
 					<span>{m.admin_conventions_field_start()}</span>
 					<input type="date" class="input" name="startDate" required />
 				</label>
@@ -241,6 +258,74 @@
 	</form>
 {/snippet}
 
+<!-- Every zone the server offers, grouped by region. -->
+{#snippet zoneChoices()}
+	{#each zoneOptions as group}
+		{#if group.region}
+			<optgroup label={group.region}>
+				{#each group.zones as zone}
+					<option value={zone.value}>{zone.label}</option>
+				{/each}
+			</optgroup>
+		{:else}
+			{#each group.zones as zone}
+				<option value={zone.value}>{zone.label}</option>
+			{/each}
+		{/if}
+	{/each}
+{/snippet}
+
+<!-- One manual row's timezone, saved the way a row's FurTrack event is. A
+     cons.fyi row has no control: the feed owns its zone. A stored zone the
+     list does not offer still shows as the row's value, so saving never
+     drops it. -->
+{#snippet zoneForm(con: { id: number; name: string; timezone: string | null }, mobile: boolean)}
+	{@const key = `tz-${mobile ? 'm' : 'd'}-${con.id}`}
+	{@const saved = con.timezone ?? ''}
+	{@const value = picked[key] ?? saved}
+	<form
+		method="POST"
+		action="?/setTimezone"
+		use:enhance={({ formElement }) => {
+			return async ({ result, update }) => {
+				await update({ reset: false });
+				delete picked[key];
+				if (result.type !== 'redirect') formElement.querySelector('select')?.focus();
+			};
+		}}
+		class="event-form zone-form"
+		class:mobile-event={mobile}
+	>
+		{#if mobile}
+			<label class="event-label" for="zone-{key}">{m.admin_conventions_field_timezone()}</label>
+		{/if}
+		<input type="hidden" name="id" value={con.id} />
+		<select
+			class="input event-select"
+			id="zone-{key}"
+			name="timezone"
+			{value}
+			onchange={(e) => (picked[key] = e.currentTarget.value)}
+			aria-label={m.admin_conventions_timezone_aria({ name: con.name })}
+			aria-describedby={form && 'zoneId' in form && form.zoneId === con.id ? 'conventions-error' : undefined}
+		>
+			<option value="">{m.admin_conventions_timezone_unset()}</option>
+			{#if con.timezone && !data.zones.includes(con.timezone)}
+				<option value={con.timezone}>{con.timezone}</option>
+			{/if}
+			{@render zoneChoices()}
+		</select>
+		<button
+			type="submit"
+			class="btn btn-outline zone-save"
+			class:unchanged={value === saved}
+			aria-label={m.admin_conventions_timezone_save_aria({ name: con.name })}
+		>
+			{m.admin_conventions_event_save()}
+		</button>
+	</form>
+{/snippet}
+
 <!-- A named tab stop, so the sideways scroll is reachable by keyboard and
      every browser announces the same thing when it lands there. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -274,7 +359,16 @@
 					<!-- The arrow keeps to its start date, so a range too wide for its
 					     column breaks after the arrow on every row, not before it on some. -->
 					<td class="dates">{formatDateRange(con.startDate, con.endDate).replace(' → ', '\u00a0→ ')}</td>
-					<td>{metaLine(con.location, con.timezone) || '—'}</td>
+					{#if con.sourceId}
+						<td>{metaLine(con.location, con.timezone) || '—'}</td>
+					{:else}
+						<td>
+							<div class="location-cell">
+								{con.location || '—'}
+								{@render zoneForm(con, false)}
+							</div>
+						</td>
+					{/if}
 					<td>{@render eventForm(con, false)}</td>
 					<td>
 						{#if live}
@@ -313,7 +407,8 @@
 		<div class="mobile-item" class:is-live={live}>
 			<div class="mobile-main">
 				<span class="con-name">{con.name}</span>
-				<span class="mobile-meta">{metaLine(formatDateRange(con.startDate, con.endDate), con.location, con.timezone)}</span>
+				<!-- A manual row's zone shows in its own select below. -->
+				<span class="mobile-meta">{metaLine(formatDateRange(con.startDate, con.endDate), con.location, con.sourceId ? con.timezone : null)}</span>
 				{#if live}
 					<a href="/connect/qr" class="btn btn-outline qr-btn mobile-qr">
 						<QrCode size={15} /> {m.admin_conventions_show_qr()}
@@ -329,6 +424,9 @@
 				<Trash2 size={16} />
 			</button>
 			{@render eventForm(con, true)}
+			{#if !con.sourceId}
+				{@render zoneForm(con, true)}
+			{/if}
 		</div>
 	{:else}
 		<p class="empty">{m.admin_conventions_empty()}</p>
@@ -627,6 +725,30 @@
 		outline-offset: 2px;
 	}
 
+	.location-cell {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 6px;
+	}
+
+	/* A zone name runs to 32 characters, and the table has to fit at 1280px
+	   beside the event column: the select stops at a narrow width, ends a
+	   long name in an ellipsis, and Save drops under it only while a change
+	   waits, rather than holding room beside it on every row. */
+	.table-wrapper .zone-form {
+		flex-wrap: wrap;
+		row-gap: 6px;
+	}
+
+	.table-wrapper .zone-form .event-select {
+		max-width: 144px;
+	}
+
+	.table-wrapper .zone-save.unchanged {
+		display: none;
+	}
+
 	.event-form {
 		display: flex;
 		align-items: center;
@@ -653,7 +775,8 @@
 		max-width: 240px;
 	}
 
-	.event-save {
+	.event-save,
+	.zone-save {
 		min-height: 32px;
 		height: auto;
 		padding: 6px 14px;
@@ -661,13 +784,15 @@
 	}
 
 	/* Holds its place while hidden, so the row does not shift when it shows. */
-	.event-save.unchanged {
+	.event-save.unchanged,
+	.zone-save.unchanged {
 		visibility: hidden;
 	}
 
 	/* The mobile row has nothing to keep in line, so the select takes the
 	   whole line until there is a change to save. */
-	.mobile-event .event-save.unchanged {
+	.mobile-event .event-save.unchanged,
+	.mobile-event .zone-save.unchanged {
 		display: none;
 	}
 
