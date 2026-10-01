@@ -309,6 +309,7 @@
 	"admin_conventions_add_manually": "Add manually",
 	"admin_conventions_col_name": "Convention",
 	"admin_conventions_col_dates": "Dates",
+	"admin_conventions_col_location": "Location and timezone",
 	"admin_conventions_source_title": "Added from cons.fyi",
 	"admin_conventions_open_website": "Open website",
 	"admin_conventions_delete_aria": "Delete {name}",

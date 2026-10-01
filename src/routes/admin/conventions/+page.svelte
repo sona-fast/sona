@@ -335,7 +335,9 @@
 			<tr>
 				<th>{m.admin_conventions_col_name()}</th>
 				<th>{m.admin_conventions_col_dates()}</th>
-				<th>{m.admin_conventions_field_location()}</th>
+				<!-- Names both: on a manual row the cell holds the timezone select,
+				     which has no visible label of its own at this width. -->
+				<th>{m.admin_conventions_col_location()}</th>
 				<th>{m.admin_conventions_field_event()}</th>
 				<th>{m.admin_conventions_status()}</th>
 				<th></th>

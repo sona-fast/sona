@@ -611,6 +611,8 @@ test.describe('manual convention timezone', () => {
 		}
 		await expect(one).toHaveValue('America/Chicago');
 		await expect(save).toBeHidden();
+		// The select's only visible label at this width is its column header.
+		await expect(page.locator('thead th').nth(2)).toHaveText('Location and timezone');
 
 		await pickAndSave(one, save, 'America/Denver');
 		await expect(page.getByRole('status')).toHaveText('Set the timezone for E2E Row One Con to America/Denver.');
