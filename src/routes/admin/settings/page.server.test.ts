@@ -984,12 +984,12 @@ describe('saveSite — absent fields are skipped, blank fields clear (#60)', () 
 
 	it('a POST omitting bluesky leaves blueskyUrl and the derived avatar alone', async () => {
 		const { db, platform } = makeDb();
-		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sona.e2e.example');
 		await seed(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/x');
 
 		await actions.saveSite(saveSiteEvent(platform, { siteName: 'sheeb.net' }));
 
-		expect(await getRawSetting(db, 'blueskyUrl')).toBe('https://bsky.app/profile/sunday.bsky.social');
+		expect(await getRawSetting(db, 'blueskyUrl')).toBe('https://bsky.app/profile/sona.e2e.example');
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('https://cdn.bsky.app/img/avatar/plain/x');
 	});
 
@@ -1107,13 +1107,13 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		const { db, platform } = makeDb();
 		vi.mocked(resolveAvatarUrl).mockClear();
 
-		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sona.e2e.example' }));
 
 		expect(await getRawSetting(db, 'blueskyUrl')).toBe(
-			'https://bsky.app/profile/sunday.bsky.social'
+			'https://bsky.app/profile/sona.e2e.example'
 		);
 		expect(resolveAvatarUrl).toHaveBeenCalledWith(
-			{ blueskyUrl: 'https://bsky.app/profile/sunday.bsky.social' },
+			{ blueskyUrl: 'https://bsky.app/profile/sona.e2e.example' },
 			expect.objectContaining({ keyHint: 'owner', origin: 'https://taro.surf' })
 		);
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/derived.jpg');
@@ -1142,7 +1142,7 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 			return realBatch(stmts as never);
 		}) as typeof d1.batch;
 
-		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sona.e2e.example' }));
 
 		const withHandle = batches.filter((keys) => keys.includes('blueskyUrl'));
 		expect(withHandle).toHaveLength(1);
@@ -1151,7 +1151,7 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 
 	it('a present-but-blank bluesky clears both blueskyUrl and the avatar', async () => {
 		const { db, platform } = makeDb();
-		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sona.e2e.example');
 		await seed(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/x');
 		vi.mocked(resolveAvatarUrl).mockClear();
 
@@ -1183,7 +1183,7 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 	// avatar it produced stayed. A failed read must stop the save instead.
 	it('a blank bluesky whose stored-handle read fails saves nothing', async () => {
 		const { db, platform } = makeDb();
-		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sona.e2e.example');
 		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/face.jpg');
 
 		// Fail the first settings read, the way a transient D1 error would.
@@ -1205,7 +1205,7 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 
 		expect(result).toMatchObject({ status: 503 });
 		expect(await getRawSetting(db, 'blueskyUrl')).toBe(
-			'https://bsky.app/profile/sunday.bsky.social'
+			'https://bsky.app/profile/sona.e2e.example'
 		);
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/face.jpg');
 		expect(await getRawSetting(db, 'siteName')).toBeNull();
@@ -1219,12 +1219,12 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 	// is skipped entirely (which is also what keeps a transient failure harmless).
 	it('an UNCHANGED handle with an owned avatar skips re-resolution and keeps the avatar', async () => {
 		const { db, platform } = makeDb();
-		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sona.e2e.example');
 		// Root-relative '/img/…' is ours by definition (no-CDN R2 shape).
 		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
 		vi.mocked(resolveAvatarUrl).mockClear();
 
-		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sona.e2e.example' }));
 
 		expect(resolveAvatarUrl).not.toHaveBeenCalled(); // no profile lookup, no re-host
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/owned.jpg');
@@ -1232,11 +1232,11 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 
 	it('an unchanged handle still re-hosts when the stored avatar is a hotlink (skip is ownership-gated)', async () => {
 		const { db, platform } = makeDb();
-		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sona.e2e.example');
 		await seed(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/rot.jpg');
 		vi.mocked(resolveAvatarUrl).mockClear();
 
-		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sona.e2e.example' }));
 
 		expect(resolveAvatarUrl).toHaveBeenCalledTimes(1);
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/derived.jpg');
