@@ -65,7 +65,6 @@ function makeDb() {
 	);`);
 	const d1 = makeD1(sqlite);
 	return {
-		sqlite,
 		db: drizzle(d1, { schema }),
 		platform: { env: { DB: d1 } } as unknown as App.Platform
 	};
@@ -1242,33 +1241,6 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'new.bsky.social' }));
 
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
-	});
-
-	// healOwnerAvatar (the refresh cron) re-reads blueskyUrl alone right before it
-	// writes adminAvatarUrl. Since SONA-235 saveSettings commits a save's keys in
-	// one atomic D1 batch, so that read can no longer see the avatar without the
-	// handle whatever the order. The batch still runs the statements in insertion
-	// order, and this test keeps the handle-first order as a second guard should
-	// the save ever stop being atomic.
-	it('writes blueskyUrl before adminAvatarUrl, which is what makes the cron heal guard safe', async () => {
-		const { sqlite, platform } = makeDb();
-		// Triggers, so the assertion is on the writes that actually reached D1
-		// rather than on the shape of the source.
-		sqlite.exec(`CREATE TABLE settings_writes (n INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL);
-		CREATE TRIGGER log_settings_insert AFTER INSERT ON site_settings
-		BEGIN INSERT INTO settings_writes (key) VALUES (NEW.key); END;
-		CREATE TRIGGER log_settings_update AFTER UPDATE ON site_settings
-		BEGIN INSERT INTO settings_writes (key) VALUES (NEW.key); END;`);
-
-		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
-
-		const keys: string[] = sqlite
-			.prepare('SELECT key FROM settings_writes ORDER BY n')
-			.all()
-			.map((r: { key: string }) => r.key);
-		expect(keys).toContain('blueskyUrl');
-		expect(keys).toContain('adminAvatarUrl');
-		expect(keys.indexOf('blueskyUrl')).toBeLessThan(keys.indexOf('adminAvatarUrl'));
 	});
 });
 

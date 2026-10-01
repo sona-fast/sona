@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { siteSettings } from './db/schema';
 import { APP_NAME } from '$lib/config';
@@ -447,7 +447,7 @@ function upsertSetting(db: Database, key: string, value: string) {
 	return db
 		.insert(siteSettings)
 		.values({ key, value })
-		.onConflictDoUpdate({ target: siteSettings.key, set: { value } });
+		.onConflictDoUpdate({ target: siteSettings.key, set: { value: sql`excluded.value` } });
 }
 
 /** Upsert a single raw site_settings row in one statement. */
@@ -617,11 +617,9 @@ export async function getSupporterKeyStatus(
 }
 
 export async function saveSettings(db: Database, settings: Partial<SiteSettings>) {
-	// One upsert per key, all sent in a single D1 batch (one round trip) instead of
-	// a read and a write per key. One statement per key rather than one multi-row
-	// INSERT: D1 caps a statement at 100 bound parameters, and a full settings
-	// save is about sixty keys at two parameters each. A D1 batch runs as one
-	// transaction, so a save stores every key or none.
+	// One statement per key because D1 caps a statement at 100 bound parameters,
+	// and each upsert binds two. A D1 batch runs as one transaction, so a save
+	// stores every key or none; healOwnerAvatar in avatar.ts relies on that.
 	const statements: BatchItem<'sqlite'>[] = [];
 	for (const [key, rawValue] of Object.entries(settings)) {
 		if (rawValue === undefined) continue;
@@ -629,7 +627,7 @@ export async function saveSettings(db: Database, settings: Partial<SiteSettings>
 		// their string form. No-op for the existing string settings.
 		statements.push(upsertSetting(db, key, String(rawValue)));
 	}
-	// drizzle refuses an empty batch, and there is nothing to write anyway.
+	// Nothing to write, and an empty batch would still be a round trip.
 	if (statements.length > 0) {
 		await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
 	}

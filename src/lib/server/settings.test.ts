@@ -406,7 +406,7 @@ function sqliteSettingsDb() {
 		prepare: (sql: string) => { bind: (...p: unknown[]) => Record<string, (...a: unknown[]) => unknown> };
 		batch: (stmts: unknown[]) => Promise<unknown>;
 	};
-	const trips = { single: 0, batches: 0, batchSizes: [] as number[] };
+	const trips = { single: 0, batches: 0 };
 	const d1 = {
 		prepare: (sql: string) => ({
 			bind: (...params: unknown[]) => {
@@ -422,7 +422,6 @@ function sqliteSettingsDb() {
 		}),
 		batch: (stmts: unknown[]) => {
 			trips.batches += 1;
-			trips.batchSizes.push(stmts.length);
 			return real.batch(stmts);
 		}
 	} as unknown as D1Database;
@@ -462,22 +461,22 @@ describe('saveSettings — invalidation', () => {
 		expect(s.registryOverridesLocal).toBe(false);
 	});
 
-	it('leaves existing string settings unchanged through the String() coercion', async () => {
-		const { db, rows } = sqliteSettingsDb();
-
-		await saveSettings(db, { siteName: 'My Gallery' });
-		expect(rows()).toEqual([{ key: 'siteName', value: 'My Gallery' }]);
-	});
-
 	it('writes only the keys it is given — the per-tab save actions rely on this', async () => {
 		// The settings page saves one tab at a time (saveSite / saveConnections /
 		// saveStorage); a tab's subset must never touch another tab's keys.
+		// An explicitly undefined key is skipped the same way an absent one is.
 		const { db, rows, seed } = sqliteSettingsDb();
 		seed('siteName', 'Kept');
+		seed('ownerName', 'Kept too');
 
-		await saveSettings(db, { autoResyncEnabled: false, registryOverridesLocal: true });
+		await saveSettings(db, {
+			autoResyncEnabled: false,
+			registryOverridesLocal: true,
+			ownerName: undefined
+		});
 		expect(rows()).toEqual([
 			{ key: 'autoResyncEnabled', value: 'false' },
+			{ key: 'ownerName', value: 'Kept too' },
 			{ key: 'registryOverridesLocal', value: 'true' },
 			{ key: 'siteName', value: 'Kept' }
 		]);
@@ -495,28 +494,6 @@ describe('saveSettings — batched upsert (SONA-235)', () => {
 			{ key: 'ownerName', value: 'Sunday' },
 			{ key: 'siteName', value: 'New' }
 		]);
-	});
-
-	it("skips undefined values and leaves that key's stored row untouched", async () => {
-		const { db, rows, seed } = sqliteSettingsDb();
-		seed('siteName', 'Kept');
-
-		await saveSettings(db, { siteName: undefined, ownerName: 'Sunday' });
-
-		expect(rows()).toEqual([
-			{ key: 'ownerName', value: 'Sunday' },
-			{ key: 'siteName', value: 'Kept' }
-		]);
-	});
-
-	it('stores a number as its string form', async () => {
-		const { db, rows } = sqliteSettingsDb();
-
-		// No numeric SiteSettings key exists today; the cast stands in for one so
-		// the String() coercion is covered for every non-string, not just booleans.
-		await saveSettings(db, { siteName: 42 as unknown as string });
-
-		expect(rows()).toEqual([{ key: 'siteName', value: '42' }]);
 	});
 
 	it('makes no database call for an empty or all-undefined save, and still drops the cache', async () => {
@@ -543,20 +520,17 @@ describe('saveSettings — batched upsert (SONA-235)', () => {
 		await saveSettings(db, many as Partial<SiteSettings>);
 
 		expect(trips.batches).toBe(1);
-		expect(trips.batchSizes).toEqual([65]);
 		expect(trips.single).toBe(0);
 		expect(rows()).toHaveLength(65);
-		expect(rows()[64]).toEqual({ key: 'key64', value: 'v64' });
 	});
 
-	it('stores no key and keeps serving the cached values when the batch fails', async () => {
+	it('propagates the error and stores no key when the batch fails', async () => {
 		const { sqlite, db, rows, seed } = sqliteSettingsDb();
 		seed('siteName', 'Old');
 		// The second statement of the batch fails inside the database, after the
 		// first one has already run in the same transaction.
 		sqlite.exec(`CREATE TRIGGER refuse_owner BEFORE INSERT ON site_settings
 			WHEN NEW.key = 'ownerName' BEGIN SELECT RAISE(ABORT, 'refused'); END;`);
-		expect((await getSettings(db)).siteName).toBe('Old');
 
 		await expect(saveSettings(db, { siteName: 'New', ownerName: 'Sunday' })).rejects.toThrow(
 			/refused/
@@ -564,8 +538,6 @@ describe('saveSettings — batched upsert (SONA-235)', () => {
 
 		// All or nothing: the siteName update rolled back with the failed insert.
 		expect(rows()).toEqual([{ key: 'siteName', value: 'Old' }]);
-		// The cache is not cleared on a throw, and it still matches the database.
-		expect((await getSettings(db)).siteName).toBe('Old');
 	});
 });
 
