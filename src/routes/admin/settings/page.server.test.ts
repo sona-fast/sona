@@ -1244,12 +1244,12 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
 	});
 
-	// Load-bearing key ORDER, not a style choice: healOwnerAvatar (the refresh
-	// cron) re-reads blueskyUrl alone right before it writes adminAvatarUrl, and
-	// that single-key read is only a valid guard because a concurrent save has
-	// necessarily written its handle first — saveSettings walks this object in
-	// insertion order with no transaction. Swap the two keys and a save caught
-	// mid-flight slips past the guard and loses its just-written avatar.
+	// healOwnerAvatar (the refresh cron) re-reads blueskyUrl alone right before it
+	// writes adminAvatarUrl. Since SONA-235 saveSettings commits a save's keys in
+	// one atomic D1 batch, so that read can no longer see the avatar without the
+	// handle whatever the order. The batch still runs the statements in insertion
+	// order, and this test keeps the handle-first order as a second guard should
+	// the save ever stop being atomic.
 	it('writes blueskyUrl before adminAvatarUrl, which is what makes the cron heal guard safe', async () => {
 		const { sqlite, platform } = makeDb();
 		// Triggers, so the assertion is on the writes that actually reached D1

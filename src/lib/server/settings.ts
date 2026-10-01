@@ -1,4 +1,5 @@
 import { eq, inArray } from 'drizzle-orm';
+import type { BatchItem } from 'drizzle-orm/batch';
 import { siteSettings } from './db/schema';
 import { APP_NAME } from '$lib/config';
 import { DEFAULT_GALLERY_SORT, isValidGallerySort, type GallerySort } from '$lib/gallery';
@@ -440,14 +441,18 @@ export async function getRawSettings(
 	return Object.fromEntries(keys.map((k) => [k, found[k] ?? null]));
 }
 
-/** Upsert a single raw site_settings row. */
+/** The one-statement upsert of a site_settings row, built but not run, so
+ * setRawSetting can await it alone and saveSettings can batch many of them. */
+function upsertSetting(db: Database, key: string, value: string) {
+	return db
+		.insert(siteSettings)
+		.values({ key, value })
+		.onConflictDoUpdate({ target: siteSettings.key, set: { value } });
+}
+
+/** Upsert a single raw site_settings row in one statement. */
 export async function setRawSetting(db: Database, key: string, value: string): Promise<void> {
-	const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
-	if (existing) {
-		await db.update(siteSettings).set({ value }).where(eq(siteSettings.key, key));
-	} else {
-		await db.insert(siteSettings).values({ key, value });
-	}
+	await upsertSetting(db, key, value);
 }
 
 // Resolved supporter-key status, memoized per isolate next to the settings cache
@@ -612,11 +617,21 @@ export async function getSupporterKeyStatus(
 }
 
 export async function saveSettings(db: Database, settings: Partial<SiteSettings>) {
+	// One upsert per key, all sent in a single D1 batch (one round trip) instead of
+	// a read and a write per key. One statement per key rather than one multi-row
+	// INSERT: D1 caps a statement at 100 bound parameters, and a full settings
+	// save is about sixty keys at two parameters each. A D1 batch runs as one
+	// transaction, so a save stores every key or none.
+	const statements: BatchItem<'sqlite'>[] = [];
 	for (const [key, rawValue] of Object.entries(settings)) {
 		if (rawValue === undefined) continue;
 		// The value column is TEXT — coerce non-strings (e.g. boolean toggles) to
 		// their string form. No-op for the existing string settings.
-		await setRawSetting(db, key, String(rawValue));
+		statements.push(upsertSetting(db, key, String(rawValue)));
+	}
+	// drizzle refuses an empty batch, and there is nothing to write anyway.
+	if (statements.length > 0) {
+		await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
 	}
 	// Invalidate so subsequent reads in this isolate see the new values.
 	clearSettingsCache();

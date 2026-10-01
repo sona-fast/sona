@@ -594,13 +594,11 @@ export async function healOwnerAvatar(
 	// the value it produced: if the operator changed or cleared their Bluesky
 	// field in the meantime, this copy is of an account that is no longer theirs.
 	//
-	// Reading blueskyUrl ALONE is safe only because of a key order elsewhere:
-	// saveSite hands saveSettings one object whose blueskyUrl key comes before
-	// adminAvatarUrl, and saveSettings writes the keys one at a time with no
-	// transaction. So a concurrent save that has already written its avatar has
-	// necessarily written its handle first, and this read sees it. Swap those two
-	// keys in that object literal and a save caught mid-flight would slip past
-	// this guard and lose its just-written avatar to the line below.
+	// Reading blueskyUrl ALONE is safe because saveSettings writes all of a
+	// save's keys in one D1 batch, which commits as a single transaction. A
+	// concurrent save that has already written its avatar has written its handle
+	// in the same commit, so this read sees it; there is no save caught
+	// mid-flight with its avatar stored and its handle not yet.
 	const now = await getRawSettings(db, ['blueskyUrl']);
 	if ((now.blueskyUrl ?? '') !== blueskyUrl) return 'unresolved';
 
