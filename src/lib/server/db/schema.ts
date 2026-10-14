@@ -179,7 +179,10 @@ export const stickerPacks = sqliteTable('sticker_packs', {
 	source: text('source', { enum: ['telegram', 'self-hosted'] }).notNull(),
 	published: integer('published', { mode: 'boolean' }).notNull().default(true),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
-});
+}, (table) => [
+	// The /about count and the ledger-only check look packs up per manager.
+	index('sticker_packs_manager_artist_id_idx').on(table.managerArtistId)
+]);
 
 // One sticker. Attribution is PER-STICKER (`artistId`) so a self-managed pack can
 // mix artists. `format` anticipates Telegram's animated `.tgs` and video `.webm`
@@ -212,7 +215,9 @@ export const stickers = sqliteTable('stickers', {
 	// existing-ids set before either writes, so the app-level check races). The
 	// column is nullable and SQLite allows many NULLs under a unique index, so
 	// self-hosted stickers (no Telegram id) are unaffected.
-	uniqueIndex('stickers_telegram_file_unique_id_unique').on(table.telegramFileUniqueId)
+	uniqueIndex('stickers_telegram_file_unique_id_unique').on(table.telegramFileUniqueId),
+	// The /about count and the ledger-only check look stickers up per artist.
+	index('stickers_artist_id_idx').on(table.artistId)
 ]);
 
 // Many emoji per sticker; search-by-emoji filters on this junction. No PK, mirroring
@@ -333,7 +338,9 @@ export const avatarCredits = sqliteTable('avatar_credits', {
 	position: integer('position').notNull().default(0)
 }, (table) => [
 	// The public detail load fetches credits per page view by avatar_id.
-	index('avatar_credits_avatar_id_idx').on(table.avatarId)
+	index('avatar_credits_avatar_id_idx').on(table.avatarId),
+	// The /about count and the ledger-only check look credits up per artist.
+	index('avatar_credits_artist_id_idx').on(table.artistId)
 ]);
 
 // Showcase media (screenshots / clips) for an avatar, ordered by `position`.
@@ -370,8 +377,7 @@ export const avatarPlatforms = sqliteTable('avatar_platforms', {
 // Commission ledger (SONA-236): the owner's private record of commissions they
 // requested, from application to delivery. Public routes never read these
 // tables. The enum arrays live here, not in $lib, because the schema drift test
-// copies this file somewhere $lib doesn't resolve; src/lib/commissions.ts keeps
-// a client-safe copy that a test pins to these.
+// copies this file somewhere $lib doesn't resolve.
 export const COMMISSION_STATUSES = [
 	'applied',
 	'waitlisted',

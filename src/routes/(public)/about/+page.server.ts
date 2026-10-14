@@ -2,7 +2,7 @@ import { getReadDb } from '$lib/server/db';
 import { getSettings, toPublicSettings } from '$lib/server/settings';
 import { images, artists, collections, conventions } from '$lib/server/db/schema';
 import { asc, sql } from 'drizzle-orm';
-import { artistHasPublicWork } from '$lib/server/public-artists';
+import { artistHasPublicWork } from '$lib/server/artist-visibility';
 import type { PageServerLoad } from './$types';
 
 async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {

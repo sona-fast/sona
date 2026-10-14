@@ -11,7 +11,7 @@
 
 import { eq, isNull, and, ne, not } from 'drizzle-orm';
 import { artists } from './db/schema';
-import { artistIsLedgerOnly } from './public-artists';
+import { artistIsLedgerOnly } from './artist-visibility';
 import { getRawSetting, setRawSetting } from './settings';
 import type { SiteSettings } from './settings';
 import { sanitizeUrl } from './validate';

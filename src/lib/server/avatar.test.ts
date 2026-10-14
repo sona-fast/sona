@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from './db/schema';
 import { artists } from './db/schema';
 import { makeD1 } from './test/d1';
@@ -29,6 +29,11 @@ CREATE TABLE artists (
 	registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
+CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
+CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER);
+CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
+CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
 `;
 
 function makeDb() {
@@ -575,6 +580,35 @@ describe('refreshArtistAvatars', () => {
 		// Newest was skipped this run — its timestamp is unchanged.
 		const newest = await db.select().from(artists).where(eq(artists.name, 'Newest')).get();
 		expect(newest!.avatarResolvedAt).toBe('2026-06-01T00:00:00Z');
+	});
+
+	// SONA-236: the lookup sends the handle to Bluesky, so an artist who exists
+	// only for a private commission entry is never looked up.
+	it('skips an artist who exists only for commission entries, and refreshes one with a piece', async () => {
+		const fetchMock = stubFetch();
+		const { db } = makeDb();
+		await db.insert(artists).values([
+			{ id: 1, name: 'Ledger only', blueskyUrl: 'ledgeronly.bsky.social', avatarUrl: null, createdAt: 'x' },
+			{ id: 2, name: 'Has a piece', blueskyUrl: 'hasapiece.bsky.social', avatarUrl: null, createdAt: 'x' }
+		]);
+		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (1), (2)`);
+		await db.run(sql`INSERT INTO images (artist_id) VALUES (2)`);
+
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: fakeBucket() } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+			origin: 'https://site.test',
+			limit: 10,
+			mode: 'oldest'
+		});
+
+		expect(r).toEqual({ processed: 1, refreshed: 1, remaining: 0 });
+		const urls = fetchMock.mock.calls.map(([u]) => String(u));
+		expect(urls.some((u) => u.includes('ledgeronly'))).toBe(false);
+		expect(urls.some((u) => u.includes('hasapiece'))).toBe(true);
+		const ledger = await db.select().from(artists).where(eq(artists.id, 1)).get();
+		expect(ledger!.avatarUrl).toBeNull();
+		expect(ledger!.avatarResolvedAt).toBeNull();
 	});
 });
 

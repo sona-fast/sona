@@ -37,7 +37,8 @@ function makeDb() {
 	CREATE TABLE avatar_credits (
 		avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL, role TEXT NOT NULL,
 		role_label TEXT, position INTEGER NOT NULL DEFAULT 0
-	);`);
+	);
+	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }

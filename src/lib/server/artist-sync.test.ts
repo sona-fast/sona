@@ -415,21 +415,29 @@ describe('syncArtists backfill — identity verification', () => {
 
 	// SONA-236: the search sends the artist's handle to the shared registry, so
 	// an artist who exists only for a private commission entry is never searched.
-	it('skips an artist who exists only for commission entries, and searches one with a piece', async () => {
+	it('skips an artist who exists only for commission entries, and searches one with other work', async () => {
 		const db = makeDb();
 		await db.insert(artists).values([
 			{ id: 1, name: 'ledger only', twitterUrl: 'https://twitter.com/ledgeronly', createdAt: now },
-			{ id: 2, name: 'has a piece', twitterUrl: 'https://twitter.com/hasapiece', createdAt: now }
+			{ id: 2, name: 'has a piece', twitterUrl: 'https://twitter.com/hasapiece', createdAt: now },
+			{ id: 3, name: 'has a sticker', twitterUrl: 'https://twitter.com/hasasticker', createdAt: now },
+			{ id: 4, name: 'manages a pack', twitterUrl: 'https://twitter.com/managesapack', createdAt: now },
+			{ id: 5, name: 'has a credit', twitterUrl: 'https://twitter.com/hasacredit', createdAt: now }
 		]);
-		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (1), (2)`);
+		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (1), (2), (3), (4), (5)`);
 		await db.run(sql`INSERT INTO images (artist_id) VALUES (2)`);
+		await db.run(sql`INSERT INTO stickers (artist_id) VALUES (3)`);
+		await db.run(sql`INSERT INTO sticker_packs (manager_artist_id) VALUES (4)`);
+		await db.run(sql`INSERT INTO avatar_credits (avatar_id, artist_id) VALUES (1, 5)`);
 
 		stubRegistry([]);
 
 		await syncArtists(db, ENV, SETTINGS);
 		const searched = searchCalls().map(([url]) => decodeURIComponent(String(url)));
 		expect(searched.some((u) => u.includes('ledgeronly'))).toBe(false);
-		expect(searched.some((u) => u.includes('hasapiece'))).toBe(true);
+		for (const handle of ['hasapiece', 'hasasticker', 'managesapack', 'hasacredit']) {
+			expect(searched.some((u) => u.includes(handle)), handle).toBe(true);
+		}
 	});
 
 	it('leaves the artist unlinked when the search returns no candidates', async () => {

@@ -26,7 +26,7 @@ export function artistHasPublicWork(artistId: SQLiteColumn): SQL {
  * True for an artist who exists only for the owner's private commission ledger:
  * they have entries, and no piece (published or not), sticker, managed pack, or
  * avatar credit. Code that sends artist data off the site on its own, like the
- * daily registry sync, skips them (SONA-236).
+ * daily registry sync and the avatar refresh, skips them (SONA-236).
  */
 export function artistIsLedgerOnly(artistId: SQLiteColumn): SQL {
 	return sql`(

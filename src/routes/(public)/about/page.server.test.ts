@@ -27,7 +27,7 @@ describe('/about artist count', () => {
 		const sqlite = migrated();
 		const artist = sqlite.prepare("INSERT INTO artists (id, name, created_at) VALUES (?, ?, '2026-10-01')");
 		const names = ['Published piece', 'Draft only', 'Sticker in published pack', 'Sticker in draft pack',
-			'Manages published pack', 'Published avatar credit', 'Draft avatar credit', 'Ledger only'];
+			'Manages published pack', 'Published avatar credit', 'Draft avatar credit', 'Ledger only', 'Published variant only'];
 		names.forEach((n, i) => artist.run(i + 1, n));
 		sqlite.prepare("INSERT INTO characters (id, name, created_at) VALUES (1, 'Kit', '2026-10-01')").run();
 
@@ -36,6 +36,12 @@ describe('/about artist count', () => {
 		);
 		image.run('published', 1, 1);
 		image.run('draft', 2, 0);
+		// A variant of piece 1: the gallery hides variants, so it isn't public work.
+		sqlite
+			.prepare(
+				"INSERT INTO images (slug, title, image_url, artist_id, published, parent_image_id, created_at) VALUES ('variant', 'Variant', '/v.png', 9, 1, 1, '2026-10-01')"
+			)
+			.run();
 
 		const pack = sqlite.prepare(
 			"INSERT INTO sticker_packs (id, name, slug, character_id, manager_artist_id, source, published, created_at) VALUES (?, 'Pack', ?, 1, ?, 'self-hosted', ?, '2026-10-01')"

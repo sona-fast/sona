@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ec1c5c7f-bb43-4d21-973b-cfc9a454fb20",
+  "id": "a094653f-9f1b-4f46-baf7-08fb08a86644",
   "prevId": "56e3bae4-6aec-4853-a036-3bece8e63ba5",
   "tables": {
     "artists": {
@@ -179,6 +179,13 @@
           "name": "avatar_credits_avatar_id_idx",
           "columns": [
             "avatar_id"
+          ],
+          "isUnique": false
+        },
+        "avatar_credits_artist_id_idx": {
+          "name": "avatar_credits_artist_id_idx",
+          "columns": [
+            "artist_id"
           ],
           "isUnique": false
         }
@@ -1604,6 +1611,13 @@
             "slug"
           ],
           "isUnique": true
+        },
+        "sticker_packs_manager_artist_id_idx": {
+          "name": "sticker_packs_manager_artist_id_idx",
+          "columns": [
+            "manager_artist_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -1744,6 +1758,13 @@
             "telegram_file_unique_id"
           ],
           "isUnique": true
+        },
+        "stickers_artist_id_idx": {
+          "name": "stickers_artist_id_idx",
+          "columns": [
+            "artist_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {

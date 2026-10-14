@@ -39,7 +39,7 @@ function referencedWithAction() {
 	return referenced;
 }
 
-export function droppedTables(sql: string): string[] {
+function droppedTables(sql: string): string[] {
 	return [...sql.matchAll(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?[`"]?(\w+)[`"]?/gi)].map((m) => m[1]);
 }
 

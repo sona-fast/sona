@@ -16,7 +16,7 @@ function migrated() {
 		sqlite.exec(readFileSync(new URL(name, dir), 'utf8'));
 	}
 	sqlite.exec(`
-		INSERT INTO artists (id, name, created_at) VALUES (1, 'Artist A', '2026-10-01');
+		INSERT INTO artists (id, name, created_at) VALUES (1, 'Artist A', '2026-10-01'), (2, 'Artist B', '2026-10-01');
 		INSERT INTO characters (id, name, created_at) VALUES (1, 'Kit', '2026-10-01'), (2, 'Pip', '2026-10-01');
 		INSERT INTO images (id, slug, title, image_url, artist_id, created_at) VALUES (1, 'snowfall', 'Snowfall', '/a.png', 1, '2026-10-01');
 	`);
@@ -58,8 +58,11 @@ describe('migration 0031 commission ledger', () => {
 
 	it('refuses to delete an artist who has entries', () => {
 		const sqlite = migrated();
-		entry(sqlite, 1, null);
-		expect(() => sqlite.exec('DELETE FROM artists WHERE id = 1')).toThrow(/FOREIGN KEY constraint failed/);
+		// Artist 2 has no pieces, so only the entry can refuse the delete.
+		sqlite.exec(
+			"INSERT INTO commissions (id, artist_id, title, created_at, updated_at) VALUES (1, 2, 'Entry', '2026-10-01', '2026-10-01')"
+		);
+		expect(() => sqlite.exec('DELETE FROM artists WHERE id = 2')).toThrow(/FOREIGN KEY constraint failed/);
 		expect(count(sqlite, 'SELECT COUNT(*) AS n FROM commissions')).toBe(1);
 	});
 

@@ -7,6 +7,10 @@
 -- unique index lets a piece link to at most one entry (NULLs stay distinct).
 -- Character links cascade from both sides.
 --
+-- The indexes on stickers.artist_id, sticker_packs.manager_artist_id, and
+-- avatar_credits.artist_id serve the /about artist count and the ledger-only
+-- check, which look these columns up once per artist.
+--
 -- Additive only: no existing table is rebuilt, so no existing ON DELETE action
 -- fires (see the table-rebuild guard test).
 CREATE TABLE `commission_characters` (
@@ -39,4 +43,7 @@ CREATE TABLE `commissions` (
 );
 --> statement-breakpoint
 CREATE INDEX `commissions_artist_id_idx` ON `commissions` (`artist_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `commissions_image_id_uq` ON `commissions` (`image_id`);
+CREATE UNIQUE INDEX `commissions_image_id_uq` ON `commissions` (`image_id`);--> statement-breakpoint
+CREATE INDEX `avatar_credits_artist_id_idx` ON `avatar_credits` (`artist_id`);--> statement-breakpoint
+CREATE INDEX `sticker_packs_manager_artist_id_idx` ON `sticker_packs` (`manager_artist_id`);--> statement-breakpoint
+CREATE INDEX `stickers_artist_id_idx` ON `stickers` (`artist_id`);

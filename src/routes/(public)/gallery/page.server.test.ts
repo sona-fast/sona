@@ -43,7 +43,10 @@ function makeDb(envExtra: Record<string, string> = {}) {
 		CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
 		CREATE TABLE fursuit_photos (id INTEGER PRIMARY KEY AUTOINCREMENT);
 		CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
-		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1, manager_artist_id INTEGER);
+		CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
+		CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
+		CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
 	`);
 	const d1 = makeD1(sqlite);
 	return {
@@ -221,6 +224,24 @@ describe('gallery load — former-name (alias) resolution', () => {
 		expect(data.filters.artist).toBe('Draft');
 		expect(data.images).toHaveLength(0);
 		expect(data.degraded).toBe(false);
+	});
+
+	it('resolves an alias that matches only a ledger-only artist, so the private name stays hidden', async () => {
+		// "Draft" exists only for a private commission entry (SONA-236). If it
+		// counted as a current name, the missing banner would reveal it exists.
+		const { db, platform } = makeDb();
+		const [{ id: draftId }] = await addArtist(db, 'Draft');
+		await db.run(sqlq`INSERT INTO commissions (artist_id) VALUES (${draftId})`);
+		const [{ id: phoenixId }] = await addArtist(
+			db,
+			'Phoenix',
+			JSON.stringify([{ displayName: 'Draft', socials: {} }])
+		);
+		await addImage(db, { artistId: phoenixId, published: true });
+
+		const data = await loadData(platform, '?artist=Draft');
+		expect(data.formerName).toEqual({ searched: 'Draft', current: 'Phoenix' });
+		expect(data.images).toHaveLength(1);
 	});
 
 	it('does not resolve a former name claimed only by a non-live artist', async () => {
