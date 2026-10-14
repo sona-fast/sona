@@ -9,8 +9,9 @@
 // Never runs on a render path — only the /api/cron/sync-artists endpoint (and a
 // manual "Sync now" admin action) call this.
 
-import { eq, isNull, and, ne } from 'drizzle-orm';
+import { eq, isNull, and, ne, not } from 'drizzle-orm';
 import { artists } from './db/schema';
+import { artistIsLedgerOnly } from './public-artists';
 import { getRawSetting, setRawSetting } from './settings';
 import type { SiteSettings } from './settings';
 import { sanitizeUrl } from './validate';
@@ -294,10 +295,15 @@ export async function syncArtists(
 	}
 
 	// ── 2. Backfill: stamp global_id onto local-only artists by handle match ────
+	// An artist added only for the owner's private commission ledger (entries,
+	// but no piece, sticker, pack, or avatar credit) is skipped: the search sends
+	// their handle to the shared registry, and no screen tells the owner that
+	// happens on a schedule (SONA-236). Filtered in SQL so skipped artists don't
+	// use up the run's cap.
 	const unlinked = await db
 		.select()
 		.from(artists)
-		.where(and(isNull(artists.globalId), ne(artists.name, '')))
+		.where(and(isNull(artists.globalId), ne(artists.name, ''), not(artistIsLedgerOnly(artists.id))))
 		.limit(BACKFILL_CAP);
 
 	for (const a of unlinked) {

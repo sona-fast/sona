@@ -55,6 +55,7 @@ vi.mock('$lib/server/supporter-key', async (importActual) =>
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	// artists: the syncNow action runs the real artist-sync against this table.
+	// The other tables let its ledger-only filter run (SONA-236).
 	sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 	CREATE TABLE artists (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
@@ -62,7 +63,12 @@ function makeDb() {
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
 		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
-	);`);
+	);
+	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
+	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
+	CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER);
+	CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
+	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
 	const d1 = makeD1(sqlite);
 	return {
 		db: drizzle(d1, { schema }),
@@ -1758,6 +1764,16 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 				id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
 				start_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'confirmed', created_at TEXT NOT NULL
 			);
+			CREATE TABLE commissions (
+				id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL REFERENCES artists(id),
+				title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'applied', payment TEXT NOT NULL DEFAULT 'unpaid',
+				image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+				created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+			);
+			CREATE TABLE commission_characters (
+				commission_id INTEGER NOT NULL REFERENCES commissions(id) ON DELETE CASCADE,
+				character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE
+			);
 		`);
 		sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
 		sqlite.prepare('INSERT INTO artists (id, name) VALUES (1, ?)').run('Alba');
@@ -1787,6 +1803,14 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 		sqlite.prepare("INSERT INTO collections (id, name) VALUES (1, 'Faves')").run();
 		sqlite.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (1, 1)').run();
 		sqlite.prepare('INSERT INTO image_characters (image_id, character_id) VALUES (1, 1)').run();
+		// A ledger entry linked to the artist, the character, and the image: the
+		// artist reference has no cascade, so the entries must go first.
+		sqlite
+			.prepare(
+				"INSERT INTO commissions (id, artist_id, title, image_id, created_at, updated_at) VALUES (1, 1, 'Ref sheet', 1, '2026-10-01', '2026-10-01')"
+			)
+			.run();
+		sqlite.prepare('INSERT INTO commission_characters (commission_id, character_id) VALUES (1, 1)').run();
 
 		const d1 = makeD1(sqlite);
 		const platform = { env: { DB: d1 } } as unknown as App.Platform;
@@ -1818,7 +1842,9 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 			'tags',
 			'collections',
 			'characters',
-			'artists'
+			'artists',
+			'commissions',
+			'commission_characters'
 		]) {
 			const row = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
 			expect(row.n, `${table} should be empty after deleteAll`).toBe(0);

@@ -5,6 +5,7 @@ import {
 	avatarMedia,
 	characters,
 	collections,
+	commissions,
 	conventions,
 	fursuitPhotos,
 	images,
@@ -67,7 +68,10 @@ export const URL_COLUMNS: ReadonlyArray<{ table: SQLiteTable; columns: readonly 
 	// modelUrl is self-hosted (the load-bearing one); externalUrl is off-site
 	// and inert — included per the over-collect rule above.
 	{ table: vrAvatars, columns: ['modelUrl', 'externalUrl'] },
-	{ table: avatarMedia, columns: ['url'] }
+	{ table: avatarMedia, columns: ['url'] },
+	// An entry's link to where the owner asked: always off-site and inert,
+	// included per the over-collect rule above.
+	{ table: commissions, columns: ['sourceUrl'] }
 ];
 
 /**

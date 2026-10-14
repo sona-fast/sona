@@ -22,6 +22,11 @@ function makeDb() {
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
 		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 	);
+	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
+	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
+	CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER);
+	CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
+	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
 	CREATE TABLE job_run (name TEXT PRIMARY KEY, status TEXT NOT NULL, ran_at TEXT NOT NULL, detail TEXT);`);
 	const d1 = makeD1(sqlite);
 	// Capture the fire-and-forget observability writes (recordJobRun) so a test can
