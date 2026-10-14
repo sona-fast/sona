@@ -27,7 +27,8 @@ describe('/about artist count', () => {
 		const sqlite = migrated();
 		const artist = sqlite.prepare("INSERT INTO artists (id, name, created_at) VALUES (?, ?, '2026-10-01')");
 		const names = ['Published piece', 'Draft only', 'Sticker in published pack', 'Sticker in draft pack',
-			'Manages published pack', 'Published avatar credit', 'Draft avatar credit', 'Ledger only', 'Published variant only'];
+			'Manages published pack', 'Published avatar credit', 'Draft avatar credit', 'Ledger only', 'Published variant only',
+			'Manages draft pack'];
 		names.forEach((n, i) => artist.run(i + 1, n));
 		sqlite.prepare("INSERT INTO characters (id, name, created_at) VALUES (1, 'Kit', '2026-10-01')").run();
 
@@ -47,7 +48,7 @@ describe('/about artist count', () => {
 			"INSERT INTO sticker_packs (id, name, slug, character_id, manager_artist_id, source, published, created_at) VALUES (?, 'Pack', ?, 1, ?, 'self-hosted', ?, '2026-10-01')"
 		);
 		pack.run(1, 'published-pack', 5, 1);
-		pack.run(2, 'draft-pack', null, 0);
+		pack.run(2, 'draft-pack', 10, 0);
 		const sticker = sqlite.prepare("INSERT INTO stickers (pack_id, artist_id, image_url, created_at) VALUES (?, ?, '/s.webp', '2026-10-01')");
 		sticker.run(1, 3);
 		sticker.run(2, 4);

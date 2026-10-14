@@ -84,6 +84,23 @@ describe('migration 0031 commission ledger', () => {
 		);
 	});
 
+	it('creates the artist-lookup indexes and the one-entry-per-piece unique index', () => {
+		const sqlite = migrated();
+		const indexes = sqlite
+			.prepare(
+				"SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name IN ('stickers_artist_id_idx', 'sticker_packs_manager_artist_id_idx', 'avatar_credits_artist_id_idx', 'commissions_artist_id_idx', 'commissions_image_id_uq') ORDER BY name"
+			)
+			.all() as { name: string; sql: string }[];
+		expect(indexes.map((i) => i.name)).toEqual([
+			'avatar_credits_artist_id_idx',
+			'commissions_artist_id_idx',
+			'commissions_image_id_uq',
+			'sticker_packs_manager_artist_id_idx',
+			'stickers_artist_id_idx'
+		]);
+		expect(indexes.filter((i) => i.sql.startsWith('CREATE UNIQUE INDEX')).map((i) => i.name)).toEqual(['commissions_image_id_uq']);
+	});
+
 	it('starts a new entry as applied and unpaid', () => {
 		const sqlite = migrated();
 		entry(sqlite, 1, null);
