@@ -87,6 +87,47 @@ test('creates an entry that lists under Active', async ({ page }, testInfo) => {
 	await settledShot(page, testInfo.outputPath('commission-ledger-cards-744.png'));
 });
 
+test('a pasted link picks the artist it names, or says why it can\'t', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByLabel('Link to where you asked');
+	const artist = page.getByLabel('Artist', { exact: true });
+	await expect(artist).toHaveValue('');
+
+	// A paste, as the browser reports one. Test Artist's stored link is
+	// twitter.com/E2E_Artist (fixtures/commissions.sql): another host and case.
+	await link.evaluate((el, value) => {
+		const input = el as HTMLInputElement;
+		Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+		input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: value }));
+	}, 'https://x.com/e2e_artist/status/1843920577201');
+	await expect(page.locator('.lookup').getByText('e2e_artist is already in your artist list as Test Artist.')).toBeVisible();
+	await expect(artist).toHaveValue('1');
+	await expect(page.getByRole('button', { name: 'Using Test Artist' })).toHaveAttribute('aria-pressed', 'true');
+	await settledShot(page, testInfo.outputPath('commission-link-match.png'));
+
+	// A link with no handle in it: the list is still there to pick from.
+	await link.fill('https://www.furaffinity.net/view/58123456/');
+	await link.press('Tab');
+	await expect(page.locator('#ce-link-msg').getByText("This link doesn't include the artist's handle. Pick the artist from the list instead.")).toBeVisible();
+	await expect(link).toHaveAttribute('aria-describedby', /ce-link-msg/);
+	await expect(artist).toBeEnabled();
+	await artist.selectOption({ label: 'Avatar Artist' });
+	await expect(artist).toHaveValue('2');
+
+	// A handle nobody holds: the page points at the Artists page, and makes no
+	// artist itself.
+	await link.fill('https://x.com/nobody_here/status/1');
+	await link.press('Tab');
+	await expect(page.locator('.lookup').getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Artists page' })).toHaveAttribute('href', '/admin/artists');
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	// The choice the owner made stays, and the link stays in its private field.
+	await expect(artist).toHaveValue('2');
+	await expect(link).toHaveValue('https://x.com/nobody_here/status/1');
+	await settledShot(page, testInfo.outputPath('commission-link-no-match.png'));
+});
+
 test('moving the entry to Delivered lists it under Finished', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions');

@@ -150,7 +150,9 @@ export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
 	// 'addstickers' matters here beyond tidiness: this repo imports sticker packs
 	// from t.me/addstickers/<pack> (see server/telegram.ts), so pasting one into
 	// the Telegram setting is a realistic slip, and it read as "@addstickers".
-	telegram: ['s', 'joinchat', 'addstickers', 'share', 'proxy']
+	// t.me/c/<id>/<post> is a message in a private channel, which has no public
+	// name: the 'c' is the path, not an account (usernames run 5+ characters).
+	telegram: ['s', 'c', 'joinchat', 'addstickers', 'share', 'proxy']
 };
 
 /**

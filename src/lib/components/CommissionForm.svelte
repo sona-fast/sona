@@ -2,7 +2,8 @@
 	import { tick, type Snippet } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
-	import { Check, CircleAlert, ImagePlus, Loader2, Plus, RefreshCw } from 'lucide-svelte';
+	import { Check, CircleAlert, ImagePlus, Loader2, Plus, RefreshCw, TriangleAlert } from 'lucide-svelte';
+	import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from '$lib/social-label';
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
@@ -148,6 +149,75 @@
 		(merged.restoredNote ? notesInput : titleInput)?.focus();
 	}
 
+
+	// Paste a link (SONA-236): the link field looks up the artist it names. The
+	// server parses the link and never fetches it; the link itself stays in this
+	// field, the entry's private record, and never becomes a piece's source.
+	type ArtistChoice = { id: number; name: string };
+	type LinkLookup =
+		| { kind: 'idle' }
+		| { kind: 'searching' }
+		| { kind: 'refused'; reason: 'invalid' | 'unsupported' | 'no_handle' | 'failed' }
+		| { kind: 'found'; platform: SocialPlatform; handle: string; matches: ArtistChoice[]; nameMatches: ArtistChoice[] };
+	let lookup = $state<LinkLookup>({ kind: 'idle' });
+	// The link last sent, so a blur after a paste doesn't ask twice.
+	let lookedUp = '';
+
+	function useArtist(artist: ArtistChoice) {
+		values.artistId = String(artist.id);
+		announcer.say(m.admin_commissions_link_using_announce({ name: artist.name }));
+	}
+
+	async function lookUpLink(raw: string) {
+		const link = raw.trim();
+		if (!link) {
+			lookup = { kind: 'idle' };
+			lookedUp = '';
+			return;
+		}
+		if (link === lookedUp) return;
+		lookedUp = link;
+		lookup = { kind: 'searching' };
+		let next: LinkLookup;
+		try {
+			const res = await fetch('/api/admin/artist-from-link', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ url: link })
+			});
+			const body = await res.json();
+			next = body.ok
+				? { kind: 'found', platform: body.platform, handle: body.handle, matches: body.matches, nameMatches: body.nameMatches }
+				: { kind: 'refused', reason: body.reason ?? 'failed' };
+		} catch {
+			next = { kind: 'refused', reason: 'failed' };
+		}
+		// The owner changed the link while this one was out: its answer is stale.
+		if (link !== lookedUp) return;
+		lookup = next;
+		announcer.say(lookupOutcome(next));
+		// One artist holds this handle: that's the artist. Several, or a name that
+		// only looks the same, wait for the owner to choose.
+		if (next.kind === 'found' && next.matches.length === 1) values.artistId = String(next.matches[0].id);
+	}
+
+	/** The sentence that says how a lookup went, shown and read out. */
+	function lookupOutcome(result: LinkLookup): string {
+		if (result.kind === 'refused') {
+			return {
+				invalid: m.admin_commissions_error_link,
+				unsupported: m.admin_commissions_link_unsupported,
+				no_handle: m.admin_commissions_link_no_handle,
+				failed: m.admin_commissions_link_failed
+			}[result.reason]();
+		}
+		if (result.kind !== 'found') return '';
+		const { handle, matches } = result;
+		if (matches.length === 1) return m.admin_commissions_link_found({ handle, name: matches[0].name });
+		if (matches.length > 1) return m.admin_commissions_link_found_several({ handle });
+		return m.admin_commissions_link_not_found({ handle });
+	}
+
 	const DATE_FIELDS = [
 		['requestedOn', m.admin_commissions_field_requested],
 		['acceptedOn', m.admin_commissions_field_accepted],
@@ -180,6 +250,26 @@
 			<CircleAlert size={14} aria-hidden="true" /><span>{errors[field]}</span>
 		</p>
 	{/if}
+{/snippet}
+
+{#snippet choice(artist: { id: number; name: string })}
+	{@const using = values.artistId === String(artist.id)}
+	<div class="match">
+		<span class="name">{artist.name}</span>
+		<button type="button" class="btn-compact" aria-pressed={using} onclick={() => useArtist(artist)}>
+			{#if using}<Check size={14} aria-hidden="true" />{m.admin_lookup_using_artist({ name: artist.name })}{:else}{m.admin_lookup_use_artist({ name: artist.name })}{/if}
+		</button>
+	</div>
+{/snippet}
+
+<!-- No artist holds the handle. Creating one from a link waits on an owner
+     decision (SONA-236 Q26), so this points at the Artists page. Swapping in the
+     new-artist dialog later means changing this snippet only. -->
+{#snippet addArtistHint()}
+	<p class="hint">
+		{m.admin_commissions_link_add_pre()}<a href="/admin/artists">{m.admin_commissions_link_add_link()}</a
+		>{m.admin_commissions_link_add_post()}
+	</p>
 {/snippet}
 
 {#snippet optional()}
@@ -336,12 +426,48 @@
 				name="sourceUrl"
 				autocomplete="off"
 				bind:value={values.sourceUrl}
+				oninput={(e) => {
+					// A paste is the moment to look; typed text waits for the owner to leave
+					// the field, so a half-typed link isn't sent.
+					if (e instanceof InputEvent && e.inputType === 'insertFromPaste') lookUpLink(e.currentTarget.value);
+					else if (!e.currentTarget.value.trim()) lookUpLink('');
+				}}
+				onchange={(e) => lookUpLink(e.currentTarget.value)}
 				aria-invalid={errors.sourceUrl ? 'true' : undefined}
-				aria-describedby={describedBy('sourceUrl', 'ce-link-hint')}
+				aria-describedby={describedBy('sourceUrl', 'ce-link-hint', lookup.kind === 'refused' ? 'ce-link-msg' : '')}
 			/>
 			{@render fieldError('sourceUrl')}
 			<small class="hint" id="ce-link-hint">{m.admin_commissions_hint_link()}</small>
+			{#if lookup.kind === 'searching'}
+				<small class="hint">{m.admin_commissions_link_searching()}</small>
+			{:else if lookup.kind === 'refused'}
+				<p class="hint hint-warn lookup-msg" id="ce-link-msg">
+					<TriangleAlert size={14} aria-hidden="true" /><span>{lookupOutcome(lookup)}</span>
+				</p>
+			{/if}
 		</div>
+		{#if lookup.kind === 'found'}
+			{@const found = lookup}
+			<div class="lookup">
+				<p class="lookup-line">
+					<span class="platform">{SOCIAL_PLATFORM_NAMES[found.platform]}</span>
+					<span class="handle">{found.handle}</span>
+				</p>
+				<p class="outcome">
+					{#if found.matches.length === 1}<Check size={14} aria-hidden="true" />{/if}<span>{lookupOutcome(found)}</span>
+				</p>
+				{#each found.matches as artist (artist.id)}
+					{@render choice(artist)}
+				{/each}
+				{#if found.matches.length === 0}
+					{#each found.nameMatches as artist (artist.id)}
+						<p class="callout">{m.admin_commissions_link_maybe({ handle: found.handle, name: artist.name })}</p>
+						{@render choice(artist)}
+					{/each}
+					{@render addArtistHint()}
+				{/if}
+			</div>
+		{/if}
 		<div class="field">
 			<label class="field-label" for="ce-artistId">{m.admin_commissions_field_artist()}</label>
 			<select
@@ -604,6 +730,25 @@
 	.field-label { font-size: 14px; font-weight: 500; }
 	.label-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.optional { font-weight: 400; color: var(--muted-foreground); font-size: 12px; }
+
+	/* Paste a link: what the link named, and which artist that is. */
+	.lookup {
+		background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-s);
+		padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere;
+	}
+	.lookup p { margin: 0; }
+	.lookup-line { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+	.lookup-line .platform { color: var(--muted-foreground); font-size: 12px; }
+	.lookup-line .handle { font-weight: 500; }
+	.outcome { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; }
+	.outcome :global(svg) { flex: none; margin-top: 3px; color: var(--status-ok); }
+	.callout { font-size: 13px; }
+	.match { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+	.match .name { font-size: 14px; font-weight: 500; }
+	.lookup .hint a { color: var(--foreground); text-decoration: underline; }
+	.hint-warn { color: var(--status-warn); }
+	.lookup-msg { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
+	.lookup-msg :global(svg) { flex: none; margin-top: 2px; }
 	.hint { font-size: 12px; color: var(--muted-foreground); line-height: 1.45; }
 	.hint a { color: var(--foreground); text-decoration: underline; }
 	/* A field with an error gets a red edge as well as its message. The edge

@@ -51,6 +51,25 @@ export function handlesOverlap(a: Record<string, unknown>, b: Record<string, unk
 	return socialsToHandles(a).some((h) => set.has(`${h.platform} ${h.handleNorm}`));
 }
 
+/**
+ * Rows whose stored socials hold one of `handles` on `platform`. Compares the
+ * normalized forms `handlesOverlap` uses, so a pasted x.com link finds an
+ * artist stored as twitter.com in any letter case, and the same name on another
+ * platform is someone else. A full scan: there's no handle index, and a site
+ * has tens to hundreds of artists.
+ */
+export function findLocalArtistsByHandle<T extends Record<string, unknown>>(
+	rows: T[],
+	platform: Platform,
+	handles: string[]
+): T[] {
+	const wanted = new Set(handles.map((h) => normalizeHandle(platform, h)).filter((h) => h !== ''));
+	if (wanted.size === 0) return [];
+	return rows.filter((row) =>
+		socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm))
+	);
+}
+
 /** Canonical profile-URL prefix, used to build a URL from a bare handle. */
 const PROFILE_URL_PREFIX: Record<SocialPlatform, string> = {
 	twitter: 'https://twitter.com/',
