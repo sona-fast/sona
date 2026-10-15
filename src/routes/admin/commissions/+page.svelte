@@ -248,7 +248,8 @@
 	.ledger-table td { vertical-align: middle; }
 	.col-chars { width: 7rem; }
 	.col-status, .col-pay { width: 6.5rem; }
-	.col-gallery { width: 9.5rem; }
+	/* Room for the 40px thumbnail and a short title on one line beside it. */
+	.col-gallery { width: 11rem; }
 	.col-actions { width: 56px; white-space: nowrap; }
 
 	.entry-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

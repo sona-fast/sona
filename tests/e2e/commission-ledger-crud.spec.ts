@@ -151,6 +151,9 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	// Delivered and not in the gallery yet: the panel offers Add to gallery.
 	const panel = page.locator('section', { has: page.getByRole('heading', { level: 2, name: 'Gallery' }) });
 	await expect(panel).toContainText('Not in your gallery');
+	await expect(panel).toContainText('Opens the upload form with this entry');
+	await expect(panel.getByRole('link', { name: 'Add to gallery' })).toHaveClass(/btn-primary/);
+	await settledShot(page, testInfo.outputPath('commission-entry-gallery-delivered.png'));
 	await panel.getByRole('link', { name: 'Add to gallery' }).click();
 
 	await expect(page.getByRole('heading', { level: 1, name: 'Upload New Artwork' })).toBeVisible();
@@ -271,7 +274,9 @@ test("an entry with no Delivered date gets the browser's date when added to the 
 	await open(page, editUrl!);
 	const add = galleryPanel(page).getByRole('link', { name: 'Add to gallery' });
 	await expect(add).toBeVisible();
+	await expect(add).toHaveClass(/btn-secondary/);
 	await expect(galleryPanel(page)).toContainText('Saving the upload marks this entry Delivered.');
+	await settledShot(page, testInfo.outputPath('commission-entry-gallery-active.png'));
 
 	// Unsaved changes hold the button back until they're saved or undone.
 	await page.getByLabel('Notes').fill('Not saved yet');
