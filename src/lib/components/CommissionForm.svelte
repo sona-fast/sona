@@ -584,8 +584,9 @@
 	.gallery-panel {
 		border: 1px solid var(--border); border-radius: var(--radius-s); padding: 16px;
 		display: flex; flex-direction: column; gap: 12px; max-width: 800px; margin-bottom: 20px;
+		background: var(--card);
 	}
-	.gallery-panel h2 { font-size: 14px; font-weight: 500; margin: 0; }
+	.gallery-panel h2 { font-size: 16px; margin: 0; }
 	.gallery-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 	.gallery-row .text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 12rem; font-size: 14px; overflow-wrap: anywhere; }
 	.gallery-row .text a { color: var(--foreground); text-decoration: underline; }

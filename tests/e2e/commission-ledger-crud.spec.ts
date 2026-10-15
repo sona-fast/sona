@@ -194,6 +194,45 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	await expect(page.getByLabel('Delivered', { exact: true })).toHaveValue('2026-01-02');
 });
 
+test('phone width: the ledger and the prefilled upload, light and dark', async ({ page }, testInfo) => {
+	const title = 'E2E delivered';
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill(title);
+	await page.getByLabel('Status').selectOption('delivered');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+
+	// One linked entry and one delivered entry not in the gallery yet.
+	await page.setViewportSize({ width: 390, height: 844 });
+	const shoot = async (name: string) => {
+		for (const mode of ['light', 'dark']) {
+			await page.evaluate((m) => document.documentElement.setAttribute('data-theme', m), mode);
+			await settledShot(page, testInfo.outputPath(`${name}-390-${mode}.png`));
+		}
+	};
+	await open(page, '/admin/commissions');
+	await expect(section(page, 'Finished').getByRole('link', { name: 'E2E Snowfall' })).toBeVisible();
+	await shoot('commission-ledger-phone');
+
+	await section(page, 'Finished').getByRole('link', { name: `Add to gallery: ${title}` }).click();
+	// The upload page drops its heading at phone width, so wait on the note.
+	await expect(page.getByRole('note')).toContainText(`From your commission: ${title}.`);
+	await waitForHydration(page);
+	await shoot('commission-upload-prefilled-phone');
+
+	// Leave the ledger as the next steps expect it: one entry.
+	await page.setViewportSize({ width: 1280, height: 720 });
+	await open(page, '/admin/commissions');
+	const editUrl = await page.getByRole('link', { name: `Edit ${title}` }).getAttribute('href');
+	await open(page, editUrl!);
+	await page.getByRole('button', { name: 'Delete entry' }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await expect(page.getByRole('link', { name: `Edit ${title}` })).toHaveCount(0);
+});
+
 test("an entry with no Delivered date gets the browser's date when added to the gallery", async ({ page }, testInfo) => {
 	const title = 'E2E in progress';
 	await loginRetrying(page, PASSWORD);
@@ -227,6 +266,21 @@ test("an entry with no Delivered date gets the browser's date when added to the 
 	const held = galleryPanel(page).getByRole('button', { name: 'Add to gallery' });
 	await expect(held).toHaveAttribute('aria-disabled', 'true');
 	await expect(galleryPanel(page)).toContainText('Save your changes first.');
+	// Held, it reads as not ready: the secondary fill, hover included, with a
+	// label that still clears 4.5:1 as rendered.
+	await held.hover();
+	await expect.poll(() => held.evaluate((el) => el.getAnimations().length)).toBe(0);
+	const [label, fill, secondary] = await held.evaluate((el) => {
+		const probe = document.createElement('span');
+		probe.style.backgroundColor = 'var(--secondary)';
+		document.body.append(probe);
+		const style = getComputedStyle(el);
+		const found = [style.color, style.backgroundColor, getComputedStyle(probe).backgroundColor];
+		probe.remove();
+		return found;
+	});
+	expect(fill).toBe(secondary);
+	expect(contrastRatio(label, fill)).toBeGreaterThanOrEqual(4.5);
 	await settledShot(page, testInfo.outputPath('commission-entry-gallery-dirty.png'));
 	await page.getByLabel('Notes').fill('');
 	await expect(add).toBeVisible();

@@ -167,10 +167,12 @@
 											<div class="not-linked">
 												<span class="muted">{m.admin_commissions_not_in_gallery()}</span>
 												{#if data.gate.open}
-													<a class="btn-compact" href="/admin/upload?commission={entry.id}"
-														><ImagePlus size={14} aria-hidden="true" /> {m.admin_commissions_add_to_gallery()}<span
-															class="sr-only">: {entry.title}</span
-														></a
+													<!-- Named for its entry: every delivered row has one. -->
+													<a
+														class="btn-compact"
+														href="/admin/upload?commission={entry.id}"
+														aria-label={m.admin_commissions_add_to_gallery_aria({ title: entry.title })}
+														><ImagePlus size={14} aria-hidden="true" /> {m.admin_commissions_add_to_gallery()}</a
 													>
 												{/if}
 											</div>

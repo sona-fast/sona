@@ -1838,5 +1838,6 @@
 	"admin_commissions_added_piece_private_post": "を非公開の作品としてギャラリーに追加しました。",
 	"admin_commissions_added_variants_pre": "バリエーション{count}件を",
 	"admin_commissions_added_variants_private_pre": "非公開のバリエーション{count}件を",
-	"admin_commissions_added_variants_post": "に追加しました。"
+	"admin_commissions_added_variants_post": "に追加しました。",
+	"admin_commissions_add_to_gallery_aria": "{title}をギャラリーに追加"
 }

@@ -1896,7 +1896,9 @@
 		<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 	</label>
 
-	{#if data.ownerCharacter}
+	<!-- Not for variants of an entry's piece: the reference sheet is a parent,
+	     and these uploads only add variants to one. -->
+	{#if data.ownerCharacter && !linkedPiece}
 		<label class="checkbox-label">
 			<input type="checkbox" name="useAsReference" />
 			<span>{m.admin_image_reference_set({ name: data.ownerCharacter.name })}{#if data.ownerCharacter.hasReference} <span class="checkbox-helper">{m.admin_image_reference_replaces()}</span>{/if}</span>
@@ -1981,7 +1983,8 @@
 	.notice p { margin: 0; font-size: 13px; line-height: 1.55; min-width: 0; overflow-wrap: anywhere; }
 	.from-note a,
 	.notice a { color: var(--foreground); text-decoration: underline; }
-	.from-note .ico { color: var(--muted-foreground); display: inline-flex; padding-top: 2px; }
+	.from-note .ico { color: var(--primary-text); display: inline-flex; padding-top: 2px; }
+	.from-note p { max-width: 68ch; text-wrap: pretty; }
 	.field-value { font-size: 14px; overflow-wrap: anywhere; }
 
 	.upload-form {
