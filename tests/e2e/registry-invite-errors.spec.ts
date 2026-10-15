@@ -105,13 +105,21 @@ test('a refusal for a token the owner has since changed is not shown', async ({ 
 	// Hold the connect request so the token can change before the reply lands.
 	let release: () => void = () => {};
 	const held = new Promise<void>((resolve) => (release = resolve));
-	await page.route('**/admin/settings?*connectRegistry*', async (route) => {
-		await held;
-		await route.continue();
-	});
+	let intercepted: () => void = () => {};
+	const isHeld = new Promise<void>((resolve) => (intercepted = resolve));
+	// A predicate, because the action URL's `&/connectRegistry` holds a slash a glob `*` won't cross.
+	await page.route(
+		(url) => url.pathname === '/admin/settings' && url.search.includes('/connectRegistry'),
+		async (route) => {
+			intercepted();
+			await held;
+			await route.continue();
+		}
+	);
 
 	const token = page.getByLabel('Invite token');
 	await submitConnect(page, 'mistyped-token');
+	await isHeld;
 	await token.fill('corrected-token');
 	release();
 
