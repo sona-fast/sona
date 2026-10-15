@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { applyAction, enhance } from '$app/forms';
 	import { afterNavigate, invalidateAll, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -8,6 +8,7 @@
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import CloudflareSetupDialog from '$lib/components/CloudflareSetupDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
+	import type { InviteRefusal } from '$lib/server/registry';
 	import { BACKUP_FILENAME_BASE, R2_FREE_TIER_BYTES } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
 	import { MAX_SONA_COLORS, mergeSuggestions, paletteHas } from '$lib/palette-merge';
@@ -47,15 +48,10 @@
 	let syncing = $state(false);
 	let connectingRegistry = $state(false);
 	// A refused invite token (registry code invite_used or invite_invalid), shown on the field.
-	// Without JavaScript the form posts normally and the refusal arrives as `form`;
-	// once an enhanced submit runs or the token changes, that copy no longer applies.
-	type InviteRefusal = 'invite_used' | 'invite_invalid';
-	let inviteError = $state<InviteRefusal | null>(null);
-	let formInviteErrorDismissed = $state(false);
+	// Without JavaScript the form posts normally and the refusal arrives as `form` on a fresh
+	// load; the enhanced callback never updates `form`, so only its first value matters.
+	let inviteError = $state<InviteRefusal | null>(untrack(() => form?.inviteError ?? null));
 	let inviteTokenInput = $state<HTMLInputElement | null>(null);
-	const shownInviteError = $derived(
-		inviteError ?? (formInviteErrorDismissed ? null : ((form?.inviteError as InviteRefusal | undefined) ?? null))
-	);
 	let primaryCharacter = $state(data.settings.primaryCharacter);
 	let twitterUrl = $state(data.settings.twitterUrl);
 	let blueskyUrl = $state(data.settings.blueskyUrl);
@@ -1405,10 +1401,9 @@
 		</section>
 	</form>
 {:else}
-	<form method="POST" action="?tab=connections&/connectRegistry" class="contents" use:enhance={() => {
+	<form method="POST" action="?tab=connections&/connectRegistry#invite-token-error" class="contents" use:enhance={() => {
 		connectingRegistry = true;
 		inviteError = null;
-		formInviteErrorDismissed = true;
 		return async ({ result }) => {
 			connectingRegistry = false;
 			if (result.type === 'success') { toast.success(m.admin_settings_registry_connected_toast()); await invalidateAll(); }
@@ -1434,17 +1429,14 @@
 					placeholder={m.admin_settings_invite_token_placeholder()}
 					required
 					bind:this={inviteTokenInput}
-					oninput={() => {
-						inviteError = null;
-						formInviteErrorDismissed = true;
-					}}
-					aria-invalid={shownInviteError ? 'true' : undefined}
-					aria-describedby={shownInviteError ? 'invite-token-error' : undefined}
+					oninput={() => (inviteError = null)}
+					aria-invalid={inviteError ? 'true' : undefined}
+					aria-describedby={inviteError ? 'invite-token-error' : undefined}
 				/>
 			</label>
-			{#if shownInviteError}
+			{#if inviteError}
 				<p class="field-error" id="invite-token-error" role="alert">
-					{shownInviteError === 'invite_used' ? m.admin_settings_invite_error_used() : m.admin_settings_invite_error_invalid()}
+					{inviteError === 'invite_used' ? m.admin_settings_invite_error_used() : m.admin_settings_invite_error_invalid()}
 				</p>
 			{/if}
 			<details class="reg-advanced">

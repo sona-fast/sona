@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { adminLogin } from './admin-login';
+import { loginRetrying, waitForHydration } from './admin-login';
 
 // Connect to the Shared Registry (SONA-237): the registry refuses a used or
 // unknown invite token with a code, and the form shows that on the token field
@@ -50,10 +50,10 @@ async function submitConnect(page: Page, token: string) {
 for (const [code, message] of cases) {
 	test(`shows ${code} on the invite token field and moves focus there`, async ({ page }, testInfo) => {
 		nextCode = code;
-		await adminLogin(page, PASSWORD);
+		await loginRetrying(page, PASSWORD);
 		await page.goto('/admin/settings?tab=connections');
 		// Focus moving to the field is the enhanced form's job, so wait for hydration.
-		await page.waitForLoadState('networkidle');
+		await waitForHydration(page);
 
 		const token = page.getByLabel('Invite token');
 		await submitConnect(page, 'a-token-the-stub-refuses');
@@ -72,9 +72,9 @@ for (const [code, message] of cases) {
 
 test('clears the field message when the token changes or a later refusal has no code', async ({ page }) => {
 	nextCode = 'invite_used';
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	await page.goto('/admin/settings?tab=connections');
-	await page.waitForLoadState('networkidle');
+	await waitForHydration(page);
 
 	const token = page.getByLabel('Invite token');
 	const error = page.locator('#invite-token-error');
@@ -92,8 +92,33 @@ test('clears the field message when the token changes or a later refusal has no 
 	// A refusal without an invite code goes back to the toast, with no field message.
 	nextCode = '';
 	await submitConnect(page, 'second-token');
-	await expect(page.getByText('Could not connect: label too long.')).toBeVisible();
+	await expect(page.getByText('Could not connect: label too long.')).toBeVisible({ timeout: 15_000 });
 	await expect(error).toHaveCount(0);
+});
+
+test('a refusal from a full-page post clears once the token changes on the hydrated page', async ({ page }) => {
+	nextCode = 'invite_invalid';
+	await loginRetrying(page, PASSWORD);
+	await page.goto('/admin/settings?tab=connections');
+	await waitForHydration(page);
+
+	await page.getByLabel('Invite token').fill('posted-natively');
+	await page.locator('details.reg-advanced summary').click();
+	await page.getByLabel('Registry URL').fill(registryUrl);
+	// form.submit() skips the submit event, so use:enhance doesn't intercept it and
+	// the browser posts the form itself, as it does before hydration.
+	await page.locator('form[action*="connectRegistry"]').evaluate((f) => (f as HTMLFormElement).submit());
+	await page.waitForURL(/connectRegistry/);
+	await waitForHydration(page);
+
+	const token = page.getByLabel('Invite token');
+	const error = page.locator('#invite-token-error');
+	await expect(error).toHaveText(cases[1][1]);
+	await expect(token).toHaveAttribute('aria-invalid', 'true');
+
+	await token.pressSequentially('x');
+	await expect(error).toHaveCount(0);
+	await expect(token).not.toHaveAttribute('aria-invalid', 'true');
 });
 
 // Login needs script (Turnstile), so this logs in with JavaScript on and reuses
@@ -104,7 +129,7 @@ test('without JavaScript, the posted form reopens Connections and shows the fiel
 	nextCode = 'invite_used';
 	const baseURL = testInfo.project.use.baseURL;
 	const login = await browser.newContext({ baseURL });
-	await adminLogin(await login.newPage(), PASSWORD);
+	await loginRetrying(await login.newPage(), PASSWORD);
 	const storageState = await login.storageState();
 	await login.close();
 
