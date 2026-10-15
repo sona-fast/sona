@@ -68,6 +68,24 @@ test('the entry shows plain dates and Delete entry, with no Save', async ({ page
 	await settledShot(page, testInfo.outputPath('commission-entry-readonly.png'));
 });
 
+test('an upload from the entry waits for the gate too, before any file goes up', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/upload?commission=1');
+	await waitForHydration(page);
+
+	const notice = page.getByRole('note').filter({ hasText: 'Early access' });
+	await expect(notice).toContainText('A supporter key unlocks it now.');
+	await expect(notice.getByRole('link', { name: 'Add your key' })).toHaveAttribute(
+		'href',
+		'/admin/settings?tab=account#supporter-key'
+	);
+	// No form to fill: no file picker, no Upload Artwork, no prefill note.
+	await expect(page.locator('input[type="file"]')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Upload Artwork' })).toHaveCount(0);
+	await expect(page.getByText('From your commission')).toHaveCount(0);
+	await settledShot(page, testInfo.outputPath('commission-upload-gated.png'));
+});
+
 test('Delete entry works with the gate closed', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/commissions/1/edit');

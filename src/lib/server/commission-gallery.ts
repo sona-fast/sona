@@ -5,7 +5,7 @@ import { commissionCharacters, commissions, images } from './db/schema';
 import { commissionGateView } from './commission-gate';
 import { parseId } from './commissions';
 import { MAX_VARIANT_SET } from './variants';
-import { canAddToGallery, isCalendarDate, type CommissionStatus } from '$lib/commissions';
+import { CLOSED_STATUSES, canAddToGallery, type CommissionStatus } from '$lib/commissions';
 
 // Add to gallery (SONA-236): the upload page's prefill from a ledger entry, the
 // checks a save from an entry passes before anything is written, the one batch
@@ -121,27 +121,22 @@ export async function checkCommissionUpload(
 	return { ok: true, entry: { id: entry.id, imageId: entry.imageId } };
 }
 
-/** The browser's date for an empty Delivered date, or null when it sent none
- * or something that isn't a date. Open question Q17 on SONA-236: built as
- * drawn, the owner's local date fills only an empty Delivered date. */
-export function deliveredOnFromForm(value: FormDataEntryValue | null): string | null {
-	return typeof value === 'string' && isCalendarDate(value) ? value : null;
-}
-
-export interface LinkedPiece {
-	title: string;
-	slug: string;
-	imageUrl: string;
-	width: number | null;
-	height: number | null;
-	fileSize: number | null;
-	nsfw: boolean;
-	published: boolean;
-	sourcePostUrl: string | null;
-	artistId: number;
-	collectionId: number | null;
-	commissionedAt: string | null;
-}
+/** What the upload form sets on a new piece; the schema's defaults fill the rest. */
+export type LinkedPiece = Pick<
+	typeof images.$inferInsert,
+	| 'title'
+	| 'slug'
+	| 'imageUrl'
+	| 'width'
+	| 'height'
+	| 'fileSize'
+	| 'nsfw'
+	| 'published'
+	| 'sourcePostUrl'
+	| 'artistId'
+	| 'collectionId'
+	| 'commissionedAt'
+>;
 
 /**
  * The row an INSERT … SELECT writes, filled the way drizzle's own `.values()`
@@ -150,7 +145,7 @@ export interface LinkedPiece {
  * column so booleans and dates encode the same. A piece saved this way gets
  * every schema default a plain upload gets.
  */
-export function insertSelection<T extends SQLiteTable>(table: T, given: Partial<T['$inferInsert']>) {
+function insertSelection<T extends SQLiteTable>(table: T, given: Partial<T['$inferInsert']>) {
 	const values = given as Record<string, unknown>;
 	return Object.fromEntries(
 		Object.entries(getTableColumns(table)).map(([key, column]) => {
@@ -172,7 +167,7 @@ function stillAddable(entryId: number) {
 	return and(
 		eq(commissions.id, entryId),
 		isNull(commissions.imageId),
-		notInArray(commissions.status, ['not_picked', 'cancelled'])
+		notInArray(commissions.status, [...CLOSED_STATUSES])
 	);
 }
 

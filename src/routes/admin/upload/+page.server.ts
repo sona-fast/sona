@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { artists, collections, tags, images, characters, imageCharacters, commissions } from '$lib/server/db/schema';
+import { artists, collections, tags, images, characters, imageCharacters } from '$lib/server/db/schema';
 import { eq, isNull, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
@@ -14,9 +14,10 @@ import {
 import * as m from '$lib/paraglide/messages';
 import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
 import { parseId } from '$lib/server/commissions';
+import { commissionGateView } from '$lib/server/commission-gate';
+import { isCalendarDate } from '$lib/commissions';
 import {
 	checkCommissionUpload,
-	deliveredOnFromForm,
 	insertLinkedPiece,
 	loadUploadPrefill
 } from '$lib/server/commission-gallery';
@@ -29,10 +30,14 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// what loadUploadPrefill allows. An id that names no entry is a dead link.
 	const commissionParam = url.searchParams.get('commission');
 	let prefill = null;
+	let commissionGate = null;
 	if (commissionParam !== null) {
 		const id = parseId(commissionParam);
 		prefill = id === null ? null : await loadUploadPrefill(db, id);
 		if (!prefill) error(404, 'Entry not found');
+		// While the gate is closed the save refuses, so the page says so before
+		// any file goes up, instead of after.
+		commissionGate = await commissionGateView(db, platform?.env);
 	}
 
 	const [allArtists, allCollections, allTags, allCharacters, parentCandidates, lookupKey] =
@@ -70,6 +75,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// the lookup sends the image to FuzzySearch.
 		lookupEnabled: !!lookupKey && !prefill,
 		prefill,
+		commissionGate,
 		ownerCharacter: ownerCharacter && {
 			name: ownerCharacter.name,
 			// A designation already exists on some image — checking the box replaces it.
@@ -266,22 +272,21 @@ export const actions = {
 			if (entry) {
 				// One batch inserts the piece and links the entry; a save that lost a
 				// race with another inserts nothing.
+				// The browser's own date, for an empty Delivered date (open question
+				// Q17, built as drawn). Anything that isn't a date is ignored.
+				const sentDate = data.get('commissionDeliveredOn');
 				const linkedId = await insertLinkedPiece(
 					db,
 					entry.id,
 					parentValues,
-					deliveredOnFromForm(data.get('commissionDeliveredOn'))
+					typeof sentDate === 'string' && isCalendarDate(sentDate) ? sentDate : null
 				);
 				if (linkedId === null) {
-					// The entry changed between the checks and the batch: say how.
-					const now = await db
-						.select({ imageId: commissions.imageId, status: commissions.status })
-						.from(commissions)
-						.where(eq(commissions.id, entry.id))
-						.get();
-					if (!now) return fail(400, { commission: 'missing' });
-					if (now.imageId !== null) return fail(409, { commission: 'just_added', imageId: now.imageId });
-					return fail(400, { commission: 'closed', status: now.status });
+					// The entry changed between the checks and the batch: the same checks,
+					// run again, say how. Passing them now can only mean the batch lost a
+					// race the checks didn't see, so it answers as a second save would.
+					const again = await checkCommissionUpload(db, platform?.env, String(entry.id), null);
+					return again.ok ? fail(409, { commission: 'just_added', imageId: null }) : fail(again.status, again.data);
 				}
 				parentDbId = linkedId;
 			} else {

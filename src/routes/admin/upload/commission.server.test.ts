@@ -54,6 +54,7 @@ async function loadPrefill(platform: App.Platform, query: string) {
 		return (await load({ platform, url } as never)) as unknown as {
 			prefill: Record<string, unknown> | null;
 			lookupEnabled: boolean;
+			commissionGate: { open: boolean; gaDate: string | null } | null;
 		};
 	} catch (e) {
 		if (isHttpError(e)) return e.status;
@@ -139,6 +140,18 @@ describe('upload load: prefill from an entry', () => {
 		if (typeof plain === 'number' || typeof fromEntry === 'number') throw new Error('load failed');
 		expect(plain.lookupEnabled).toBe(true);
 		expect(fromEntry.lookupEnabled).toBe(false);
+	});
+
+	it('says the gate is closed before any file goes up', async () => {
+		setLedgerGa('future');
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite);
+		const data = await loadPrefill(platform, `?commission=${id}`);
+		const plain = await loadPrefill(platform, '');
+		if (typeof data === 'number' || typeof plain === 'number') throw new Error('load failed');
+		expect(data.commissionGate).toEqual({ open: false, gaDate: '2999.01.01' });
+		// A plain upload doesn't involve the ledger, so it reads no gate.
+		expect(plain.commissionGate).toBeNull();
 	});
 
 	it('404s an entry that does not exist, or an id that is not one', async () => {
@@ -408,6 +421,16 @@ describe('upload save from an entry: the entry changes between the checks and th
 		expect(result.status).toBe(409);
 		expect(result.data).toEqual({ commission: 'just_added', imageId: 7 });
 		expect(imageCount(sqlite)).toBe(1);
+	});
+
+	it('returns 400 missing and writes nothing when the entry was deleted meanwhile', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite);
+		const remove = () => sqlite.prepare('DELETE FROM commissions WHERE id = ?').run(id);
+		const result = await save(racing(platform, remove), { commissionId: String(id) });
+		expect(result.status).toBe(400);
+		expect(result.data).toEqual({ commission: 'missing' });
+		expect(imageCount(sqlite)).toBe(0);
 	});
 
 	it('returns 400 closed and writes nothing when the entry was canceled meanwhile', async () => {

@@ -38,7 +38,9 @@
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
-	import { localToday, STATUS_LABELS, type CommissionStatus } from '$lib/commissions';
+	import { localToday, STATUS_LABELS } from '$lib/commissions';
+	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
+	import type { CommissionRefusal } from '$lib/server/commission-gallery';
 	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 
@@ -59,13 +61,9 @@
 	const cancelHref = prefill ? `/admin/commissions/${prefill.id}/edit` : '/admin/images';
 
 	// Why a save from an entry was refused, narrowed once from the action data.
-	type Refusal = {
-		commission: 'missing' | 'gated' | 'closed' | 'mismatch' | 'group' | 'just_added';
-		imageId?: number | null;
-		gaDate?: string | null;
-		status?: CommissionStatus;
-	};
-	const refusal = $derived(form && 'commission' in form ? (form as unknown as Refusal) : null);
+	const refusal = $derived(form && 'commission' in form ? (form as CommissionRefusal) : null);
+	// From an entry while adding to the ledger waits for the GA date.
+	const uploadClosed = $derived(!!data.commissionGate && !data.commissionGate.open);
 	let refusalBox = $state<HTMLElement>();
 	$effect(() => {
 		if (refusal && refusalBox) refusalBox.focus();
@@ -82,7 +80,7 @@
 	// Two identical batches say the same thing, so the region is keyed on a
 	// counter rather than on the text — see `$lib/live-announcer.svelte`.
 	const announcer = new Announcer();
-	let fileInput: HTMLInputElement;
+	let fileInput = $state<HTMLInputElement>();
 
 	// The Tags field is bound so the suggestion control can write accepted tags
 	// back into it; it still submits through its own name attribute, unchanged.
@@ -1354,6 +1352,11 @@
 	{/if}
 {/if}
 
+{#if uploadClosed && data.commissionGate}
+	<!-- From an entry while the gate is closed: the save would refuse, so say so
+	     before any file goes up. -->
+	<CommissionIntro gate={data.commissionGate} empty />
+{:else}
 {#if prefill}
 	<!-- The entry's title appears here and nowhere else on the page: the piece
 	     gets its own public title below. -->
@@ -1934,6 +1937,7 @@
 		</button>
 	</div>
 </form>
+{/if}
 
 {#if showNewArtist}
 	<NewArtistDialog

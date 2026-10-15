@@ -18,7 +18,6 @@ import {
 	localToday,
 	parsePrice
 } from './commissions';
-import * as m from '$lib/paraglide/messages';
 
 const messages = (locale: 'en' | 'ja') =>
 	JSON.parse(readFileSync(new URL(`../../messages/${locale}.json`, import.meta.url), 'utf-8')) as Record<
