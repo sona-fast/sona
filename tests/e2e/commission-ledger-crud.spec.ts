@@ -170,6 +170,8 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	// FuzzySearch, and the entry already names the artist.
 	await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
 	await expect(page.locator('#lookup-hint')).toHaveCount(0);
+	// A new piece can still become the owner's reference sheet.
+	await expect(page.locator('input[name="useAsReference"]')).toHaveCount(1);
 	await settledShot(page, testInfo.outputPath('commission-upload-prefilled.png'));
 
 	await uploadPiece(page, 'E2E Snowfall');
@@ -192,6 +194,16 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	await expect(panel.getByRole('link', { name: 'Add to gallery' })).toHaveCount(0);
 	// The Delivered date the owner set stays as it was.
 	await expect(page.getByLabel('Delivered', { exact: true })).toHaveValue('2026-01-02');
+
+	// Add a variant opens the upload for that piece: no group choice, and no
+	// reference-sheet box, since a variant can't be the reference sheet.
+	await panel.getByRole('link', { name: 'Add a variant' }).click();
+	await expect(page.getByRole('note')).toContainText('This adds a variant to the piece E2E Snowfall.');
+	await waitForHydration(page);
+	await expect(page.getByText('Variant of', { exact: true })).toBeVisible();
+	await expect(page.locator('input[name="groupMode"]')).toHaveCount(0);
+	await expect(page.locator('input[name="useAsReference"]')).toHaveCount(0);
+	await settledShot(page, testInfo.outputPath('commission-upload-variant.png'));
 });
 
 test('phone width: the ledger and the prefilled upload, light and dark', async ({ page }, testInfo) => {
