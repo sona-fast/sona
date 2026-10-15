@@ -150,3 +150,18 @@ export const E2E_REGISTRY_MOCK = path.join(here, 'registry-mock.mjs');
 // .invalid name: it can never resolve, so a missed interception fails fast.
 export const E2E_REGISTRY_URL = 'https://registry.e2e.invalid';
 export const E2E_REGISTRY_SCENARIO = path.join(E2E_PERSIST_TO_REGISTRY, 'registry-scenario.json');
+
+// The commission ledger CRUD spec (SONA-236) creates, edits, and deletes
+// entries, and the shared servers are read-only by convention. Its own
+// throwaway DB + dev server on the shared wrangler config, which opens the
+// ledger's early-access gate through E2E_COMMISSION_GATE.
+export const E2E_PERSIST_TO_COMMISSIONS = path.join(persistRoot, '.wrangler-e2e-commissions');
+export const E2E_PLATFORM_PERSIST_COMMISSIONS = path.join(E2E_PERSIST_TO_COMMISSIONS, 'v3');
+
+// The gated commission ledger spec needs the gate CLOSED, which no other server
+// has: its own wrangler config without the bypass, and one seeded entry
+// (fixtures/commissions-gated.sql) to read and then delete.
+export const E2E_WRANGLER_CONFIG_COMMISSIONS_GATED = path.join(here, 'wrangler.e2e-commissions-gated.toml');
+export const E2E_COMMISSIONS_GATED_OVERLAY = path.join(here, 'fixtures', 'commissions-gated.sql');
+export const E2E_PERSIST_TO_COMMISSIONS_GATED = path.join(persistRoot, '.wrangler-e2e-commissions-gated');
+export const E2E_PLATFORM_PERSIST_COMMISSIONS_GATED = path.join(E2E_PERSIST_TO_COMMISSIONS_GATED, 'v3');
