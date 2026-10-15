@@ -144,7 +144,7 @@ test('a refused price shows its error on the field, and nothing is saved', async
 // server renders the refusal: the typing and the field's error both have to be
 // in that HTML.
 test('without JavaScript, a refused save keeps what was typed and shows the error', async ({ page, browser }, testInfo) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	const context = await browser.newContext({
 		baseURL: testInfo.project.use.baseURL,
 		storageState: await page.context().storageState(),
