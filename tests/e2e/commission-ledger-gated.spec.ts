@@ -38,6 +38,8 @@ test('the ledger reads, offers the key, and hides New entry', async ({ page }, t
 	await expect(notice).toContainText('Until then, you can read and delete your entries, but not add or change them.');
 	await expect(page.getByRole('link', { name: 'New entry' })).toHaveCount(0);
 	await expect(page.getByRole('link', { name: 'View Headshot icon' })).toBeVisible();
+	// Adding to the gallery is a change, so it waits for the gate too.
+	await expect(page.getByRole('link', { name: /Add to gallery/ })).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-ledger-gated.png'));
 
 	const keyLink = notice.getByRole('link', { name: 'Add your key' });

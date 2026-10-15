@@ -106,6 +106,78 @@ test('moving the entry to Delivered lists it under Finished', async ({ page }, t
 	await settledShot(page, testInfo.outputPath('commission-ledger-finished.png'));
 });
 
+// One small PNG: the upload is stubbed below, so only the browser reads it.
+const PNG = Buffer.from(
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+	'base64'
+);
+
+test('Add to gallery uploads a new piece and links it to the entry', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	await page.getByRole('link', { name: `Edit ${TITLE}` }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
+	await waitForHydration(page);
+
+	// Delivered and not in the gallery yet: the panel offers Add to gallery.
+	const panel = page.locator('section', { has: page.getByRole('heading', { level: 2, name: 'Gallery' }) });
+	await expect(panel).toContainText('Not in your gallery');
+	await panel.getByRole('link', { name: 'Add to gallery' }).click();
+
+	await expect(page.getByRole('heading', { level: 1, name: 'Upload New Artwork' })).toBeVisible();
+	await waitForHydration(page);
+	await expect(page.getByRole('note')).toContainText(`From your commission: ${TITLE}.`);
+	await expect(page.getByRole('note')).toContainText('This becomes a new piece.');
+	// The artist and characters come from the entry. The title, source, and date
+	// stay empty, and the piece starts private.
+	await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+	await expect(page.locator('input[name="char-1"]')).toBeChecked();
+	await expect(page.locator('input[name="char-2"]')).toBeChecked();
+	await expect(page.locator('input[name="title"]')).toHaveValue('');
+	await expect(page.locator('input[name="sourcePostUrl"]')).toHaveValue('');
+	await expect(page.locator('input[name="commissionedAt"]')).toHaveValue('');
+	await expect(page.locator('input[name="published"]')).toBeChecked();
+	// No Look up artist and no prompt to set one up: it would send the image to
+	// FuzzySearch, and the entry already names the artist.
+	await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
+	await expect(page.locator('#lookup-hint')).toHaveCount(0);
+	await settledShot(page, testInfo.outputPath('commission-upload-prefilled.png'));
+
+	// The file goes to storage first; the stub answers with an asset the site
+	// already serves, so the saved piece renders.
+	await page.route(
+		(url) => url.pathname === '/api/upload',
+		(route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/e2e-avatar.svg' }) })
+	);
+	await expect(async () => {
+		await page.setInputFiles('input[type="file"]', { name: 'snowfall.png', mimeType: 'image/png', buffer: PNG });
+		await page.evaluate(() =>
+			document.querySelector('input[type="file"]')!.dispatchEvent(new Event('change', { bubbles: true }))
+		);
+		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/e2e-avatar.svg', { timeout: 2000 });
+	}).toPass({ timeout: 20_000 });
+	await page.locator('input[name="title"]').fill('E2E Snowfall');
+	await page.getByRole('button', { name: 'Upload Artwork' }).click();
+
+	await expect(page).toHaveURL(/\/admin\/commissions\?added=\d+$/);
+	const notice = page.locator('.notice.ok');
+	await expect(notice).toContainText('Added to your gallery as a private piece: E2E Snowfall.');
+	const row = section(page, 'Finished').getByRole('row', { name: new RegExp(TITLE) });
+	await expect(row.getByRole('link', { name: 'E2E Snowfall' })).toBeVisible();
+	await expect(row.locator('.thumb img')).toHaveAttribute('src', /e2e-avatar\.svg/);
+	await settledShot(page, testInfo.outputPath('commission-ledger-linked.png'));
+
+	// The entry's panel now shows the piece and offers a variant instead. Opened
+	// by its address: a click straight after the upload's client-side redirect
+	// can land before the ledger finishes settling and go nowhere.
+	const editUrl = await row.getByRole('link', { name: `Edit ${TITLE}` }).getAttribute('href');
+	await open(page, editUrl!);
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
+	await expect(panel.getByRole('link', { name: 'E2E Snowfall' })).toBeVisible();
+	await expect(panel.getByRole('link', { name: 'Add a variant' })).toHaveAttribute('href', /\/admin\/upload\?commission=\d+$/);
+	await expect(panel.getByRole('link', { name: 'Add to gallery' })).toHaveCount(0);
+});
+
 test('an out-of-date save is refused, and Reload entry brings the typed note back', async ({ page, context }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions');
