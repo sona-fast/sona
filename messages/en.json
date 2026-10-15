@@ -1242,6 +1242,8 @@
 	"admin_settings_registry_connect_desc": "The shared registry is a curated, opt-in directory of artists so you don't re-enter the same people on every fork. Ask the registry maintainer for an invite token, paste it here, and we'll register this site and store its key — no CLI or redeploy.",
 	"admin_settings_invite_token": "Invite token",
 	"admin_settings_invite_token_placeholder": "paste the token the maintainer gave you",
+	"admin_settings_invite_error_used": "This invite token was already used or revoked. Ask the registry maintainer for a new one.",
+	"admin_settings_invite_error_invalid": "The registry didn't accept this invite token. Check it, or ask the registry maintainer for a new one.",
 	"admin_settings_registry_advanced": "Advanced — custom registry URL",
 	"admin_settings_registry_url": "Registry URL",
 	"admin_settings_registry_url_placeholder": "https://registry.sona.fast (default)",

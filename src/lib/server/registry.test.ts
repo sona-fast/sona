@@ -147,6 +147,26 @@ describe('registryRegisterFork', () => {
 		expect(result).toEqual({ error: 'invalid token' });
 	});
 
+	it('passes through the two invite refusal codes', async () => {
+		for (const code of ['invite_used', 'invite_invalid']) {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'refused', code }), { status: 401 }))
+			);
+			expect(await registryRegisterFork({ signupToken: 'x' })).toEqual({ error: 'refused', code });
+		}
+	});
+
+	it('drops any other code a registry sends', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ error: 'refused', code: 'something_else' }), { status: 401 })
+			)
+		);
+		expect(await registryRegisterFork({ signupToken: 'x' })).toEqual({ error: 'refused' });
+	});
+
 	it('returns an error when the registry does not respond', async () => {
 		// withTimeout swallows the rejection and yields its null fallback.
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));

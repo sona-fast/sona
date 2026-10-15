@@ -748,7 +748,11 @@ export const actions = {
 			signupToken,
 			label
 		});
-		if ('error' in result) return fail(400, { error: `Could not connect: ${result.error}.` });
+		if ('error' in result) {
+			// A refused invite token is shown on the token field, not as a toast.
+			if (result.code) return fail(400, { inviteError: result.code });
+			return fail(400, { error: `Could not connect: ${result.error}.` });
+		}
 
 		// Store the one-time fork key (and any custom URL) in D1 so the connection
 		// survives without a deploy. The key never goes back to the client.

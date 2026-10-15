@@ -95,6 +95,10 @@ export async function resolveRegistryEnv(
 	return { ...env, REGISTRY_API_KEY: apiKey, REGISTRY_URL: url || env.REGISTRY_URL };
 }
 
+/** The registry's two invite refusals, which the connect form shows on the token field. */
+const INVITE_REFUSALS = ['invite_used', 'invite_invalid'] as const;
+export type InviteRefusal = (typeof INVITE_REFUSALS)[number];
+
 /**
  * Register this fork with the registry (`POST /v1/forks`) using a maintainer
  * invite token, returning the one-time fork key to store. Used by the in-app
@@ -104,7 +108,7 @@ export async function registryRegisterFork(opts: {
 	url?: string;
 	signupToken?: string;
 	label?: string;
-}): Promise<{ forkId: string; key: string } | { error: string }> {
+}): Promise<{ forkId: string; key: string } | { error: string; code?: InviteRefusal }> {
 	const base = (opts.url || REGISTRY_DEFAULT_URL).replace(/\/+$/, '');
 	try {
 		const res = await withTimeout(
@@ -118,10 +122,12 @@ export async function registryRegisterFork(opts: {
 		);
 		if (!res) return { error: 'the registry did not respond — check the URL and try again' };
 		const data = (await res.json().catch(() => null)) as
-			| { forkId?: string; key?: string; error?: string }
+			| { forkId?: string; key?: string; error?: string; code?: unknown }
 			| null;
 		if (!res.ok || !data?.key || !data?.forkId) {
-			return { error: data?.error || `registry returned HTTP ${res.status}` };
+			const error = data?.error || `registry returned HTTP ${res.status}`;
+			const code = INVITE_REFUSALS.find((c) => c === data?.code);
+			return code ? { error, code } : { error };
 		}
 		return { forkId: data.forkId, key: data.key };
 	} catch {

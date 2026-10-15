@@ -123,6 +123,39 @@ describe('settings connectRegistry — fork key label', () => {
 	});
 });
 
+describe('settings connectRegistry — refused invite tokens', () => {
+	for (const code of ['invite_used', 'invite_invalid'] as const) {
+		it(`returns ${code} for the token field and stores no key`, async () => {
+			fetchMock.mockResolvedValueOnce(
+				new Response(JSON.stringify({ error: 'refused', code }), { status: 401 })
+			);
+			const { db, platform } = makeDb();
+
+			const result = (await actions.connectRegistry(connectEvent(platform, { signupToken: 'tok' }))) as {
+				status: number;
+				data: Record<string, unknown>;
+			};
+
+			expect(result.status).toBe(400);
+			expect(result.data).toEqual({ inviteError: code });
+			expect(await getRawSetting(db, REGISTRY_API_KEY_SETTING)).toBeNull();
+		});
+	}
+
+	it('keeps the general error message for any other refusal', async () => {
+		fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'label too long' }), { status: 400 }));
+		const { platform } = makeDb();
+
+		const result = (await actions.connectRegistry(connectEvent(platform, { signupToken: 'tok' }))) as {
+			status: number;
+			data: Record<string, unknown>;
+		};
+
+		expect(result.status).toBe(400);
+		expect(result.data).toEqual({ error: 'Could not connect: label too long.' });
+	});
+});
+
 function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
 	const body = new FormData();
 	for (const [k, v] of Object.entries(fields)) body.append(k, v);
