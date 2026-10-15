@@ -12,7 +12,8 @@ import type { RequestHandler } from './$types';
 // Paste a link (SONA-236): body { url } → the artist the link names, and the
 // local artists that already hold that handle. The link is parsed, never
 // fetched, and never logged: it can be a private chat link. POST rather than
-// GET keeps it out of query strings and access logs.
+// GET keeps it out of query strings and access logs: with only POST defined
+// here, SvelteKit answers any GET with 405 (the e2e checks it).
 
 export const POST: RequestHandler = async ({ request, platform }) => {
 	let url: unknown;
@@ -55,8 +56,3 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	return json({ ...parsed, matches, nameMatches });
 };
-
-// Said outright rather than left to the router: the link must never ride in a
-// query string, so a GET is refused even if someone adds one by mistake.
-export const GET: RequestHandler = () =>
-	new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });

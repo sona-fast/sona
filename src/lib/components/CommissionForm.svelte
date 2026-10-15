@@ -142,6 +142,9 @@
 		restoredNote = merged.restoredNote;
 		failure = null;
 		staleText = '';
+		// The reloaded entry has its own link; the last lookup was about another.
+		lookup = { kind: 'idle' };
+		lookedUp = '';
 		announcer.say(
 			merged.restoredNote ? m.admin_commissions_reloaded_announce_note() : m.admin_commissions_reloaded_announce()
 		);
@@ -195,17 +198,23 @@
 		// The owner changed the link while this one was out: its answer is stale.
 		if (link !== lookedUp) return;
 		lookup = next;
-		announcer.say(lookupOutcome(next));
-		// One artist holds this handle: that's the artist. Several, or a name that
-		// only looks the same, wait for the owner to choose.
-		if (next.kind === 'found' && next.matches.length === 1) values.artistId = String(next.matches[0].id);
+		// A lookup that didn't get through can be tried again with the same link.
+		if (next.kind === 'refused' && next.reason === 'failed') lookedUp = '';
+		// One artist holds this handle and none is chosen yet: that's the artist.
+		// A choice the owner already made stays theirs to change, and several
+		// matches, or a name that only looks the same, wait for them to pick.
+		const single = next.kind === 'found' && next.matches.length === 1 ? next.matches[0] : null;
+		const pick = single && !values.artistId ? single : null;
+		if (pick) values.artistId = String(pick.id);
+		const sentences = [lookupOutcome(next), pick ? m.admin_commissions_link_using_announce({ name: pick.name }) : ''];
+		announcer.say(sentences.filter(Boolean).join(getLocale() === 'ja' ? '' : ' '));
 	}
 
 	/** The sentence that says how a lookup went, shown and read out. */
 	function lookupOutcome(result: LinkLookup): string {
 		if (result.kind === 'refused') {
 			return {
-				invalid: m.admin_commissions_error_link,
+				invalid: m.admin_commissions_link_invalid,
 				unsupported: m.admin_commissions_link_unsupported,
 				no_handle: m.admin_commissions_link_no_handle,
 				failed: m.admin_commissions_link_failed
@@ -252,11 +261,13 @@
 	{/if}
 {/snippet}
 
-{#snippet choice(artist: { id: number; name: string })}
+{#snippet choice(artist: ArtistChoice)}
 	{@const using = values.artistId === String(artist.id)}
 	<div class="match">
 		<span class="name">{artist.name}</span>
-		<button type="button" class="btn-compact" aria-pressed={using} onclick={() => useArtist(artist)}>
+		<!-- The label says the state: "Use X" until chosen, then "Using X" with a
+		     check, as in ArtistLookupPanel. -->
+		<button type="button" class="btn-compact" onclick={() => useArtist(artist)}>
 			{#if using}<Check size={14} aria-hidden="true" />{m.admin_lookup_using_artist({ name: artist.name })}{:else}{m.admin_lookup_use_artist({ name: artist.name })}{/if}
 		</button>
 	</div>

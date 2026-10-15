@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ledgerDb, type Sqlite } from '$lib/server/test/ledger-db';
-import { GET, POST } from './+server';
+import { POST } from './+server';
 
 // POST /api/admin/artist-from-link (SONA-236 paste a link), against the
 // shipped schema. The admin gate in hooks.server.ts covers who may call it;
@@ -87,13 +87,5 @@ describe('POST /api/admin/artist-from-link', () => {
 		expect(await post(platform, 'not json', true)).toEqual({ status: 400, body: { ok: false, reason: 'invalid' } });
 		expect(await post(platform, { url: 42 })).toEqual({ status: 400, body: { ok: false, reason: 'invalid' } });
 		expect(await post(platform, {})).toEqual({ status: 400, body: { ok: false, reason: 'invalid' } });
-	});
-});
-
-describe('GET /api/admin/artist-from-link', () => {
-	it('is refused with 405, so a link never rides in a query string', async () => {
-		const res = await GET({} as never);
-		expect(res.status).toBe(405);
-		expect(res.headers.get('allow')).toBe('POST');
 	});
 });

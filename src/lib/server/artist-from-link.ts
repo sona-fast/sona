@@ -51,11 +51,22 @@ export function parseArtistLink(raw: string): ParsedLink {
 	const platform = PLATFORMS.find((p) => platformDomain(p, url.hostname) !== null);
 	if (!platform) return { ok: false, reason: 'unsupported' };
 
-	const handle = socialHandle(platform, url.href);
+	const handle = deviantArtSubdomain(url.hostname) ?? socialHandle(platform, url.href);
 	if (!handle) return { ok: false, reason: 'no_handle' };
 	// A handle a profile link can't be built from, such as a Bluesky DID, names
 	// no account the owner could have stored, so it's no handle here.
 	const profileUrl = normalizeSocialUrl(platform, handle);
 	if (!profileUrl) return { ok: false, reason: 'no_handle' };
 	return { ok: true, platform, handle, profileUrl };
+}
+
+/**
+ * The account in a legacy DeviantArt link, <user>.deviantart.com/art/… or
+ * /gallery: the subdomain is the user, and the path's first segment ("art",
+ * "gallery") is a section of their page, not a name. Null for any other host.
+ */
+function deviantArtSubdomain(hostname: string): string | null {
+	const match = /^([a-z0-9-]+)\.deviantart\.com$/i.exec(hostname);
+	if (!match || match[1].toLowerCase() === 'www') return null;
+	return match[1];
 }

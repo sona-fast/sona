@@ -457,3 +457,14 @@ describe('bare handles', () => {
 		expect(socialLabel('twitter', '@')).toBe('Twitter');
 	});
 });
+
+describe('a private Telegram channel link (SONA-236)', () => {
+	// t.me/c/<id>/<post> is a message in a channel with no public name; the 'c'
+	// is part of the path, not an account.
+	it('reads as no handle, and labels as the platform', () => {
+		expect(socialHandle('telegram', 'https://t.me/c/123456/78')).toBeNull();
+		expect(socialLabel('telegram', 'https://t.me/c/123456/78')).toBe('Telegram');
+		// A public channel still reads as its name.
+		expect(socialHandle('telegram', 'https://t.me/artist_a/412')).toBe('artist_a');
+	});
+});

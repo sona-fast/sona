@@ -2348,7 +2348,7 @@
 	"admin_commissions_error_characters_unknown": "A character you picked isn't in your character list anymore. Check the characters and save again.",
 	"admin_commissions_error_status": "Pick a status from the list.",
 	"admin_commissions_error_payment": "Pick a payment status from the list.",
-	"admin_commissions_error_link": "Sona couldn't read this link. Fix it or clear it, then pick the artist from the list.",
+	"admin_commissions_error_link": "Sona couldn't read this link. Fix it or clear it.",
 	"admin_commissions_error_price_format": "Enter the price as a number, like 45 or 45.50.",
 	"admin_commissions_error_price_no_decimals": "{currency} prices don't use decimals. Enter a whole number.",
 	"admin_commissions_error_price_decimals": "{currency} prices can't have more than {digits} decimal places.",
@@ -2407,5 +2407,6 @@
 	"admin_commissions_link_no_handle": "This link doesn't include the artist's handle. Pick the artist from the list instead.",
 	"admin_commissions_link_unsupported": "Sona can't find artists from this kind of link. Pick the artist from the list instead.",
 	"admin_commissions_link_failed": "Sona couldn't look up this link. Pick the artist from the list instead.",
-	"admin_commissions_link_using_announce": "Using {name} as the artist."
+	"admin_commissions_link_using_announce": "Using {name} as the artist.",
+	"admin_commissions_link_invalid": "Sona couldn't read this link. Fix it or clear it, then pick the artist from the list."
 }

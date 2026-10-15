@@ -82,3 +82,26 @@ describe('parseArtistLink: what is not a link Sona reads', () => {
 		}
 	});
 });
+
+describe('parseArtistLink: older link shapes', () => {
+	it('reads a legacy DeviantArt subdomain as the account, whatever the path', () => {
+		for (const link of [
+			'https://someuser.deviantart.com/art/Title-123',
+			'https://someuser.deviantart.com/gallery',
+			'https://someuser.deviantart.com/'
+		]) {
+			expect(parseArtistLink(link), link).toEqual({
+				ok: true,
+				platform: 'deviantart',
+				handle: 'someuser',
+				profileUrl: 'https://www.deviantart.com/someuser'
+			});
+		}
+	});
+
+	it('says a FurAffinity gallery link has no handle it reads', () => {
+		// FurAffinity profiles are /user/<name>; a /gallery/<name> path isn't one
+		// the artist fields store.
+		expect(parseArtistLink('https://www.furaffinity.net/gallery/someuser/')).toEqual({ ok: false, reason: 'no_handle' });
+	});
+});
