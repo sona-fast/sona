@@ -83,7 +83,24 @@ test('an upload from the entry waits for the gate too, before any file goes up',
 	await expect(page.locator('input[type="file"]')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Upload Artwork' })).toHaveCount(0);
 	await expect(page.getByText('From your commission')).toHaveCount(0);
+	// The page's way back to the entry.
+	await expect(page.getByRole('link', { name: 'Back to the entry' })).toHaveAttribute('href', '/admin/commissions/1/edit');
 	await settledShot(page, testInfo.outputPath('commission-upload-gated.png'));
+
+	// The page listens for pasted images anywhere on it. With no form to fill,
+	// a pasted image must not go up to storage.
+	let uploads = 0;
+	page.on('request', (r) => {
+		if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/upload') uploads += 1;
+	});
+	await page.evaluate(() => {
+		const clipboard = new DataTransfer();
+		clipboard.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'pasted.png', { type: 'image/png' }));
+		window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true }));
+	});
+	// A paste that went through would POST at once; give it time to show up.
+	await page.waitForTimeout(1500);
+	expect(uploads).toBe(0);
 });
 
 test('Delete entry works with the gate closed', async ({ page }, testInfo) => {

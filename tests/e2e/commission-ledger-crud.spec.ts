@@ -121,7 +121,7 @@ const PNG = Buffer.from(
  * the stub answers with an asset the site already serves, so the piece
  * renders. setInputFiles doesn't reach Svelte's delegated change handler, so
  * the change is dispatched by hand, retried until hydration attaches it. */
-async function uploadPiece(page: Page, title: string) {
+async function uploadPiece(page: Page, title: string, lands: RegExp = /\/admin\/commissions\?added=\d+$/) {
 	await page.route(
 		(url) => url.pathname === '/api/upload',
 		(route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/e2e-avatar.svg' }) })
@@ -135,11 +135,40 @@ async function uploadPiece(page: Page, title: string) {
 	}).toPass({ timeout: 20_000 });
 	await page.locator('input[name="title"]').fill(title);
 	await page.getByRole('button', { name: 'Upload Artwork' }).click();
-	await expect(page).toHaveURL(/\/admin\/commissions\?added=\d+$/);
+	await expect(page).toHaveURL(lands);
 }
 
 const galleryPanel = (page: Page) =>
 	page.locator('section', { has: page.getByRole('heading', { level: 2, name: 'Gallery' }) });
+
+test("leaving an entry's upload for a plain one drops everything the entry filled", async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	await section(page, 'Finished').getByRole('link', { name: `Add to gallery: ${TITLE}` }).click();
+	await expect(page.getByRole('note')).toContainText(`From your commission: ${TITLE}.`);
+	await waitForHydration(page);
+	await expect(page.locator('input[name="commissionId"]')).toHaveCount(1);
+
+	// The sidebar's Upload is the same page with no entry: SvelteKit keeps the
+	// page mounted across it unless something makes it start over.
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Upload' }).click();
+	await expect(page).toHaveURL(/\/admin\/upload$/);
+	await expect(page.getByText('From your commission')).toHaveCount(0);
+	await expect(page.locator('input[name="commissionId"]')).toHaveCount(0);
+	await expect(page.locator('select[name="artistId"]')).toHaveValue('');
+	await expect(page.locator('input[name="char-1"]')).not.toBeChecked();
+	await expect(page.locator('input[name="char-2"]')).not.toBeChecked();
+	await expect(page.locator('input[name="published"]')).not.toBeChecked();
+	await settledShot(page, testInfo.outputPath('commission-upload-plain-after-entry.png'));
+
+	// Saved, it's an ordinary upload, and the entry stays as it was.
+	await page.locator('select[name="artistId"]').selectOption({ label: 'Test Artist' });
+	await uploadPiece(page, 'E2E unrelated piece', /\/admin\/images$/);
+	await open(page, '/admin/commissions');
+	const row = section(page, 'Finished').getByRole('row', { name: new RegExp(TITLE) });
+	await expect(row).toContainText('Not in your gallery');
+	await expect(row.getByRole('link', { name: 'E2E unrelated piece' })).toHaveCount(0);
+});
 
 test('Add to gallery uploads a new piece and links it to the entry', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);

@@ -71,7 +71,8 @@ export type CommissionRefusal =
 	| { commission: 'closed'; status: CommissionStatus }
 	| { commission: 'mismatch' }
 	| { commission: 'group' }
-	| { commission: 'just_added'; imageId: number };
+	// imageId is null when the batch lost a race the checks couldn't see.
+	| { commission: 'just_added'; imageId: number | null };
 
 /**
  * Every check a save from an entry passes before an image is written: the

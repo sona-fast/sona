@@ -401,13 +401,17 @@ describe('upload save from an entry: what the browser sends', () => {
 describe('upload save from an entry: the entry changes between the checks and the batch', () => {
 	/** The same database, with `change` run just before the action's batch: the
 	 * moment another tab's save or edit would land. */
-	function racing(platform: App.Platform, change: () => void): App.Platform {
+	function racing(platform: App.Platform, change: () => void, after?: () => void): App.Platform {
 		const d1 = platform.env.DB as unknown as { prepare: (s: string) => unknown; batch: (s: unknown[]) => unknown };
 		const db = {
 			prepare: (s: string) => d1.prepare(s),
-			batch: (stmts: unknown[]) => {
+			batch: async (stmts: unknown[]) => {
 				change();
-				return d1.batch(stmts);
+				try {
+					return await d1.batch(stmts);
+				} finally {
+					after?.();
+				}
 			}
 		};
 		return { env: { ...platform.env, DB: db } } as unknown as App.Platform;
@@ -421,6 +425,27 @@ describe('upload save from an entry: the entry changes between the checks and th
 		expect(result.status).toBe(409);
 		expect(result.data).toEqual({ commission: 'just_added', imageId: 7 });
 		expect(imageCount(sqlite)).toBe(1);
+	});
+
+	it('returns 409 with no piece to name when the batch loses a race the checks no longer see', async () => {
+		// The entry is closed only while the batch runs: the batch refuses it, and
+		// by the time the checks run again it's addable once more.
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite, { status: 'in_progress' });
+		const setStatus = (status: string) =>
+			sqlite.prepare('UPDATE commissions SET status = ? WHERE id = ?').run(status, id);
+		const result = await save(
+			racing(
+				platform,
+				() => setStatus('cancelled'),
+				() => setStatus('in_progress')
+			),
+			{ commissionId: String(id) }
+		);
+		expect(result.status).toBe(409);
+		expect(result.data).toEqual({ commission: 'just_added', imageId: null });
+		expect(imageCount(sqlite)).toBe(0);
+		expect(entryRow(sqlite, id)).toMatchObject({ image_id: null, status: 'in_progress' });
 	});
 
 	it('returns 400 missing and writes nothing when the entry was deleted meanwhile', async () => {

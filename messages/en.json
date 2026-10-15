@@ -2394,5 +2394,6 @@
 	"admin_commissions_added_variants_pre": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Added a variant to ", "countPlural=other": "Added {count} variants to "}}],
 	"admin_commissions_added_variants_private_pre": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Added a private variant to ", "countPlural=other": "Added {count} private variants to "}}],
 	"admin_commissions_added_variants_post": ".",
-	"admin_commissions_add_to_gallery_aria": "Add to gallery: {title}"
+	"admin_commissions_add_to_gallery_aria": "Add to gallery: {title}",
+	"admin_upload_commission_back_to_entry": "Back to the entry"
 }

@@ -1839,5 +1839,6 @@
 	"admin_commissions_added_variants_pre": "バリエーション{count}件を「",
 	"admin_commissions_added_variants_private_pre": "非公開のバリエーション{count}件を「",
 	"admin_commissions_added_variants_post": "」に追加しました。",
-	"admin_commissions_add_to_gallery_aria": "{title}をギャラリーに追加"
+	"admin_commissions_add_to_gallery_aria": "{title}をギャラリーに追加",
+	"admin_upload_commission_back_to_entry": "エントリーに戻る"
 }

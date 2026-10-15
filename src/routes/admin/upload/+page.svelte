@@ -427,6 +427,9 @@
 		// A save in flight is already sending these tiles; the drop zone and the
 		// picker are disabled for the same reason, so paste can't be the one way in.
 		if (saving) return;
+		// From an entry while the gate is closed there's no form to fill, and the
+		// save would refuse: a paste must not upload a file nobody can use.
+		if (uploadClosed) return;
 		const dt = e.clipboardData;
 		if (!dt) return;
 		const files = extractImageFiles(dt.items);
@@ -1318,7 +1321,9 @@
 	<p class="error">{form.error}</p>
 {/if}
 
-{#if refusal}
+<!-- With the gate closed the page already shows its notice in place of the
+     form, so a gated refusal would only say it twice. -->
+{#if refusal && !(refusal.commission === 'gated' && uploadClosed)}
 	<!-- A save from an entry the server refused before writing anything. It
 	     takes focus when it appears, after an enhanced save or a full reload. -->
 	{#if refusal.commission === 'just_added'}
@@ -1356,6 +1361,7 @@
 	<!-- From an entry while the gate is closed: the save would refuse, so say so
 	     before any file goes up. -->
 	<CommissionIntro gate={data.commissionGate} empty />
+	<p><a class="back-to-entry" href={cancelHref}>{m.admin_upload_commission_back_to_entry()}</a></p>
 {:else}
 {#if prefill}
 	<!-- The entry's title appears here and nowhere else on the page: the piece
@@ -1990,6 +1996,7 @@
 	.from-note .ico { color: var(--primary-text); display: inline-flex; padding-top: 2px; }
 	.from-note p { max-width: 68ch; text-wrap: pretty; }
 	.field-value { font-size: 14px; overflow-wrap: anywhere; }
+	.back-to-entry { font-size: 14px; color: var(--foreground); text-decoration: underline; }
 
 	.upload-form {
 		display: flex;
