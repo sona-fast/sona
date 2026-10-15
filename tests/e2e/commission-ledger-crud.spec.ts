@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
+import { contrastRatio } from './contrast';
 
 // The commission ledger saved through the real form (SONA-236 PR 2): create an
 // entry, move it to Delivered, refuse an out-of-date save from a second tab and
@@ -35,9 +36,36 @@ test('creates an entry that lists under Active', async ({ page }, testInfo) => {
 	await page.getByLabel('Price').fill('120.00');
 	await page.getByLabel('Currency').fill('USD');
 	await page.getByLabel('Requested').fill('2026-10-02');
-	await page.getByRole('button', { name: 'Save entry' }).click();
+
+	// Hold the save so a second click and an Enter land while it's in flight.
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	let posts = 0;
+	const createPost = (url: URL) => url.pathname === '/admin/commissions/new';
+	await page.route(
+		createPost,
+		async (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			posts += 1;
+			await held;
+			await route.continue();
+		}
+	);
+	const save = page.locator('form.entry-form button[type="submit"]');
+	await save.click();
+	await expect(save).toHaveAttribute('aria-disabled', 'true');
+	await expect(save).toBeFocused();
+	await save.click({ force: true });
+	await page.keyboard.press('Enter');
+	await expect(save).toBeFocused();
+	expect(posts).toBe(1);
+	release();
 
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	expect(posts).toBe(1);
+	await page.unroute(createPost);
+	// One save, one entry.
+	await expect(page.getByRole('row', { name: new RegExp(TITLE) })).toHaveCount(1);
 	const row = section(page, 'Active').getByRole('row', { name: new RegExp(TITLE) });
 	await expect(row).toBeVisible();
 	await expect(row).toContainText('Test Artist');
@@ -128,7 +156,15 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await expect(page.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
 	await waitForHydration(page);
 
-	await page.getByRole('button', { name: 'Delete entry' }).click();
+	// Hovered, the label keeps 4.5:1 against what the browser actually paints.
+	const deleteButton = page.getByRole('button', { name: 'Delete entry' });
+	await deleteButton.hover();
+	const [color, background] = await deleteButton.evaluate((el) => {
+		const style = getComputedStyle(el);
+		return [style.color, style.backgroundColor];
+	});
+	expect(contrastRatio(color, background)).toBeGreaterThanOrEqual(4.5);
+	await deleteButton.click();
 	const dialog = page.getByRole('dialog', { name: 'Delete this entry?' });
 	await expect(dialog).toContainText('Test Artist stays in your artist list');
 	await page.screenshot({ path: testInfo.outputPath('commission-entry-delete.png'), fullPage: true });

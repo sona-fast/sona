@@ -2671,25 +2671,15 @@ describe('"made with" credit badge WCAG AA contrast, every host × theme × mode
 	}
 });
 
-// The ledger's Delete entry button (SONA-236): the outline variant painted
-// with --destructive. Its hover keeps the --background fill, because the outline
-// variant's tinted hover fill pulled this label under 4.5:1 on several themes.
-describe('commission ledger Delete entry button keeps 4.5:1 at rest and on hover', () => {
-	const file = '../routes/admin/commissions/[id]/edit/+page.svelte';
-
-	it('paints the label with --destructive and keeps the hover fill at --background', () => {
-		expect(ruleBody(file, '.danger')).toMatch(/(?:^|[;{\s])color:\s*var\(--destructive\)/);
-		expect(ruleBody(file, '.delete-slot .danger:hover')).toMatch(/background-color:\s*var\(--background\)/);
-	});
-
-	it('draws an invalid entry field with the same token, so the pairs below cover its 3:1 edge', () => {
-		expect(ruleBody('./components/CommissionForm.svelte', "[aria-invalid='true']")).toMatch(
-			/border-color:\s*var\(--destructive\)/
-		);
-	});
-
+// The ledger's Delete entry button (SONA-236) paints its label with
+// --destructive on a --background fill, at rest and on hover, and an invalid
+// entry field draws its edge with --destructive. The rendered colors are
+// checked in the browser (tests/e2e/commission-ledger-crud.spec.ts and
+// commission-ledger-pages.spec.ts); this measures the token pair in every
+// theme × mode, which a browser run on the default theme can't.
+describe('commission ledger: --destructive on --background, every theme × mode', () => {
 	for (const { name, sel } of THEME_BLOCKS) {
-		it(`${name}: --destructive on --background meets 4.5:1 (rest and hover)`, () => {
+		it(`${name}: --destructive on --background meets 4.5:1`, () => {
 			expect(contrast(blockToken(sel, 'destructive'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(4.5);
 		});
 	}

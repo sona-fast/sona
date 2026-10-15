@@ -15,6 +15,7 @@
 		STATUS_LABELS,
 		TITLE_MAX,
 		datesAfterStatusChange,
+		FIELD_ORDER,
 		formValuesOf,
 		localToday,
 		mergeReloaded,
@@ -126,22 +127,6 @@
 		['deliveredOn', m.admin_commissions_field_delivered]
 	] as const;
 
-	const FIELD_ORDER: CommissionField[] = [
-		'sourceUrl',
-		'artistId',
-		'title',
-		'kind',
-		'characterIds',
-		'notes',
-		'status',
-		'payment',
-		'price',
-		'currency',
-		'requestedOn',
-		'acceptedOn',
-		'deliveredOn'
-	];
-
 	async function focusFailure() {
 		await tick();
 		if (failure?.stale) staleBox?.focus();
@@ -222,13 +207,19 @@
 		// What the owner changed, read now: the refusal names it as it was sent.
 		const sent = { ...values, characterIds: [...values.characterIds] };
 		return async ({ update, result }) => {
-			// A save redirects to the ledger, which enhance follows. Only refusals
-			// stay on this page, and they keep what the owner typed.
-			await update({ reset: false });
+			// Fixed before update() renders the refusal, so the alert appears once,
+			// with its whole text.
+			if (result.type === 'failure') {
+				const data = result.data as FailureData | undefined;
+				staleText = data?.stale ? staleMessage(loaded, sent, getLocale()) : '';
+			}
+			// A save redirects to the ledger, which enhance follows; a refusal stays
+			// here with what the owner typed. An error is left out: update() would
+			// render the error page in place of the form and lose the typing.
+			if (result.type !== 'error') await update({ reset: false });
 			saving = false;
 			if (result.type === 'failure') {
 				failure = (result.data as FailureData | undefined) ?? null;
-				staleText = failure?.stale ? staleMessage(loaded, sent, getLocale()) : '';
 				if (!failure?.errors && !failure?.gated && !failure?.stale) toast.error(m.admin_commissions_save_failed());
 				await focusFailure();
 			} else if (result.type === 'error') {

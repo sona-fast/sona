@@ -15,9 +15,13 @@ const PASSWORD = 'e2e-admin-password';
 // The gate reads the server's real clock, which a spec can't fake. Past the GA
 // date (or once the registry entry retires) the gate opens for everyone and
 // this spec has nothing to test, so it skips; delete it with the entry.
-const gaDate = readFileSync(new URL('../../src/lib/early-access.ts', import.meta.url), 'utf8').match(
-	/'commission-ledger':\s*\{\s*gaDate:\s*'(\d{4}-\d{2}-\d{2})'/
-)?.[1];
+const registry = readFileSync(new URL('../../src/lib/early-access.ts', import.meta.url), 'utf8');
+const gaDate = registry.match(/'commission-ledger':\s*\{\s*gaDate:\s*'(\d{4}-\d{2}-\d{2})'/)?.[1];
+// An entry this can't read is a broken check, not a GA'd feature: fail rather
+// than skip, or a reformatted registry line would switch this spec off quietly.
+if (registry.includes("'commission-ledger'") && gaDate === undefined) {
+	throw new Error("early-access.ts registers 'commission-ledger', but its gaDate didn't parse");
+}
 const gated = gaDate !== undefined && Date.now() < Date.parse(`${gaDate}T00:00:00Z`);
 
 test.describe.configure({ mode: 'serial' });

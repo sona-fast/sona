@@ -217,9 +217,19 @@ describe('staleMessage', () => {
 		);
 	});
 
+	const headJa = 'このエントリーは開いた後に変更されたため、保存されませんでした。「エントリーを再読み込み」を選ぶと最新の内容を取得できます。';
+
 	it('runs the Japanese sentences together, with no space between them', () => {
-		const ja = staleMessage(loaded, { ...loaded, notes: 'New' }, 'ja');
-		expect(ja).toBe('このエントリーは開いた後に変更されたため、保存されませんでした。「エントリーを再読み込み」を選ぶと最新の内容を取得できます。メモはそのまま引き継がれます。');
+		expect(staleMessage(loaded, { ...loaded, notes: 'New' }, 'ja')).toBe(`${headJa}メモはそのまま引き継がれます。`);
+	});
+
+	it('names the dropped fields in Japanese, with and without a note change', () => {
+		expect(staleMessage(loaded, { ...loaded, payment: 'unpaid' }, 'ja')).toBe(
+			`${headJa}再読み込みすると支払いの変更は失われるため、もう一度入力してください。`
+		);
+		expect(staleMessage(loaded, { ...loaded, notes: 'New', title: 'T', price: '1' }, 'ja')).toBe(
+			`${headJa}メモは引き継がれますが、タイトル、価格の変更は引き継がれないため、もう一度入力してください。`
+		);
 	});
 });
 

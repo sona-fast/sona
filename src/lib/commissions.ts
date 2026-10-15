@@ -144,7 +144,7 @@ export function isCalendarDate(value: string): boolean {
 	return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
 }
 
-export const CURRENCY_PATTERN = /^[A-Z]{3}$/;
+const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 
 /** How many minor-unit digits a currency uses: 2 for USD, 0 for JPY, 3 for
  * BHD. Null when the code isn't one Intl accepts. */
@@ -261,14 +261,15 @@ export function formValuesOf(entry: CommissionFormEntry | null): CommissionFormV
 	};
 }
 
-/** Every field except Notes, in the order the form shows them. Notes is left
- * out because Reload entry brings the typed note back. */
-const RELOAD_LOSES: Exclude<CommissionField, 'notes'>[] = [
+/** Every field, in the order the form shows them. The form focuses the first
+ * one with an error. */
+export const FIELD_ORDER: CommissionField[] = [
 	'sourceUrl',
 	'artistId',
 	'title',
 	'kind',
 	'characterIds',
+	'notes',
 	'status',
 	'payment',
 	'price',
@@ -278,6 +279,9 @@ const RELOAD_LOSES: Exclude<CommissionField, 'notes'>[] = [
 	'deliveredOn'
 ];
 
+/** What Reload entry drops: every field but Notes, which it brings back. */
+const RELOAD_LOSES = FIELD_ORDER.filter((f): f is Exclude<CommissionField, 'notes'> => f !== 'notes');
+
 /** The fields besides Notes that the owner changed since the form loaded.
  * Characters compare as a set: picking the same ones in another order is no
  * change. */
@@ -286,7 +290,7 @@ export function changedFields(
 	current: CommissionFormValues
 ): Exclude<CommissionField, 'notes'>[] {
 	const sameSet = (a: number[], b: number[]) =>
-		a.length === b.length && [...a].sort((x, y) => x - y).join() === [...b].sort((x, y) => x - y).join();
+		[...a].sort((x, y) => x - y).join() === [...b].sort((x, y) => x - y).join();
 	return RELOAD_LOSES.filter((field) =>
 		field === 'characterIds'
 			? !sameSet(loaded.characterIds, current.characterIds)
@@ -320,6 +324,7 @@ export function staleMessage(
 	locale: 'en' | 'ja'
 ): string {
 	const options = { locale };
+	const head = m.admin_commissions_stale({}, options);
 	const changed = changedFields(loaded, current).map((field) => FIELD_NAMES[field]({}, options));
 	const fields = new Intl.ListFormat(locale, { type: 'conjunction' }).format(changed);
 	const noteChanged = loaded.notes !== current.notes;
@@ -332,7 +337,7 @@ export function staleMessage(
 			: '';
 	// Japanese runs sentences together; English separates them with a space.
 	const join = locale === 'ja' ? '' : ' ';
-	return detail ? `${m.admin_commissions_stale({}, options)}${join}${detail}` : m.admin_commissions_stale({}, options);
+	return detail ? `${head}${join}${detail}` : head;
 }
 
 /**

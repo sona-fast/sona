@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { adminLogin, waitForHydration } from './admin-login';
+import type { Page } from '@playwright/test';
 
 // The commission ledger pages (SONA-236 PR 2), driven in a real browser. The
 // server actions are covered against a real schema in the vitest suites beside
@@ -111,8 +112,75 @@ test('a refused price shows its error on the field, and nothing is saved', async
 	await expect(price).toHaveAttribute('aria-describedby', /ce-price-err/);
 	// Focus moves to the first field with an error.
 	await expect(price).toBeFocused();
+	// The field's edge is drawn in the theme's --destructive.
+	const [edge, destructive] = await price.evaluate((el) => {
+		const probe = document.createElement('span');
+		probe.style.color = 'var(--destructive)';
+		document.body.append(probe);
+		const pair = [getComputedStyle(el).borderTopColor, getComputedStyle(probe).color];
+		probe.remove();
+		return pair;
+	});
+	expect(edge).toBe(destructive);
 	await page.screenshot({ path: testInfo.outputPath('commission-entry-price-error.png'), fullPage: true });
 
 	await page.goto('/admin/commissions');
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
+});
+
+/** Answers the create form's POST with `answer`, without reaching the server. */
+async function stubCreate(page: Page, answer: Parameters<import('@playwright/test').Route['fulfill']>[0] | 'abort') {
+	await page.route(
+		(url) => url.pathname === '/admin/commissions/new',
+		async (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			if (answer === 'abort') return route.abort('connectionreset');
+			return route.fulfill(answer);
+		}
+	);
+}
+
+async function fillEntry(page: Page) {
+	await page.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
+	await page.getByLabel('Title').fill('E2E kept title');
+	await page.getByLabel('Notes').fill('E2E kept note');
+}
+
+for (const [name, answer] of [
+	['the connection drops', 'abort'],
+	['the server errors', { status: 500, contentType: 'application/json', body: JSON.stringify({ type: 'error', error: { message: 'Internal Error' } }) }]
+] as const) {
+	test(`when ${name}, the form keeps what was typed and says so`, async ({ page }, testInfo) => {
+		await adminLogin(page, PASSWORD);
+		await page.goto('/admin/commissions/new');
+		await waitForHydration(page);
+		await stubCreate(page, answer);
+		await fillEntry(page);
+		await page.getByRole('button', { name: 'Save entry' }).click();
+
+		await expect(page.getByRole('status').filter({ hasText: 'Something went wrong' })).toBeVisible();
+		await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
+		await expect(page.getByLabel('Title')).toHaveValue('E2E kept title');
+		await expect(page.getByLabel('Notes')).toHaveValue('E2E kept note');
+		await page.screenshot({ path: testInfo.outputPath('commission-entry-save-error.png'), fullPage: true });
+	});
+}
+
+test('a refusal with no field to point at keeps focus on Save', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/commissions/new');
+	await waitForHydration(page);
+	// A SvelteKit action failure whose data names no field, no gate, no stale save.
+	await stubCreate(page, {
+		status: 200,
+		contentType: 'application/json',
+		body: JSON.stringify({ type: 'failure', status: 400, data: '[{}]' })
+	});
+	await fillEntry(page);
+	const save = page.locator('form.entry-form button[type="submit"]');
+	await save.click();
+
+	await expect(page.getByRole('status').filter({ hasText: "Couldn't save the entry. Try again." })).toBeVisible();
+	await expect(save).toBeFocused();
+	await expect(page.getByLabel('Title')).toHaveValue('E2E kept title');
 });
