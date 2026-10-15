@@ -67,6 +67,13 @@ export function isActiveStatus(status: CommissionStatus): boolean {
 	return ACTIVE.has(status);
 }
 
+/** Entries marked these never go to the gallery: there's no art to add. */
+const CLOSED: ReadonlySet<CommissionStatus> = new Set(['not_picked', 'cancelled']);
+
+export function canAddToGallery(status: CommissionStatus): boolean {
+	return !CLOSED.has(status);
+}
+
 // Static references to each message function, never a lookup by computed key:
 // a computed key pins the whole catalog into every route that renders a label
 // (SONA-169, scripts/check-catalog-pinning.mjs).
@@ -356,4 +363,17 @@ export function mergeReloaded(
 		values: { ...fresh, notes: typedNote },
 		restoredNote: fresh.notes === loadedNote ? 'kept' : 'replaces'
 	};
+}
+
+/**
+ * A message with a link inside it, split around the link. `render` builds the
+ * message with whatever it's given in place of the linked text, so each
+ * locale keeps its own word order: English puts the piece's title at the end
+ * of "Added to your gallery: Snowfall.", Japanese at the start. Null when the
+ * message doesn't contain the link exactly once.
+ */
+export function aroundLink(render: (link: string) => string): { before: string; after: string } | null {
+	const marker = '\u0000';
+	const parts = render(marker).split(marker);
+	return parts.length === 2 ? { before: parts[0], after: parts[1] } : null;
 }

@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { images, artists, collections, tags, imageTags, characters, imageCharacters } from '$lib/server/db/schema';
+import { images, artists, collections, tags, imageTags, characters, imageCharacters, commissions } from '$lib/server/db/schema';
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
@@ -198,6 +198,14 @@ export const actions = {
 					.get();
 				if (owner?.referenceImageId === id)
 					return fail(400, { error: REFERENCE_BECOMES_VARIANT_ERROR });
+				// A piece linked to a commission entry stays a parent, so Add to gallery
+				// never gets a variant as the piece to add variants to (SONA-236).
+				const linked = await db
+					.select({ id: commissions.id })
+					.from(commissions)
+					.where(eq(commissions.imageId, id))
+					.get();
+				if (linked) return fail(400, { error: m.admin_image_linked_cannot_be_variant() });
 			}
 		}
 

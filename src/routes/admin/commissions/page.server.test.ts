@@ -11,10 +11,12 @@ beforeEach(() => {
 afterEach(restoreRegistry);
 
 type Data = {
+	added: Record<string, unknown> | null;
 	entries: Record<string, unknown>[];
 	gate: { open: boolean; gaDate: string | null };
 };
-const run = async (platform: App.Platform) => (await load({ platform } as never)) as unknown as Data;
+const run = async (platform: App.Platform, query = '') =>
+	(await load({ platform, url: new URL(`http://localhost/admin/commissions${query}`) } as never)) as unknown as Data;
 
 describe('/admin/commissions load', () => {
 	it('reads every entry while the gate is closed', async () => {
@@ -56,7 +58,8 @@ describe('/admin/commissions load', () => {
 				artistName: 'Artist B',
 				artistAvatarUrl: null,
 				characterNames: ['Kit', 'Pip'],
-				piece: { id: 7, title: 'Snowfall' }
+				// No thumbnail stored, so the full image stands in.
+				piece: { id: 7, title: 'Snowfall', thumb: '/a.png' }
 			},
 			{
 				id: expect.any(Number),
@@ -98,5 +101,75 @@ describe('/admin/commissions load', () => {
 		const data = await run(platform);
 		expect(data.entries).toHaveLength(120);
 		expect(data.entries.every((e) => (e.characterNames as string[]).join() === 'Kit,Pip')).toBe(true);
+	});
+
+	// After an upload from an entry: the notice comes from the saved rows. The
+	// URL carries ids only, and an id that doesn't check out shows nothing.
+	describe('the "Added to your gallery" notice', () => {
+		function linked(sqlite: Parameters<typeof seedEntry>[0], published: number) {
+			sqlite.exec(
+				`INSERT INTO images (id, slug, title, image_url, artist_id, published, created_at)
+				 VALUES (7, 'snowfall', 'Snowfall', '/a.png', 1, ${published}, '2026-10-01'),
+				        (8, 'other', 'Other', '/b.png', 1, 1, '2026-10-01')`
+			);
+			const id = seedEntry(sqlite, { status: 'delivered' });
+			sqlite.prepare('UPDATE commissions SET image_id = 7 WHERE id = ?').run(id);
+			return id;
+		}
+		const variant = (sqlite: Parameters<typeof seedEntry>[0], id: number, parent: number, published: number) =>
+			sqlite.exec(
+				`INSERT INTO images (id, slug, title, image_url, artist_id, parent_image_id, published, created_at)
+				 VALUES (${id}, 'v-${id}', 'V', '/v.png', 1, ${parent}, ${published}, '2026-10-01')`
+			);
+
+		it('names the new piece and whether visitors can see it', async () => {
+			setLedgerGa('past');
+			const pub = ledgerDb();
+			const pubId = linked(pub.sqlite, 1);
+			expect((await run(pub.platform, `?added=${pubId}`)).added).toEqual({
+				kind: 'piece',
+				imageId: 7,
+				title: 'Snowfall',
+				published: true
+			});
+			const priv = ledgerDb();
+			const privId = linked(priv.sqlite, 0);
+			expect((await run(priv.platform, `?added=${privId}`)).added).toMatchObject({ published: false });
+		});
+
+		it("counts new variants of the entry's piece", async () => {
+			setLedgerGa('past');
+			const { sqlite, platform } = ledgerDb();
+			const id = linked(sqlite, 1);
+			variant(sqlite, 20, 7, 0);
+			variant(sqlite, 21, 7, 0);
+			expect((await run(platform, `?added=${id}&variants=20,21`)).added).toEqual({
+				kind: 'variants',
+				count: 2,
+				published: false,
+				pieceId: 7,
+				pieceTitle: 'Snowfall'
+			});
+		});
+
+		it('shows nothing for ids that do not check out', async () => {
+			setLedgerGa('past');
+			const { sqlite, platform } = ledgerDb();
+			const id = linked(sqlite, 1);
+			variant(sqlite, 30, 8, 1);
+			const unlinked = seedEntry(sqlite, { title: 'Unlinked' });
+			for (const query of [
+				'',
+				'?added=abc',
+				'?added=999',
+				`?added=${unlinked}`,
+				`?added=${id}&variants=30`,
+				`?added=${id}&variants=999`,
+				`?added=${id}&variants=`,
+				`?added=${id}&variants=1,2,3,4,5,6,7,8,9`
+			]) {
+				expect((await run(platform, query)).added, query).toBeNull();
+			}
+		});
 	});
 });

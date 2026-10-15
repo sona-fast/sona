@@ -3,9 +3,9 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, imageTags, images, siteSettings, tags } from '$lib/server/db/schema';
+import { characters, imageTags, images, siteSettings, tags, commissions } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
 import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
 import { load, actions } from './+page.server';
@@ -33,6 +33,8 @@ function makeDb() {
 			deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, avatar_url TEXT,
 			is_owner INTEGER NOT NULL DEFAULT 0, reference_image_id INTEGER, created_at TEXT NOT NULL DEFAULT ''
 		);
+		-- The variant actions refuse a piece linked to a commission entry (SONA-236).
+		CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, image_id INTEGER);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, image_url TEXT NOT NULL,
 			thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER, md5hash TEXT,
@@ -286,6 +288,26 @@ describe('admin image edit — save action', () => {
 			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: '' }), platform } as never)
 		);
 		expect(await tagNamesOf(db, 5)).toEqual([]);
+	});
+
+	// SONA-236: a piece linked to a commission entry stays a parent, so Add to
+	// gallery never gets a variant as the piece to add variants to.
+	it('refuses to make a piece linked to a commission entry a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await seedImage(db, 9);
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (5)`);
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', parentImageId: '9' }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe(
+			"This piece is linked to a commission entry, so it can't become a variant."
+		);
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(null);
+		// The link stays.
+		expect(await db.select({ imageId: commissions.imageId }).from(commissions)).toEqual([{ imageId: 5 }]);
 	});
 
 	// SONA-18: the other ordering of the same conflict — the guard in the

@@ -1,11 +1,40 @@
 <script lang="ts">
-	import { ClipboardList, Eye, Image as ImageIcon, Pencil, Plus } from 'lucide-svelte';
+	import { CircleCheck, ClipboardList, Eye, ImagePlus, Pencil, Plus } from 'lucide-svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
-	import { isActiveStatus, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
+	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
+	import PieceThumb from '$lib/components/PieceThumb.svelte';
+	import { Announcer } from '$lib/live-announcer.svelte';
+	import { aroundLink, isActiveStatus, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
+
+	// "Added to your gallery" after an upload from an entry. The server built it
+	// from the saved rows; the piece's title is the link inside the sentence.
+	const added = $derived.by(() => {
+		const notice = data.added;
+		if (!notice) return null;
+		const render =
+			notice.kind === 'piece'
+				? (piece: string) =>
+						notice.published
+							? m.admin_commissions_added_piece({ piece })
+							: m.admin_commissions_added_piece_private({ piece })
+				: (piece: string) =>
+						notice.published
+							? m.admin_commissions_added_variants({ count: notice.count, piece })
+							: m.admin_commissions_added_variants_private({ count: notice.count, piece });
+		const title = notice.kind === 'piece' ? notice.title : notice.pieceTitle;
+		const pieceId = notice.kind === 'piece' ? notice.imageId : notice.pieceId;
+		return { parts: aroundLink(render), text: render(title), title, href: `/admin/images/${pieceId}/edit` };
+	});
+
+	// The layout's live region reads the notice out once the page arrives.
+	const announcer = new Announcer();
+	$effect(() => {
+		if (added) announcer.say(added.text);
+	});
 
 	type Entry = (typeof data.entries)[number];
 
@@ -44,6 +73,16 @@
 		</div>
 	{/if}
 </div>
+
+<LiveAnnouncer {announcer} />
+{#if added}
+	<div class="notice ok">
+		<span class="ok-mark"><CircleCheck size={16} aria-hidden="true" /></span>
+		<p>
+			{#if added.parts}{added.parts.before}<a href={added.href}>{added.title}</a>{added.parts.after}{:else}{added.text}{/if}
+		</p>
+	</div>
+{/if}
 
 <CommissionIntro gate={data.gate} empty={data.entries.length === 0} />
 
@@ -113,13 +152,22 @@
 									{#if entry.piece}
 										<td data-label={m.admin_commissions_col_gallery()}>
 											<div class="gallery-cell">
-												<span class="thumb" aria-hidden="true"><ImageIcon size={16} /></span>
+												<PieceThumb src={entry.piece.thumb} />
 												<a href="/admin/images/{entry.piece.id}/edit">{entry.piece.title}</a>
 											</div>
 										</td>
 									{:else if entry.status === 'delivered'}
 										<td data-label={m.admin_commissions_col_gallery()}>
-											<span class="muted">{m.admin_commissions_not_in_gallery()}</span>
+											<div class="not-linked">
+												<span class="muted">{m.admin_commissions_not_in_gallery()}</span>
+												{#if data.gate.open}
+													<a class="btn-compact" href="/admin/upload?commission={entry.id}"
+														><ImagePlus size={14} aria-hidden="true" /> {m.admin_commissions_add_to_gallery()}<span
+															class="sr-only">: {entry.title}</span
+														></a
+													>
+												{/if}
+											</div>
 										</td>
 									{:else}
 										<td class="gallery-none" data-label={m.admin_commissions_col_gallery()}>
@@ -216,11 +264,18 @@
 	.muted { font-size: 12px; color: var(--muted-foreground); }
 	.gallery-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 	.gallery-cell a { min-width: 0; }
-	.thumb {
-		width: 40px; height: 40px; border-radius: var(--radius-xs);
-		background: var(--secondary); color: var(--muted-foreground);
-		display: flex; align-items: center; justify-content: center; flex: none;
+
+	.not-linked { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+
+	.notice {
+		display: flex; align-items: center; gap: 12px; max-width: 720px;
+		background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-s);
+		padding: 12px 16px; margin-bottom: 20px;
 	}
+	/* The notice quotes an owner-typed title, so a long word breaks inside it. */
+	.notice p { font-size: 13px; line-height: 1.55; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+	.notice a { color: var(--foreground); text-decoration: underline; }
+	.ok-mark { color: var(--status-ok); display: inline-flex; }
 
 	.icon-btn {
 		background: none; border: none; color: var(--muted-foreground); cursor: pointer;
@@ -268,5 +323,6 @@
 		.data-table td.col-actions .icon-btn { padding: 8px; }
 		.data-table td.gallery-none { display: none; }
 		.data-table .artist-cell { text-align: right; }
+		.not-linked { align-items: flex-end; }
 	}
 </style>

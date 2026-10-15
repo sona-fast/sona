@@ -1,6 +1,6 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { artists, collections, tags, images, characters, imageCharacters } from '$lib/server/db/schema';
+import { artists, collections, tags, images, characters, imageCharacters, commissions } from '$lib/server/db/schema';
 import { eq, isNull, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
@@ -13,10 +13,27 @@ import {
 } from '$lib/server/image-tags';
 import * as m from '$lib/paraglide/messages';
 import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
+import { parseId } from '$lib/server/commissions';
+import {
+	checkCommissionUpload,
+	deliveredOnFromForm,
+	insertLinkedPiece,
+	loadUploadPrefill
+} from '$lib/server/commission-gallery';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ platform }) => {
+export const load: PageServerLoad = async ({ platform, url }) => {
 	const db = getDb(platform!.env.DB);
+
+	// Add to gallery from a commission entry (SONA-236): the prefill carries only
+	// what loadUploadPrefill allows. An id that names no entry is a dead link.
+	const commissionParam = url.searchParams.get('commission');
+	let prefill = null;
+	if (commissionParam !== null) {
+		const id = parseId(commissionParam);
+		prefill = id === null ? null : await loadUploadPrefill(db, id);
+		if (!prefill) error(404, 'Entry not found');
+	}
 
 	const [allArtists, allCollections, allTags, allCharacters, parentCandidates, lookupKey] =
 		await Promise.all([
@@ -48,8 +65,11 @@ export const load: PageServerLoad = async ({ platform }) => {
 		parentCandidates,
 		maxVariantSet: MAX_VARIANT_SET,
 		// Presence only — the key itself never leaves the server. Without one,
-		// "Look up artist" is not offered at all (SONA-156).
-		lookupEnabled: !!lookupKey,
+		// "Look up artist" is not offered at all (SONA-156). An upload from an
+		// entry doesn't offer it either: the entry already names the artist, and
+		// the lookup sends the image to FuzzySearch.
+		lookupEnabled: !!lookupKey && !prefill,
+		prefill,
 		ownerCharacter: ownerCharacter && {
 			name: ownerCharacter.name,
 			// A designation already exists on some image — checking the box replaces it.
@@ -120,6 +140,8 @@ export const actions = {
 		// with no group target is the classic single upload.
 		const count = Number(data.get('count')) || 1;
 		const existingParentIdRaw = (data.get('existingParentId') as string)?.trim();
+		// Set when the upload comes from a commission entry (Add to gallery).
+		const commissionIdRaw = (data.get('commissionId') as string | null)?.trim() ?? '';
 		const parentIndex = Number(data.get('parentIndex')) || 0;
 
 		if (count < 1 || count > MAX_VARIANT_SET) {
@@ -189,6 +211,20 @@ export const actions = {
 			}
 		}
 
+		// Before anything is written: the entry exists, the gate is open, its
+		// status allows it, and the group target matches the entry.
+		let entry: { id: number; imageId: number | null } | null = null;
+		if (commissionIdRaw) {
+			const check = await checkCommissionUpload(
+				db,
+				platform?.env,
+				commissionIdRaw,
+				existingParent ? existingParent.id : null
+			);
+			if (!check.ok) return fail(check.status, check.data);
+			entry = check.entry;
+		}
+
 		const shared = {
 			artistId: resolvedArtistId,
 			collectionId: collectionId ? Number(collectionId) : null,
@@ -214,26 +250,44 @@ export const actions = {
 			variantTiles = tiles.map((tile, i) => ({ tile, n: offset + i + 1 }));
 		} else {
 			const parentTile = tiles[parentIndex];
-			const parentRow = await db
-				.insert(images)
-				.values({
-					title,
-					slug: await freeSlug(db, slugify(title), usedSlugs),
-					imageUrl: parentTile.imageUrl,
-					width: parentTile.width,
-					height: parentTile.height,
-					fileSize: parentTile.fileSize,
-					nsfw: parentTile.nsfw,
-					...shared
-				})
-				.returning({ id: images.id })
-				.get();
-			parentDbId = parentRow.id;
+			const parentValues = {
+				title,
+				slug: await freeSlug(db, slugify(title), usedSlugs),
+				imageUrl: parentTile.imageUrl,
+				width: parentTile.width,
+				height: parentTile.height,
+				fileSize: parentTile.fileSize,
+				nsfw: parentTile.nsfw,
+				...shared
+			};
+			if (entry) {
+				// One batch inserts the piece and links the entry; a save that lost a
+				// race with another inserts nothing.
+				const linkedId = await insertLinkedPiece(
+					db,
+					entry.id,
+					parentValues,
+					deliveredOnFromForm(data.get('commissionDeliveredOn'))
+				);
+				if (linkedId === null) {
+					const now = await db
+						.select({ imageId: commissions.imageId })
+						.from(commissions)
+						.where(eq(commissions.id, entry.id))
+						.get();
+					return fail(409, { commission: 'just_added', imageId: now?.imageId ?? null });
+				}
+				parentDbId = linkedId;
+			} else {
+				const parentRow = await db.insert(images).values(parentValues).returning({ id: images.id }).get();
+				parentDbId = parentRow.id;
+			}
 			await attachTagsAndCharacters(db, parentDbId, tagNames, characterIds);
 			variantTiles = tiles.filter((_, i) => i !== parentIndex).map((tile, i) => ({ tile, n: i + 1 }));
 		}
 
 		const baseTitle = existingParent ? existingParent.title : title;
+		const variantIds: number[] = [];
 		for (const { tile, n } of variantTiles) {
 			const variantTitle = sanitizeText(`${baseTitle} (${tile.label || `Variant ${n}`})`, 200);
 			const variantRow = await db
@@ -253,6 +307,7 @@ export const actions = {
 				.returning({ id: images.id })
 				.get();
 			await attachTagsAndCharacters(db, variantRow.id, tagNames, characterIds);
+			variantIds.push(variantRow.id);
 		}
 
 		// Optionally designate the primary (parent) image as the owner character's
@@ -265,6 +320,11 @@ export const actions = {
 			}
 		}
 
+		// From an entry, back to the ledger, whose notice reads what was saved.
+		if (entry) {
+			const variants = existingParent ? `&variants=${variantIds.join(',')}` : '';
+			redirect(302, `/admin/commissions?added=${entry.id}${variants}`);
+		}
 		redirect(302, '/admin/images');
 	}
 } satisfies Actions;

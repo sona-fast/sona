@@ -2,10 +2,11 @@ import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { deleteFile } from '$lib/server/storage';
-import { images, artists, imageTags, tags, characters } from '$lib/server/db/schema';
+import { images, artists, imageTags, tags, characters, commissions } from '$lib/server/db/schema';
 import { eq, desc, asc, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { variantAssignmentError, REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
+import * as m from '$lib/paraglide/messages';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
@@ -167,6 +168,16 @@ export const actions = {
 			.get();
 		if (owner?.referenceImageId != null && childIds.includes(owner.referenceImageId))
 			return fail(400, { error: REFERENCE_BECOMES_VARIANT_ERROR });
+
+		// A piece linked to a commission entry stays a parent (SONA-236). Binds one
+		// parameter per selected image, as the lookups above do.
+		const linked = await db
+			.select({ title: images.title })
+			.from(commissions)
+			.innerJoin(images, eq(commissions.imageId, images.id))
+			.where(inArray(commissions.imageId, childIds))
+			.get();
+		if (linked) return fail(400, { error: m.admin_images_group_linked({ title: linked.title }) });
 
 		await db.update(images).set({ parentImageId: parentId }).where(inArray(images.id, childIds));
 
