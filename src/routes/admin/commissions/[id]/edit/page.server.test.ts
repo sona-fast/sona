@@ -220,8 +220,31 @@ describe('save action', () => {
 			const result = await save(platform, String(id), saveForm(overrides));
 			expect(result.status, JSON.stringify(overrides)).toBe(400);
 			expect(result.data.values, JSON.stringify(overrides)).toMatchObject({ title: 'Ref sheet update' });
+			expect(result.data.version, JSON.stringify(overrides)).toBe(VERSION);
 		}
 		expect(ledgerSnapshot(sqlite)).toEqual(before);
+	});
+
+	it('a save fixed after a 400 is refused as stale when another tab saved in between', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		const id = seedEntry(sqlite, { title: 'Original' });
+
+		const refused = await save(platform, String(id), saveForm({ title: 'From this tab', price: '45.5', currency: 'JPY' }));
+		expect(refused.status).toBe(400);
+		// The version this form loaded with, not one read after the refusal.
+		expect(refused.data.version).toBe(VERSION);
+		// Another tab saves while this one fixes the price.
+		expect((await save(platform, String(id), saveForm({ title: 'From the other tab' }))).status).toBe('redirected');
+
+		// The form resubmits with the version the 400 handed back.
+		const resubmit = await save(
+			platform,
+			String(id),
+			saveForm({ version: refused.data.version as string, title: 'From this tab', price: '45', currency: 'JPY' })
+		);
+		expect(resubmit.status).toBe(409);
+		expect(rows(sqlite, 'SELECT title FROM commissions')).toEqual([{ title: 'From the other tab' }]);
 	});
 
 	it('404s a non-numeric id and an entry that is gone', async () => {

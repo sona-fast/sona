@@ -36,15 +36,18 @@ export const actions = {
 		if (!(await commissionLedgerEnabled(db, platform?.env))) return fail(403, { gated: true });
 
 		const data = await request.formData();
+		const version = data.get('version');
+		// A refusal sends back what was typed, so a save without JavaScript keeps
+		// it, and the version it was sent with: the reloaded entry's own would let
+		// the next Save overwrite a change made since the form loaded.
+		const sent = () => ({ values: submittedValues(data), version: typeof version === 'string' ? version : '' });
 		const parsed = parseCommissionForm(data);
-		// A refusal sends back what was typed, so a save without JavaScript keeps it.
-		if (!parsed.ok) return fail(400, { errors: parsed.errors, values: submittedValues(data) });
+		if (!parsed.ok) return fail(400, { errors: parsed.errors, ...sent() });
 		const refErrors = await checkCommissionRefs(db, parsed.input);
-		if (Object.keys(refErrors).length > 0) return fail(400, { errors: refErrors, values: submittedValues(data) });
+		if (Object.keys(refErrors).length > 0) return fail(400, { errors: refErrors, ...sent() });
 
 		// A save without the version the form loaded with can't prove it isn't
 		// stale, so it's refused the same way.
-		const version = data.get('version');
 		const result =
 			typeof version === 'string' && version
 				? await updateCommission(db, id, parsed.input, version)
@@ -52,13 +55,7 @@ export const actions = {
 		if (result === 'stale') {
 			// Stale, or deleted since the form loaded: both leave nothing to save.
 			if (!(await loadCommission(db, id))) return fail(404, { missing: true });
-			// The version goes back with the typing: the reloaded entry's own would
-			// let a second Save overwrite the change this one was refused over.
-			return fail(409, {
-				stale: true,
-				values: submittedValues(data),
-				version: typeof version === 'string' ? version : ''
-			});
+			return fail(409, { stale: true, ...sent() });
 		}
 		redirect(303, '/admin/commissions');
 	},
