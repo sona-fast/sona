@@ -11,6 +11,7 @@ import { sanitizeUrl, stripControlChars } from './validate';
 import { SOCIAL_KEY_TO_PLATFORM, normalizeHandle } from '../handle-classify';
 import {
 	RESERVED_SEGMENTS,
+	deviantArtUserSubdomain,
 	extractHandle,
 	platformDomains,
 	type Platform,
@@ -65,9 +66,28 @@ export function findLocalArtistsByHandle<T extends Record<string, unknown>>(
 ): T[] {
 	const wanted = new Set(handles.map((h) => normalizeHandle(platform, h)).filter((h) => h !== ''));
 	if (wanted.size === 0) return [];
-	return rows.filter((row) =>
-		socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm))
+	return rows.filter(
+		(row) =>
+			socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm)) ||
+			(platform === 'deviantart' && wanted.has(legacyDeviantArtHandle(row.deviantArtUrl) ?? ''))
 	);
+}
+
+/**
+ * The user in a stored legacy DeviantArt link, https://<user>.deviantart.com/,
+ * case-folded. normalizeHandle reads that host as the handle
+ * "<user>.deviantart.com", and changing it would change registry matching on
+ * every fork, so only this lookup reads the legacy form.
+ */
+function legacyDeviantArtHandle(stored: unknown): string | null {
+	if (typeof stored !== 'string' || !stored.trim()) return null;
+	const text = stored.trim();
+	try {
+		const url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text.replace(/^\/\//, '')}`);
+		return deviantArtUserSubdomain(url.hostname)?.toLowerCase() ?? null;
+	} catch {
+		return null;
+	}
 }
 
 /** Canonical profile-URL prefix, used to build a URL from a bare handle. */

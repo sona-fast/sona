@@ -287,3 +287,25 @@ describe('findLocalArtistsByHandle (SONA-236 paste a link)', () => {
 		expect(findLocalArtistsByHandle(rows, 'twitter', [''])).toEqual([]);
 	});
 });
+
+describe('findLocalArtistsByHandle: a stored legacy DeviantArt link (SONA-236)', () => {
+	const rows = [
+		{ id: 1, name: 'Legacy', deviantArtUrl: 'https://SomeUser.deviantart.com/' },
+		{ id: 2, name: 'Current', deviantArtUrl: 'https://www.deviantart.com/other' },
+		{ id: 3, name: 'Service host', deviantArtUrl: 'https://backend.deviantart.com/' }
+	];
+
+	it('matches the user in the legacy host, from either link shape', () => {
+		// The handle a legacy link and a www link both parse to.
+		expect(findLocalArtistsByHandle(rows, 'deviantart', ['someuser']).map((r) => r.id)).toEqual([1]);
+		expect(findLocalArtistsByHandle(rows, 'deviantart', ['other']).map((r) => r.id)).toEqual([2]);
+	});
+
+	it("doesn't read DeviantArt's own hosts as a user", () => {
+		expect(findLocalArtistsByHandle(rows, 'deviantart', ['backend'])).toEqual([]);
+	});
+
+	it('leaves the shared normalizer as registry matching knows it', () => {
+		expect(normalizeHandle('deviantart', 'https://someuser.deviantart.com/')).toBe('someuser.deviantart.com');
+	});
+});

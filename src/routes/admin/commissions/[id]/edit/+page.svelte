@@ -9,6 +9,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { commissionDateRows, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
 	import * as m from '$lib/paraglide/messages';
+	import type { Snapshot } from './$types';
 
 	let { data, form } = $props();
 
@@ -28,6 +29,17 @@
 				})
 			: m.admin_commissions_delete_message({ title: entry.title, artist: entry.artistName })
 	);
+
+	// The draft survives following a link off the page (the lookup's "Artists
+	// page") and coming back with the browser's Back button.
+	let commissionForm = $state<ReturnType<typeof CommissionForm>>();
+	type Draft = ReturnType<ReturnType<typeof CommissionForm>['captureDraft']>;
+	export const snapshot: Snapshot<Draft | undefined> = {
+		capture: () => commissionForm?.captureDraft(),
+		restore: (draft) => {
+			if (draft) commissionForm?.restoreDraft(draft);
+		}
+	};
 </script>
 
 {#snippet deleteButton()}
@@ -50,6 +62,7 @@
 
 {#if data.gate.open}
 	<CommissionForm
+		bind:this={commissionForm}
 		artists={data.artists}
 		characters={data.characters}
 		{entry}

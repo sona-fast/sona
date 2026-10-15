@@ -145,6 +145,8 @@
 		// The reloaded entry has its own link; the last lookup was about another.
 		lookup = { kind: 'idle' };
 		lookedUp = '';
+		lookupSeq++;
+		autoPicked = null;
 		announcer.say(
 			merged.restoredNote ? m.admin_commissions_reloaded_announce_note() : m.admin_commissions_reloaded_announce()
 		);
@@ -165,9 +167,20 @@
 	let lookup = $state<LinkLookup>({ kind: 'idle' });
 	// The link last sent, so a blur after a paste doesn't ask twice.
 	let lookedUp = '';
+	// Which request is current: an answer to any earlier one is stale.
+	let lookupSeq = 0;
+	// The artist the lookup picked by itself, while the owner hasn't picked one.
+	// A later link's match may replace it; it never replaces the owner's pick.
+	let autoPicked: string | null = null;
+
+	/** The owner chose an artist, from a Use button or the select. */
+	function ownerPicked() {
+		autoPicked = null;
+	}
 
 	function useArtist(artist: ArtistChoice) {
 		values.artistId = String(artist.id);
+		ownerPicked();
 		announcer.say(m.admin_commissions_link_using_announce({ name: artist.name }));
 	}
 
@@ -176,10 +189,12 @@
 		if (!link) {
 			lookup = { kind: 'idle' };
 			lookedUp = '';
+			lookupSeq++;
 			return;
 		}
 		if (link === lookedUp) return;
 		lookedUp = link;
+		const seq = ++lookupSeq;
 		lookup = { kind: 'searching' };
 		let next: LinkLookup;
 		try {
@@ -195,19 +210,42 @@
 		} catch {
 			next = { kind: 'refused', reason: 'failed' };
 		}
-		// The owner changed the link while this one was out: its answer is stale.
-		if (link !== lookedUp) return;
+		// A newer lookup went out, or the owner has changed the field since: this
+		// answer is about a link that's no longer there.
+		if (seq !== lookupSeq || values.sourceUrl.trim() !== link) return;
 		lookup = next;
 		// A lookup that didn't get through can be tried again with the same link.
 		if (next.kind === 'refused' && next.reason === 'failed') lookedUp = '';
-		// One artist holds this handle and none is chosen yet: that's the artist.
-		// A choice the owner already made stays theirs to change, and several
-		// matches, or a name that only looks the same, wait for them to pick.
+		// One artist holds this handle: that's the artist, unless the owner has
+		// already chosen one. Several, or a name that only looks the same, wait
+		// for the owner.
 		const single = next.kind === 'found' && next.matches.length === 1 ? next.matches[0] : null;
-		const pick = single && !values.artistId ? single : null;
-		if (pick) values.artistId = String(pick.id);
-		const sentences = [lookupOutcome(next), pick ? m.admin_commissions_link_using_announce({ name: pick.name }) : ''];
-		announcer.say(sentences.filter(Boolean).join(getLocale() === 'ja' ? '' : ' '));
+		const outcome = lookupOutcome(next);
+		if (single && (!values.artistId || values.artistId === autoPicked)) {
+			values.artistId = autoPicked = String(single.id);
+			const using = m.admin_commissions_link_using_announce({ name: single.name });
+			announcer.say(`${outcome}${getLocale() === 'ja' ? '' : ' '}${using}`);
+		} else {
+			announcer.say(outcome);
+		}
+	}
+
+	/** The form as typed, and the lookup beside it, for the page's snapshot:
+	 * following the Artists page link and coming back keeps the draft. */
+	export function captureDraft() {
+		return {
+			values: $state.snapshot(values),
+			lookup: $state.snapshot(lookup),
+			lookedUp,
+			autoPicked
+		};
+	}
+
+	export function restoreDraft(draft: ReturnType<typeof captureDraft>) {
+		values = draft.values;
+		lookup = draft.lookup.kind === 'searching' ? { kind: 'idle' } : draft.lookup;
+		lookedUp = draft.lookup.kind === 'searching' ? '' : draft.lookedUp;
+		autoPicked = draft.autoPicked;
 	}
 
 	/** The sentence that says how a lookup went, shown and read out. */
@@ -463,14 +501,23 @@
 			<div class="lookup"><p class="hint">{m.admin_commissions_link_searching()}</p></div>
 		{:else if lookup.kind === 'found'}
 			{@const found = lookup}
+			<!-- Once the owner takes a suggestion, "isn't in your list yet" and the
+			     Artists page hint would contradict the choice beside them. -->
+			{@const suggestionTaken =
+				found.matches.length === 0 && found.nameMatches.some((a) => String(a.id) === values.artistId)}
 			<div class="lookup">
 				<p class="lookup-line">
 					<span class="platform">{SOCIAL_PLATFORM_NAMES[found.platform]}</span>
 					<span class="handle">{found.handle}</span>
 				</p>
-				<p class="outcome">
-					{#if found.matches.length === 1}<Check size={14} aria-hidden="true" />{/if}<span>{lookupOutcome(found)}</span>
-				</p>
+				{#if !suggestionTaken}
+					<p class="outcome">
+						{#if found.matches.length === 1 && values.artistId === String(found.matches[0].id)}<Check
+								size={14}
+								aria-hidden="true"
+							/>{/if}<span>{lookupOutcome(found)}</span>
+					</p>
+				{/if}
 				{#each found.matches as artist (artist.id)}
 					{@render choice(artist, found.matches.length > 1)}
 				{/each}
@@ -479,7 +526,7 @@
 						<p class="callout">{m.admin_commissions_link_maybe({ handle: found.handle, name: artist.name })}</p>
 						{@render choice(artist, false)}
 					{/each}
-					{@render addArtistHint()}
+					{#if !suggestionTaken}{@render addArtistHint()}{/if}
 				{/if}
 			</div>
 		{/if}
@@ -491,6 +538,7 @@
 				name="artistId"
 				required
 				bind:value={values.artistId}
+				onchange={ownerPicked}
 				aria-invalid={errors.artistId ? 'true' : undefined}
 				aria-describedby={describedBy('artistId', artists.length === 0 ? 'ce-no-artists' : '')}
 			>

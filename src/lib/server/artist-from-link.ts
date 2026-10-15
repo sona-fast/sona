@@ -1,5 +1,11 @@
 import { socialHandle } from '$lib/social-label';
-import { HOST_PREFIXES, platformDomain, type Platform } from '$lib/social-platforms';
+import {
+	DEVIANTART_SERVICE_SUBDOMAINS,
+	HOST_PREFIXES,
+	deviantArtUserSubdomain,
+	platformDomain,
+	type Platform
+} from '$lib/social-platforms';
 import { normalizeSocialUrl } from './handle-normalize';
 import { stripControlChars } from './validate';
 
@@ -51,7 +57,12 @@ export function parseArtistLink(raw: string): ParsedLink {
 	const platform = PLATFORMS.find((p) => platformDomain(p, url.hostname) !== null);
 	if (!platform) return { ok: false, reason: 'unsupported' };
 
-	const handle = deviantArtSubdomain(url.hostname) ?? socialHandle(platform, url.href);
+	// DeviantArt: a legacy <user>.deviantart.com link names its user in the
+	// host, and its path is a section of that user's page. Of DeviantArt's own
+	// subdomains only www. and m. serve profiles at /<user>; the rest (backend.,
+	// comments., forum.) have no account in the path.
+	if (platform === 'deviantart' && isDeviantArtServiceHost(url.hostname)) return { ok: false, reason: 'no_handle' };
+	const handle = deviantArtUserSubdomain(url.hostname) ?? socialHandle(platform, url.href);
 	if (!handle) return { ok: false, reason: 'no_handle' };
 	// A handle a profile link can't be built from, such as a Bluesky DID, names
 	// no account the owner could have stored, so it's no handle here.
@@ -60,13 +71,9 @@ export function parseArtistLink(raw: string): ParsedLink {
 	return { ok: true, platform, handle, profileUrl };
 }
 
-/**
- * The account in a legacy DeviantArt link, <user>.deviantart.com/art/… or
- * /gallery: the subdomain is the user, and the path's first segment ("art",
- * "gallery") is a section of their page, not a name. Null for any other host.
- */
-function deviantArtSubdomain(hostname: string): string | null {
-	const match = /^([a-z0-9-]+)\.deviantart\.com$/i.exec(hostname);
-	if (!match || match[1].toLowerCase() === 'www') return null;
-	return match[1];
+/** A DeviantArt subdomain of its own that serves no profiles. */
+function isDeviantArtServiceHost(hostname: string): boolean {
+	const sub = /^([a-z0-9-]+)\.deviantart\.com$/i.exec(hostname)?.[1]?.toLowerCase();
+	return !!sub && sub !== 'www' && sub !== 'm' && DEVIANTART_SERVICE_SUBDOMAINS.includes(sub);
 }
+

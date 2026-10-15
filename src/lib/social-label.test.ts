@@ -468,3 +468,15 @@ describe('a private Telegram channel link (SONA-236)', () => {
 		expect(socialHandle('telegram', 'https://t.me/artist_a/412')).toBe('artist_a');
 	});
 });
+
+describe('DeviantArt section links (SONA-236)', () => {
+	// A profile is www.deviantart.com/<user>; these paths are parts of the site.
+	it('render no handle, and label as the platform', () => {
+		for (const path of ['stash/0abc', 'users/login', 'watch', 'groups/foo', 'settings']) {
+			const url = `https://www.deviantart.com/${path}`;
+			expect(socialHandle('deviantart', url), url).toBeNull();
+			expect(socialLabel('deviantart', url), url).toBe('DeviantArt');
+		}
+		expect(socialHandle('deviantart', 'https://www.deviantart.com/someuser')).toBe('someuser');
+	});
+});

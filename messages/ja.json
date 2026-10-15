@@ -1843,7 +1843,7 @@
 	"admin_upload_commission_back_to_entry": "エントリーに戻る",
 	"admin_commissions_link_searching": "アーティストを探しています…",
 	"admin_commissions_link_found": "{handle}は「{name}」としてアーティスト一覧にすでにあります。",
-	"admin_commissions_link_found_several": "{handle}はアーティスト一覧に複数登録されています。1人選んでください。",
+	"admin_commissions_link_found_several": "{handle}はアーティスト一覧に複数あります。1人選んでください。",
 	"admin_commissions_link_not_found": "{handle}はまだアーティスト一覧にありません。",
 	"admin_commissions_link_maybe": "{handle}は「{name}」として一覧にすでにあるかもしれません。",
 	"admin_commissions_link_add_pre": "",

@@ -105,3 +105,37 @@ describe('parseArtistLink: older link shapes', () => {
 		expect(parseArtistLink('https://www.furaffinity.net/gallery/someuser/')).toEqual({ ok: false, reason: 'no_handle' });
 	});
 });
+
+describe('parseArtistLink: DeviantArt hosts and sections', () => {
+	it("reads a profile on DeviantArt's mobile host from the path", () => {
+		expect(parseArtistLink('https://m.deviantart.com/someuser')).toMatchObject({ ok: true, handle: 'someuser' });
+	});
+
+	it("reads DeviantArt's own service hosts as no handle, not as a user", () => {
+		for (const link of [
+			'https://backend.deviantart.com/oembed?url=https://www.deviantart.com/someuser/art/x',
+			'https://comments.deviantart.com/1/12345/6789',
+			'https://forum.deviantart.com/community/general/'
+		]) {
+			expect(parseArtistLink(link), link).toEqual({ ok: false, reason: 'no_handle' });
+		}
+	});
+
+	it('reads section paths on www.deviantart.com as no handle', () => {
+		for (const section of [
+			'stash/0abc123',
+			'users/login',
+			'watch',
+			'notifications',
+			'groups/foo',
+			'comments/1/2/3',
+			'download/123/x',
+			'view/12345',
+			'settings',
+			'oembed?url=x'
+		]) {
+			const link = `https://www.deviantart.com/${section}`;
+			expect(parseArtistLink(link), link).toEqual({ ok: false, reason: 'no_handle' });
+		}
+	});
+});

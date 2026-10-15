@@ -214,7 +214,7 @@ for (const [name, answer] of [
 		await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
 		await expect(page.getByLabel('Title')).toHaveValue('E2E kept title');
 		await expect(page.getByLabel('Notes')).toHaveValue('E2E kept note');
-		await settledShot(page, testInfo.outputPath('commission-entry-save-error.png'));
+		await settledShot(page, testInfo.outputPath(`commission-entry-save-error-${name.replaceAll(' ', '-')}.png`));
 	});
 }
 

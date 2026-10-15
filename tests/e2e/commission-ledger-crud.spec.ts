@@ -123,16 +123,26 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	await expect(card.getByText('e2e_artist is already in your artist list as Test Artist.')).toBeVisible();
 	await expect(artist).toHaveValue('1');
 	await expect(card.getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+	const liveRegion = page.locator('[aria-live="polite"]');
+	await expect(
+		liveRegion.filter({ hasText: 'e2e_artist is already in your artist list as Test Artist. Using Test Artist as the artist.' })
+	).toHaveCount(1);
 	await settledShot(page, testInfo.outputPath('commission-link-match.png'));
 	await page.setViewportSize({ width: 390, height: 844 });
 	await settledShot(page, testInfo.outputPath('commission-link-match-390.png'));
 	await page.setViewportSize({ width: 1280, height: 720 });
 
-	// With an artist already chosen, a match is offered, not imposed.
+	// The lookup's own pick gives way to the next link's match.
+	await paste(link, 'https://x.com/solo_artist/status/5');
+	await expect(card.getByText('solo_artist is already in your artist list as Solo Artist.')).toBeVisible();
+	await expect(artist).toHaveValue('53');
+
+	// The owner's own pick doesn't: a match is offered, not imposed.
 	await artist.selectOption({ label: 'Avatar Artist' });
 	await paste(link, 'https://twitter.com/E2E_Artist/status/2');
 	await expect(card.getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 	await expect(artist).toHaveValue('2');
+	await expect(liveRegion.filter({ hasText: 'Using Test Artist as the artist.' })).toHaveCount(0);
 	await card.getByRole('button', { name: 'Use Test Artist' }).click();
 	await expect(artist).toHaveValue('1');
 	await expect(card.getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
@@ -171,11 +181,17 @@ test('a name that only looks like the handle, or a handle two artists share, wai
 	const card = page.locator('.lookup');
 
 	await paste(link, 'https://x.com/name_only_artist/status/1');
-	await expect(card.getByText('name_only_artist may already be in your list as name_only_artist.')).toBeVisible();
+	await expect(card.getByText('name_only_artist may already be in your artist list as name_only_artist.')).toBeVisible();
 	await expect(artist).toHaveValue('');
+	await expect(card.getByText("name_only_artist isn't in your artist list yet.")).toBeVisible();
 	await card.getByRole('button', { name: 'Use name_only_artist' }).click();
 	await expect(artist).toHaveValue('50');
 	await expect(card.getByRole('button', { name: 'Using name_only_artist' })).toBeVisible();
+	// Taken, the suggestion isn't contradicted: no "isn't in your list" line and
+	// no pointer to the Artists page beside it.
+	await expect(card.getByText('name_only_artist may already be in your artist list as name_only_artist.')).toBeVisible();
+	await expect(card.getByText("name_only_artist isn't in your artist list yet.")).toHaveCount(0);
+	await expect(card.getByRole('link', { name: 'Artists page' })).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-link-name-only.png'));
 
 	await artist.selectOption('');
@@ -223,8 +239,13 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 	await paste(link, 'https://x.com/e2e_artist/status/1');
 	await paste(link, 'https://x.com/nobody_here/status/9');
 	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	const staleAnswer = page.waitForResponse(
+		(r) => r.url().endsWith('/api/admin/artist-from-link') && !!r.request().postData()?.includes('e2e_artist')
+	);
 	release();
-	await page.waitForTimeout(1000);
+	await staleAnswer;
+	// Past the response, the page has had its chance to apply it.
+	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
 	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
 	await expect(page.getByText('e2e_artist is already in your artist list as Test Artist.')).toHaveCount(0);
 	await expect(artist).toHaveValue('');
@@ -247,6 +268,24 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 	await paste(link, 'https://x.com/e2e_artist/status/3');
 	await expect(card.getByText('e2e_artist is already in your artist list as Test Artist.')).toBeVisible();
 	expect(lookups.count - before).toBe(2);
+});
+
+test('the draft survives a trip to the Artists page and back', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByLabel('Link to where you asked');
+	await page.getByLabel('Title').fill('E2E draft title');
+	await paste(link, 'https://x.com/nobody_here/status/11');
+	const card = page.locator('.lookup');
+	await card.getByRole('link', { name: 'Artists page' }).click();
+	await expect(page).toHaveURL(/\/admin\/artists$/);
+
+	await page.goBack();
+	await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
+	await expect(page.getByLabel('Title')).toHaveValue('E2E draft title');
+	await expect(link).toHaveValue('https://x.com/nobody_here/status/11');
+	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	await settledShot(page, testInfo.outputPath('commission-link-draft-restored.png'));
 });
 
 test('moving the entry to Delivered lists it under Finished', async ({ page }, testInfo) => {
@@ -582,6 +621,34 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 	await page.getByRole('button', { name: 'Save changes' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
 	await expect(section(page, 'Finished').getByRole('row', { name: /renamed/ })).toBeVisible();
+});
+
+test('Reload entry clears the last lookup, and the same link can be looked up again', async ({ page, context }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	const editUrl = await page.getByRole('link', { name: new RegExp(`^Edit ${TITLE}`) }).getAttribute('href');
+	await open(page, editUrl!);
+	const lookups = countLookups(page);
+
+	// Another tab saves, so this tab's save will be out of date.
+	const other = await context.newPage();
+	await open(other, editUrl!);
+	await other.getByRole('button', { name: 'Save changes' }).click();
+	await expect(other).toHaveURL(/\/admin\/commissions$/);
+	await other.close();
+
+	const link = page.getByLabel('Link to where you asked');
+	await paste(link, 'https://x.com/nobody_here/status/12');
+	await expect(page.locator('.lookup').getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await page.getByRole('button', { name: 'Reload entry' }).click();
+	await expect(page.locator('.lookup')).toHaveCount(0);
+	await expect(page.locator('#ce-link-msg')).toHaveCount(0);
+
+	const before = lookups.count;
+	await paste(link, 'https://x.com/nobody_here/status/12');
+	await expect(page.locator('.lookup').getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	expect(lookups.count - before).toBe(1);
 });
 
 test('an entry deleted elsewhere: save says so, and delete counts as done', async ({ page }, testInfo) => {

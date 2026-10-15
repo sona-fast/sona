@@ -61,6 +61,15 @@ describe('POST /api/admin/artist-from-link', () => {
 		expect(body).toMatchObject({ ok: true, handle: 'artist_g', matches: [], nameMatches: [{ id: 4, name: 'artist_g' }] });
 	});
 
+	it('finds an artist stored with a legacy DeviantArt link, from either link shape', async () => {
+		const { sqlite, platform } = ledgerDb();
+		sqlite.prepare("UPDATE artists SET deviantart_url = 'https://someuser.deviantart.com/' WHERE id = 1").run();
+		for (const url of ['https://someuser.deviantart.com/art/Title-123', 'https://www.deviantart.com/someuser/art/Title-123']) {
+			const { body } = await post(platform, { url });
+			expect(body, url).toMatchObject({ ok: true, handle: 'someuser', matches: [{ id: 1, name: 'Artist A' }] });
+		}
+	});
+
 	it('finds nobody for a handle no artist holds', async () => {
 		const { sqlite, platform } = ledgerDb();
 		withSocials(sqlite);

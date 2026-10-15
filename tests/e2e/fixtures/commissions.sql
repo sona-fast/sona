@@ -11,3 +11,7 @@ INSERT INTO artists (id, name, created_at) VALUES (50, 'name_only_artist', '2026
 INSERT INTO artists (id, name, twitter_url, created_at) VALUES
   (51, 'Twin One', 'https://twitter.com/twin_artist', '2026-07-01T00:00:00.000Z'),
   (52, 'Twin Two', 'https://x.com/twin_artist', '2026-07-01T00:00:00.000Z');
+
+-- One more artist with a handle of their own, so a second pasted link can
+-- replace the artist the first link picked.
+INSERT INTO artists (id, name, twitter_url, created_at) VALUES (53, 'Solo Artist', 'https://twitter.com/solo_artist', '2026-07-01T00:00:00.000Z');
