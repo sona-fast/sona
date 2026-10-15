@@ -124,6 +124,9 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	await expect(artist).toHaveValue('1');
 	await expect(card.getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
 	await settledShot(page, testInfo.outputPath('commission-link-match.png'));
+	await page.setViewportSize({ width: 390, height: 844 });
+	await settledShot(page, testInfo.outputPath('commission-link-match-390.png'));
+	await page.setViewportSize({ width: 1280, height: 720 });
 
 	// With an artist already chosen, a match is offered, not imposed.
 	await artist.selectOption({ label: 'Avatar Artist' });

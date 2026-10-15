@@ -261,10 +261,12 @@
 	{/if}
 {/snippet}
 
-{#snippet choice(artist: ArtistChoice)}
+<!-- `named` lists the artist's name beside the button, for when several share
+     a handle. A single match is already named by the line above and the button. -->
+{#snippet choice(artist: ArtistChoice, named: boolean)}
 	{@const using = values.artistId === String(artist.id)}
 	<div class="match">
-		<span class="name">{artist.name}</span>
+		{#if named}<span class="name">{artist.name}</span>{/if}
 		<!-- The label says the state: "Use X" until chosen, then "Using X" with a
 		     check, as in ArtistLookupPanel. -->
 		<button type="button" class="btn-compact" onclick={() => useArtist(artist)}>
@@ -449,15 +451,17 @@
 			/>
 			{@render fieldError('sourceUrl')}
 			<small class="hint" id="ce-link-hint">{m.admin_commissions_hint_link()}</small>
-			{#if lookup.kind === 'searching'}
-				<small class="hint">{m.admin_commissions_link_searching()}</small>
-			{:else if lookup.kind === 'refused'}
+			{#if lookup.kind === 'refused'}
 				<p class="hint hint-warn lookup-msg" id="ce-link-msg">
 					<TriangleAlert size={14} aria-hidden="true" /><span>{lookupOutcome(lookup)}</span>
 				</p>
 			{/if}
 		</div>
-		{#if lookup.kind === 'found'}
+		{#if lookup.kind === 'searching'}
+			<!-- The card's place, held while the answer comes, so the Artist select
+			     below doesn't jump when it arrives. -->
+			<div class="lookup"><p class="hint">{m.admin_commissions_link_searching()}</p></div>
+		{:else if lookup.kind === 'found'}
 			{@const found = lookup}
 			<div class="lookup">
 				<p class="lookup-line">
@@ -468,12 +472,12 @@
 					{#if found.matches.length === 1}<Check size={14} aria-hidden="true" />{/if}<span>{lookupOutcome(found)}</span>
 				</p>
 				{#each found.matches as artist (artist.id)}
-					{@render choice(artist)}
+					{@render choice(artist, found.matches.length > 1)}
 				{/each}
 				{#if found.matches.length === 0}
 					{#each found.nameMatches as artist (artist.id)}
 						<p class="callout">{m.admin_commissions_link_maybe({ handle: found.handle, name: artist.name })}</p>
-						{@render choice(artist)}
+						{@render choice(artist, false)}
 					{/each}
 					{@render addArtistHint()}
 				{/if}
@@ -755,6 +759,7 @@
 	.outcome :global(svg) { flex: none; margin-top: 3px; color: var(--status-ok); }
 	.callout { font-size: 13px; }
 	.match { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+	.match:not(:has(.name)) { justify-content: flex-start; }
 	.match .name { font-size: 14px; font-weight: 500; }
 	.lookup .hint a { color: var(--foreground); text-decoration: underline; }
 	.hint-warn { color: var(--status-warn); }
