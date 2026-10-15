@@ -47,10 +47,15 @@
 	let syncing = $state(false);
 	let connectingRegistry = $state(false);
 	// A refused invite token (registry code invite_used or invite_invalid), shown on the field.
-	let inviteError = $state<'invite_used' | 'invite_invalid' | null>(null);
+	// Without JavaScript the form posts normally and the refusal arrives as `form`;
+	// once an enhanced submit runs or the token changes, that copy no longer applies.
+	type InviteRefusal = 'invite_used' | 'invite_invalid';
+	let inviteError = $state<InviteRefusal | null>(null);
+	let formInviteErrorDismissed = $state(false);
 	let inviteTokenInput = $state<HTMLInputElement | null>(null);
-	// Without JavaScript the form posts normally, so the refusal comes back as `form`.
-	const shownInviteError = $derived(inviteError ?? (form?.inviteError as 'invite_used' | 'invite_invalid' | undefined) ?? null);
+	const shownInviteError = $derived(
+		inviteError ?? (formInviteErrorDismissed ? null : ((form?.inviteError as InviteRefusal | undefined) ?? null))
+	);
 	let primaryCharacter = $state(data.settings.primaryCharacter);
 	let twitterUrl = $state(data.settings.twitterUrl);
 	let blueskyUrl = $state(data.settings.blueskyUrl);
@@ -1400,14 +1405,15 @@
 		</section>
 	</form>
 {:else}
-	<form method="POST" action="?/connectRegistry" class="contents" use:enhance={() => {
+	<form method="POST" action="?tab=connections&/connectRegistry" class="contents" use:enhance={() => {
 		connectingRegistry = true;
 		inviteError = null;
+		formInviteErrorDismissed = true;
 		return async ({ result }) => {
 			connectingRegistry = false;
 			if (result.type === 'success') { toast.success(m.admin_settings_registry_connected_toast()); await invalidateAll(); }
 			else if (result.type === 'failure' && result.data?.inviteError) {
-				inviteError = result.data.inviteError as 'invite_used' | 'invite_invalid';
+				inviteError = result.data.inviteError as InviteRefusal;
 				await tick();
 				inviteTokenInput?.focus();
 			}
@@ -1428,6 +1434,10 @@
 					placeholder={m.admin_settings_invite_token_placeholder()}
 					required
 					bind:this={inviteTokenInput}
+					oninput={() => {
+						inviteError = null;
+						formInviteErrorDismissed = true;
+					}}
 					aria-invalid={shownInviteError ? 'true' : undefined}
 					aria-describedby={shownInviteError ? 'invite-token-error' : undefined}
 				/>
