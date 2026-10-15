@@ -6,9 +6,13 @@ import {
 	COMMISSION_STATUSES,
 	PAYMENT_LABELS,
 	STATUS_LABELS,
+	changedFields,
 	commissionDateRows,
 	datesAfterStatusChange,
+	formValuesOf,
 	formatMinor,
+	mergeReloaded,
+	staleMessage,
 	isActiveStatus,
 	isCalendarDate,
 	localToday,
@@ -111,6 +115,12 @@ describe('parsePrice', () => {
 		}
 	});
 
+	it('refuses a price too large to store exactly, rather than rounding it', () => {
+		// CLF uses four minor digits, so twelve whole digits make a 16-digit integer.
+		expect(parsePrice('999999999999.9999', 'CLF')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice('999999999999.99', 'USD')).toEqual({ ok: true, minor: 99999999999999 });
+	});
+
 	it('refuses a malformed currency code', () => {
 		expect(parsePrice('30', 'XYZ1')).toEqual({ ok: false, reason: 'format' });
 		expect(parsePrice('30', 'usd')).toEqual({ ok: false, reason: 'format' });
@@ -146,5 +156,92 @@ describe('commissionDateRows (SONA-9)', () => {
 
 	it('shows nothing for an entry without dates', () => {
 		expect(commissionDateRows({ requestedOn: null, acceptedOn: null, deliveredOn: null })).toEqual([]);
+	});
+});
+
+const ENTRY = {
+	artistId: 1,
+	title: 'Headshot icon',
+	kind: 'Icon',
+	sourceUrl: 'https://t.me/artist_a/412',
+	characters: [{ id: 1 }, { id: 2 }],
+	status: 'in_progress' as const,
+	payment: 'paid' as const,
+	price: '45.00',
+	currency: 'USD',
+	notes: 'Transparent background.',
+	requestedOn: '2026-09-03',
+	acceptedOn: '2026-09-05',
+	deliveredOn: null
+};
+
+describe('changedFields', () => {
+	const loaded = formValuesOf(ENTRY);
+
+	it('finds nothing when nothing changed, or only the note did', () => {
+		expect(changedFields(loaded, { ...loaded })).toEqual([]);
+		expect(changedFields(loaded, { ...loaded, notes: 'New note' })).toEqual([]);
+	});
+
+	it('names the fields besides Notes, in form order', () => {
+		expect(changedFields(loaded, { ...loaded, price: '50.00', notes: 'x', status: 'delivered' })).toEqual([
+			'status',
+			'price'
+		]);
+	});
+
+	it('compares characters as a set', () => {
+		expect(changedFields(loaded, { ...loaded, characterIds: [2, 1] })).toEqual([]);
+		expect(changedFields(loaded, { ...loaded, characterIds: [2] })).toEqual(['characterIds']);
+	});
+});
+
+describe('staleMessage', () => {
+	const loaded = formValuesOf(ENTRY);
+	const head = "This entry wasn't saved because it changed after you opened it. Select Reload entry to get the latest version.";
+
+	it('says only what happened when nothing was changed', () => {
+		expect(staleMessage(loaded, { ...loaded }, 'en')).toBe(head);
+	});
+
+	it('says the note comes along when only the note changed', () => {
+		expect(staleMessage(loaded, { ...loaded, notes: 'New' }, 'en')).toBe(`${head} Your note comes with it.`);
+	});
+
+	it('names the other fields the reload drops', () => {
+		expect(staleMessage(loaded, { ...loaded, notes: 'New', title: 'T', price: '1' }, 'en')).toBe(
+			`${head} Your note comes with it, but your changes to Title and Price don't, so enter those again.`
+		);
+		expect(staleMessage(loaded, { ...loaded, sourceUrl: '' }, 'en')).toBe(
+			`${head} Reloading doesn't keep your changes to Link, so enter those again.`
+		);
+	});
+
+	it('runs the Japanese sentences together, with no space between them', () => {
+		const ja = staleMessage(loaded, { ...loaded, notes: 'New' }, 'ja');
+		expect(ja).toBe('このエントリーは開いた後に変更されたため、保存されませんでした。「エントリーを再読み込み」を選ぶと最新の内容を取得できます。メモはそのまま引き継がれます。');
+	});
+});
+
+describe('mergeReloaded', () => {
+	const loadedNote = 'Transparent background.';
+	const fresh = formValuesOf({ ...ENTRY, status: 'delivered', deliveredOn: '2026-10-12' });
+
+	it('takes the current entry as is when the owner left the note alone', () => {
+		expect(mergeReloaded(fresh, loadedNote, loadedNote)).toEqual({ values: fresh, restoredNote: '' });
+	});
+
+	it('puts the typed note back over the current entry', () => {
+		const { values, restoredNote } = mergeReloaded(fresh, loadedNote, 'Artist posted it, so I can share it.');
+		expect(values).toEqual({ ...fresh, notes: 'Artist posted it, so I can share it.' });
+		expect(restoredNote).toBe('kept');
+	});
+
+	it("says 'replaces' when the other change also edited the note", () => {
+		const edited = { ...fresh, notes: 'Edited elsewhere.' };
+		const { values, restoredNote } = mergeReloaded(edited, loadedNote, 'Typed here.');
+		expect(values.notes).toBe('Typed here.');
+		expect(values.status).toBe('delivered');
+		expect(restoredNote).toBe('replaces');
 	});
 });

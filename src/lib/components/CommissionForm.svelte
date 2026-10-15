@@ -9,12 +9,18 @@
 	import {
 		COMMISSION_PAYMENTS,
 		COMMISSION_STATUSES,
+		KIND_MAX,
+		NOTES_MAX,
 		PAYMENT_LABELS,
 		STATUS_LABELS,
+		TITLE_MAX,
 		datesAfterStatusChange,
+		formValuesOf,
 		localToday,
-		type CommissionPayment,
-		type CommissionStatus
+		mergeReloaded,
+		staleMessage,
+		type CommissionField,
+		type CommissionFormEntry
 	} from '$lib/commissions';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
@@ -22,24 +28,11 @@
 	/** The entry as the edit page loads it. `version` is the row's updated_at:
 	 * the save sends it back so the server can refuse an out-of-date form. It is
 	 * never shown. */
-	interface EntryInit {
-		artistId: number;
-		title: string;
-		kind: string | null;
-		sourceUrl: string | null;
-		characters: { id: number }[];
-		status: CommissionStatus;
-		payment: CommissionPayment;
-		price: string;
-		currency: string | null;
-		notes: string | null;
-		requestedOn: string | null;
-		acceptedOn: string | null;
-		deliveredOn: string | null;
+	interface EntryInit extends CommissionFormEntry {
 		version: string;
 	}
 	interface FailureData {
-		errors?: Partial<Record<Field, string>>;
+		errors?: Partial<Record<CommissionField, string>>;
 		gated?: boolean;
 		stale?: boolean;
 	}
@@ -57,66 +50,18 @@
 
 	let { artists, characters, entry = null, form = null, gaDate, extraActions }: Props = $props();
 
-	type Field =
-		| 'artistId'
-		| 'title'
-		| 'kind'
-		| 'sourceUrl'
-		| 'characterIds'
-		| 'status'
-		| 'payment'
-		| 'price'
-		| 'currency'
-		| 'notes'
-		| 'requestedOn'
-		| 'acceptedOn'
-		| 'deliveredOn';
-
 	// The page never swaps a create form into an edit form, so the first value holds.
 	// svelte-ignore state_referenced_locally
 	const isEdit = entry !== null;
 
-	interface Values {
-		artistId: string;
-		title: string;
-		kind: string;
-		sourceUrl: string;
-		characterIds: number[];
-		status: CommissionStatus;
-		payment: CommissionPayment;
-		price: string;
-		currency: string;
-		notes: string;
-		requestedOn: string;
-		acceptedOn: string;
-		deliveredOn: string;
-	}
-	function valuesOf(e: EntryInit | null): Values {
-		return {
-			artistId: e ? String(e.artistId) : '',
-			title: e?.title ?? '',
-			kind: e?.kind ?? '',
-			sourceUrl: e?.sourceUrl ?? '',
-			characterIds: e ? e.characters.map((c) => c.id) : [],
-			status: e?.status ?? 'applied',
-			payment: e?.payment ?? 'unpaid',
-			price: e?.price ?? '',
-			currency: e?.currency ?? '',
-			notes: e?.notes ?? '',
-			requestedOn: e?.requestedOn ?? '',
-			acceptedOn: e?.acceptedOn ?? '',
-			deliveredOn: e?.deliveredOn ?? ''
-		};
-	}
-
 	// What the form opened with, for naming what the owner changed when a save
 	// is refused as out of date. Replaced on Reload entry.
 	// svelte-ignore state_referenced_locally
-	let loaded = $state(valuesOf(entry));
+	let loaded = $state(formValuesOf(entry));
 	// svelte-ignore state_referenced_locally
 	let version = $state(entry?.version ?? '');
 	// svelte-ignore state_referenced_locally
-	let values = $state(valuesOf(entry));
+	let values = $state(formValuesOf(entry));
 
 	let saving = $state(false);
 	// The refusal on screen. Cleared when a new save starts or the entry reloads,
@@ -126,6 +71,9 @@
 		failure = form ?? null;
 	});
 	const errors = $derived(failure?.errors ?? {});
+	// The out-of-date refusal's text, fixed when the refusal arrives so the alert
+	// doesn't change under a screen reader while the owner keeps typing.
+	let staleText = $state('');
 	// After Reload entry put an unsaved note back: which hint Notes shows.
 	let restoredNote = $state<'' | 'kept' | 'replaces'>('');
 
@@ -134,6 +82,7 @@
 	let gateBox = $state<HTMLElement>();
 	let notesInput = $state<HTMLTextAreaElement>();
 	let titleInput = $state<HTMLInputElement>();
+	let saveButton = $state<HTMLButtonElement>();
 
 	// Moving to Accepted or Delivered fills that step's empty date with today
 	// (open question Q17, built as drawn). The owner can change or clear it.
@@ -150,71 +99,25 @@
 			: [...values.characterIds, id];
 	}
 
-	// Field labels for the out-of-date message, as static references.
-	const FIELD_LABELS: Record<Exclude<Field, 'notes'>, () => string> = {
-		artistId: m.admin_commissions_field_artist,
-		title: m.admin_commissions_field_title,
-		kind: m.admin_commissions_field_kind,
-		sourceUrl: m.admin_commissions_field_link,
-		characterIds: m.admin_commissions_field_characters,
-		status: m.admin_commissions_field_status,
-		payment: m.admin_commissions_field_payment,
-		price: m.admin_commissions_field_price,
-		currency: m.admin_commissions_field_currency,
-		requestedOn: m.admin_commissions_field_requested,
-		acceptedOn: m.admin_commissions_field_accepted,
-		deliveredOn: m.admin_commissions_field_delivered
-	};
-
-	/** The fields besides Notes that the owner changed since the form loaded. */
-	function changedFields(): string[] {
-		return (Object.keys(FIELD_LABELS) as (keyof typeof FIELD_LABELS)[])
-			.filter((field) => {
-				const now = values[field];
-				const then = loaded[field];
-				return Array.isArray(now) && Array.isArray(then)
-					? [...now].sort().join() !== [...then].sort().join()
-					: now !== then;
-			})
-			.map((field) => FIELD_LABELS[field]());
-	}
-
-	const noteChanged = $derived(values.notes !== loaded.notes);
-	const staleDetail = $derived.by(() => {
-		if (!failure?.stale) return '';
-		const changed = changedFields();
-		const fields = new Intl.ListFormat(getLocale(), { type: 'conjunction' }).format(changed);
-		if (noteChanged) {
-			return changed.length > 0
-				? m.admin_commissions_stale_note_and_fields({ fields })
-				: m.admin_commissions_stale_note();
-		}
-		return changed.length > 0 ? m.admin_commissions_stale_fields({ fields }) : '';
-	});
-
 	/** Loads the entry as it is now, and puts the unsaved note back in Notes. */
 	async function reloadEntry() {
 		const typedNote = values.notes;
-		const ownerChangedNote = noteChanged;
-		const noteBefore = loaded.notes;
+		const loadedNote = loaded.notes;
 		await invalidateAll();
 		// The page passes the reloaded entry back in through `entry`.
-		const fresh = valuesOf(entry);
+		const fresh = formValuesOf(entry);
+		const merged = mergeReloaded(fresh, loadedNote, typedNote);
 		loaded = fresh;
 		version = entry?.version ?? '';
-		values = { ...fresh, notes: ownerChangedNote ? typedNote : fresh.notes };
+		values = merged.values;
+		restoredNote = merged.restoredNote;
 		failure = null;
-		if (ownerChangedNote) {
-			restoredNote = fresh.notes !== noteBefore ? 'replaces' : 'kept';
-			announcer.say(m.admin_commissions_reloaded_announce_note());
-			await tick();
-			notesInput?.focus();
-		} else {
-			restoredNote = '';
-			announcer.say(m.admin_commissions_reloaded_announce());
-			await tick();
-			titleInput?.focus();
-		}
+		staleText = '';
+		announcer.say(
+			merged.restoredNote ? m.admin_commissions_reloaded_announce_note() : m.admin_commissions_reloaded_announce()
+		);
+		await tick();
+		(merged.restoredNote ? notesInput : titleInput)?.focus();
 	}
 
 	const DATE_FIELDS = [
@@ -223,7 +126,7 @@
 		['deliveredOn', m.admin_commissions_field_delivered]
 	] as const;
 
-	const FIELD_ORDER: Field[] = [
+	const FIELD_ORDER: CommissionField[] = [
 		'sourceUrl',
 		'artistId',
 		'title',
@@ -246,17 +149,19 @@
 		else {
 			const first = FIELD_ORDER.find((f) => errors[f]);
 			if (first) document.getElementById(`ce-${first}`)?.focus();
+			// No field to send focus to: keep it on Save rather than on <body>.
+			else saveButton?.focus();
 		}
 	}
 
 	/** aria-describedby for a field: its error first, then its hints. */
-	function describedBy(field: Field, ...hints: string[]): string | undefined {
+	function describedBy(field: CommissionField, ...hints: string[]): string | undefined {
 		const ids = [errors[field] ? `ce-${field}-err` : '', ...hints].filter(Boolean);
 		return ids.length > 0 ? ids.join(' ') : undefined;
 	}
 </script>
 
-{#snippet fieldError(field: Field)}
+{#snippet fieldError(field: CommissionField)}
 	{#if errors[field]}
 		<p class="field-error" id="ce-{field}-err">
 			<CircleAlert size={14} aria-hidden="true" /><span>{errors[field]}</span>
@@ -285,7 +190,7 @@
 	<div class="stale">
 		<div class="error" role="alert" tabindex="-1" bind:this={staleBox}>
 			<CircleAlert size={16} aria-hidden="true" />
-			<span>{m.admin_commissions_stale()}{staleDetail ? ` ${staleDetail}` : ''}</span>
+			<span>{staleText || m.admin_commissions_stale()}</span>
 		</div>
 		<details class="why">
 			<summary>{m.admin_commissions_why()}</summary>
@@ -305,9 +210,17 @@
 	action={isEdit ? '?/save' : undefined}
 	class="form entry-form"
 	novalidate
-	use:enhance={() => {
+	use:enhance={({ cancel }) => {
+		// aria-disabled rather than disabled keeps focus on Save while it works,
+		// so this is what stops a second submit.
+		if (saving) {
+			cancel();
+			return;
+		}
 		saving = true;
 		failure = null;
+		// What the owner changed, read now: the refusal names it as it was sent.
+		const sent = { ...values, characterIds: [...values.characterIds] };
 		return async ({ update, result }) => {
 			// A save redirects to the ledger, which enhance follows. Only refusals
 			// stay on this page, and they keep what the owner typed.
@@ -315,6 +228,7 @@
 			saving = false;
 			if (result.type === 'failure') {
 				failure = (result.data as FailureData | undefined) ?? null;
+				staleText = failure?.stale ? staleMessage(loaded, sent, getLocale()) : '';
 				if (!failure?.errors && !failure?.gated && !failure?.stale) toast.error(m.admin_commissions_save_failed());
 				await focusFailure();
 			} else if (result.type === 'error') {
@@ -374,7 +288,7 @@
 				type="text"
 				name="title"
 				autocomplete="off"
-				maxlength="120"
+				maxlength={TITLE_MAX}
 				required
 				bind:value={values.title}
 				bind:this={titleInput}
@@ -393,7 +307,7 @@
 				class="input"
 				type="text"
 				name="kind"
-				maxlength="60"
+				maxlength={KIND_MAX}
 				placeholder={m.admin_commissions_kind_placeholder()}
 				bind:value={values.kind}
 				aria-invalid={errors.kind ? 'true' : undefined}
@@ -443,7 +357,7 @@
 				name="notes"
 				autocomplete="off"
 				rows="4"
-				maxlength="2000"
+				maxlength={NOTES_MAX}
 				bind:value={values.notes}
 				bind:this={notesInput}
 				aria-invalid={errors.notes ? 'true' : undefined}
@@ -537,7 +451,8 @@
 			{@render fieldError('currency')}
 			<small class="hint" id="ce-price-hint">{m.admin_commissions_hint_price()}</small>
 		</div>
-		<fieldset class="subgroup" aria-describedby="ce-dates-hint">
+		<!-- The hint is tied to each date input, so the fieldset doesn't repeat it. -->
+		<fieldset class="subgroup">
 			<legend>{m.admin_commissions_legend_dates()} {@render optional()}</legend>
 			<div class="row-3">
 				{#each DATE_FIELDS as [field, label] (field)}
@@ -562,7 +477,7 @@
 
 	<div class="form-actions">
 		<a href="/admin/commissions" class="btn btn-secondary">{m.admin_cancel()}</a>
-		<button type="submit" class="btn btn-primary" disabled={saving}>
+		<button type="submit" class="btn btn-primary" aria-disabled={saving ? 'true' : undefined} bind:this={saveButton}>
 			{#if saving}<Loader2 size={16} class="spin" aria-hidden="true" /> {m.admin_saving()}{:else}{isEdit
 					? m.admin_commissions_save_changes()
 					: m.admin_commissions_save_entry()}{/if}

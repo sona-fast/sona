@@ -12,6 +12,7 @@
  */
 
 import { formatDate } from '$lib/index';
+import type { EarlyAccessLabel } from '$lib/early-access';
 import * as m from '$lib/paraglide/messages';
 
 export const COMMISSION_STATUSES = [
@@ -27,6 +28,28 @@ export const COMMISSION_PAYMENTS = ['unpaid', 'deposit', 'paid', 'refunded'] as 
 
 export type CommissionStatus = (typeof COMMISSION_STATUSES)[number];
 export type CommissionPayment = (typeof COMMISSION_PAYMENTS)[number];
+
+// Field limits from the design doc's table. The server enforces them, and the
+// form's maxlength attributes come from the same numbers.
+export const TITLE_MAX = 120;
+export const KIND_MAX = 60;
+export const NOTES_MAX = 2000;
+
+/** The entry form's fields, as the server keys its errors. */
+export type CommissionField =
+	| 'artistId'
+	| 'title'
+	| 'kind'
+	| 'sourceUrl'
+	| 'characterIds'
+	| 'status'
+	| 'payment'
+	| 'price'
+	| 'currency'
+	| 'notes'
+	| 'requestedOn'
+	| 'acceptedOn'
+	| 'deliveredOn';
 
 export function isCommissionStatus(value: unknown): value is CommissionStatus {
 	return (COMMISSION_STATUSES as readonly unknown[]).includes(value);
@@ -44,16 +67,10 @@ export function isActiveStatus(status: CommissionStatus): boolean {
 	return ACTIVE.has(status);
 }
 
-/** A label's message function, in paraglide's shape. */
-export type CommissionLabel = (
-	inputs?: Record<string, never>,
-	options?: { locale?: 'en' | 'ja' }
-) => string;
-
 // Static references to each message function, never a lookup by computed key:
 // a computed key pins the whole catalog into every route that renders a label
 // (SONA-169, scripts/check-catalog-pinning.mjs).
-export const STATUS_LABELS: Record<CommissionStatus, CommissionLabel> = {
+export const STATUS_LABELS: Record<CommissionStatus, EarlyAccessLabel> = {
 	applied: m.admin_commissions_status_applied,
 	waitlisted: m.admin_commissions_status_waitlisted,
 	not_picked: m.admin_commissions_status_not_picked,
@@ -63,7 +80,7 @@ export const STATUS_LABELS: Record<CommissionStatus, CommissionLabel> = {
 	cancelled: m.admin_commissions_status_cancelled
 };
 
-export const PAYMENT_LABELS: Record<CommissionPayment, CommissionLabel> = {
+export const PAYMENT_LABELS: Record<CommissionPayment, EarlyAccessLabel> = {
 	unpaid: m.admin_commissions_payment_unpaid,
 	deposit: m.admin_commissions_payment_deposit,
 	paid: m.admin_commissions_payment_paid,
@@ -160,7 +177,11 @@ export function parsePrice(price: string, currency: string): PriceResult {
 	if (!match) return { ok: false, reason: 'format' };
 	const fraction = match[2] ?? '';
 	if (fraction.length > digits) return { ok: false, reason: 'decimals', digits };
-	return { ok: true, minor: Number(match[1] + fraction.padEnd(digits, '0')) };
+	// Currencies with four minor digits (CLF, UYW) put twelve whole digits past
+	// what a double holds exactly, and a rounded price is a different price.
+	const minor = Number(match[1] + fraction.padEnd(digits, '0'));
+	if (!Number.isSafeInteger(minor)) return { ok: false, reason: 'format' };
+	return { ok: true, minor };
 }
 
 /** Minor units back to the typed form: 4550 USD is "45.50", 45 JPY is "45". */
@@ -185,4 +206,149 @@ export function commissionDateRows(dates: {
 		{ label: m.admin_commissions_field_delivered(), value: dates.deliveredOn }
 	];
 	return rows.flatMap((row) => (row.value ? [{ label: row.label, value: formatDate(row.value) }] : []));
+}
+
+/** What the entry form holds, as strings the inputs bind to. */
+export interface CommissionFormValues {
+	artistId: string;
+	title: string;
+	kind: string;
+	sourceUrl: string;
+	characterIds: number[];
+	status: CommissionStatus;
+	payment: CommissionPayment;
+	price: string;
+	currency: string;
+	notes: string;
+	requestedOn: string;
+	acceptedOn: string;
+	deliveredOn: string;
+}
+
+/** The entry the edit page loads, as far as the form reads it. */
+export interface CommissionFormEntry {
+	artistId: number;
+	title: string;
+	kind: string | null;
+	sourceUrl: string | null;
+	characters: { id: number }[];
+	status: CommissionStatus;
+	payment: CommissionPayment;
+	price: string;
+	currency: string | null;
+	notes: string | null;
+	requestedOn: string | null;
+	acceptedOn: string | null;
+	deliveredOn: string | null;
+}
+
+/** The form's starting values: the entry's, or an empty new entry's. */
+export function formValuesOf(entry: CommissionFormEntry | null): CommissionFormValues {
+	return {
+		artistId: entry ? String(entry.artistId) : '',
+		title: entry?.title ?? '',
+		kind: entry?.kind ?? '',
+		sourceUrl: entry?.sourceUrl ?? '',
+		characterIds: entry ? entry.characters.map((c) => c.id) : [],
+		status: entry?.status ?? 'applied',
+		payment: entry?.payment ?? 'unpaid',
+		price: entry?.price ?? '',
+		currency: entry?.currency ?? '',
+		notes: entry?.notes ?? '',
+		requestedOn: entry?.requestedOn ?? '',
+		acceptedOn: entry?.acceptedOn ?? '',
+		deliveredOn: entry?.deliveredOn ?? ''
+	};
+}
+
+/** Every field except Notes, in the order the form shows them. Notes is left
+ * out because Reload entry brings the typed note back. */
+const RELOAD_LOSES: Exclude<CommissionField, 'notes'>[] = [
+	'sourceUrl',
+	'artistId',
+	'title',
+	'kind',
+	'characterIds',
+	'status',
+	'payment',
+	'price',
+	'currency',
+	'requestedOn',
+	'acceptedOn',
+	'deliveredOn'
+];
+
+/** The fields besides Notes that the owner changed since the form loaded.
+ * Characters compare as a set: picking the same ones in another order is no
+ * change. */
+export function changedFields(
+	loaded: CommissionFormValues,
+	current: CommissionFormValues
+): Exclude<CommissionField, 'notes'>[] {
+	const sameSet = (a: number[], b: number[]) =>
+		a.length === b.length && [...a].sort((x, y) => x - y).join() === [...b].sort((x, y) => x - y).join();
+	return RELOAD_LOSES.filter((field) =>
+		field === 'characterIds'
+			? !sameSet(loaded.characterIds, current.characterIds)
+			: loaded[field] !== current[field]
+	);
+}
+
+const FIELD_NAMES: Record<Exclude<CommissionField, 'notes'>, EarlyAccessLabel> = {
+	sourceUrl: m.admin_commissions_field_link_short,
+	artistId: m.admin_commissions_field_artist,
+	title: m.admin_commissions_field_title,
+	kind: m.admin_commissions_field_kind,
+	characterIds: m.admin_commissions_field_characters,
+	status: m.admin_commissions_field_status,
+	payment: m.admin_commissions_field_payment,
+	price: m.admin_commissions_field_price,
+	currency: m.admin_commissions_field_currency,
+	requestedOn: m.admin_commissions_field_requested,
+	acceptedOn: m.admin_commissions_field_accepted,
+	deliveredOn: m.admin_commissions_field_delivered
+};
+
+/**
+ * The refusal shown when a save is out of date: what happened, then what
+ * Reload entry keeps and what it loses. Computed once, when the refusal
+ * arrives, so the alert's text doesn't change while the owner keeps typing.
+ */
+export function staleMessage(
+	loaded: CommissionFormValues,
+	current: CommissionFormValues,
+	locale: 'en' | 'ja'
+): string {
+	const options = { locale };
+	const changed = changedFields(loaded, current).map((field) => FIELD_NAMES[field]({}, options));
+	const fields = new Intl.ListFormat(locale, { type: 'conjunction' }).format(changed);
+	const noteChanged = loaded.notes !== current.notes;
+	const detail = noteChanged
+		? changed.length > 0
+			? m.admin_commissions_stale_note_and_fields({ fields }, options)
+			: m.admin_commissions_stale_note({}, options)
+		: changed.length > 0
+			? m.admin_commissions_stale_fields({ fields }, options)
+			: '';
+	// Japanese runs sentences together; English separates them with a space.
+	const join = locale === 'ja' ? '' : ' ';
+	return detail ? `${m.admin_commissions_stale({}, options)}${join}${detail}` : m.admin_commissions_stale({}, options);
+}
+
+/**
+ * Reload entry: the current entry, with the note the owner typed put back
+ * when they had changed it. `restoredNote` says which hint Notes shows:
+ * 'kept' when the saved note is still the one the form loaded with, and
+ * 'replaces' when the other change also edited it, so saving would replace it.
+ */
+export function mergeReloaded(
+	fresh: CommissionFormValues,
+	loadedNote: string,
+	typedNote: string
+): { values: CommissionFormValues; restoredNote: '' | 'kept' | 'replaces' } {
+	if (typedNote === loadedNote) return { values: fresh, restoredNote: '' };
+	return {
+		values: { ...fresh, notes: typedNote },
+		restoredNote: fresh.notes === loadedNote ? 'kept' : 'replaces'
+	};
 }

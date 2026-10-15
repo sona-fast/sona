@@ -199,8 +199,12 @@
 	.readonly-actions { max-width: 800px; display: flex; margin-top: 20px; }
 
 	/* The outline variant in the destructive color, as the shipped Delete
-	   avatar button draws it. */
+	   avatar button draws it. The fill stays --background on hover: the
+	   outline variant's tinted hover fill drops this red label under 4.5:1 in
+	   several themes, so hover shows as an underline instead. theme-contrast.test.ts
+	   measures --destructive on --background in every theme × mode. */
 	.danger { color: var(--destructive); border-color: var(--destructive); }
+	.delete-slot .danger:hover { background-color: var(--background); text-decoration: underline; }
 	.danger:disabled { opacity: 0.55; cursor: progress; }
 
 	/* Delete sits apart from Save: on the left on a wide screen, on its own row

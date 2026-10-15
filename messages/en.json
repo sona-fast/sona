@@ -2267,7 +2267,7 @@
 	"admin_commissions_empty_body_gated": "After the ledger opens, add an entry when you ask an artist for a piece. When the art arrives, you can add it to your gallery from that entry.",
 	"admin_commissions_active": "Active",
 	"admin_commissions_finished": "Finished",
-	"admin_commissions_active_empty": "Entries marked Applied, Waitlisted, Accepted, or In progress show here.",
+	"admin_commissions_active_empty": "Entries you mark Applied, Waitlisted, Accepted, or In progress show here.",
 	"admin_commissions_finished_empty": "Entries you mark Delivered, Not picked, or Canceled move here.",
 	"admin_commissions_col_entry": "Commission",
 	"admin_commissions_col_artist": "Artist",
@@ -2333,7 +2333,7 @@
 	"admin_commissions_stale": "This entry wasn't saved because it changed after you opened it. Select Reload entry to get the latest version.",
 	"admin_commissions_stale_note": "Your note comes with it.",
 	"admin_commissions_stale_note_and_fields": "Your note comes with it, but your changes to {fields} don't, so enter those again.",
-	"admin_commissions_stale_fields": "Your changes to {fields} don't come with it, so enter those again.",
+	"admin_commissions_stale_fields": "Reloading doesn't keep your changes to {fields}, so enter those again.",
 	"admin_commissions_why": "Why did this happen?",
 	"admin_commissions_why_body": "Another tab or device changed this entry after you opened it. For example, Add to gallery marks an entry Delivered. Saving this older copy would undo that change.",
 	"admin_commissions_reload": "Reload entry",
@@ -2347,7 +2347,7 @@
 	"admin_commissions_error_artist_unknown": "That artist isn't in your artist list anymore. Pick another one.",
 	"admin_commissions_error_characters_unknown": "A character you picked isn't in your character list anymore. Check the characters and save again.",
 	"admin_commissions_error_status": "Pick a status from the list.",
-	"admin_commissions_error_payment": "Pick a payment state from the list.",
+	"admin_commissions_error_payment": "Pick a payment status from the list.",
 	"admin_commissions_error_link": "Sona couldn't read this link. Fix it or clear it.",
 	"admin_commissions_error_price_format": "Enter the price as a number, like 45 or 45.50.",
 	"admin_commissions_error_price_no_decimals": "{currency} prices don't use decimals. Enter a whole number.",
@@ -2355,5 +2355,6 @@
 	"admin_commissions_error_price_missing": "Add a price for this currency, or clear the currency.",
 	"admin_commissions_error_currency_missing": "Add a currency for this price, or clear the price.",
 	"admin_commissions_error_currency_code": "Use a three-letter currency code, like USD or EUR.",
-	"admin_commissions_error_date": "Enter a real date, or leave this empty."
+	"admin_commissions_error_date": "Enter a real date, or leave this empty.",
+	"admin_commissions_field_link_short": "Link"
 }

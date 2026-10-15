@@ -223,6 +223,18 @@ describe('create action: bad input', () => {
 		});
 	}
 
+	it('counts a CRLF line break as one character and stores it as LF', async () => {
+		// Browsers send textarea line breaks as CRLF. A note the textarea's
+		// maxlength allowed must not be refused for the extra carriage returns.
+		const { sqlite, platform } = ledgerDb();
+		const line = 'x'.repeat(99);
+		const typed = Array.from({ length: 20 }, () => line).join('\n'); // 1,999 characters
+		const sent = typed.replaceAll('\n', '\r\n') + 'y';
+		expect(typed.length + 1).toBe(2000);
+		expect((await create(platform, entryForm({ notes: sent }))).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT notes FROM commissions')).toEqual([{ notes: typed + 'y' }]);
+	});
+
 	it('accepts a title of exactly 120 characters', async () => {
 		const { platform } = ledgerDb();
 		expect((await create(platform, entryForm({ title: 'x'.repeat(120) }))).status).toBe('redirected');

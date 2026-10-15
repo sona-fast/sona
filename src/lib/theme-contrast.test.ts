@@ -2670,3 +2670,21 @@ describe('"made with" credit badge WCAG AA contrast, every host × theme × mode
 		}
 	}
 });
+
+// The ledger's Delete entry button (SONA-236): the outline variant painted
+// with --destructive. Its hover keeps the --background fill, because the outline
+// variant's tinted hover fill pulled this label under 4.5:1 on several themes.
+describe('commission ledger Delete entry button keeps 4.5:1 at rest and on hover', () => {
+	const file = '../routes/admin/commissions/[id]/edit/+page.svelte';
+
+	it('paints the label with --destructive and keeps the hover fill at --background', () => {
+		expect(ruleBody(file, '.danger')).toMatch(/(?:^|[;{\s])color:\s*var\(--destructive\)/);
+		expect(ruleBody(file, '.delete-slot .danger:hover')).toMatch(/background-color:\s*var\(--background\)/);
+	});
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: --destructive on --background meets 4.5:1 (rest and hover)`, () => {
+			expect(contrast(blockToken(sel, 'destructive'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});

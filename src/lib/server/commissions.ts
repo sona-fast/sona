@@ -3,13 +3,16 @@ import type { Database } from './db';
 import { artists, characters, commissions, commissionCharacters, images } from './db/schema';
 import { sanitizeUrl } from './validate';
 import {
-	CURRENCY_PATTERN,
+	KIND_MAX,
+	NOTES_MAX,
+	TITLE_MAX,
 	currencyFractionDigits,
 	formatMinor,
 	isCalendarDate,
 	isCommissionPayment,
 	isCommissionStatus,
 	parsePrice,
+	type CommissionField,
 	type CommissionPayment,
 	type CommissionStatus
 } from '$lib/commissions';
@@ -20,25 +23,6 @@ import * as m from '$lib/paraglide/messages';
 //
 // SONA-9: nothing here returns created_at, or a value computed from two dates.
 // updated_at leaves the server only as the edit form's stale-save token.
-
-export const TITLE_MAX = 120;
-export const KIND_MAX = 60;
-export const NOTES_MAX = 2000;
-
-export type CommissionField =
-	| 'artistId'
-	| 'title'
-	| 'kind'
-	| 'sourceUrl'
-	| 'characterIds'
-	| 'status'
-	| 'payment'
-	| 'price'
-	| 'currency'
-	| 'notes'
-	| 'requestedOn'
-	| 'acceptedOn'
-	| 'deliveredOn';
 
 export type CommissionErrors = Partial<Record<CommissionField, string>>;
 
@@ -92,7 +76,9 @@ export function parseCommissionForm(
 	const kind = text(data, 'kind');
 	if (kind.length > KIND_MAX) errors.kind = m.admin_commissions_error_too_long({ max: KIND_MAX });
 
-	const notes = text(data, 'notes');
+	// Browsers send a textarea's line breaks as CRLF, which counts two characters
+	// per break against a limit the textarea counted as one. Stored as LF.
+	const notes = text(data, 'notes').replace(/\r\n?/g, '\n');
 	if (notes.length > NOTES_MAX) errors.notes = m.admin_commissions_error_too_long({ max: NOTES_MAX });
 
 	const rawUrl = text(data, 'sourceUrl');
@@ -121,7 +107,7 @@ export function parseCommissionForm(
 	if (price && !currency) errors.currency = m.admin_commissions_error_currency_missing();
 	else if (!price && currency) errors.price = m.admin_commissions_error_price_missing();
 	else if (price && currency) {
-		if (!CURRENCY_PATTERN.test(currency) || currencyFractionDigits(currency) === null) {
+		if (currencyFractionDigits(currency) === null) {
 			errors.currency = m.admin_commissions_error_currency_code();
 		} else {
 			const parsed = parsePrice(price, currency);

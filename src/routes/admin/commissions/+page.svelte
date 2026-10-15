@@ -40,7 +40,7 @@
 	</h1>
 	{#if data.gate.open}
 		<div class="header-actions">
-			<a href="/admin/commissions/new" class="btn btn-primary"><Plus size={16} /> {m.admin_commissions_new()}</a>
+			<a href="/admin/commissions/new" class="btn btn-primary"><Plus size={16} aria-hidden="true" /> {m.admin_commissions_new()}</a>
 		</div>
 	{/if}
 </div>
@@ -128,7 +128,7 @@
 									{/if}
 									<td class="col-actions">
 										<a href="/admin/commissions/{entry.id}/edit" class="icon-btn" aria-label={rowLinkLabel(entry)}>
-											{#if data.gate.open}<Pencil size={16} />{:else}<Eye size={16} />{/if}
+											{#if data.gate.open}<Pencil size={16} aria-hidden="true" />{:else}<Eye size={16} aria-hidden="true" />{/if}
 										</a>
 									</td>
 								</tr>
