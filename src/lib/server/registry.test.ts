@@ -157,6 +157,14 @@ describe('registryRegisterFork', () => {
 		}
 	});
 
+	it('ignores an invite code on a server error', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'boom', code: 'invite_used' }), { status: 503 }))
+		);
+		expect(await registryRegisterFork({ signupToken: 'x' })).toEqual({ error: 'boom' });
+	});
+
 	it('drops any other code a registry sends', async () => {
 		vi.stubGlobal(
 			'fetch',

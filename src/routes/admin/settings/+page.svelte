@@ -8,7 +8,7 @@
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import CloudflareSetupDialog from '$lib/components/CloudflareSetupDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
-	import type { InviteRefusal } from '$lib/server/registry';
+	import type { InviteRefusal } from '$lib/registry-invite';
 	import { BACKUP_FILENAME_BASE, R2_FREE_TIER_BYTES } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
 	import { MAX_SONA_COLORS, mergeSuggestions, paletteHas } from '$lib/palette-merge';

@@ -7,6 +7,7 @@ import { REGISTRY_DEFAULT_URL } from '$lib/config';
 import { withTimeout } from './timeout';
 import { getRawSetting } from './settings';
 import type { Database } from './db';
+import { INVITE_REFUSALS, type InviteRefusal } from '$lib/registry-invite';
 
 type Env = App.Platform['env'];
 
@@ -95,10 +96,6 @@ export async function resolveRegistryEnv(
 	return { ...env, REGISTRY_API_KEY: apiKey, REGISTRY_URL: url || env.REGISTRY_URL };
 }
 
-/** The registry's two invite refusals, which the connect form shows on the token field. */
-const INVITE_REFUSALS = ['invite_used', 'invite_invalid'] as const;
-export type InviteRefusal = (typeof INVITE_REFUSALS)[number];
-
 /**
  * Register this fork with the registry (`POST /v1/forks`) using a maintainer
  * invite token, returning the one-time fork key to store. Used by the in-app
@@ -126,7 +123,9 @@ export async function registryRegisterFork(opts: {
 			| null;
 		if (!res.ok || !data?.key || !data?.forkId) {
 			const error = data?.error || `registry returned HTTP ${res.status}`;
-			const code = INVITE_REFUSALS.find((c) => c === data?.code);
+			// Only a client error is a refusal of the token; a 5xx carrying a code isn't.
+			const refused = res.status >= 400 && res.status < 500;
+			const code = refused ? INVITE_REFUSALS.find((c) => c === data?.code) : undefined;
 			return code ? { error, code } : { error };
 		}
 		return { forkId: data.forkId, key: data.key };
