@@ -2359,5 +2359,9 @@
 	"admin_commissions_field_link_short": "Link",
 	"admin_commissions_no_artists_pre": "You haven't added any artists yet. Add one on the ",
 	"admin_commissions_no_artists_link": "Artists page",
-	"admin_commissions_no_artists_post": ", then come back to record this commission."
+	"admin_commissions_no_artists_post": ", then come back to record this commission.",
+	"admin_commissions_missing_pre": "This entry was deleted somewhere else, so there's nothing to save. ",
+	"admin_commissions_missing_link": "Go back to your ledger",
+	"admin_commissions_missing_post": ".",
+	"admin_commissions_save_error": "Something went wrong, so the entry wasn't saved. Your changes are still here. Try again."
 }

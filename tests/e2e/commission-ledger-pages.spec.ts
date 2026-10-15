@@ -1,7 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 import { adminLogin, waitForHydration } from './admin-login';
 import { settledShot } from './settled-shot';
-import type { Page } from '@playwright/test';
 
 // The commission ledger pages (SONA-236 PR 2), driven in a real browser. The
 // server actions are covered against a real schema in the vitest suites beside
@@ -113,16 +112,18 @@ test('a refused price shows its error on the field, and nothing is saved', async
 	await expect(price).toHaveAttribute('aria-describedby', /ce-price-err/);
 	// Focus moves to the first field with an error.
 	await expect(price).toBeFocused();
-	// The field's edge is drawn in the theme's --destructive.
-	const [edge, destructive] = await price.evaluate((el) => {
+	// The field's edge, and its focus ring, are drawn in the theme's --destructive.
+	const [edge, ring, destructive] = await price.evaluate((el) => {
 		const probe = document.createElement('span');
 		probe.style.color = 'var(--destructive)';
 		document.body.append(probe);
-		const pair = [getComputedStyle(el).borderTopColor, getComputedStyle(probe).color];
+		const style = getComputedStyle(el);
+		const found = [style.borderTopColor, style.outlineColor, getComputedStyle(probe).color];
 		probe.remove();
-		return pair;
+		return found;
 	});
 	expect(edge).toBe(destructive);
+	expect(ring).toBe(destructive);
 	await settledShot(page, testInfo.outputPath('commission-entry-price-error.png'));
 
 	await page.goto('/admin/commissions');
@@ -130,7 +131,7 @@ test('a refused price shows its error on the field, and nothing is saved', async
 });
 
 /** Answers the create form's POST with `answer`, without reaching the server. */
-async function stubCreate(page: Page, answer: Parameters<import('@playwright/test').Route['fulfill']>[0] | 'abort') {
+async function stubCreate(page: Page, answer: Parameters<Route['fulfill']>[0] | 'abort') {
 	await page.route(
 		(url) => url.pathname === '/admin/commissions/new',
 		async (route) => {
@@ -159,7 +160,11 @@ for (const [name, answer] of [
 		await fillEntry(page);
 		await page.getByRole('button', { name: 'Save entry' }).click();
 
-		await expect(page.getByRole('status').filter({ hasText: 'Something went wrong' })).toBeVisible();
+		await expect(
+			page.getByRole('status').filter({ hasText: "Something went wrong, so the entry wasn't saved." })
+		).toBeVisible();
+		// Focus stays on Save, so trying again is one key away.
+		await expect(page.locator('form.entry-form button[type="submit"]')).toBeFocused();
 		await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
 		await expect(page.getByLabel('Title')).toHaveValue('E2E kept title');
 		await expect(page.getByLabel('Notes')).toHaveValue('E2E kept note');

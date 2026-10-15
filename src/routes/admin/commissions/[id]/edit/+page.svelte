@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
 	import { ArrowLeft, Loader2, Trash2 } from 'lucide-svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionForm from '$lib/components/CommissionForm.svelte';
@@ -141,7 +142,10 @@
 		return async ({ update, result }) => {
 			await update({ reset: false });
 			deleting = false;
-			if (result.type === 'failure') toast.error(m.admin_commissions_delete_failed());
+			// Already deleted somewhere else: the delete is done either way.
+			if (result.type === 'failure' && (result.data as { missing?: boolean } | undefined)?.missing) {
+				await goto('/admin/commissions');
+			} else if (result.type === 'failure') toast.error(m.admin_commissions_delete_failed());
 			else if (result.type === 'error') toast.error(m.admin_something_wrong());
 		};
 	}}

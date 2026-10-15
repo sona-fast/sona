@@ -1804,5 +1804,9 @@
 	"admin_commissions_field_link_short": "リンク",
 	"admin_commissions_no_artists_pre": "まだアーティストが登録されていません。",
 	"admin_commissions_no_artists_link": "アーティスト",
-	"admin_commissions_no_artists_post": "ページで追加してから、この依頼を記録してください。"
+	"admin_commissions_no_artists_post": "ページで追加してから、この依頼を記録してください。",
+	"admin_commissions_missing_pre": "このエントリーは別の場所で削除されたため、保存できません。",
+	"admin_commissions_missing_link": "制作依頼の一覧に戻る",
+	"admin_commissions_missing_post": "",
+	"admin_commissions_save_error": "問題が発生したため、エントリーは保存されませんでした。入力した内容は残っています。もう一度お試しください。"
 }

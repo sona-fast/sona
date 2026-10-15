@@ -36,6 +36,8 @@
 		errors?: Partial<Record<CommissionField, string>>;
 		gated?: boolean;
 		stale?: boolean;
+		/** The entry was deleted after the form loaded. */
+		missing?: boolean;
 	}
 	interface Props {
 		artists: { id: number; name: string }[];
@@ -81,6 +83,7 @@
 	const announcer = new Announcer();
 	let staleBox = $state<HTMLElement>();
 	let gateBox = $state<HTMLElement>();
+	let missingBox = $state<HTMLElement>();
 	let notesInput = $state<HTMLTextAreaElement>();
 	let titleInput = $state<HTMLInputElement>();
 	let saveButton = $state<HTMLButtonElement>();
@@ -131,6 +134,7 @@
 		await tick();
 		if (failure?.stale) staleBox?.focus();
 		else if (failure?.gated) gateBox?.focus();
+		else if (failure?.missing) missingBox?.focus();
 		else {
 			const first = FIELD_ORDER.find((f) => errors[f]);
 			if (first) document.getElementById(`ce-${first}`)?.focus();
@@ -171,6 +175,16 @@
 	</p>
 {/if}
 
+{#if failure?.missing}
+	<p class="error" role="alert" tabindex="-1" bind:this={missingBox}>
+		<CircleAlert size={16} aria-hidden="true" />
+		<span
+			>{m.admin_commissions_missing_pre()}<a href="/admin/commissions">{m.admin_commissions_missing_link()}</a
+			>{m.admin_commissions_missing_post()}</span
+		>
+	</p>
+{/if}
+
 {#if failure?.stale}
 	<div class="stale">
 		<div class="error" role="alert" tabindex="-1" bind:this={staleBox}>
@@ -207,23 +221,25 @@
 		// What the owner changed, read now: the refusal names it as it was sent.
 		const sent = { ...values, characterIds: [...values.characterIds] };
 		return async ({ update, result }) => {
+			const refusal = result.type === 'failure' ? ((result.data as FailureData | undefined) ?? {}) : null;
 			// Fixed before update() renders the refusal, so the alert appears once,
 			// with its whole text.
-			if (result.type === 'failure') {
-				const data = result.data as FailureData | undefined;
-				staleText = data?.stale ? staleMessage(loaded, sent, getLocale()) : '';
-			}
+			if (refusal) staleText = refusal.stale ? staleMessage(loaded, sent, getLocale()) : '';
 			// A save redirects to the ledger, which enhance follows; a refusal stays
 			// here with what the owner typed. An error is left out: update() would
 			// render the error page in place of the form and lose the typing.
 			if (result.type !== 'error') await update({ reset: false });
 			saving = false;
-			if (result.type === 'failure') {
-				failure = (result.data as FailureData | undefined) ?? null;
-				if (!failure?.errors && !failure?.gated && !failure?.stale) toast.error(m.admin_commissions_save_failed());
+			if (refusal) {
+				failure = refusal;
+				if (!refusal.errors && !refusal.gated && !refusal.stale && !refusal.missing) {
+					toast.error(m.admin_commissions_save_failed());
+				}
 				await focusFailure();
 			} else if (result.type === 'error') {
-				toast.error(m.admin_something_wrong());
+				toast.error(m.admin_commissions_save_error());
+				// Focus stays on Save, so trying again is one key away.
+				saveButton?.focus();
 			}
 		};
 	}}
@@ -509,7 +525,7 @@
 	   theme (theme-contrast.test.ts), above the 3:1 a border needs. */
 	[aria-invalid='true'] { border-color: var(--destructive); }
 	/* Focused, it keeps the red edge instead of the usual focus color. */
-	[aria-invalid='true']:focus { outline-color: var(--destructive); }
+	[aria-invalid='true']:focus { outline-color: var(--destructive); outline-offset: 2px; }
 	.field-error {
 		display: flex; align-items: flex-start; gap: 6px; margin: 0;
 		font-size: 12px; color: var(--destructive); line-height: 1.45;

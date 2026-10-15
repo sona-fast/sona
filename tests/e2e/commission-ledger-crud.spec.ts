@@ -125,12 +125,38 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 	// This tab, still on the old copy, changes the note and the payment.
 	await page.getByLabel('Notes').fill('Typed before the reload.');
 	await page.getByLabel('Payment').selectOption('deposit');
+
+	// Record every text the alert ever shows, from the moment it's added, so a
+	// first render with half the message (read out, then rewritten) is caught.
+	await page.evaluate(() => {
+		const seen: string[] = [];
+		(window as unknown as { alertTexts: string[] }).alertTexts = seen;
+		const record = (el: Element) => {
+			const text = el.textContent?.trim() ?? '';
+			if (seen.at(-1) !== text) seen.push(text);
+		};
+		new MutationObserver((mutations) => {
+			for (const mutation of mutations) {
+				const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+				for (const node of mutation.addedNodes) {
+					if (node instanceof Element) node.querySelectorAll('[role="alert"]').forEach(record);
+					if (node instanceof Element && node.matches('[role="alert"]')) record(node);
+				}
+				const alert = target?.closest('[role="alert"]');
+				if (alert) record(alert);
+			}
+		}).observe(document.body, { childList: true, subtree: true, characterData: true });
+	});
 	await page.getByRole('button', { name: 'Save changes' }).click();
 
 	const alert = page.getByRole('alert').filter({ hasText: 'changed after you opened it' });
 	await expect(alert).toBeVisible();
 	await expect(alert).toContainText('Your note comes with it, but your changes to Payment don');
 	await expect(alert).toBeFocused();
+	const texts = await page.evaluate(() => (window as unknown as { alertTexts: string[] }).alertTexts);
+	expect(texts.length, JSON.stringify(texts)).toBeGreaterThan(0);
+	expect(texts[0]).toContain('your changes to Payment');
+	expect(new Set(texts).size, JSON.stringify(texts)).toBe(1);
 	await page.getByText('Why did this happen?').click();
 	await expect(page.getByText('Another tab or device changed this entry')).toBeVisible();
 	await settledShot(page, testInfo.outputPath('commission-entry-stale.png'));
@@ -150,6 +176,34 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 	await expect(section(page, 'Finished').getByRole('row', { name: /renamed/ })).toBeVisible();
 });
 
+test('an entry deleted elsewhere: save says so, and delete counts as done', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	await page.getByRole('link', { name: new RegExp(`^Edit ${TITLE}`) }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
+	await waitForHydration(page);
+
+	// Both actions answer as the server does once the entry is gone. The stubs
+	// never reach the server, so the entry is still there for the next test.
+	const missing = { status: 200, contentType: 'application/json', body: JSON.stringify({ type: 'failure', status: 404, data: '[{"missing":1},true]' }) };
+	const action = (name: string) => (url: URL) => url.pathname.endsWith('/edit') && url.search === `?/${name}`;
+	await page.route(action('save'), (route) => route.fulfill(missing));
+	await page.route(action('delete'), (route) => route.fulfill(missing));
+
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	const alert = page.getByRole('alert').filter({ hasText: 'This entry was deleted somewhere else' });
+	await expect(alert).toBeVisible();
+	await expect(alert).toBeFocused();
+	await expect(alert.getByRole('link', { name: 'Go back to your ledger' })).toHaveAttribute('href', '/admin/commissions');
+	await expect(page.getByRole('status').filter({ hasText: "Couldn't save the entry" })).toHaveCount(0);
+	await settledShot(page, testInfo.outputPath('commission-entry-missing.png'));
+
+	await page.getByRole('button', { name: 'Delete entry' }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await expect(page.getByRole('status').filter({ hasText: "Couldn't delete the entry" })).toHaveCount(0);
+});
+
 test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions');
@@ -160,10 +214,19 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	// Hovered, the label keeps 4.5:1 against what the browser actually paints.
 	const deleteButton = page.getByRole('button', { name: 'Delete entry' });
 	await deleteButton.hover();
-	const [color, background] = await deleteButton.evaluate((el) => {
+	// The button eases its background, and reduced motion doesn't stop that, so
+	// read the colors only once the hover has finished.
+	await expect.poll(() => deleteButton.evaluate((el) => el.getAnimations().length)).toBe(0);
+	const [color, background, pageBackground] = await deleteButton.evaluate((el) => {
+		const probe = document.createElement('span');
+		probe.style.backgroundColor = 'var(--background)';
+		document.body.append(probe);
 		const style = getComputedStyle(el);
-		return [style.color, style.backgroundColor];
+		const found = [style.color, style.backgroundColor, getComputedStyle(probe).backgroundColor];
+		probe.remove();
+		return found;
 	});
+	expect(background).toBe(pageBackground);
 	expect(contrastRatio(color, background)).toBeGreaterThanOrEqual(4.5);
 	await deleteButton.click();
 	const dialog = page.getByRole('dialog', { name: 'Delete this entry?' });
