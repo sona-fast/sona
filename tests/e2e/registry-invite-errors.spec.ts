@@ -96,6 +96,31 @@ test('clears the field message when the token changes or a later refusal has no 
 	await expect(error).toHaveCount(0);
 });
 
+test('a refusal for a token the owner has since changed is not shown', async ({ page }) => {
+	nextCode = 'invite_invalid';
+	await loginRetrying(page, PASSWORD);
+	await page.goto('/admin/settings?tab=connections');
+	await waitForHydration(page);
+
+	// Hold the connect request so the token can change before the reply lands.
+	let release: () => void = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route('**/admin/settings?*connectRegistry*', async (route) => {
+		await held;
+		await route.continue();
+	});
+
+	const token = page.getByLabel('Invite token');
+	await submitConnect(page, 'mistyped-token');
+	await token.fill('corrected-token');
+	release();
+
+	await expect(page.getByRole('button', { name: 'Connect to registry' })).toBeEnabled();
+	await expect(page.locator('#invite-token-error')).toHaveCount(0);
+	await expect(token).not.toHaveAttribute('aria-invalid', 'true');
+	await expect(token).toHaveValue('corrected-token');
+});
+
 test('a refusal from a full-page post clears once the token changes on the hydrated page', async ({ page }) => {
 	nextCode = 'invite_invalid';
 	await loginRetrying(page, PASSWORD);

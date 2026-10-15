@@ -1401,13 +1401,16 @@
 		</section>
 	</form>
 {:else}
-	<form method="POST" action="?tab=connections&/connectRegistry#invite-token" class="contents" use:enhance={() => {
+	<form method="POST" action="?tab=connections&/connectRegistry#invite-token" class="contents" use:enhance={({ formData }) => {
 		connectingRegistry = true;
 		inviteError = null;
+		const sentToken = formData.get('signupToken');
 		return async ({ result }) => {
 			connectingRegistry = false;
 			if (result.type === 'success') { toast.success(m.admin_settings_registry_connected_toast()); await invalidateAll(); }
 			else if (result.type === 'failure' && result.data?.inviteError) {
+				// The owner changed the token while this request ran; the refusal was for the old one.
+				if (inviteTokenInput?.value !== sentToken) return;
 				inviteError = result.data.inviteError as InviteRefusal;
 				await tick();
 				inviteTokenInput?.focus();
