@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { adminLogin, waitForHydration } from './admin-login';
+import { settledShot } from './settled-shot';
 import type { Page } from '@playwright/test';
 
 // The commission ledger pages (SONA-236 PR 2), driven in a real browser. The
@@ -28,7 +29,7 @@ test('the ledger lists nothing yet and says who can read it', async ({ page }, t
 	const labels = await nav.allInnerTexts();
 	expect(labels.map((l) => l.trim()).indexOf('Commissions')).toBe(labels.map((l) => l.trim()).indexOf('Artists') + 1);
 
-	await page.screenshot({ path: testInfo.outputPath('commission-ledger-empty.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-ledger-empty.png'));
 });
 
 test('with no artists yet, the form points to the Artists page', async ({ page }, testInfo) => {
@@ -61,7 +62,7 @@ test('with no artists yet, the form points to the Artists page', async ({ page }
 	await expect(hint).toContainText("You haven't added any artists yet.");
 	await expect(artist).toHaveAttribute('aria-describedby', /ce-no-artists/);
 	await expect(hint.getByRole('link', { name: 'Artists page' })).toHaveAttribute('href', '/admin/artists');
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-no-artists.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-no-artists.png'));
 });
 
 test("moving an entry to Accepted fills today's date, and a set date stays", async ({ page }, testInfo) => {
@@ -89,7 +90,7 @@ test("moving an entry to Accepted fills today's date, and a set date stays", asy
 	await page.getByLabel('Status').selectOption('delivered');
 	await expect(delivered).toHaveValue('2026-01-02');
 
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-dates.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-dates.png'));
 });
 
 test('a refused price shows its error on the field, and nothing is saved', async ({ page }, testInfo) => {
@@ -122,7 +123,7 @@ test('a refused price shows its error on the field, and nothing is saved', async
 		return pair;
 	});
 	expect(edge).toBe(destructive);
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-price-error.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-price-error.png'));
 
 	await page.goto('/admin/commissions');
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
@@ -162,7 +163,7 @@ for (const [name, answer] of [
 		await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
 		await expect(page.getByLabel('Title')).toHaveValue('E2E kept title');
 		await expect(page.getByLabel('Notes')).toHaveValue('E2E kept note');
-		await page.screenshot({ path: testInfo.outputPath('commission-entry-save-error.png'), fullPage: true });
+		await settledShot(page, testInfo.outputPath('commission-entry-save-error.png'));
 	});
 }
 

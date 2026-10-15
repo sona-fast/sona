@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
+import { settledShot } from './settled-shot';
 
 // The commission ledger with its early-access gate closed (SONA-236 PR 2): a
 // fork with no supporter key before the GA date. Its own server (the
@@ -37,7 +38,7 @@ test('the ledger reads, offers the key, and hides New entry', async ({ page }, t
 	await expect(notice).toContainText('Until then, you can read and delete your entries, but not add or change them.');
 	await expect(page.getByRole('link', { name: 'New entry' })).toHaveCount(0);
 	await expect(page.getByRole('link', { name: 'View Headshot icon' })).toBeVisible();
-	await page.screenshot({ path: testInfo.outputPath('commission-ledger-gated.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-ledger-gated.png'));
 
 	const keyLink = notice.getByRole('link', { name: 'Add your key' });
 	await expect(keyLink).toHaveAttribute('href', '/admin/settings?tab=account#supporter-key');
@@ -59,7 +60,7 @@ test('the entry shows plain dates and Delete entry, with no Save', async ({ page
 	// SONA-9: 35 days apart, and nothing on the page may say so.
 	await expect(page.locator('main')).not.toContainText(/\b35\b|days?\b|ago\b|since\b/);
 	await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-readonly.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-readonly.png'));
 });
 
 test('Delete entry works with the gate closed', async ({ page }, testInfo) => {
@@ -73,5 +74,5 @@ test('Delete entry works with the gate closed', async ({ page }, testInfo) => {
 
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
-	await page.screenshot({ path: testInfo.outputPath('commission-ledger-gated-emptied.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-ledger-gated-emptied.png'));
 });

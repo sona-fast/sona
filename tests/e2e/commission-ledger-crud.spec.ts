@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
+import { settledShot } from './settled-shot';
 import { contrastRatio } from './contrast';
 
 // The commission ledger saved through the real form (SONA-236 PR 2): create an
@@ -73,14 +74,14 @@ test('creates an entry that lists under Active', async ({ page }, testInfo) => {
 	await expect(row).toContainText('Applied');
 	await expect(row).toContainText('Unpaid');
 	await expect(section(page, 'Finished')).toContainText('Entries you mark Delivered, Not picked, or Canceled move here.');
-	await page.screenshot({ path: testInfo.outputPath('commission-ledger-created.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-ledger-created.png'));
 
 	// At tablet width the section is under the 760px the seven columns need, so
 	// each row becomes a card: no header row, and the row lays out as a block.
 	await page.setViewportSize({ width: 744, height: 1024 });
 	await expect(section(page, 'Active').locator('thead')).toBeHidden();
 	await expect(row).toHaveCSS('display', 'block');
-	await page.screenshot({ path: testInfo.outputPath('commission-ledger-cards-744.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-ledger-cards-744.png'));
 });
 
 test('moving the entry to Delivered lists it under Finished', async ({ page }, testInfo) => {
@@ -94,7 +95,7 @@ test('moving the entry to Delivered lists it under Finished', async ({ page }, t
 	await expect(page.getByLabel('Price')).toHaveValue('120.00');
 	await page.getByLabel('Status').selectOption('delivered');
 	await expect(page.getByLabel('Delivered', { exact: true })).not.toHaveValue('');
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-edit.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-edit.png'));
 	await page.getByRole('button', { name: 'Save changes' }).click();
 
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
@@ -102,7 +103,7 @@ test('moving the entry to Delivered lists it under Finished', async ({ page }, t
 	await expect(row).toContainText('Delivered');
 	await expect(row).toContainText('Not in your gallery');
 	await expect(section(page, 'Active')).toContainText('Entries you mark Applied, Waitlisted, Accepted, or In progress show here.');
-	await page.screenshot({ path: testInfo.outputPath('commission-ledger-finished.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-ledger-finished.png'));
 });
 
 test('an out-of-date save is refused, and Reload entry brings the typed note back', async ({ page, context }, testInfo) => {
@@ -132,7 +133,7 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 	await expect(alert).toBeFocused();
 	await page.getByText('Why did this happen?').click();
 	await expect(page.getByText('Another tab or device changed this entry')).toBeVisible();
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-stale.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-stale.png'));
 
 	await page.getByRole('button', { name: 'Reload entry' }).click();
 	const notes = page.getByLabel('Notes');
@@ -141,7 +142,7 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 	await expect(page.getByLabel('Title')).toHaveValue(`${TITLE} (renamed)`);
 	await expect(page.getByLabel('Payment')).toHaveValue('unpaid');
 	await expect(page.getByText("Your note from before the reload isn't saved yet. Save changes to keep it.")).toBeVisible();
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-reloaded.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-reloaded.png'));
 
 	// The reloaded form carries the current version, so this save goes through.
 	await page.getByRole('button', { name: 'Save changes' }).click();
@@ -167,10 +168,10 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await deleteButton.click();
 	const dialog = page.getByRole('dialog', { name: 'Delete this entry?' });
 	await expect(dialog).toContainText('Test Artist stays in your artist list');
-	await page.screenshot({ path: testInfo.outputPath('commission-entry-delete.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-entry-delete.png'));
 	await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
 
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
-	await page.screenshot({ path: testInfo.outputPath('commission-ledger-emptied.png'), fullPage: true });
+	await settledShot(page, testInfo.outputPath('commission-ledger-emptied.png'));
 });

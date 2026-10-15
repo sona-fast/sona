@@ -508,6 +508,8 @@
 	   --destructive token measures at least 4.5:1 on --background in every
 	   theme (theme-contrast.test.ts), above the 3:1 a border needs. */
 	[aria-invalid='true'] { border-color: var(--destructive); }
+	/* Focused, it keeps the red edge instead of the usual focus color. */
+	[aria-invalid='true']:focus { outline-color: var(--destructive); }
 	.field-error {
 		display: flex; align-items: flex-start; gap: 6px; margin: 0;
 		font-size: 12px; color: var(--destructive); line-height: 1.45;

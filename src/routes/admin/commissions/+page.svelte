@@ -183,7 +183,12 @@
 	/* Titles, kinds, and names are typed by the owner, so a long word breaks
 	   inside its cell instead of running under the next one. */
 	.ledger-table { table-layout: fixed; overflow-wrap: anywhere; }
-	.ledger-table th[scope='row'] { font-weight: 400; text-align: left; }
+	/* The entry title in the body face and full foreground, not the header row's
+	   smaller monospace label style, so it reads first in its row. */
+	.ledger-table th[scope='row'] {
+		font-weight: 400; text-align: left;
+		font-family: var(--font-secondary); color: var(--foreground); white-space: normal;
+	}
 	.ledger-table td { vertical-align: middle; }
 	.col-chars { width: 7rem; }
 	.col-status, .col-pay { width: 6.5rem; }
