@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { isHttpError } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
 import { getTableColumns } from 'drizzle-orm';
 import { images } from '$lib/server/db/schema';
 import { insertLinkedPiece } from '$lib/server/commission-gallery';
+import { slugify } from '$lib/server/slugify';
 import { ledgerDb, restoreRegistry, rows, seedEntry, setLedgerGa, type Sqlite } from '$lib/server/test/ledger-db';
 import { actions, load } from './+page.server';
 
@@ -18,7 +19,10 @@ beforeEach(() => {
 	clearSettingsCache();
 	clearSupporterKeyStatusCache();
 });
-afterEach(restoreRegistry);
+afterEach(() => {
+	restoreRegistry();
+	vi.restoreAllMocks();
+});
 
 /** An entry with every private field set, so a leak of any of them shows. */
 function privateEntry(sqlite: Sqlite, fields: Parameters<typeof seedEntry>[1] = {}) {
@@ -32,7 +36,7 @@ function privateEntry(sqlite: Sqlite, fields: Parameters<typeof seedEntry>[1] = 
 		characterIds: [2, 1],
 		...fields
 	});
-	sqlite.prepare("UPDATE commissions SET source_url = 'https://t.me/private_chat/412' WHERE id = ?").run(id);
+	sqlite.prepare("UPDATE commissions SET source_url = 'https://example.com/PRIVATE-LINK/412' WHERE id = ?").run(id);
 	return id;
 }
 
@@ -118,7 +122,7 @@ describe('upload load: prefill from an entry', () => {
 			commissionedOn: ''
 		});
 		// None of the entry's private values ride along anywhere in the page data.
-		expect(JSON.stringify(data)).not.toMatch(/PRIVATE-NOTE|private_chat|4500|2026-09-03|2026-09-05/);
+		expect(JSON.stringify(data)).not.toMatch(/PRIVATE-NOTE|PRIVATE-LINK|4500|2026-09-03|2026-09-05/);
 	});
 
 	it("starts a variant upload from the linked piece, with the piece's own date", async () => {
@@ -323,6 +327,13 @@ describe('upload save from an entry: refusals write no image', () => {
 		expect(entryRow(sqlite, id).image_id).toBeNull();
 	});
 
+	it('links only the characters that exist on a plain upload, instead of failing', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const result = await save(platform, { characters: '1,99,1' });
+		expect(result.location).toBe('/admin/images');
+		expect(rows(sqlite, 'SELECT character_id FROM image_characters')).toEqual([{ character_id: 1 }]);
+	});
+
 	it('leaves an upload without an entry as it was', async () => {
 		const { sqlite, platform } = ledgerDb();
 		privateEntry(sqlite);
@@ -456,6 +467,41 @@ describe('upload save from an entry: the entry changes between the checks and th
 		expect(result.status).toBe(400);
 		expect(result.data).toEqual({ commission: 'missing' });
 		expect(imageCount(sqlite)).toBe(0);
+	});
+
+	it('links the characters that remain when one was deleted meanwhile, and still delivers', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite);
+		const removeCharacter = () => sqlite.prepare('DELETE FROM characters WHERE id = 2').run();
+		const result = await save(racing(platform, removeCharacter), { commissionId: String(id), commissionDeliveredOn: '2026-10-14' });
+		expect(result.location).toBe(`/admin/commissions?added=${id}`);
+		const [piece] = rows(sqlite, 'SELECT id FROM images') as { id: number }[];
+		expect(entryRow(sqlite, id)).toEqual({ image_id: piece.id, status: 'delivered', delivered_on: '2026-10-14' });
+		expect(rows(sqlite, 'SELECT image_id, character_id FROM image_characters')).toEqual([
+			{ image_id: piece.id, character_id: 1 }
+		]);
+	});
+
+	it('saves under a fresh slug when another upload takes the slug meanwhile', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite);
+		// A fixed random suffix, so the race can take the very slug the save picked.
+		vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const slug = slugify('Snowfall');
+		let taken = false;
+		const takeSlug = () => {
+			if (taken) return;
+			taken = true;
+			sqlite
+				.prepare("INSERT INTO images (slug, title, image_url, artist_id, created_at) VALUES (?, 'Other', '/img/o.png', 1, '2026-10-01')")
+				.run(slug);
+		};
+		const result = await save(racing(platform, takeSlug), { commissionId: String(id) });
+		expect(result.location).toBe(`/admin/commissions?added=${id}`);
+		const saved = rows(sqlite, "SELECT id, slug FROM images WHERE title = 'Snowfall'") as { id: number; slug: string }[];
+		expect(saved).toEqual([{ id: expect.any(Number), slug: `${slug}-2` }]);
+		expect(entryRow(sqlite, id)).toMatchObject({ image_id: saved[0].id, status: 'delivered' });
+		expect(imageCount(sqlite)).toBe(2);
 	});
 
 	it('returns 400 closed and writes nothing when the entry was canceled meanwhile', async () => {

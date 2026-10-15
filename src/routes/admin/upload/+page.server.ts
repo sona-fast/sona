@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { artists, collections, tags, images, characters, imageCharacters } from '$lib/server/db/schema';
-import { eq, isNull, count as countFn } from 'drizzle-orm';
+import { artists, collections, tags, images, characters } from '$lib/server/db/schema';
+import { eq, isNull, sql, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
@@ -100,10 +100,26 @@ async function attachTagsAndCharacters(
 
 	if (characterIds) {
 		const ids = characterIds.split(',').map((id) => Number(id.trim())).filter(Boolean);
-		for (const charId of ids) {
-			await db.insert(imageCharacters).values({ imageId, characterId: charId });
+		// One statement that links only the characters that still exist. A
+		// character deleted in another tab since the form loaded is skipped, rather
+		// than failing the foreign key after the piece (and, from an entry, its
+		// link) is already saved. The ids ride in as one bound JSON array, as in
+		// image-tags.ts, so a long selection stays one parameter.
+		if (ids.length > 0) {
+			await db.run(
+				sql`INSERT INTO image_characters (image_id, character_id)
+					SELECT ${imageId}, id FROM characters WHERE id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`
+			);
 		}
 	}
+}
+
+/** Whether a write failed because another save took the image's slug. */
+function slugTaken(e: unknown): boolean {
+	for (let c: unknown = e; c instanceof Error; c = c.cause) {
+		if (/UNIQUE constraint failed: images\.slug/.test(c.message)) return true;
+	}
+	return false;
 }
 
 // A slug that's free both in the DB and within the current batch.
@@ -275,12 +291,18 @@ export const actions = {
 				// The browser's own date, for an empty Delivered date (open question
 				// Q17, built as drawn). Anything that isn't a date is ignored.
 				const sentDate = data.get('commissionDeliveredOn');
-				const linkedId = await insertLinkedPiece(
-					db,
-					entry.id,
-					parentValues,
-					typeof sentDate === 'string' && isCalendarDate(sentDate) ? sentDate : null
-				);
+				const deliveredOn = typeof sentDate === 'string' && isCalendarDate(sentDate) ? sentDate : null;
+				let linkedId: number | null;
+				try {
+					linkedId = await insertLinkedPiece(db, entry.id, parentValues, deliveredOn);
+				} catch (e) {
+					if (!slugTaken(e)) throw e;
+					// Another upload took the slug after freeSlug looked. The batch rolled
+					// back whole, so nothing was written: one more try with a fresh slug.
+					// A 409 would tell the owner the entry was added when it wasn't.
+					parentValues.slug = await freeSlug(db, slugify(title), usedSlugs);
+					linkedId = await insertLinkedPiece(db, entry.id, parentValues, deliveredOn);
+				}
 				if (linkedId === null) {
 					// The entry changed between the checks and the batch: the same checks,
 					// run again, say how. Passing them now can only mean the batch lost a

@@ -27,7 +27,7 @@ describe('/gallery/[slug] for a piece linked to a commission entry', () => {
 			characterIds: [1]
 		});
 		sqlite
-			.prepare("UPDATE commissions SET image_id = 7, kind = 'LEDGER-KIND', source_url = 'https://t.me/ledger_chat/1' WHERE id = ?")
+			.prepare("UPDATE commissions SET image_id = 7, kind = 'LEDGER-KIND', source_url = 'https://example.com/LEDGER-LINK/1' WHERE id = ?")
 			.run(id);
 
 		const data = await load({ platform, params: { slug: 'snowfall' } } as never);
@@ -35,6 +35,6 @@ describe('/gallery/[slug] for a piece linked to a commission entry', () => {
 		// The page did load the piece, so the absence below is not an empty page.
 		expect(text).toContain('Snowfall');
 		expect(text).toContain('2026-01-20');
-		expect(text).not.toMatch(/LEDGER-|ledger_chat|4567|2026-09-03|2026-09-05|2026-10-08|delivered/);
+		expect(text).not.toMatch(/LEDGER-|4567|2026-09-03|2026-09-05|2026-10-08|delivered/);
 	});
 });
