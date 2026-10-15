@@ -1043,18 +1043,22 @@ export const actions = {
 		// the FK checks refuse the wipe. Each cascades its own children
 		// (credits/media/platforms; stickers → sticker_emojis). Commission entries
 		// reference artists without cascade too, and cascade their character links.
-		await db.delete(commissions);
-		await db.delete(vrAvatars);
-		await db.delete(stickerPacks);
-		await db.delete(fursuitPhotos);
-		await db.delete(conventions);
-		await db.delete(imageTags);
-		await db.delete(imageCharacters);
-		await db.delete(images);
-		await db.delete(tags);
-		await db.delete(characters);
-		await db.delete(collections);
-		await db.delete(artists);
+		// One batch, so a failure part-way leaves everything in place instead of a
+		// half-wiped site (D1 runs a batch as one transaction, in order).
+		await db.batch([
+			db.delete(commissions),
+			db.delete(vrAvatars),
+			db.delete(stickerPacks),
+			db.delete(fursuitPhotos),
+			db.delete(conventions),
+			db.delete(imageTags),
+			db.delete(imageCharacters),
+			db.delete(images),
+			db.delete(tags),
+			db.delete(characters),
+			db.delete(collections),
+			db.delete(artists),
+		]);
 
 		// The wiped tables feed the per-isolate nav/tab probe caches — clear them
 		// all so this isolate's nav drops the sections immediately (same convention

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
@@ -919,6 +919,21 @@ describe('delete action — VR avatar credits block deletion', () => {
 		expect(result.data.error).toMatch(/VR avatars/);
 		const still = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
 		expect(still?.name).toBe('Rigger');
+	});
+
+	it('refuses to delete an artist with commission ledger entries and names them', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Ledger');
+		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (${id}), (${id})`);
+
+		const result = (await actions.delete(deleteEvent(platform, id))) as unknown as {
+			status: number;
+			data: { error: string };
+		};
+
+		expect(result.status).toBe(400);
+		expect(result.data.error).toMatch(/2 commission ledger entries/);
+		expect(await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get()).toBeDefined();
 	});
 
 	it('still deletes an artist with no references', async () => {

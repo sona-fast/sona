@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { artists, images, stickers, stickerPacks, avatarCredits } from '$lib/server/db/schema';
+import { artists, images, stickers, stickerPacks, avatarCredits, commissions } from '$lib/server/db/schema';
 import { eq, sql, like, or } from 'drizzle-orm';
 import {
 	resolveAvatarUrl,
@@ -477,6 +477,18 @@ export const actions = {
 		if (managedPackRow && managedPackRow.count > 0) {
 			return fail(400, {
 				error: `Cannot delete artist who manages ${managedPackRow.count} sticker pack${managedPackRow.count === 1 ? '' : 's'}. Reassign or remove those packs first.`
+			});
+		}
+
+		// commissions.artist_id is non-cascading too: a private ledger entry keeps its artist.
+		const commissionRow = await db
+			.select({ count: sql<number>`COUNT(*)` })
+			.from(commissions)
+			.where(eq(commissions.artistId, id))
+			.get();
+		if (commissionRow && commissionRow.count > 0) {
+			return fail(400, {
+				error: `Cannot delete artist with ${commissionRow.count} commission ledger entr${commissionRow.count === 1 ? 'y' : 'ies'}. Delete those entries first.`
 			});
 		}
 
