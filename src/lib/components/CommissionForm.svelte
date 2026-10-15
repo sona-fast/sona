@@ -17,11 +17,13 @@
 		datesAfterStatusChange,
 		FIELD_ORDER,
 		formValuesOf,
+		isCommissionStatus,
 		localToday,
 		mergeReloaded,
 		staleMessage,
 		type CommissionField,
-		type CommissionFormEntry
+		type CommissionFormEntry,
+		type CommissionFormValues
 	} from '$lib/commissions';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
@@ -38,6 +40,9 @@
 		stale?: boolean;
 		/** The entry was deleted after the form loaded. */
 		missing?: boolean;
+		/** What the refused save sent, and the version it sent with it. */
+		values?: CommissionFormValues;
+		version?: string;
 	}
 	interface Props {
 		artists: { id: number; name: string }[];
@@ -61,15 +66,19 @@
 	// is refused as out of date. Replaced on Reload entry.
 	// svelte-ignore state_referenced_locally
 	let loaded = $state(formValuesOf(entry));
+	// A save refused without JavaScript renders the page again from the server:
+	// the form opens with what was sent, under the version it was sent with.
 	// svelte-ignore state_referenced_locally
-	let version = $state(entry?.version ?? '');
+	let version = $state(form?.version ?? entry?.version ?? '');
 	// svelte-ignore state_referenced_locally
-	let values = $state(formValuesOf(entry));
+	let values = $state(form?.values ?? formValuesOf(entry));
 
 	let saving = $state(false);
 	// The refusal on screen. Cleared when a new save starts or the entry reloads,
 	// so an answered refusal doesn't linger above a fresh form.
-	let failure = $state<FailureData | null>(null);
+	// Starts from `form` so the server-rendered page shows the refusal too.
+	// svelte-ignore state_referenced_locally
+	let failure = $state<FailureData | null>(form ?? null);
 	$effect(() => {
 		failure = form ?? null;
 	});
@@ -90,8 +99,12 @@
 
 	// Moving to Accepted or Delivered fills that step's empty date with today
 	// (open question Q17, built as drawn). The owner can change or clear it.
-	function onStatusChange() {
-		const next = datesAfterStatusChange(values.status, values, localToday());
+	// The pick is read from the event, not from values.status, so the date never
+	// depends on whether the binding has run yet.
+	function onStatusChange(e: Event & { currentTarget: HTMLSelectElement }) {
+		const status = e.currentTarget.value;
+		if (!isCommissionStatus(status)) return;
+		const next = datesAfterStatusChange(status, values, localToday());
 		values.requestedOn = next.requestedOn;
 		values.acceptedOn = next.acceptedOn;
 		values.deliveredOn = next.deliveredOn;

@@ -13,6 +13,7 @@ import {
 	isCommissionStatus,
 	parsePrice,
 	type CommissionField,
+	type CommissionFormValues,
 	type CommissionPayment,
 	type CommissionStatus
 } from '$lib/commissions';
@@ -141,6 +142,32 @@ export function parseCommissionForm(
 			notes: notes || null,
 			...dates
 		}
+	};
+}
+
+/** What the owner sent, as the form binds it, for a refused save to hand back.
+ * Without JavaScript the page renders again from the server, and these keep
+ * the typing. Only the form's own fields, read the way the parser reads them. */
+export function submittedValues(data: FormData): CommissionFormValues {
+	const status = text(data, 'status');
+	const payment = text(data, 'payment');
+	return {
+		artistId: text(data, 'artistId'),
+		title: text(data, 'title'),
+		kind: text(data, 'kind'),
+		sourceUrl: text(data, 'sourceUrl'),
+		characterIds: data
+			.getAll('characterId')
+			.map(parseId)
+			.filter((id): id is number => id !== null),
+		status: isCommissionStatus(status) ? status : 'applied',
+		payment: isCommissionPayment(payment) ? payment : 'unpaid',
+		price: text(data, 'price'),
+		currency: text(data, 'currency'),
+		notes: text(data, 'notes').replace(/\r\n?/g, '\n'),
+		requestedOn: text(data, 'requestedOn'),
+		acceptedOn: text(data, 'acceptedOn'),
+		deliveredOn: text(data, 'deliveredOn')
 	};
 }
 

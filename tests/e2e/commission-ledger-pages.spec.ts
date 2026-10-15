@@ -84,7 +84,14 @@ test("moving an entry to Accepted fills today's date, and a set date stays", asy
 	await expect(accepted).toHaveValue(today);
 	await expect(delivered).toHaveValue('');
 
+	// Delivered fills its own date only; the Accepted date the owner changed stays.
+	await accepted.fill('2026-01-01');
+	await page.getByLabel('Status').selectOption('delivered');
+	await expect(delivered).toHaveValue(today);
+	await expect(accepted).toHaveValue('2026-01-01');
+
 	// A Delivered date the owner already typed is kept.
+	await page.getByLabel('Status').selectOption('in_progress');
 	await delivered.fill('2026-01-02');
 	await page.getByLabel('Status').selectOption('delivered');
 	await expect(delivered).toHaveValue('2026-01-02');
@@ -125,6 +132,42 @@ test('a refused price shows its error on the field, and nothing is saved', async
 	expect(edge).toBe(destructive);
 	expect(ring).toBe(destructive);
 	await settledShot(page, testInfo.outputPath('commission-entry-price-error.png'));
+
+	await page.goto('/admin/commissions');
+	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
+});
+
+// Before hydration, or with JavaScript off, the form posts natively and the
+// server renders the refusal: the typing and the field's error both have to be
+// in that HTML.
+test('without JavaScript, a refused save keeps what was typed and shows the error', async ({ page, browser }, testInfo) => {
+	await adminLogin(page, PASSWORD);
+	const context = await browser.newContext({
+		baseURL: testInfo.project.use.baseURL,
+		storageState: await page.context().storageState(),
+		javaScriptEnabled: false
+	});
+	try {
+		const noJs = await context.newPage();
+		await noJs.goto('/admin/commissions/new');
+		await noJs.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
+		await noJs.getByLabel('Title').fill('E2E no-JS title');
+		await noJs.getByLabel('Notes').fill('E2E no-JS note');
+		await noJs.getByLabel('Price').fill('45.5');
+		await noJs.getByLabel('Currency').fill('JPY');
+		await noJs.getByRole('button', { name: 'Save entry' }).click();
+		await noJs.waitForLoadState();
+
+		await expect(noJs.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
+		await expect(noJs.getByLabel('Title')).toHaveValue('E2E no-JS title');
+		await expect(noJs.getByLabel('Notes')).toHaveValue('E2E no-JS note');
+		await expect(noJs.getByLabel('Price')).toHaveValue('45.5');
+		await expect(noJs.getByLabel('Price')).toHaveAttribute('aria-invalid', 'true');
+		await expect(noJs.getByText("JPY prices don't use decimals. Enter a whole number.")).toBeVisible();
+		await settledShot(noJs, testInfo.outputPath('commission-entry-nojs-error.png'));
+	} finally {
+		await context.close();
+	}
 
 	await page.goto('/admin/commissions');
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();

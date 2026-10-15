@@ -8,6 +8,7 @@ import {
 	loadCommissionChoices,
 	parseCommissionForm,
 	parseId,
+	submittedValues,
 	updateCommission
 } from '$lib/server/commissions';
 import type { Actions, PageServerLoad } from './$types';
@@ -36,9 +37,10 @@ export const actions = {
 
 		const data = await request.formData();
 		const parsed = parseCommissionForm(data);
-		if (!parsed.ok) return fail(400, { errors: parsed.errors });
+		// A refusal sends back what was typed, so a save without JavaScript keeps it.
+		if (!parsed.ok) return fail(400, { errors: parsed.errors, values: submittedValues(data) });
 		const refErrors = await checkCommissionRefs(db, parsed.input);
-		if (Object.keys(refErrors).length > 0) return fail(400, { errors: refErrors });
+		if (Object.keys(refErrors).length > 0) return fail(400, { errors: refErrors, values: submittedValues(data) });
 
 		// A save without the version the form loaded with can't prove it isn't
 		// stale, so it's refused the same way.
@@ -50,7 +52,13 @@ export const actions = {
 		if (result === 'stale') {
 			// Stale, or deleted since the form loaded: both leave nothing to save.
 			if (!(await loadCommission(db, id))) return fail(404, { missing: true });
-			return fail(409, { stale: true });
+			// The version goes back with the typing: the reloaded entry's own would
+			// let a second Save overwrite the change this one was refused over.
+			return fail(409, {
+				stale: true,
+				values: submittedValues(data),
+				version: typeof version === 'string' ? version : ''
+			});
 		}
 		redirect(303, '/admin/commissions');
 	},

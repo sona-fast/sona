@@ -240,6 +240,37 @@ describe('create action: bad input', () => {
 		expect((await create(platform, entryForm({ title: 'x'.repeat(120) }))).status).toBe('redirected');
 	});
 
+	it('sends back what was typed, trimmed, so a save without JavaScript keeps it', async () => {
+		const { platform } = ledgerDb();
+		const result = await create(
+			platform,
+			entryForm({ title: '  Kept title ', notes: 'Line one\r\nline two', price: '45.5', currency: 'JPY', characterId: ['1', 'x'] })
+		);
+		expect(result.status).toBe(400);
+		expect(result.data.values).toEqual({
+			artistId: '1',
+			title: 'Kept title',
+			kind: 'Ref sheet',
+			sourceUrl: 'https://t.me/artist_a/412',
+			characterIds: [1],
+			status: 'applied',
+			payment: 'unpaid',
+			price: '45.5',
+			currency: 'JPY',
+			notes: 'Line one\nline two',
+			requestedOn: '2026-10-02',
+			acceptedOn: '',
+			deliveredOn: ''
+		});
+	});
+
+	it('sends back what was typed when the artist is unknown', async () => {
+		const { platform } = ledgerDb();
+		const result = await create(platform, entryForm({ artistId: '99' }));
+		expect(result.status).toBe(400);
+		expect(result.data.values).toMatchObject({ artistId: '99', title: 'Ref sheet update' });
+	});
+
 	it('names every bad field at once', async () => {
 		const { platform } = ledgerDb();
 		const result = await create(platform, entryForm({ title: '', status: 'nope', price: '1', currency: '' }));

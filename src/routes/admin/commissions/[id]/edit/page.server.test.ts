@@ -180,7 +180,13 @@ describe('save action', () => {
 
 		const stale = await save(platform, String(id), saveForm({ title: 'From this tab', characterId: ['2'] }));
 		expect(stale.status).toBe(409);
-		expect(stale.data).toEqual({ stale: true });
+		// The typing goes back with the version it was sent under, so a second
+		// Save without JavaScript is refused again rather than overwriting.
+		expect(stale.data).toEqual({
+			stale: true,
+			version: VERSION,
+			values: expect.objectContaining({ title: 'From this tab', characterIds: [2] })
+		});
 		expect(ledgerSnapshot(sqlite)).toEqual(afterOther);
 
 		// Reload entry: the form now carries the current version, and saves.
@@ -211,7 +217,9 @@ describe('save action', () => {
 			{ artistId: '99' },
 			{ characterId: ['99'] }
 		]) {
-			expect((await save(platform, String(id), saveForm(overrides))).status, JSON.stringify(overrides)).toBe(400);
+			const result = await save(platform, String(id), saveForm(overrides));
+			expect(result.status, JSON.stringify(overrides)).toBe(400);
+			expect(result.data.values, JSON.stringify(overrides)).toMatchObject({ title: 'Ref sheet update' });
 		}
 		expect(ledgerSnapshot(sqlite)).toEqual(before);
 	});
