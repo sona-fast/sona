@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { isHttpError } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
+import { getTableColumns } from 'drizzle-orm';
+import { images } from '$lib/server/db/schema';
 import { insertLinkedPiece } from '$lib/server/commission-gallery';
 import { ledgerDb, restoreRegistry, rows, seedEntry, setLedgerGa, type Sqlite } from '$lib/server/test/ledger-db';
 import { actions, load } from './+page.server';
@@ -316,3 +318,107 @@ describe('upload save from an entry: refusals write no image', () => {
 		expect(rows(sqlite, 'SELECT image_id, status FROM commissions')).toEqual([{ image_id: null, status: 'applied' }]);
 	});
 });
+
+describe('a piece saved from an entry gets the schema defaults a plain upload gets', () => {
+	it('matches a plain insert in every column that has a default', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite);
+		const db = getDb(platform.env.DB);
+		// Only what the upload form provides; everything else is left to defaults.
+		const given = {
+			title: 'T',
+			imageUrl: '/img/x.png',
+			width: null,
+			height: null,
+			fileSize: null,
+			nsfw: false,
+			published: false,
+			sourcePostUrl: null,
+			artistId: 1,
+			collectionId: null,
+			commissionedAt: null
+		};
+		await db.insert(images).values({ ...given, slug: 'plain' });
+		await insertLinkedPiece(db, id, { ...given, slug: 'linked' }, null);
+		const [plain, linked] = ['plain', 'linked'].map(
+			(slug) => rows(sqlite, 'SELECT * FROM images WHERE slug = ?', slug)[0] as Record<string, unknown>
+		);
+
+		const defaulted = Object.values(getTableColumns(images)).filter((c) => c.hasDefault && !c.primary);
+		// Armed: the walk finds the defaulted columns this table has today.
+		expect(defaulted.map((c) => c.name).sort()).toEqual(['created_at', 'featured', 'nsfw', 'published']);
+		for (const column of defaulted) {
+			if (column.name === 'created_at') {
+				// A timestamp, generated per insert like the plain one.
+				expect(linked.created_at, column.name).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+				continue;
+			}
+			expect(linked[column.name], column.name).toEqual(plain[column.name]);
+		}
+	});
+});
+
+describe('upload save from an entry: what the browser sends', () => {
+	it("fills an empty Delivered date with the browser's date, and keeps the piece's own date", async () => {
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite, { status: 'in_progress' });
+		await save(platform, {
+			commissionId: String(id),
+			commissionedAt: '2026-02-01',
+			commissionDeliveredOn: '2026-10-14'
+		});
+		expect(entryRow(sqlite, id)).toMatchObject({ status: 'delivered', delivered_on: '2026-10-14' });
+		expect(rows(sqlite, 'SELECT commissioned_at FROM images')).toEqual([{ commissioned_at: '2026-02-01' }]);
+	});
+
+	it('saves the piece as private unless the form says public outright', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const quiet = privateEntry(sqlite, { title: 'No field' });
+		// No Private box and no visibility field: a plain upload would publish this.
+		await save(platform, { commissionId: String(quiet), published: '', title: 'Quiet' });
+		const open = privateEntry(sqlite, { title: 'Public' });
+		await save(platform, { commissionId: String(open), commissionVisibility: 'public', title: 'Loud' });
+		expect(rows(sqlite, 'SELECT title, published FROM images ORDER BY id')).toEqual([
+			{ title: 'Quiet', published: 0 },
+			{ title: 'Loud', published: 1 }
+		]);
+	});
+});
+
+describe('upload save from an entry: the entry changes between the checks and the batch', () => {
+	/** The same database, with `change` run just before the action's batch: the
+	 * moment another tab's save or edit would land. */
+	function racing(platform: App.Platform, change: () => void): App.Platform {
+		const d1 = platform.env.DB as unknown as { prepare: (s: string) => unknown; batch: (s: unknown[]) => unknown };
+		const db = {
+			prepare: (s: string) => d1.prepare(s),
+			batch: (stmts: unknown[]) => {
+				change();
+				return d1.batch(stmts);
+			}
+		};
+		return { env: { ...platform.env, DB: db } } as unknown as App.Platform;
+	}
+
+	it('returns 409 and writes nothing when another save linked it first', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite);
+		seedImage(sqlite, 7);
+		const result = await save(racing(platform, () => link(sqlite, id, 7)), { commissionId: String(id) });
+		expect(result.status).toBe(409);
+		expect(result.data).toEqual({ commission: 'just_added', imageId: 7 });
+		expect(imageCount(sqlite)).toBe(1);
+	});
+
+	it('returns 400 closed and writes nothing when the entry was canceled meanwhile', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const id = privateEntry(sqlite);
+		const cancel = () => sqlite.prepare("UPDATE commissions SET status = 'cancelled' WHERE id = ?").run(id);
+		const result = await save(racing(platform, cancel), { commissionId: String(id) });
+		expect(result.status).toBe(400);
+		expect(result.data).toEqual({ commission: 'closed', status: 'cancelled' });
+		expect(imageCount(sqlite)).toBe(0);
+		expect(entryRow(sqlite, id)).toMatchObject({ image_id: null, status: 'cancelled' });
+	});
+});
+

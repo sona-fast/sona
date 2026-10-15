@@ -228,7 +228,10 @@ export const actions = {
 		const shared = {
 			artistId: resolvedArtistId,
 			collectionId: collectionId ? Number(collectionId) : null,
-			published,
+			// From an entry the piece stays private unless the form says public in so
+			// many words: artists often ask clients to wait until they post first, and
+			// a form that lost its checkbox shouldn't publish.
+			published: entry ? data.get('commissionVisibility') === 'public' : published,
 			sourcePostUrl: sourcePostUrl || null,
 			commissionedAt: commissionedAt || null
 		};
@@ -270,12 +273,15 @@ export const actions = {
 					deliveredOnFromForm(data.get('commissionDeliveredOn'))
 				);
 				if (linkedId === null) {
+					// The entry changed between the checks and the batch: say how.
 					const now = await db
-						.select({ imageId: commissions.imageId })
+						.select({ imageId: commissions.imageId, status: commissions.status })
 						.from(commissions)
 						.where(eq(commissions.id, entry.id))
 						.get();
-					return fail(409, { commission: 'just_added', imageId: now?.imageId ?? null });
+					if (!now) return fail(400, { commission: 'missing' });
+					if (now.imageId !== null) return fail(409, { commission: 'just_added', imageId: now.imageId });
+					return fail(400, { commission: 'closed', status: now.status });
 				}
 				parentDbId = linkedId;
 			} else {

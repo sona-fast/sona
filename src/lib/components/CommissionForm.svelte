@@ -230,9 +230,10 @@
 
 {#snippet galleryButton(label: string, primary: boolean, described: boolean)}
 	{@const tone = primary ? 'btn-primary' : 'btn-secondary'}
+	{@const Icon = entry?.piece ? Plus : ImagePlus}
 	{#if dirty}
 		<button type="button" class="btn {tone}" aria-disabled="true" aria-describedby="ce-gallery-hint">
-			{#if entry?.piece}<Plus size={16} aria-hidden="true" />{:else}<ImagePlus size={16} aria-hidden="true" />{/if}
+			<Icon size={16} aria-hidden="true" />
 			{label}
 		</button>
 	{:else}
@@ -241,7 +242,7 @@
 			href="/admin/upload?commission={entry?.id}"
 			aria-describedby={described ? 'ce-gallery-hint' : undefined}
 		>
-			{#if entry?.piece}<Plus size={16} aria-hidden="true" />{:else}<ImagePlus size={16} aria-hidden="true" />{/if}
+			<Icon size={16} aria-hidden="true" />
 			{label}
 		</a>
 	{/if}

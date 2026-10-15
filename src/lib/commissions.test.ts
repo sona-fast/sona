@@ -6,7 +6,6 @@ import {
 	COMMISSION_STATUSES,
 	PAYMENT_LABELS,
 	STATUS_LABELS,
-	aroundLink,
 	changedFields,
 	commissionDateRows,
 	datesAfterStatusChange,
@@ -255,36 +254,5 @@ describe('mergeReloaded', () => {
 		expect(values.notes).toBe('Typed here.');
 		expect(values.status).toBe('delivered');
 		expect(restoredNote).toBe('replaces');
-	});
-});
-
-describe('aroundLink', () => {
-	it('splits each "Added to your gallery" notice around its link, in both languages', () => {
-		for (const locale of ['en', 'ja'] as const) {
-			const o = { locale };
-			const renders = [
-				(piece: string) => m.admin_commissions_added_piece({ piece }, o),
-				(piece: string) => m.admin_commissions_added_piece_private({ piece }, o),
-				(piece: string) => m.admin_commissions_added_variants({ count: 2, piece }, o),
-				(piece: string) => m.admin_commissions_added_variants_private({ count: 1, piece }, o)
-			];
-			for (const render of renders) {
-				const parts = aroundLink(render);
-				expect(parts, `${locale}: ${render('X')}`).not.toBeNull();
-				expect(`${parts!.before}Snowfall${parts!.after}`).toBe(render('Snowfall'));
-			}
-		}
-	});
-
-	it('keeps Japanese word order, with the piece first', () => {
-		expect(aroundLink((piece) => m.admin_commissions_added_variants({ count: 2, piece }, { locale: 'ja' }))).toEqual({
-			before: '',
-			after: 'にバリエーションを2件追加しました。'
-		});
-	});
-
-	it('gives null when the link is missing or repeated', () => {
-		expect(aroundLink(() => 'No link here.')).toBeNull();
-		expect(aroundLink((x) => `${x} and ${x}`)).toBeNull();
 	});
 });

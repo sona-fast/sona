@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 import { settledShot } from './settled-shot';
+import { failOnPageErrors } from './page-errors';
 
 // The commission ledger pages (SONA-236 PR 2), driven in a real browser. The
 // server actions are covered against a real schema in the vitest suites beside
@@ -14,6 +15,8 @@ import { settledShot } from './settled-shot';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
+
+failOnPageErrors();
 
 test('the ledger lists nothing yet and says who can read it', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);

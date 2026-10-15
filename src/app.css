@@ -250,6 +250,18 @@ input, select, textarea {
 	background-color: color-mix(in srgb, var(--destructive) 88%, black);
 }
 
+/* A button that stays focusable but doesn't act yet (aria-disabled, so focus
+   doesn't jump away and its reason can be read). It drops to the secondary
+   look in every variant and on hover, and keeps that pair's tested text
+   contrast instead of fading its label. */
+.btn[aria-disabled='true'],
+.btn[aria-disabled='true']:hover {
+	background-color: var(--secondary);
+	color: var(--secondary-foreground);
+	box-shadow: none;
+	cursor: not-allowed;
+}
+
 .btn-primary {
 	background-color: var(--primary);
 	color: var(--primary-foreground);

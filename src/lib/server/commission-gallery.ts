@@ -1,6 +1,6 @@
-import { and, asc, eq, getTableColumns, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, inArray, is, isNull, notInArray, SQL, sql } from 'drizzle-orm';
 import type { Database } from './db';
-import type { SQLiteInsertSelectQueryBuilder } from 'drizzle-orm/sqlite-core';
+import type { SQLiteInsertSelectQueryBuilder, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { commissionCharacters, commissions, images } from './db/schema';
 import { commissionGateView } from './commission-gate';
 import { parseId } from './commissions';
@@ -59,7 +59,8 @@ export async function loadUploadPrefill(db: Database, id: number): Promise<Uploa
 		artistId: row.artistId,
 		characterIds: links.map((l) => l.id),
 		existingParentId: row.imageId,
-		commissionedOn: row.imageId !== null ? (row.pieceDate ?? '') : ''
+		// Null for a new piece: the join finds no piece, so no date.
+		commissionedOn: row.pieceDate ?? ''
 	};
 }
 
@@ -143,10 +144,44 @@ export interface LinkedPiece {
 }
 
 /**
+ * The row an INSERT … SELECT writes, filled the way drizzle's own `.values()`
+ * insert fills it: the given values, then each unset column's `.default()`,
+ * `$defaultFn()`, or `$onUpdateFn()`, then NULL, each bound through the
+ * column so booleans and dates encode the same. A piece saved this way gets
+ * every schema default a plain upload gets.
+ */
+export function insertSelection<T extends SQLiteTable>(table: T, given: Partial<T['$inferInsert']>) {
+	const values = given as Record<string, unknown>;
+	return Object.fromEntries(
+		Object.entries(getTableColumns(table)).map(([key, column]) => {
+			let value: unknown = values[key];
+			if (value === undefined) {
+				if (column.default !== null && column.default !== undefined) value = column.default;
+				else if (column.defaultFn) value = column.defaultFn();
+				else if (column.onUpdateFn) value = column.onUpdateFn();
+				else return [key, sql`null`];
+			}
+			return [key, is(value, SQL) ? value : sql`${sql.param(value, column)}`];
+		})
+	) as Record<keyof T['$inferSelect'], SQL>;
+}
+
+/** The guard both statements share: the entry is still unlinked, and still
+ * in a state that can go to the gallery. */
+function stillAddable(entryId: number) {
+	return and(
+		eq(commissions.id, entryId),
+		isNull(commissions.imageId),
+		notInArray(commissions.status, ['not_picked', 'cancelled'])
+	);
+}
+
+/**
  * Inserts a new piece and links the entry to it in one batch, so either both
- * happen or neither. The insert runs only while the entry is still unlinked,
- * and the link finds the piece by its unique slug. When two saves race, the
- * second inserts nothing and links nothing, and this returns null.
+ * happen or neither. Both statements run only while the entry is unlinked and
+ * not marked Not picked or Canceled, and the link finds the piece by its unique
+ * slug. When another save got there first, or the entry was closed since the
+ * checks, this inserts nothing, links nothing, and returns null.
  *
  * The entry moves to Delivered, and an empty Delivered date takes
  * `deliveredOn` (the owner's local date). A date the owner set stays. The
@@ -159,26 +194,9 @@ export async function insertLinkedPiece(
 	deliveredOn: string | null,
 	now: Date = new Date()
 ): Promise<number | null> {
-	const stamp = now.toISOString();
-	const given: Partial<Record<keyof typeof images.$inferInsert, unknown>> = {
-		...piece,
-		// Bound as integers: a boolean isn't a value SQLite can bind.
-		nsfw: piece.nsfw ? 1 : 0,
-		published: piece.published ? 1 : 0,
-		featured: 0,
-		createdAt: stamp
-	};
-	// An INSERT … SELECT names every column in table order, so the selection is
-	// built from the table: the piece's values, NULL for the rest. A new NOT NULL
-	// column needs a value here, or this insert fails its constraint.
-	const selection = Object.fromEntries(
-		Object.keys(getTableColumns(images)).map((key) => [
-			key,
-			key in given ? sql`${given[key as keyof typeof given]}` : sql`NULL`
-		])
-	) as Record<keyof typeof images.$inferSelect, SQL>;
 	const [inserted] = await db.batch([
-		// One row while the entry is unlinked, none once anything has linked it.
+		// One row while the entry can still take the piece, none once another
+		// save has linked it or the entry was marked Not picked or Canceled.
 		db
 			.insert(images)
 			.select(
@@ -187,11 +205,9 @@ export async function insertLinkedPiece(
 					// carry each column's type; drizzle still checks the keys and their
 					// order against the table at runtime.
 					qb
-						.select(selection)
+						.select(insertSelection(images, piece))
 						.from(commissions)
-						.where(
-							and(eq(commissions.id, entryId), isNull(commissions.imageId))
-						) as unknown as SQLiteInsertSelectQueryBuilder<typeof images>
+						.where(stillAddable(entryId)) as unknown as SQLiteInsertSelectQueryBuilder<typeof images>
 			)
 			.returning({ id: images.id }),
 		db
@@ -200,9 +216,9 @@ export async function insertLinkedPiece(
 				imageId: sql`(SELECT id FROM images WHERE slug = ${piece.slug})`,
 				status: 'delivered',
 				deliveredOn: sql`COALESCE(${commissions.deliveredOn}, ${deliveredOn})`,
-				updatedAt: stamp
+				updatedAt: now.toISOString()
 			})
-			.where(and(eq(commissions.id, entryId), isNull(commissions.imageId)))
+			.where(stillAddable(entryId))
 	]);
 	return inserted[0]?.id ?? null;
 }

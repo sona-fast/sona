@@ -5,35 +5,41 @@
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
-	import { aroundLink, isActiveStatus, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
+	import { untrack } from 'svelte';
+	import { isActiveStatus, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
 	// "Added to your gallery" after an upload from an entry. The server built it
-	// from the saved rows; the piece's title is the link inside the sentence.
+	// from the saved rows; the piece's title is the link inside the sentence,
+	// and each language puts it where its word order wants it.
 	const added = $derived.by(() => {
 		const notice = data.added;
 		if (!notice) return null;
-		const render =
+		const [pre, post] =
 			notice.kind === 'piece'
-				? (piece: string) =>
+				? notice.published
+					? [m.admin_commissions_added_piece_pre(), m.admin_commissions_added_piece_post()]
+					: [m.admin_commissions_added_piece_private_pre(), m.admin_commissions_added_piece_private_post()]
+				: [
 						notice.published
-							? m.admin_commissions_added_piece({ piece })
-							: m.admin_commissions_added_piece_private({ piece })
-				: (piece: string) =>
-						notice.published
-							? m.admin_commissions_added_variants({ count: notice.count, piece })
-							: m.admin_commissions_added_variants_private({ count: notice.count, piece });
+							? m.admin_commissions_added_variants_pre({ count: notice.count })
+							: m.admin_commissions_added_variants_private_pre({ count: notice.count }),
+						m.admin_commissions_added_variants_post()
+					];
 		const title = notice.kind === 'piece' ? notice.title : notice.pieceTitle;
 		const pieceId = notice.kind === 'piece' ? notice.imageId : notice.pieceId;
-		return { parts: aroundLink(render), text: render(title), title, href: `/admin/images/${pieceId}/edit` };
+		return { pre, post, title, href: `/admin/images/${pieceId}/edit` };
 	});
 
-	// The layout's live region reads the notice out once the page arrives.
+	// This page's live region reads the notice out once the page arrives.
+	// untrack: say() reads and bumps the announcer's counter, and an effect that
+	// tracked it would rerun on its own write.
 	const announcer = new Announcer();
 	$effect(() => {
-		if (added) announcer.say(added.text);
+		const notice = added;
+		if (notice) untrack(() => announcer.say(`${notice.pre}${notice.title}${notice.post}`));
 	});
 
 	type Entry = (typeof data.entries)[number];
@@ -79,7 +85,7 @@
 	<div class="notice ok">
 		<span class="ok-mark"><CircleCheck size={16} aria-hidden="true" /></span>
 		<p>
-			{#if added.parts}{added.parts.before}<a href={added.href}>{added.title}</a>{added.parts.after}{:else}{added.text}{/if}
+			{added.pre}<a href={added.href}>{added.title}</a>{added.post}
 		</p>
 	</div>
 {/if}

@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 import { settledShot } from './settled-shot';
+import { failOnPageErrors } from './page-errors';
 
 // The commission ledger with its early-access gate closed (SONA-236 PR 2): a
 // fork with no supporter key before the GA date. Its own server (the
@@ -12,6 +13,8 @@ import { settledShot } from './settled-shot';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-commissions-gated.toml.
 const PASSWORD = 'e2e-admin-password';
+
+failOnPageErrors();
 
 // The gate reads the server's real clock, which a spec can't fake. Past the GA
 // date (or once the registry entry retires) the gate opens for everyone and

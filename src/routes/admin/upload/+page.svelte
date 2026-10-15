@@ -38,7 +38,7 @@
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
-	import { localToday, STATUS_LABELS } from '$lib/commissions';
+	import { localToday, STATUS_LABELS, type CommissionStatus } from '$lib/commissions';
 	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 
@@ -57,6 +57,19 @@
 			: null
 	);
 	const cancelHref = prefill ? `/admin/commissions/${prefill.id}/edit` : '/admin/images';
+
+	// Why a save from an entry was refused, narrowed once from the action data.
+	type Refusal = {
+		commission: 'missing' | 'gated' | 'closed' | 'mismatch' | 'group' | 'just_added';
+		imageId?: number | null;
+		gaDate?: string | null;
+		status?: CommissionStatus;
+	};
+	const refusal = $derived(form && 'commission' in form ? (form as unknown as Refusal) : null);
+	let refusalBox = $state<HTMLElement>();
+	$effect(() => {
+		if (refusal && refusalBox) refusalBox.focus();
+	});
 
 	// A newly created artist (via the New Artist dialog) is appended here so it
 	// appears in the select without a reload. `data.artists` is left untouched.
@@ -1307,32 +1320,31 @@
 	<p class="error">{form.error}</p>
 {/if}
 
-{#if form && 'commission' in form && form.commission}
-	<!-- A save from an entry the server refused before writing anything. -->
-	{@const refusal = form}
+{#if refusal}
+	<!-- A save from an entry the server refused before writing anything. It
+	     takes focus when it appears, after an enhanced save or a full reload. -->
 	{#if refusal.commission === 'just_added'}
-		<div class="notice" role="alert">
+		<div class="notice" role="alert" tabindex="-1" bind:this={refusalBox}>
 			<p>
-				{m.admin_upload_commission_just_added()}{#if 'imageId' in refusal && refusal.imageId}<a
-						href="/admin/images/{refusal.imageId}/edit">{m.admin_upload_commission_view_piece()}</a
+				{m.admin_upload_commission_just_added()}{#if refusal.imageId}<a href="/admin/images/{refusal.imageId}/edit"
+						>{m.admin_upload_commission_view_piece()}</a
 					>{m.admin_upload_commission_or()}{/if}<a href="/admin/commissions"
 					>{m.admin_upload_commission_back_lower()}</a
 				>{m.admin_upload_commission_just_added_post()}
 			</p>
 		</div>
 	{:else if refusal.commission === 'gated'}
-		<p class="error" role="alert">
+		<p class="error" role="alert" tabindex="-1" bind:this={refusalBox}>
 			<CircleAlert size={16} aria-hidden="true" /><span
-				>{m.admin_upload_commission_gated({
-					date: 'gaDate' in refusal ? (refusal.gaDate ?? '') : ''
-				})}<a href="/admin/settings?tab=account#supporter-key">{m.admin_commissions_refused_link()}</a
+				>{m.admin_upload_commission_gated({ date: refusal.gaDate ?? '' })}<a
+					href="/admin/settings?tab=account#supporter-key">{m.admin_commissions_refused_link()}</a
 				>{m.admin_commissions_refused_post()}</span
 			>
 		</p>
 	{:else}
-		<p class="error" role="alert">
+		<p class="error" role="alert" tabindex="-1" bind:this={refusalBox}>
 			<CircleAlert size={16} aria-hidden="true" /><span
-				>{#if refusal.commission === 'missing'}{m.admin_upload_commission_missing()}{:else if refusal.commission === 'closed' && 'status' in refusal && refusal.status}{m.admin_upload_commission_closed(
+				>{#if refusal.commission === 'missing'}{m.admin_upload_commission_missing()}{:else if refusal.commission === 'closed' && refusal.status}{m.admin_upload_commission_closed(
 						{ status: STATUS_LABELS[refusal.status]() }
 					)}{:else if refusal.commission === 'mismatch'}{m.admin_upload_commission_mismatch()}{:else}{m.admin_upload_commission_group()}{/if}<a
 					href="/admin/commissions">{m.admin_upload_commission_back()}</a
@@ -1369,7 +1381,11 @@
 	};
 }} class="upload-form">
 	<input type="hidden" name="count" value={tiles.length} />
-	{#if prefill}<input type="hidden" name="commissionId" value={prefill.id} />{/if}
+	{#if prefill}
+		<input type="hidden" name="commissionId" value={prefill.id} />
+		<!-- Said outright, so a form that loses the Private box saves privately. -->
+		<input type="hidden" name="commissionVisibility" value={isPrivate ? 'private' : 'public'} />
+	{/if}
 	{#if groupMode === 'new'}
 		<input type="hidden" name="parentIndex" value={parentIndex} />
 	{:else}

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 import { settledShot } from './settled-shot';
+import { failOnPageErrors } from './page-errors';
 import { contrastRatio } from './contrast';
 
 // The commission ledger saved through the real form (SONA-236 PR 2): create an
@@ -12,6 +13,8 @@ import { contrastRatio } from './contrast';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
+
+failOnPageErrors();
 const TITLE = 'E2E ref sheet';
 
 test.describe.configure({ mode: 'serial' });
@@ -95,6 +98,8 @@ test('moving the entry to Delivered lists it under Finished', async ({ page }, t
 	await expect(page.getByLabel('Price')).toHaveValue('120.00');
 	await page.getByLabel('Status').selectOption('delivered');
 	await expect(page.getByLabel('Delivered', { exact: true })).not.toHaveValue('');
+	// A date the owner picks, which Add to gallery must keep later.
+	await page.getByLabel('Delivered', { exact: true }).fill('2026-01-02');
 	await settledShot(page, testInfo.outputPath('commission-entry-edit.png'));
 	await page.getByRole('button', { name: 'Save changes' }).click();
 
@@ -111,6 +116,30 @@ const PNG = Buffer.from(
 	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
 	'base64'
 );
+
+/** Uploads one file and saves it as `title`. The file goes to storage first;
+ * the stub answers with an asset the site already serves, so the piece
+ * renders. setInputFiles doesn't reach Svelte's delegated change handler, so
+ * the change is dispatched by hand, retried until hydration attaches it. */
+async function uploadPiece(page: Page, title: string) {
+	await page.route(
+		(url) => url.pathname === '/api/upload',
+		(route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/e2e-avatar.svg' }) })
+	);
+	await expect(async () => {
+		await page.setInputFiles('input[type="file"]', { name: 'piece.png', mimeType: 'image/png', buffer: PNG });
+		await page.evaluate(() =>
+			document.querySelector('input[type="file"]')!.dispatchEvent(new Event('change', { bubbles: true }))
+		);
+		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/e2e-avatar.svg', { timeout: 2000 });
+	}).toPass({ timeout: 20_000 });
+	await page.locator('input[name="title"]').fill(title);
+	await page.getByRole('button', { name: 'Upload Artwork' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions\?added=\d+$/);
+}
+
+const galleryPanel = (page: Page) =>
+	page.locator('section', { has: page.getByRole('heading', { level: 2, name: 'Gallery' }) });
 
 test('Add to gallery uploads a new piece and links it to the entry', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
@@ -143,23 +172,8 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	await expect(page.locator('#lookup-hint')).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-upload-prefilled.png'));
 
-	// The file goes to storage first; the stub answers with an asset the site
-	// already serves, so the saved piece renders.
-	await page.route(
-		(url) => url.pathname === '/api/upload',
-		(route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/e2e-avatar.svg' }) })
-	);
-	await expect(async () => {
-		await page.setInputFiles('input[type="file"]', { name: 'snowfall.png', mimeType: 'image/png', buffer: PNG });
-		await page.evaluate(() =>
-			document.querySelector('input[type="file"]')!.dispatchEvent(new Event('change', { bubbles: true }))
-		);
-		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/e2e-avatar.svg', { timeout: 2000 });
-	}).toPass({ timeout: 20_000 });
-	await page.locator('input[name="title"]').fill('E2E Snowfall');
-	await page.getByRole('button', { name: 'Upload Artwork' }).click();
+	await uploadPiece(page, 'E2E Snowfall');
 
-	await expect(page).toHaveURL(/\/admin\/commissions\?added=\d+$/);
 	const notice = page.locator('.notice.ok');
 	await expect(notice).toContainText('Added to your gallery as a private piece: E2E Snowfall.');
 	const row = section(page, 'Finished').getByRole('row', { name: new RegExp(TITLE) });
@@ -176,6 +190,66 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	await expect(panel.getByRole('link', { name: 'E2E Snowfall' })).toBeVisible();
 	await expect(panel.getByRole('link', { name: 'Add a variant' })).toHaveAttribute('href', /\/admin\/upload\?commission=\d+$/);
 	await expect(panel.getByRole('link', { name: 'Add to gallery' })).toHaveCount(0);
+	// The Delivered date the owner set stays as it was.
+	await expect(page.getByLabel('Delivered', { exact: true })).toHaveValue('2026-01-02');
+});
+
+test("an entry with no Delivered date gets the browser's date when added to the gallery", async ({ page }, testInfo) => {
+	const title = 'E2E in progress';
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill(title);
+	await page.getByLabel('Status').selectOption('cancelled');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const editUrl = await page.getByRole('link', { name: `Edit ${title}` }).getAttribute('href');
+
+	// Canceled: nothing to add.
+	await open(page, editUrl!);
+	await expect(galleryPanel(page)).toContainText("You can't add an entry marked Not picked or Canceled to your gallery.");
+	await expect(galleryPanel(page).getByRole('link')).toHaveCount(0);
+	await expect(galleryPanel(page).getByRole('button')).toHaveCount(0);
+	await settledShot(page, testInfo.outputPath('commission-entry-gallery-closed.png'));
+
+	// In progress, with no Delivered date.
+	await page.getByLabel('Status').selectOption('in_progress');
+	await expect(page.getByLabel('Delivered', { exact: true })).toHaveValue('');
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await open(page, editUrl!);
+	const add = galleryPanel(page).getByRole('link', { name: 'Add to gallery' });
+	await expect(add).toBeVisible();
+	await expect(galleryPanel(page)).toContainText('Saving the upload marks this entry Delivered.');
+
+	// Unsaved changes hold the button back until they're saved or undone.
+	await page.getByLabel('Notes').fill('Not saved yet');
+	const held = galleryPanel(page).getByRole('button', { name: 'Add to gallery' });
+	await expect(held).toHaveAttribute('aria-disabled', 'true');
+	await expect(galleryPanel(page)).toContainText('Save your changes first.');
+	await settledShot(page, testInfo.outputPath('commission-entry-gallery-dirty.png'));
+	await page.getByLabel('Notes').fill('');
+	await expect(add).toBeVisible();
+
+	await add.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Upload New Artwork' })).toBeVisible();
+	await waitForHydration(page);
+	await uploadPiece(page, 'E2E Second piece');
+
+	// Delivered now, dated by the browser that saved it.
+	const today = await page.evaluate(() => {
+		const d = new Date();
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	});
+	await open(page, editUrl!);
+	await expect(page.getByLabel('Status')).toHaveValue('delivered');
+	await expect(page.getByLabel('Delivered', { exact: true })).toHaveValue(today);
+
+	// Leave the ledger as the next steps expect it: one entry.
+	await page.getByRole('button', { name: 'Delete entry' }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await expect(page.getByRole('link', { name: `Edit ${title}` })).toHaveCount(0);
 });
 
 test('an out-of-date save is refused, and Reload entry brings the typed note back', async ({ page, context }, testInfo) => {
