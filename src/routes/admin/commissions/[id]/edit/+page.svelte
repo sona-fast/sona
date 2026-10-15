@@ -166,7 +166,7 @@
 	}
 	.back-link:hover { color: var(--foreground); }
 	.page-header { margin-bottom: 12px; }
-	.page-header h1 { font-size: 22px; margin: 0; overflow-wrap: anywhere; }
+	.page-header h1 { font-size: 24px; margin: 0; overflow-wrap: anywhere; }
 
 	.readonly { display: flex; flex-direction: column; gap: 20px; max-width: 800px; }
 	.ro-section {

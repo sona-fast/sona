@@ -24,5 +24,5 @@
 	}
 	.back-link:hover { color: var(--foreground); }
 	.page-header { margin-bottom: 12px; }
-	.page-header h1 { font-size: 22px; margin: 0; }
+	.page-header h1 { font-size: 24px; margin: 0; }
 </style>

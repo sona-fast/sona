@@ -267,7 +267,7 @@
 				required
 				bind:value={values.artistId}
 				aria-invalid={errors.artistId ? 'true' : undefined}
-				aria-describedby={describedBy('artistId')}
+				aria-describedby={describedBy('artistId', artists.length === 0 ? 'ce-no-artists' : '')}
 			>
 				<option value="">{m.admin_commissions_select_artist()}</option>
 				{#each artists as artist (artist.id)}
@@ -275,6 +275,14 @@
 				{/each}
 			</select>
 			{@render fieldError('artistId')}
+			{#if artists.length === 0}
+				<!-- The entry form doesn't create artists yet (the paste-a-link flow
+				     does, in a later change), so point at the page that does. -->
+				<small class="hint" id="ce-no-artists"
+					>{m.admin_commissions_no_artists_pre()}<a href="/admin/artists">{m.admin_commissions_no_artists_link()}</a
+					>{m.admin_commissions_no_artists_post()}</small
+				>
+			{/if}
 		</div>
 	</fieldset>
 
@@ -503,6 +511,12 @@
 	.label-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.optional { font-weight: 400; color: var(--muted-foreground); font-size: 12px; }
 	.hint { font-size: 12px; color: var(--muted-foreground); line-height: 1.45; }
+	.hint a { color: var(--foreground); text-decoration: underline; }
+	/* A field with an error gets a red edge as well as its message. The edge
+	   only adds to the text, which carries the error on its own; the
+	   --destructive token measures at least 4.5:1 on --background in every
+	   theme (theme-contrast.test.ts), above the 3:1 a border needs. */
+	[aria-invalid='true'] { border-color: var(--destructive); }
 	.field-error {
 		display: flex; align-items: flex-start; gap: 6px; margin: 0;
 		font-size: 12px; color: var(--destructive); line-height: 1.45;
@@ -557,5 +571,10 @@
 	.why summary { color: var(--muted-foreground); cursor: pointer; width: fit-content; padding-block: 4px; }
 	.why p { margin: 6px 0 0; line-height: 1.5; color: var(--foreground); max-width: 60ch; }
 	.why-actions { justify-content: flex-start; }
+
+	/* Cancel and Save share the row on a phone. */
+	@media (max-width: 768px) {
+		.form-actions > :is(a, button) { flex: 1; }
+	}
 
 </style>

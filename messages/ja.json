@@ -1801,5 +1801,8 @@
 	"admin_commissions_error_currency_missing": "この価格の通貨を入力するか、価格を空欄にしてください。",
 	"admin_commissions_error_currency_code": "USDやEURのような3文字の通貨コードを入力してください。",
 	"admin_commissions_error_date": "正しい日付を入力するか、空欄にしてください。",
-	"admin_commissions_field_link_short": "リンク"
+	"admin_commissions_field_link_short": "リンク",
+	"admin_commissions_no_artists_pre": "まだアーティストが登録されていません。",
+	"admin_commissions_no_artists_link": "アーティスト",
+	"admin_commissions_no_artists_post": "ページで追加してから、この依頼を記録してください。"
 }

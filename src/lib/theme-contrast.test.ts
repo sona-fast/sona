@@ -2682,6 +2682,12 @@ describe('commission ledger Delete entry button keeps 4.5:1 at rest and on hover
 		expect(ruleBody(file, '.delete-slot .danger:hover')).toMatch(/background-color:\s*var\(--background\)/);
 	});
 
+	it('draws an invalid entry field with the same token, so the pairs below cover its 3:1 edge', () => {
+		expect(ruleBody('./components/CommissionForm.svelte', "[aria-invalid='true']")).toMatch(
+			/border-color:\s*var\(--destructive\)/
+		);
+	});
+
 	for (const { name, sel } of THEME_BLOCKS) {
 		it(`${name}: --destructive on --background meets 4.5:1 (rest and hover)`, () => {
 			expect(contrast(blockToken(sel, 'destructive'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(4.5);

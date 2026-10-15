@@ -46,6 +46,13 @@ test('creates an entry that lists under Active', async ({ page }, testInfo) => {
 	await expect(row).toContainText('Unpaid');
 	await expect(section(page, 'Finished')).toContainText('Entries you mark Delivered, Not picked, or Canceled move here.');
 	await page.screenshot({ path: testInfo.outputPath('commission-ledger-created.png'), fullPage: true });
+
+	// At tablet width the section is under the 760px the seven columns need, so
+	// each row becomes a card: no header row, and the row lays out as a block.
+	await page.setViewportSize({ width: 744, height: 1024 });
+	await expect(section(page, 'Active').locator('thead')).toBeHidden();
+	await expect(row).toHaveCSS('display', 'block');
+	await page.screenshot({ path: testInfo.outputPath('commission-ledger-cards-744.png'), fullPage: true });
 });
 
 test('moving the entry to Delivered lists it under Finished', async ({ page }, testInfo) => {

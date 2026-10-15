@@ -2356,5 +2356,8 @@
 	"admin_commissions_error_currency_missing": "Add a currency for this price, or clear the price.",
 	"admin_commissions_error_currency_code": "Use a three-letter currency code, like USD or EUR.",
 	"admin_commissions_error_date": "Enter a real date, or leave this empty.",
-	"admin_commissions_field_link_short": "Link"
+	"admin_commissions_field_link_short": "Link",
+	"admin_commissions_no_artists_pre": "You haven't added any artists yet. Add one on the ",
+	"admin_commissions_no_artists_link": "Artists page",
+	"admin_commissions_no_artists_post": ", then come back to record this commission."
 }

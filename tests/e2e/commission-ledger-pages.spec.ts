@@ -30,6 +30,39 @@ test('the ledger lists nothing yet and says who can read it', async ({ page }, t
 	await page.screenshot({ path: testInfo.outputPath('commission-ledger-empty.png'), fullPage: true });
 });
 
+test('with no artists yet, the form points to the Artists page', async ({ page }, testInfo) => {
+	// The shared seed has artists and is read-only, so the page's data comes back
+	// with the artist list emptied. A client-side navigation loads it from
+	// __data.json, the one response a spec can rewrite.
+	await page.route('**/admin/commissions/new/__data.json*', async (route) => {
+		const response = await route.fetch();
+		const body = await response.json();
+		let emptied = false;
+		for (const node of body.nodes ?? []) {
+			const root = node?.type === 'data' ? node.data?.[0] : undefined;
+			if (root && typeof root === 'object' && 'artists' in root) {
+				node.data[root.artists] = [];
+				emptied = true;
+			}
+		}
+		if (!emptied) throw new Error('no artists list in the page data to empty');
+		await route.fulfill({ response, json: body });
+	});
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/commissions');
+	await waitForHydration(page);
+	await page.getByRole('link', { name: 'New entry' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
+
+	const artist = page.getByLabel('Artist', { exact: true });
+	await expect(artist.locator('option')).toHaveCount(1);
+	const hint = page.locator('#ce-no-artists');
+	await expect(hint).toContainText("You haven't added any artists yet.");
+	await expect(artist).toHaveAttribute('aria-describedby', /ce-no-artists/);
+	await expect(hint.getByRole('link', { name: 'Artists page' })).toHaveAttribute('href', '/admin/artists');
+	await page.screenshot({ path: testInfo.outputPath('commission-entry-no-artists.png'), fullPage: true });
+});
+
 test("moving an entry to Accepted fills today's date, and a set date stays", async ({ page }, testInfo) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/commissions/new');

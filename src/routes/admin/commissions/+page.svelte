@@ -144,13 +144,13 @@
 <style>
 	.page-header {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
 		margin-bottom: 12px;
 		flex-wrap: wrap;
 	}
-	h1 { font-size: 22px; margin: 0; }
+	h1 { font-size: 24px; margin: 0; }
 	.count {
 		font-size: 14px;
 		font-weight: 400;
@@ -178,7 +178,8 @@
 		text-wrap: pretty; margin: 0;
 	}
 
-	.table-wrapper { border: 1px solid var(--border); border-radius: var(--radius-s); overflow: hidden; }
+	/* Scrolls sideways rather than clipping when a long word won't break. */
+	.table-wrapper { border: 1px solid var(--border); border-radius: var(--radius-s); overflow-x: auto; }
 	/* Titles, kinds, and names are typed by the owner, so a long word breaks
 	   inside its cell instead of running under the next one. */
 	.ledger-table { table-layout: fixed; overflow-wrap: anywhere; }
@@ -222,9 +223,10 @@
 	}
 	.icon-btn:hover { color: var(--foreground); }
 
-	/* Cards when the section is narrow. In a card, the row header leaves room on
-	   its right for the row's one link, which sits in the top-right corner. */
-	@container (max-width: 640px) {
+	/* Cards when the section is narrower than the seven columns need, which is
+	   760px in the mocks. In a card, the row header leaves room on its right for
+	   the row's one link, which sits in the top-right corner. */
+	@container (max-width: 760px) {
 		.table-wrapper { border: none; border-radius: 0; overflow: visible; }
 		.data-table { display: block; }
 		.data-table thead { display: none; }
