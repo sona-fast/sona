@@ -110,6 +110,9 @@ test('a refusal from a full-page post clears once the token changes on the hydra
 	await page.locator('form[action*="connectRegistry"]').evaluate((f) => (f as HTMLFormElement).submit());
 	await page.waitForURL(/connectRegistry/);
 	await waitForHydration(page);
+	// The action's fragment brings the field into view after a full-page post.
+	await expect(page).toHaveURL(/#invite-token$/);
+	await expect(page.getByLabel('Invite token')).toBeInViewport();
 
 	const token = page.getByLabel('Invite token');
 	const error = page.locator('#invite-token-error');
@@ -146,6 +149,8 @@ test('without JavaScript, the posted form reopens Connections and shows the fiel
 
 	const error = page.locator('#invite-token-error');
 	await expect(error).toBeVisible();
+	await expect(page).toHaveURL(/#invite-token$/);
+	await expect(token).toBeInViewport();
 	await expect(error).toHaveText(cases[0][1]);
 	await expect(token).toHaveAttribute('aria-invalid', 'true');
 	await expect(token).toHaveAttribute('aria-describedby', 'invite-token-error');

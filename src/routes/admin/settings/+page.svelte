@@ -1401,7 +1401,7 @@
 		</section>
 	</form>
 {:else}
-	<form method="POST" action="?tab=connections&/connectRegistry#invite-token-error" class="contents" use:enhance={() => {
+	<form method="POST" action="?tab=connections&/connectRegistry#invite-token" class="contents" use:enhance={() => {
 		connectingRegistry = true;
 		inviteError = null;
 		return async ({ result }) => {
@@ -1424,6 +1424,7 @@
 				<span>{m.admin_settings_invite_token()}</span>
 				<input
 					type="text"
+					id="invite-token"
 					name="signupToken"
 					class="input"
 					placeholder={m.admin_settings_invite_token_placeholder()}
@@ -3134,5 +3135,9 @@
 		.item { grid-template-columns: 22px 1fr; }
 		.item .body { grid-column: 2; }
 		.item .chip { grid-column: 2; justify-self: start; align-self: start; margin-top: 8px; }
+	}
+	/* A full-page connect post lands on #invite-token; keep its label in view. */
+	#invite-token {
+		scroll-margin-top: 4rem;
 	}
 </style>
