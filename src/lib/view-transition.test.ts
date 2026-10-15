@@ -1,13 +1,16 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { startNavigationTransition } from './view-transition';
 
 // Collects unhandled rejections for the length of a test, so a test fails when
 // the helper leaves one of the transition's promises without a handler.
 const unhandled: unknown[] = [];
 const onUnhandled = (reason: unknown) => unhandled.push(reason);
-process.on('unhandledRejection', onUnhandled);
-afterEach(() => {
+beforeEach(() => {
 	unhandled.length = 0;
+	process.on('unhandledRejection', onUnhandled);
+});
+afterEach(() => {
+	process.off('unhandledRejection', onUnhandled);
 });
 
 async function settle() {
@@ -66,7 +69,7 @@ describe('startNavigationTransition', () => {
 	it('navigates without the transition when starting one throws', async () => {
 		const doc = {
 			startViewTransition(): never {
-				throw new DOMException('hidden document', 'InvalidStateError');
+				throw new TypeError('Illegal invocation');
 			}
 		};
 		await expect(startNavigationTransition(doc, Promise.resolve())).resolves.toBeUndefined();

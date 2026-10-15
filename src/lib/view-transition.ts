@@ -35,7 +35,8 @@ export function startNavigationTransition(
 				await complete;
 			});
 		} catch {
-			// Throws, for example, in a hidden document; navigate without it.
+			// SvelteKit awaits every onNavigate result, so a throw here would fail
+			// the navigation itself. Navigate without the transition instead.
 			resolve();
 			return;
 		}
