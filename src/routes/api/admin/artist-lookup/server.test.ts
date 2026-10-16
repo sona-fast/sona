@@ -950,6 +950,23 @@ describe('artist-lookup — art from a commission entry', () => {
 		expect(fetcher.calls).toEqual([]);
 	});
 
+	// The entry check reads the row before the key; only its refusal may answer
+	// there. A missing row or a bad id still gets the no-key answer.
+	it.each([
+		['a piece that is gone', 404],
+		['an id that is not a number', 'x']
+	])('still answers enabled:false with no key for %s', async (_label, imageId) => {
+		const { sqlite, platform } = makeEnv();
+		seedStored(sqlite);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ enabled: false, forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+	});
+
 	it('still looks up a piece when the entry links a different one', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		seedStored(sqlite);
