@@ -241,10 +241,21 @@ export const DEVIANTART_SERVICE_SUBDOMAINS: readonly string[] = [
 	'browse'
 ];
 
+/** The subdomain in front of deviantart.com, or null for any other host. */
+function deviantArtSubdomain(hostname: string): string | null {
+	return /^([a-z0-9-]+)\.deviantart\.com$/i.exec(hostname)?.[1] ?? null;
+}
+
 /** The user a legacy <user>.deviantart.com host names, or null for any other
  * host, DeviantArt's own subdomains included. */
 export function deviantArtUserSubdomain(hostname: string): string | null {
-	const match = /^([a-z0-9-]+)\.deviantart\.com$/i.exec(hostname);
-	if (!match || DEVIANTART_SERVICE_SUBDOMAINS.includes(match[1].toLowerCase())) return null;
-	return match[1];
+	const sub = deviantArtSubdomain(hostname);
+	return sub && !DEVIANTART_SERVICE_SUBDOMAINS.includes(sub.toLowerCase()) ? sub : null;
+}
+
+/** A DeviantArt subdomain of its own that serves no profiles: all of them but
+ * www. and m., which serve profiles at /<user>. */
+export function isDeviantArtServiceHost(hostname: string): boolean {
+	const sub = deviantArtSubdomain(hostname)?.toLowerCase();
+	return !!sub && sub !== 'www' && sub !== 'm' && DEVIANTART_SERVICE_SUBDOMAINS.includes(sub);
 }

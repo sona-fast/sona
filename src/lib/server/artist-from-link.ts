@@ -1,8 +1,8 @@
 import { socialHandle } from '$lib/social-label';
 import {
-	DEVIANTART_SERVICE_SUBDOMAINS,
 	HOST_PREFIXES,
 	deviantArtUserSubdomain,
+	isDeviantArtServiceHost,
 	platformDomain,
 	type Platform
 } from '$lib/social-platforms';
@@ -70,10 +70,3 @@ export function parseArtistLink(raw: string): ParsedLink {
 	if (!profileUrl) return { ok: false, reason: 'no_handle' };
 	return { ok: true, platform, handle, profileUrl };
 }
-
-/** A DeviantArt subdomain of its own that serves no profiles. */
-function isDeviantArtServiceHost(hostname: string): boolean {
-	const sub = /^([a-z0-9-]+)\.deviantart\.com$/i.exec(hostname)?.[1]?.toLowerCase();
-	return !!sub && sub !== 'www' && sub !== 'm' && DEVIANTART_SERVICE_SUBDOMAINS.includes(sub);
-}
-

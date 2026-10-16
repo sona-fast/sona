@@ -1845,7 +1845,7 @@
 	"admin_commissions_link_found": "{handle}は「{name}」としてアーティスト一覧にすでにあります。",
 	"admin_commissions_link_found_several": "{handle}はアーティスト一覧に複数あります。1人選んでください。",
 	"admin_commissions_link_not_found": "{handle}はまだアーティスト一覧にありません。",
-	"admin_commissions_link_maybe": "{handle}は「{name}」として一覧にすでにあるかもしれません。",
+	"admin_commissions_link_maybe": "{handle}は「{name}」としてアーティスト一覧にすでにあるかもしれません。",
 	"admin_commissions_link_add_pre": "",
 	"admin_commissions_link_add_link": "アーティスト",
 	"admin_commissions_link_add_post": "ページで追加してから、一覧から選んでください。",
@@ -1853,5 +1853,6 @@
 	"admin_commissions_link_unsupported": "この種類のリンクからはアーティストを探せません。一覧からアーティストを選んでください。",
 	"admin_commissions_link_failed": "このリンクを調べられませんでした。一覧からアーティストを選んでください。",
 	"admin_commissions_link_using_announce": "「{name}」をアーティストに設定しました。",
-	"admin_commissions_link_invalid": "このリンクを読み取れませんでした。修正するか空欄にしてから、一覧からアーティストを選んでください。"
+	"admin_commissions_link_invalid": "このリンクを読み取れませんでした。修正するか空欄にしてから、一覧からアーティストを選んでください。",
+	"admin_commissions_draft_restored": "下書きを戻しました。"
 }

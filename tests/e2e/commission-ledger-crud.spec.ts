@@ -143,9 +143,12 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	await expect(card.getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 	await expect(artist).toHaveValue('2');
 	await expect(liveRegion.filter({ hasText: 'Using Test Artist as the artist.' })).toHaveCount(0);
+	// The check says "this is your artist", so it waits for the owner to agree.
+	await expect(card.locator('.outcome svg')).toHaveCount(0);
 	await card.getByRole('button', { name: 'Use Test Artist' }).click();
 	await expect(artist).toHaveValue('1');
 	await expect(card.getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+	await expect(card.locator('.outcome svg')).toHaveCount(1);
 
 	// A link with no handle in it: the list is still there to pick from.
 	await link.fill('https://www.furaffinity.net/view/58123456/');
@@ -251,6 +254,39 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 	await expect(artist).toHaveValue('');
 	await page.unrouteAll({ behavior: 'wait' });
 
+	// The same link pasted again after clearing is a new request: a late
+	// answer to the first one must not land on it. The first is held, the
+	// second fails, then the first arrives with a match that would pick Test
+	// Artist.
+	let releaseFirst!: () => void;
+	const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+	let sameLink = 0;
+	await page.route('**/api/admin/artist-from-link', async (route) => {
+		if (!route.request().postData()?.includes('e2e_artist/status/4')) return route.continue();
+		sameLink += 1;
+		if (sameLink === 1) {
+			await firstHeld;
+			return route.continue();
+		}
+		return route.abort('connectionreset');
+	});
+	await paste(link, 'https://x.com/e2e_artist/status/4');
+	await link.fill('');
+	await paste(link, 'https://x.com/e2e_artist/status/4');
+	const failedLine = page
+		.locator('#ce-link-msg')
+		.getByText("Sona couldn't look up this link. Pick the artist from the list instead.");
+	await expect(failedLine).toBeVisible();
+	const lateAnswer = page.waitForResponse(
+		(r) => r.url().endsWith('/api/admin/artist-from-link') && !!r.request().postData()?.includes('e2e_artist/status/4')
+	);
+	releaseFirst();
+	await lateAnswer;
+	await expect(failedLine).toBeVisible();
+	await expect(card).toHaveCount(0);
+	await expect(artist).toHaveValue('');
+	await page.unrouteAll({ behavior: 'wait' });
+
 	// A lookup that didn't get through can be tried again with the same link.
 	let failNext = true;
 	await page.route('**/api/admin/artist-from-link', (route) => {
@@ -270,22 +306,75 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 	expect(lookups.count - before).toBe(2);
 });
 
-test('the draft survives a trip to the Artists page and back', async ({ page }, testInfo) => {
+test('the draft survives a trip to the Artists page, and the lookup asks again on return', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
 	const link = page.getByLabel('Link to where you asked');
+	const artist = page.getByLabel('Artist', { exact: true });
 	await page.getByLabel('Title').fill('E2E draft title');
-	await paste(link, 'https://x.com/nobody_here/status/11');
+	await paste(link, 'https://x.com/draft_artist/status/11');
 	const card = page.locator('.lookup');
+	await expect(card.getByText("draft_artist isn't in your artist list yet.")).toBeVisible();
 	await card.getByRole('link', { name: 'Artists page' }).click();
 	await expect(page).toHaveURL(/\/admin\/artists$/);
+	// The owner adds the artist, through the same endpoint the add dialog uses.
+	const created = await page.request.post('/api/artists', { data: { name: 'Draft Artist', twitter: 'draft_artist' } });
+	expect(created.ok()).toBe(true);
+	const { id } = (await created.json()) as { id: number };
 
 	await page.goBack();
 	await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
 	await expect(page.getByLabel('Title')).toHaveValue('E2E draft title');
-	await expect(link).toHaveValue('https://x.com/nobody_here/status/11');
-	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	await expect(link).toHaveValue('https://x.com/draft_artist/status/11');
+	// Asked again, so the answer knows about the new artist, and picks them.
+	await expect(card.getByText('draft_artist is already in your artist list as Draft Artist.')).toBeVisible();
+	await expect(artist).toHaveValue(String(id));
 	await settledShot(page, testInfo.outputPath('commission-link-draft-restored.png'));
+});
+
+test("a restored draft keeps the lookup's own pick replaceable", async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByLabel('Link to where you asked');
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	await paste(link, 'https://x.com/e2e_artist/status/21');
+	await expect(artist).toHaveValue('1');
+
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Artists' }).click();
+	await expect(page).toHaveURL(/\/admin\/artists$/);
+	await page.goBack();
+	await expect(card.getByText('e2e_artist is already in your artist list as Test Artist.')).toBeVisible();
+	await expect(artist).toHaveValue('1');
+
+	// Still the lookup's pick, so the next link's match replaces it.
+	await paste(link, 'https://x.com/solo_artist/status/22');
+	await expect(card.getByText('solo_artist is already in your artist list as Solo Artist.')).toBeVisible();
+	await expect(artist).toHaveValue('53');
+});
+
+test('a saved form leaves no draft to come back to', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill('E2E saved once');
+	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/30');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+
+	// Back to the form: empty, so saving again can't make a second entry.
+	await page.goBack();
+	await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
+	await expect(page.getByLabel('Title')).toHaveValue('');
+	await expect(page.locator('.lookup')).toHaveCount(0);
+
+	// Leave the ledger as the next steps expect it: one entry.
+	await open(page, '/admin/commissions');
+	const editUrl = await page.getByRole('link', { name: 'Edit E2E saved once' }).getAttribute('href');
+	await open(page, editUrl!);
+	await page.getByRole('button', { name: 'Delete entry' }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
 });
 
 test('moving the entry to Delivered lists it under Finished', async ({ page }, testInfo) => {
@@ -651,6 +740,47 @@ test('Reload entry clears the last lookup, and the same link can be looked up ag
 	expect(lookups.count - before).toBe(1);
 });
 
+test('a draft typed against an older copy of the entry is dropped on return', async ({ page, context }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	const editUrl = await page.getByRole('link', { name: new RegExp(`^Edit ${TITLE}`) }).getAttribute('href');
+	await open(page, editUrl!);
+	const kind = page.getByLabel('Kind');
+	const keptKind = await kind.inputValue();
+
+	await page.getByLabel('Notes').fill('E2E draft note');
+	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/40');
+	await page.locator('.lookup').getByRole('link', { name: 'Artists page' }).click();
+	await expect(page).toHaveURL(/\/admin\/artists$/);
+
+	// Meanwhile another tab changes the entry and saves.
+	const other = await context.newPage();
+	await open(other, editUrl!);
+	await other.getByLabel('Kind').fill('Changed elsewhere');
+	await other.getByRole('button', { name: 'Save changes' }).click();
+	await expect(other).toHaveURL(/\/admin\/commissions$/);
+	await other.close();
+
+	// Back: the current entry, not the old draft over it.
+	await page.goBack();
+	await expect(kind).toHaveValue('Changed elsewhere');
+	await expect(page.getByLabel('Notes')).not.toHaveValue('E2E draft note');
+	await expect(page.getByLabel('Link to where you asked')).not.toHaveValue('https://x.com/nobody_here/status/40');
+	// Saving now keeps the other tab's change.
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await open(page, editUrl!);
+	await expect(kind).toHaveValue('Changed elsewhere');
+
+	// Put the kind back for the steps after this one, and check a saved edit
+	// leaves no draft: Back shows what was saved.
+	await kind.fill(keptKind);
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await page.goBack();
+	await expect(kind).toHaveValue(keptKind);
+});
+
 test('an entry deleted elsewhere: save says so, and delete counts as done', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions');
@@ -713,3 +843,22 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
 	await settledShot(page, testInfo.outputPath('commission-ledger-emptied.png'));
 });
+
+test('signing out forgets unsaved drafts', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Title').fill('E2E draft before sign-out');
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Commissions' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	// A reload writes the drafts SvelteKit holds to sessionStorage, as closing
+	// or hiding the tab would.
+	await page.reload();
+	await waitForHydration(page);
+	const stored = () => page.evaluate(() => sessionStorage.getItem('sveltekit:snapshot') ?? '');
+	expect(await stored()).toContain('E2E draft before sign-out');
+
+	await page.locator('.sidebar-footer').getByRole('button', { name: 'Logout' }).click();
+	await expect(page).toHaveURL(/\/admin\/login$/);
+	expect(await stored()).not.toContain('E2E draft before sign-out');
+});
+

@@ -8,6 +8,7 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { isAdminAuthExempt } from '$lib/admin-routes';
+	import { forgetDrafts } from '$lib/drafts';
 	import { VIEWER_TZ_COOKIE } from '$lib/config';
 
 	let { children, data } = $props();
@@ -109,7 +110,19 @@
 				{/each}
 			</nav>
 			<div class="sidebar-footer">
-				<form method="POST" action="/admin/logout" use:enhance>
+				<!-- Signing out forgets unsaved entry drafts (they can hold private
+				     ledger notes) and loads the sign-in page fresh, so none are left in
+				     this tab's memory either. -->
+				<form
+					method="POST"
+					action="/admin/logout"
+					use:enhance={() =>
+						async ({ result, update }) => {
+							forgetDrafts();
+							if (result.type === 'redirect') location.assign(result.location);
+							else await update();
+						}}
+				>
 					<button type="submit" class="sidebar-link logout-btn">
 						<LogOut size={16} />
 						{m.admin_logout()}

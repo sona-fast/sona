@@ -143,10 +143,9 @@
 		failure = null;
 		staleText = '';
 		// The reloaded entry has its own link; the last lookup was about another.
-		lookup = { kind: 'idle' };
-		lookedUp = '';
-		lookupSeq++;
-		autoPicked = null;
+		// (No auto-pick to forget: an entry always has an artist, so the lookup
+		// never picks one on the edit page.)
+		clearLookup();
 		announcer.say(
 			merged.restoredNote ? m.admin_commissions_reloaded_announce_note() : m.admin_commissions_reloaded_announce()
 		);
@@ -187,9 +186,7 @@
 	async function lookUpLink(raw: string) {
 		const link = raw.trim();
 		if (!link) {
-			lookup = { kind: 'idle' };
-			lookedUp = '';
-			lookupSeq++;
+			clearLookup();
 			return;
 		}
 		if (link === lookedUp) return;
@@ -230,22 +227,47 @@
 		}
 	}
 
-	/** The form as typed, and the lookup beside it, for the page's snapshot:
-	 * following the Artists page link and coming back keeps the draft. */
+	/** No lookup on screen, and any answer still on its way ignored. */
+	function clearLookup() {
+		lookup = { kind: 'idle' };
+		lookedUp = '';
+		lookupSeq++;
+	}
+
+	// Set once a save has gone through: what's on the page then is saved, and
+	// coming back to it must not bring an older copy back.
+	let saved = false;
+
+	/**
+	 * The draft for the page's snapshot, so following a link off the form (the
+	 * lookup's Artists page) and coming back keeps what the owner typed.
+	 * Nothing when there's nothing unsaved: an untouched form, or one whose
+	 * save went through.
+	 */
 	export function captureDraft() {
+		if (saved || !dirty) return undefined;
 		return {
+			// The entry's version the draft was typed against.
+			version,
 			values: $state.snapshot(values),
-			lookup: $state.snapshot(lookup),
-			lookedUp,
-			autoPicked
+			// Only while it still holds: the lookup's own pick, not the owner's.
+			autoPicked: autoPicked === values.artistId ? autoPicked : null
 		};
 	}
 
-	export function restoreDraft(draft: ReturnType<typeof captureDraft>) {
+	/**
+	 * Puts a draft back. A draft typed against an older version of the entry is
+	 * dropped: the page shows the current entry, so a save can't quietly undo
+	 * another tab's change. The lookup is asked again rather than restored,
+	 * because the artist list may have changed while the owner was away.
+	 */
+	export function restoreDraft(draft: NonNullable<ReturnType<typeof captureDraft>>) {
+		if (draft.version !== version) return;
 		values = draft.values;
-		lookup = draft.lookup.kind === 'searching' ? { kind: 'idle' } : draft.lookup;
-		lookedUp = draft.lookup.kind === 'searching' ? '' : draft.lookedUp;
 		autoPicked = draft.autoPicked;
+		clearLookup();
+		announcer.say(m.admin_commissions_draft_restored());
+		if (values.sourceUrl.trim()) lookUpLink(values.sourceUrl);
 	}
 
 	/** The sentence that says how a lookup went, shown and read out. */
@@ -446,6 +468,7 @@
 			// A save redirects to the ledger, which enhance follows; a refusal stays
 			// here with what the owner typed. An error is left out: update() would
 			// render the error page in place of the form and lose the typing.
+			if (result.type === 'redirect') saved = true;
 			if (result.type !== 'error') await update({ reset: false });
 			saving = false;
 			if (refusal) {
