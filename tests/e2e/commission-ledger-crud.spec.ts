@@ -287,6 +287,34 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 	await expect(artist).toHaveValue('');
 	await page.unrouteAll({ behavior: 'wait' });
 
+	// An answer dropped because the owner edited the field mid-lookup leaves
+	// nothing stuck: once the field is back to that link and they leave it, the
+	// link is looked up again.
+	await link.fill('');
+	let releaseEdited!: () => void;
+	const editedHeld = new Promise<void>((resolve) => (releaseEdited = resolve));
+	let editedLink = 0;
+	await page.route('**/api/admin/artist-from-link', async (route) => {
+		if (route.request().postData()?.includes('e2e_artist/status/5') && ++editedLink === 1) await editedHeld;
+		await route.continue();
+	});
+	await link.focus();
+	await paste(link, 'https://x.com/e2e_artist/status/5');
+	await link.press('End');
+	await link.press('x');
+	const droppedAnswer = page.waitForResponse(
+		(r) => r.url().endsWith('/api/admin/artist-from-link') && !!r.request().postData()?.includes('e2e_artist/status/5')
+	);
+	releaseEdited();
+	await droppedAnswer;
+	await link.press('Backspace');
+	await link.press('Tab');
+	await expect(card.getByText('e2e_artist is already in your artist list as Test Artist.')).toBeVisible();
+	expect(editedLink).toBe(2);
+	await page.unrouteAll({ behavior: 'wait' });
+	await link.fill('');
+	await artist.selectOption('');
+
 	// A lookup that didn't get through can be tried again with the same link.
 	let failNext = true;
 	await page.route('**/api/admin/artist-from-link', (route) => {
@@ -298,9 +326,20 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 	});
 	const before = lookups.count;
 	await paste(link, 'https://x.com/e2e_artist/status/3');
-	await expect(
-		page.locator('#ce-link-msg').getByText("Sona couldn't look up this link. Pick the artist from the list instead.")
-	).toBeVisible();
+	const failedAgain = page
+		.locator('#ce-link-msg')
+		.getByText("Sona couldn't look up this link. Pick the artist from the list instead.");
+	await expect(failedAgain).toBeVisible();
+	// The warning line takes the warning color, not the muted hint color.
+	const warnColor = await page.evaluate(() => {
+		const probe = document.createElement('span');
+		probe.style.color = 'var(--status-warn)';
+		document.body.append(probe);
+		const color = getComputedStyle(probe).color;
+		probe.remove();
+		return color;
+	});
+	await expect(page.locator('#ce-link-msg.hint-warn')).toHaveCSS('color', warnColor);
 	await paste(link, 'https://x.com/e2e_artist/status/3');
 	await expect(card.getByText('e2e_artist is already in your artist list as Test Artist.')).toBeVisible();
 	expect(lookups.count - before).toBe(2);
@@ -855,6 +894,16 @@ test('signing out forgets unsaved drafts', async ({ page }) => {
 	await page.reload();
 	await waitForHydration(page);
 	const stored = () => page.evaluate(() => sessionStorage.getItem('sveltekit:snapshot') ?? '');
+	expect(await stored()).toContain('E2E draft before sign-out');
+
+	// A sign-out that doesn't go through keeps the owner signed in, so it
+	// keeps their drafts too, including through the next reload.
+	await page.route('**/admin/logout', (route) => route.abort('connectionreset'));
+	await page.locator('.sidebar-footer').getByRole('button', { name: 'Logout' }).click();
+	await page.waitForTimeout(500);
+	await page.unrouteAll({ behavior: 'wait' });
+	await page.reload();
+	await waitForHydration(page);
 	expect(await stored()).toContain('E2E draft before sign-out');
 
 	await page.locator('.sidebar-footer').getByRole('button', { name: 'Logout' }).click();

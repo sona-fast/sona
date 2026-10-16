@@ -209,7 +209,14 @@
 		}
 		// A newer lookup went out, or the owner has changed the field since: this
 		// answer is about a link that's no longer there.
-		if (seq !== lookupSeq || values.sourceUrl.trim() !== link) return;
+		if (seq !== lookupSeq) return;
+		if (values.sourceUrl.trim() !== link) {
+			// Nothing newer is on its way, so stop searching, and let the link be
+			// asked again if the field comes back to it.
+			lookup = { kind: 'idle' };
+			lookedUp = '';
+			return;
+		}
 		lookup = next;
 		// A lookup that didn't get through can be tried again with the same link.
 		if (next.kind === 'refused' && next.reason === 'failed') lookedUp = '';
@@ -833,11 +840,12 @@
 	.match:not(:has(.name)) { justify-content: flex-start; }
 	.match .name { font-size: 14px; font-weight: 500; }
 	.lookup .hint a { color: var(--foreground); text-decoration: underline; }
-	.hint-warn { color: var(--status-warn); }
 	.lookup-msg { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
 	.lookup-msg :global(svg) { flex: none; margin-top: 2px; }
 	.hint { font-size: 12px; color: var(--muted-foreground); line-height: 1.45; }
 	.hint a { color: var(--foreground); text-decoration: underline; }
+	/* After .hint, which it overrides at the same specificity. */
+	.hint-warn { color: var(--status-warn); }
 	/* A field with an error gets a red edge as well as its message. The edge
 	   only adds to the text, which carries the error on its own; the
 	   --destructive token measures at least 4.5:1 on --background in every

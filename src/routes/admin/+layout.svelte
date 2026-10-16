@@ -118,9 +118,10 @@
 					action="/admin/logout"
 					use:enhance={() =>
 						async ({ result, update }) => {
-							forgetDrafts();
-							if (result.type === 'redirect') location.assign(result.location);
-							else await update();
+							if (result.type === 'redirect') {
+								forgetDrafts();
+								location.assign(result.location);
+							} else await update();
 						}}
 				>
 					<button type="submit" class="sidebar-link logout-btn">
