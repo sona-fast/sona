@@ -73,7 +73,10 @@ export type LookupFailReason =
 	| 'unavailable'
 	| 'signed_out'
 	| 'no_key'
-	| 'gone';
+	| 'gone'
+	// Art from a commission entry, which the endpoint refuses before reading it
+	// (SONA-236). Nothing was sent, and no retry or key changes that.
+	| 'from_commission';
 
 export type LookupState =
 	| { kind: 'idle' }
@@ -739,7 +742,8 @@ const FAIL_REASONS: readonly LookupFailReason[] = [
 	'rate_limited',
 	'too_large',
 	'invalid_image',
-	'unavailable'
+	'unavailable',
+	'from_commission'
 ];
 
 /**

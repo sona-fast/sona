@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { count, eq, isNotNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
-import { images, artists } from '$lib/server/db/schema';
+import { images, artists, commissions } from '$lib/server/db/schema';
 import { proxyStoredImage } from '$lib/server/image-proxy';
 import { isAllowedImageType } from '$lib/server/storage/allowlist';
 import { bufferStream, MaxBytesExceededError } from '$lib/server/storage/buffer';
@@ -148,6 +148,15 @@ function failure(reason: LookupFailure, forwarded: boolean) {
 	return json({ enabled: true, error: reason, forwarded }, { status: FAILURE_STATUS[reason] });
 }
 
+/** Art that came from a commission entry is never looked up (SONA-236): the
+ * entry already names the artist. Refused before the stored copy is read, so
+ * nothing about the piece exists in this request to hand over. 409, under 500
+ * so it stays out of the error rollup, and neither 401 nor 403, which the client
+ * reads as a session that ended. */
+function fromCommissionRefusal() {
+	return json({ enabled: true, error: 'from_commission', forwarded: false }, { status: 409 });
+}
+
 /** Whether the leading bytes ARE one of the raster types on the allowlist.
  * Both request shapes get their type from someone else's word for it — the
  * browser's file.type, the upstream's Content-Type — so both hold the bytes
@@ -253,17 +262,26 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 
 		// And the same for D1: a busy or unreachable database throws, and a typed
 		// answer the client can read beats a 500 it cannot.
-		let row: { id: number; imageUrl: string; parentImageId: number | null } | undefined;
+		let row:
+			| { id: number; imageUrl: string; parentImageId: number | null; commissionId: number | null }
+			| undefined;
 		try {
 			row = await db
-				.select({ id: images.id, imageUrl: images.imageUrl, parentImageId: images.parentImageId })
+				.select({
+					id: images.id,
+					imageUrl: images.imageUrl,
+					parentImageId: images.parentImageId,
+					commissionId: commissions.id
+				})
 				.from(images)
+				.leftJoin(commissions, eq(commissions.imageId, images.id))
 				.where(eq(images.id, imageId))
 				.get();
 		} catch {
 			return failure('unavailable', false);
 		}
 		if (!row) error(404, { message: 'Image not found', forwarded: false });
+		if (row.commissionId !== null) return fromCommissionRefusal();
 		selfImage = { id: row.id, parentImageId: row.parentImageId };
 
 		// Server-side fetch of a URL the SERVER looked up, with the shared

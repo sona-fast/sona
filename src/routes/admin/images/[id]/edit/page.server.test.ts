@@ -481,3 +481,41 @@ describe('admin image edit — load lookupEnabled (SONA-156)', () => {
 		await expect(brokenDb.select().from(images).where(eq(images.id, 5))).resolves.toHaveLength(1);
 	});
 });
+
+// Art that came from a commission entry never goes to FuzzySearch (SONA-236):
+// the entry already names the artist, so the edit page doesn't offer the lookup
+// and says why instead.
+describe('admin image edit — load keeps entry art out of the lookup (SONA-236)', () => {
+	const lookupView = async (platform: App.Platform) => {
+		const data = (await load({ params: { id: '5' }, platform } as never)) as {
+			lookupEnabled: boolean;
+			fromCommission: boolean;
+		};
+		return { lookupEnabled: data.lookupEnabled, fromCommission: data.fromCommission };
+	};
+
+	it('is off for a piece linked to an entry, even with a key', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (5)`);
+		expect(await lookupView(platform)).toEqual({ lookupEnabled: false, fromCommission: true });
+	});
+
+	it('stays on for a piece no entry links to', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await seedImage(db, 6);
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
+		// Another piece's entry says nothing about this one.
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (6)`);
+		expect(await lookupView(platform)).toEqual({ lookupEnabled: true, fromCommission: false });
+	});
+
+	it('is off with no key, and still names the entry as the reason', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (5)`);
+		expect(await lookupView(platform)).toEqual({ lookupEnabled: false, fromCommission: true });
+	});
+});

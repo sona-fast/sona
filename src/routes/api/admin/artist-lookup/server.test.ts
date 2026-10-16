@@ -94,7 +94,8 @@ const DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NU
 		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, global_id TEXT UNIQUE,
 		registry_version INTEGER, registry_synced_at TEXT, aliases TEXT,
-		avatar_resolved_at TEXT, created_at TEXT NOT NULL);`;
+		avatar_resolved_at TEXT, created_at TEXT NOT NULL);
+	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, image_id INTEGER UNIQUE);`;
 
 /** A PNG stand-in — the endpoint never decodes, but it does sniff the leading
  * bytes of an uploaded file, so the signature has to be the real one. */
@@ -890,6 +891,61 @@ describe('artist-lookup — stored image by id', () => {
 
 		expect(res.status).toBe(200);
 		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/png');
+	});
+});
+
+// Art that came from a commission entry never goes to FuzzySearch (SONA-236).
+// The edit page hides the button for it; this is the refusal behind that, for
+// a page loaded before the piece was linked or a request made by hand.
+describe('artist-lookup — art from a commission entry', () => {
+	function seedStored(sqlite: { exec(sql: string): void }) {
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01'),
+			        (2, 'Other', 'other', 'https://cdn.example.com/other.png', '2026-01-01');`
+		);
+	}
+
+	it('refuses a piece an entry links to, before its bytes are fetched or sent', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (1);`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ enabled: true, error: 'from_commission', forwarded: false });
+		// Not even the stored copy was read, so nothing existed to hand over.
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('still looks up a piece when the entry links a different one', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (2);`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(fetcher.calls).toEqual(['https://cdn.example.com/stored.png']);
+		expect(searchImage).toHaveBeenCalledTimes(1);
+	});
+
+	it('answers a failed entry check as not sent, rather than looking the piece up anyway', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(`DROP TABLE commissions;`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
 	});
 });
 

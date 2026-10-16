@@ -52,7 +52,8 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		allCharacters,
 		parentCandidates,
 		firstVariant,
-		lookupKey
+		lookupKey,
+		linkedEntry
 	] = await Promise.all([
 			db.select().from(artists).orderBy(artists.name),
 			db.select().from(collections).orderBy(collections.name),
@@ -68,7 +69,8 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 			// In the batch, not after it: a fork without the deploy secret reads the
 			// stored key from D1, and awaited below this it cost a serial round trip
 			// on every page load.
-			resolveFuzzysearchKey(db, platform?.env)
+			resolveFuzzysearchKey(db, platform?.env),
+			db.select({ id: commissions.id }).from(commissions).where(eq(commissions.imageId, id)).get()
 		]);
 
 	// The site's owner character (first, if several) carries the canonical
@@ -85,8 +87,11 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		characters: allCharacters,
 		parentCandidates,
 		// Presence only — the key itself never leaves the server. Without one,
-		// "Look up artist" is not offered at all (SONA-156).
-		lookupEnabled: !!lookupKey,
+		// "Look up artist" is not offered at all (SONA-156). Art from a commission
+		// entry doesn't offer it either: the entry already names the artist, and
+		// the lookup sends the image to FuzzySearch (SONA-236).
+		lookupEnabled: !!lookupKey && !linkedEntry,
+		fromCommission: !!linkedEntry,
 		// An image that already has variants is a parent — it can't also be a variant.
 		hasVariants: !!firstVariant,
 		ownerCharacter: ownerCharacter && {

@@ -568,6 +568,44 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	await settledShot(page, testInfo.outputPath('commission-upload-variant.png'));
 });
 
+/** Saves or removes a throwaway FuzzySearch key through the settings page's own
+ * actions. Never used: the tests below only check what the edit page offers. */
+async function setLookupKey(page: Page, on: boolean) {
+	const action = on ? 'saveFuzzysearchKey' : 'removeFuzzysearchKey';
+	const res = await page.request.post(`/admin/settings?/${action}`, {
+		form: on ? { fuzzysearchApiKey: 'e2e-not-a-real-key' } : {},
+		headers: { origin: new URL(page.url()).origin, 'x-sveltekit-action': 'true' }
+	});
+	expect(res.ok()).toBe(true);
+	expect(((await res.json()) as { type: string }).type).toBe('success');
+}
+
+test('a piece added from an entry offers no Look up artist, and says why', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	const pieceUrl = await section(page, 'Finished')
+		.getByRole('row', { name: new RegExp(TITLE) })
+		.getByRole('link', { name: 'E2E Snowfall' })
+		.getAttribute('href');
+	await setLookupKey(page, true);
+	try {
+		// With the key saved, a piece no entry links to offers the lookup.
+		await open(page, '/admin/images/1/edit');
+		await expect(page.getByRole('button', { name: 'Look up artist' })).toBeVisible();
+
+		// The entry's piece doesn't, and the hint says why.
+		await open(page, pieceUrl!);
+		await expect(page.locator('input[name="title"]')).toHaveValue('E2E Snowfall');
+		await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
+		await expect(page.locator('#lookup-hint')).toHaveText(
+			'Look up artist is off for art from a commission entry. Your entry already names the artist.'
+		);
+		await settledShot(page, testInfo.outputPath('commission-piece-no-lookup.png'));
+	} finally {
+		await setLookupKey(page, false);
+	}
+});
+
 test('phone width: the ledger and the prefilled upload, light and dark', async ({ page }, testInfo) => {
 	const title = 'E2E delivered';
 	await loginRetrying(page, PASSWORD);
