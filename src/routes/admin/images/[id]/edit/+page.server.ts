@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { images, artists, collections, tags, imageTags, characters, imageCharacters, commissions } from '$lib/server/db/schema';
-import { eq, and, isNull, ne, inArray } from 'drizzle-orm';
+import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
@@ -19,6 +19,7 @@ import {
 } from '$lib/server/variants';
 import * as m from '$lib/paraglide/messages';
 import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
+import { entryLinksPiece } from '$lib/server/commissions';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -72,11 +73,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 			resolveFuzzysearchKey(db, platform?.env),
 			// The piece itself, or the piece it's a variant of: a variant of entry art
 			// is another version of the same commissioned piece.
-			db
-				.select({ id: commissions.id })
-				.from(commissions)
-				.where(inArray(commissions.imageId, image.parentImageId === null ? [id] : [id, image.parentImageId]))
-				.get()
+			db.select({ id: commissions.id }).from(commissions).where(entryLinksPiece(id, image.parentImageId)).get()
 		]);
 
 	// The site's owner character (first, if several) carries the canonical

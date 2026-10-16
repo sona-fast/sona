@@ -507,8 +507,9 @@ describe('admin image edit — load keeps entry art out of the lookup (SONA-236)
 		await seedImage(db, 5);
 		await seedImage(db, 6);
 		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
-		// Another piece's entry says nothing about this one.
-		await db.run(sql`INSERT INTO commissions (image_id) VALUES (6)`);
+		// Another piece's entry says nothing about this one, and neither does an
+		// entry with no piece yet: a null parent must not match its null image_id.
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (6), (NULL)`);
 		expect(await lookupView(platform)).toEqual({ lookupEnabled: true, fromCommission: false });
 	});
 

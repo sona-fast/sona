@@ -569,6 +569,9 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	await settledShot(page, testInfo.outputPath('commission-upload-variant.png'));
 });
 
+const ENTRY_ART_HINT =
+	"Look up artist isn't available for art you added from a commission entry. The entry already names the artist.";
+
 /** Saves or removes a throwaway FuzzySearch key through the settings page's own
  * actions. Never used: the tests below only check what the edit page offers. */
 async function setLookupKey(page: Page, on: boolean) {
@@ -598,7 +601,7 @@ test('a piece added from an entry offers no Look up artist, and says why', async
 		await expect(page.locator('input[name="title"]')).toHaveValue('E2E Snowfall');
 		await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
 		await expect(page.locator('#lookup-hint')).toHaveText(
-			'Look up artist is off for art from a commission entry. Your entry already names the artist.'
+			ENTRY_ART_HINT
 		);
 		await settledShot(page, testInfo.outputPath('commission-piece-no-lookup.png'));
 
@@ -611,7 +614,7 @@ test('a piece added from an entry offers no Look up artist, and says why', async
 		await open(page, `/admin/images/${variantId}/edit`);
 		await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
 		await expect(page.locator('#lookup-hint')).toHaveText(
-			'Look up artist is off for art from a commission entry. Your entry already names the artist.'
+			ENTRY_ART_HINT
 		);
 	} finally {
 		await setLookupKey(page, false);

@@ -921,10 +921,41 @@ describe('artist-lookup — art from a commission entry', () => {
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
+	// Checked before the key: a page loaded while a key was saved, on a piece
+	// linked since, would otherwise say "no key" and send the owner to Settings
+	// for a lookup that wouldn't run with one either.
+	it('says from_commission rather than no key, with no key saved', async () => {
+		const { sqlite, platform } = makeEnv();
+		seedStored(sqlite);
+		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (1);`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ enabled: true, error: 'from_commission', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('still answers enabled:false with no key for a piece no entry links to', async () => {
+		const { sqlite, platform } = makeEnv();
+		seedStored(sqlite);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ enabled: false, forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+	});
+
 	it('still looks up a piece when the entry links a different one', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		seedStored(sqlite);
-		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (2);`);
+		// And an entry with no piece yet: image 1 has no parent, and that null must
+		// not match the entry's null image_id.
+		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (2), (NULL);`);
 		const fetcher = imageFetch();
 
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));

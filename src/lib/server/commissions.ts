@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, or, sql, type Column } from 'drizzle-orm';
 import type { Database } from './db';
 import { artists, characters, commissions, commissionCharacters, images } from './db/schema';
 import { sanitizeUrl } from './validate';
@@ -49,6 +49,16 @@ export function parseId(value: unknown): number | null {
 	if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
 	const n = Number(value);
 	return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * The condition that a commissions row links this piece or the piece it's a
+ * variant of: art from an entry, which the artist lookup never sends anywhere.
+ * Takes values (a loaded image) or columns (a join on images), so a caller can
+ * fold it into a query it already makes. A null parent matches nothing.
+ */
+export function entryLinksPiece(id: number | Column, parentId: number | null | Column) {
+	return or(eq(commissions.imageId, id), eq(commissions.imageId, parentId as number | Column));
 }
 
 function text(data: FormData, name: string): string {
