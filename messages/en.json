@@ -2400,7 +2400,7 @@
 	"admin_commissions_link_found": "{handle} is already in your artist list as {name}.",
 	"admin_commissions_link_found_several": "{handle} is in your artist list more than once. Pick one.",
 	"admin_commissions_link_not_found": "{handle} isn't in your artist list yet.",
-	"admin_commissions_link_maybe": "{handle} may already be in your artist list as {name}.",
+	"admin_commissions_link_name_only": "None of your artists links to {handle}, but one has that name and might be them.",
 	"admin_commissions_link_add_pre": "Add them on the ",
 	"admin_commissions_link_add_link": "Artists page",
 	"admin_commissions_link_add_post": ", then pick them from the list.",

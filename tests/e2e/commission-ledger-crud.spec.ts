@@ -184,16 +184,17 @@ test('a name that only looks like the handle, or a handle two artists share, wai
 	const card = page.locator('.lookup');
 
 	await paste(link, 'https://x.com/name_only_artist/status/1');
-	await expect(card.getByText('name_only_artist may already be in your artist list as name_only_artist.')).toBeVisible();
+	// One line says what was found; it doesn't also claim the artist is missing.
+	const nameOnly = card.getByText('None of your artists links to name_only_artist, but one has that name and might be them.');
+	await expect(nameOnly).toBeVisible();
+	await expect(card.getByText("name_only_artist isn't in your artist list yet.")).toHaveCount(0);
 	await expect(artist).toHaveValue('');
-	await expect(card.getByText("name_only_artist isn't in your artist list yet.")).toBeVisible();
 	await card.getByRole('button', { name: 'Use name_only_artist' }).click();
 	await expect(artist).toHaveValue('50');
 	await expect(card.getByRole('button', { name: 'Using name_only_artist' })).toBeVisible();
-	// Taken, the suggestion isn't contradicted: no "isn't in your list" line and
+	// Taken, the suggestion isn't second-guessed: no "might be them" line and
 	// no pointer to the Artists page beside it.
-	await expect(card.getByText('name_only_artist may already be in your artist list as name_only_artist.')).toBeVisible();
-	await expect(card.getByText("name_only_artist isn't in your artist list yet.")).toHaveCount(0);
+	await expect(nameOnly).toHaveCount(0);
 	await expect(card.getByRole('link', { name: 'Artists page' })).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-link-name-only.png'));
 

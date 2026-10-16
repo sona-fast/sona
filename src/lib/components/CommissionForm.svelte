@@ -291,6 +291,7 @@
 		const { handle, matches } = result;
 		if (matches.length === 1) return m.admin_commissions_link_found({ handle, name: matches[0].name });
 		if (matches.length > 1) return m.admin_commissions_link_found_several({ handle });
+		if (result.nameMatches.length > 0) return m.admin_commissions_link_name_only({ handle });
 		return m.admin_commissions_link_not_found({ handle });
 	}
 
@@ -553,7 +554,6 @@
 				{/each}
 				{#if found.matches.length === 0}
 					{#each found.nameMatches as artist (artist.id)}
-						<p class="callout">{m.admin_commissions_link_maybe({ handle: found.handle, name: artist.name })}</p>
 						{@render choice(artist, false)}
 					{/each}
 					{#if !suggestionTaken}{@render addArtistHint()}{/if}
@@ -835,7 +835,6 @@
 	.lookup-line .handle { font-weight: 500; }
 	.outcome { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; }
 	.outcome :global(svg) { flex: none; margin-top: 3px; color: var(--status-ok); }
-	.callout { font-size: 13px; }
 	.match { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 	.match:not(:has(.name)) { justify-content: flex-start; }
 	.match .name { font-size: 14px; font-weight: 500; }
