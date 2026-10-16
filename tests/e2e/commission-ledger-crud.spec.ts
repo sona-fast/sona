@@ -451,7 +451,7 @@ const PNG = Buffer.from(
  * the stub answers with an asset the site already serves, so the piece
  * renders. setInputFiles doesn't reach Svelte's delegated change handler, so
  * the change is dispatched by hand, retried until hydration attaches it. */
-async function uploadPiece(page: Page, title: string, lands: RegExp = /\/admin\/commissions\?added=\d+$/) {
+async function uploadPiece(page: Page, title: string | null, lands: RegExp = /\/admin\/commissions\?added=\d+$/) {
 	await page.route(
 		(url) => url.pathname === '/api/upload',
 		(route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/e2e-avatar.svg' }) })
@@ -463,7 +463,8 @@ async function uploadPiece(page: Page, title: string, lands: RegExp = /\/admin\/
 		);
 		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/e2e-avatar.svg', { timeout: 2000 });
 	}).toPass({ timeout: 20_000 });
-	await page.locator('input[name="title"]').fill(title);
+	// A variant has no title of its own: it takes its piece's.
+	if (title !== null) await page.locator('input[name="title"]').fill(title);
 	await page.getByRole('button', { name: 'Upload Artwork' }).click();
 	await expect(page).toHaveURL(lands);
 }
@@ -583,10 +584,9 @@ async function setLookupKey(page: Page, on: boolean) {
 test('a piece added from an entry offers no Look up artist, and says why', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions');
-	const pieceUrl = await section(page, 'Finished')
-		.getByRole('row', { name: new RegExp(TITLE) })
-		.getByRole('link', { name: 'E2E Snowfall' })
-		.getAttribute('href');
+	const row = section(page, 'Finished').getByRole('row', { name: new RegExp(TITLE) });
+	const pieceUrl = await row.getByRole('link', { name: 'E2E Snowfall' }).getAttribute('href');
+	const entryUrl = await row.getByRole('link', { name: `Edit ${TITLE}` }).getAttribute('href');
 	await setLookupKey(page, true);
 	try {
 		// With the key saved, a piece no entry links to offers the lookup.
@@ -601,6 +601,18 @@ test('a piece added from an entry offers no Look up artist, and says why', async
 			'Look up artist is off for art from a commission entry. Your entry already names the artist.'
 		);
 		await settledShot(page, testInfo.outputPath('commission-piece-no-lookup.png'));
+
+		// A variant added from the entry is entry art too.
+		await open(page, entryUrl!);
+		await galleryPanel(page).getByRole('link', { name: 'Add a variant' }).click();
+		await waitForHydration(page);
+		await uploadPiece(page, null, /\/admin\/commissions\?added=\d+&variants=\d+$/);
+		const variantId = new URL(page.url()).searchParams.get('variants');
+		await open(page, `/admin/images/${variantId}/edit`);
+		await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
+		await expect(page.locator('#lookup-hint')).toHaveText(
+			'Look up artist is off for art from a commission entry. Your entry already names the artist.'
+		);
 	} finally {
 		await setLookupKey(page, false);
 	}

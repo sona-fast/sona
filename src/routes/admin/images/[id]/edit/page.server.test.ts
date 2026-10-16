@@ -512,6 +512,27 @@ describe('admin image edit — load keeps entry art out of the lookup (SONA-236)
 		expect(await lookupView(platform)).toEqual({ lookupEnabled: true, fromCommission: false });
 	});
 
+	// A variant of entry art is entry art too: it's another version of the same
+	// commissioned piece, and its entry names the same artist.
+	it('is off for a variant whose parent an entry links to', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 4);
+		await db.insert(images).values({ id: 5, title: 'Alt', slug: 'alt', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, parentImageId: 4 });
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (4)`);
+		expect(await lookupView(platform)).toEqual({ lookupEnabled: false, fromCommission: true });
+	});
+
+	it('stays on for a variant whose parent no entry links to', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 4);
+		await seedImage(db, 6);
+		await db.insert(images).values({ id: 5, title: 'Alt', slug: 'alt', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, parentImageId: 4 });
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (6)`);
+		expect(await lookupView(platform)).toEqual({ lookupEnabled: true, fromCommission: false });
+	});
+
 	it('is off with no key, and still names the entry as the reason', async () => {
 		const { db, platform } = makeDb();
 		await seedImage(db, 5);

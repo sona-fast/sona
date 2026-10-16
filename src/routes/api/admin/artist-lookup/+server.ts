@@ -1,5 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { count, eq, isNotNull } from 'drizzle-orm';
+import { count, eq, isNotNull, or } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { images, artists, commissions } from '$lib/server/db/schema';
 import { proxyStoredImage } from '$lib/server/image-proxy';
@@ -274,7 +274,11 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 					commissionId: commissions.id
 				})
 				.from(images)
-				.leftJoin(commissions, eq(commissions.imageId, images.id))
+				// The piece or its parent: a variant of entry art is entry art too.
+				.leftJoin(
+					commissions,
+					or(eq(commissions.imageId, images.id), eq(commissions.imageId, images.parentImageId))
+				)
 				.where(eq(images.id, imageId))
 				.get();
 		} catch {

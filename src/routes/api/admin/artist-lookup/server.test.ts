@@ -934,6 +934,41 @@ describe('artist-lookup — art from a commission entry', () => {
 		expect(searchImage).toHaveBeenCalledTimes(1);
 	});
 
+	it('refuses a variant whose parent an entry links to, before anything is fetched', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, parent_image_id, created_at)
+			 VALUES (3, 'Alt', 'alt', 'https://cdn.example.com/alt.png', 1, '2026-01-01');
+			 INSERT INTO commissions (image_id) VALUES (1);`
+		);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 3 }, fetcher.fn));
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ enabled: true, error: 'from_commission', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('still looks up a variant whose parent no entry links to', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, parent_image_id, created_at)
+			 VALUES (3, 'Alt', 'alt', 'https://cdn.example.com/alt.png', 1, '2026-01-01');
+			 INSERT INTO commissions (image_id) VALUES (2);`
+		);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 3 }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(fetcher.calls).toEqual(['https://cdn.example.com/alt.png']);
+		expect(searchImage).toHaveBeenCalledTimes(1);
+	});
+
 	it('answers a failed entry check as not sent, rather than looking the piece up anyway', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		seedStored(sqlite);
