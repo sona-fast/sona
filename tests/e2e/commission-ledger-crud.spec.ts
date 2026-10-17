@@ -429,6 +429,25 @@ test("a restored draft keeps the lookup's own pick replaceable", async ({ page }
 	await expect(artist).toHaveValue('53');
 });
 
+test('Back during a navigation leaves the ledger pages working', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	// A slow machine, so Back lands before the Artists page has finished
+	// rendering. SvelteKit then shows the page being left the Artists page's
+	// data; the page-error guard fails this test if that throws.
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+	for (let i = 0; i < 4; i++) {
+		await page.locator('.sidebar-nav').getByRole('link', { name: 'Artists' }).click();
+		await expect(page).toHaveURL(/\/admin\/artists$/);
+		await page.goBack();
+		await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
+	}
+	await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+	await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
+	await expect(page.getByLabel('Link to where you asked')).toBeVisible();
+});
+
 test('a saved form leaves no draft to come back to', async ({ page }) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
