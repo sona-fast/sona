@@ -39,7 +39,7 @@ import {
 	sessions,
 	siteSettings
 } from '$lib/server/db/schema';
-import { sql, inArray } from 'drizzle-orm';
+import { sql, inArray, eq } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
@@ -47,6 +47,7 @@ import { socialAtHandle } from '$lib/social-label';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl, isOurAvatarUrl, shouldWriteAvatar } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
+import { PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
 import {
 	isRegistryEnabled,
 	resolveRegistryEnv,
@@ -812,7 +813,16 @@ export const actions = {
 		if (adminEmail && !isValidEmail(adminEmail)) {
 			return fail(400, { error: 'Enter a valid email address, like you@example.com.' });
 		}
-		await setRawSetting(db, 'adminEmail', adminEmail);
+		// A reset link already mailed to the previous address must stop working
+		// once the operator moves recovery elsewhere, so drop any pending token in
+		// the same batch that writes the new address.
+		await db.batch([
+			db
+				.insert(siteSettings)
+				.values({ key: 'adminEmail', value: adminEmail })
+				.onConflictDoUpdate({ target: siteSettings.key, set: { value: adminEmail } }),
+			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
+		]);
 		return { recoveryEmailSaved: true };
 	},
 
@@ -891,7 +901,10 @@ export const actions = {
 				.values({ key: 'adminPasswordHash', value: passwordHash })
 				.onConflictDoUpdate({ target: siteSettings.key, set: { value: passwordHash } }),
 			db.delete(sessions),
-			db.insert(sessions).values({ token: tokenHash, expiresAt })
+			db.insert(sessions).values({ token: tokenHash, expiresAt }),
+			// A pending reset link would otherwise still set a password over the one
+			// just chosen, and the reset then signs this session out.
+			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
 		]);
 		cookies.set(SESSION_COOKIE, token, {
 			path: '/',

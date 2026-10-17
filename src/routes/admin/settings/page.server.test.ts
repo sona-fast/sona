@@ -26,6 +26,8 @@ import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
 import { EARLY_ACCESS } from '$lib/early-access';
+import { hashPassword, hashToken } from '$lib/server/admin-auth';
+import { PASSWORD_RESET_SETTING, validateResetToken } from '$lib/server/password-reset';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -419,6 +421,95 @@ describe('settings saveSecurityEmail — admin recovery address', () => {
 
 		expect(result).toMatchObject({ status: 400 });
 		expect(await getRawSetting(db, 'adminEmail')).toBe('old@x.y');
+	});
+});
+
+// A reset link mailed before the operator changed their password or recovery
+// address must stop working: otherwise whoever holds that email can still set
+// a password over the new one and sign the operator out.
+describe('settings — pending reset link is revoked', () => {
+	const TOKEN = 'pending-reset-token';
+	const OLD_PASSWORD = 'old-password-123';
+
+	async function seedPendingReset() {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL);`);
+		const d1 = makeD1(sqlite);
+		const db = drizzle(d1, { schema });
+		const platform = { env: { DB: d1 } } as unknown as App.Platform;
+		await setRawSetting(db, 'adminPasswordHash', await hashPassword(OLD_PASSWORD));
+		await setRawSetting(db, 'adminEmail', 'old@x.y');
+		await setRawSetting(
+			db,
+			PASSWORD_RESET_SETTING,
+			JSON.stringify({
+				tokenHash: await hashToken(TOKEN),
+				expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+				requestedAt: new Date().toISOString()
+			})
+		);
+		expect(await validateResetToken(db, TOKEN)).toBe(true);
+		return { db, platform };
+	}
+
+	function changePasswordEvent(platform: App.Platform, fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.append(k, v);
+		return {
+			platform,
+			cookies: { set: () => {}, get: () => undefined, delete: () => {} },
+			request: new Request('https://taro.surf/admin/settings?/changePassword', { method: 'POST', body })
+		} as never;
+	}
+
+	it('a password change invalidates the pending reset link', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.changePassword(
+			changePasswordEvent(platform, {
+				currentPassword: OLD_PASSWORD,
+				newPassword: 'brand-new-password-456',
+				confirmPassword: 'brand-new-password-456'
+			})
+		);
+
+		expect(result).not.toMatchObject({ status: expect.any(Number) });
+		expect(await validateResetToken(db, TOKEN)).toBe(false);
+	});
+
+	it('a refused password change leaves the pending reset link alone', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.changePassword(
+			changePasswordEvent(platform, {
+				currentPassword: 'wrong-password',
+				newPassword: 'brand-new-password-456',
+				confirmPassword: 'brand-new-password-456'
+			})
+		);
+
+		expect(result).toMatchObject({ status: 401 });
+		expect(await validateResetToken(db, TOKEN)).toBe(true);
+	});
+
+	it('changing the recovery address invalidates the pending reset link', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, 'new@x.y'));
+
+		expect(result).toEqual({ recoveryEmailSaved: true });
+		expect(await getRawSetting(db, 'adminEmail')).toBe('new@x.y');
+		expect(await validateResetToken(db, TOKEN)).toBe(false);
+	});
+
+	it('an invalid recovery address leaves the pending reset link alone', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, 'not-an-email'));
+
+		expect(result).toMatchObject({ status: 400 });
+		expect(await validateResetToken(db, TOKEN)).toBe(true);
 	});
 });
 
