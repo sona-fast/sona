@@ -342,7 +342,7 @@
 		{#if named}<span class="name">{artist.name}</span>{/if}
 		<!-- The label says the state: "Use X" until chosen, then "Using X" with a
 		     check, as in ArtistLookupPanel. -->
-		<button type="button" class="btn-compact" onclick={() => useArtist(artist)}>
+		<button type="button" class="btn-compact btn-tap-mobile" onclick={() => useArtist(artist)}>
 			{#if using}<Check size={14} aria-hidden="true" />{m.admin_lookup_using_artist({ name: artist.name })}{:else}{m.admin_lookup_use_artist({ name: artist.name })}{/if}
 		</button>
 	</div>
@@ -919,8 +919,6 @@
 	/* Cancel and Save share the row on a phone. */
 	@media (max-width: 768px) {
 		.form-actions > :is(a, button) { flex: 1; }
-		/* A full-size tap target on a phone; the compact tier stays on desktop. */
-		.lookup .btn-compact { min-height: 44px; }
 	}
 
 </style>
