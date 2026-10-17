@@ -739,12 +739,14 @@ describe('update action — ledger-only artists stay on the site (SONA-236)', ()
 
 	it('still looks up the avatar once the artist has a piece on the site', async () => {
 		const { db, platform } = makeDb();
-		const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
-		vi.stubGlobal('fetch', fetchSpy);
+		// The profile answers; the CDN copy stays offline, so the source link is kept.
+		const resolvedAvatar = 'https://cdn.bsky.app/img/avatar/plain/quill.jpg';
+		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });
 		const id = await seedWithEntry(db, true);
 
 		await actions.update(updateEvent(platform, { id: String(id), name: 'Quill', bluesky: 'quill.bsky.social' }));
-		expect(fetchSpy).toHaveBeenCalled();
+		const after = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
+		expect(after!.avatarUrl).toBe(resolvedAvatar);
 	});
 });
 
