@@ -140,6 +140,8 @@
 		version = entry?.version ?? '';
 		values = merged.values;
 		restoredNote = merged.restoredNote;
+		// The form now shows the entry as saved, not the draft.
+		draftRestored = false;
 		failure = null;
 		staleText = '';
 		// The reloaded entry has its own link; the last lookup was about another.
@@ -171,6 +173,8 @@
 	// The artist the lookup picked by itself, while the owner hasn't picked one.
 	// A later link's match may replace it; it never replaces the owner's pick.
 	let autoPicked: string | null = null;
+	// A draft came back, so the owner sees why the form isn't empty.
+	let draftRestored = $state(false);
 
 	/** The owner chose an artist, from a Use button or the select. */
 	function ownerPicked() {
@@ -273,6 +277,7 @@
 		values = draft.values;
 		autoPicked = draft.autoPicked;
 		clearLookup();
+		draftRestored = true;
 		announcer.say(m.admin_commissions_draft_restored());
 		if (values.sourceUrl.trim()) lookUpLink(values.sourceUrl);
 	}
@@ -494,6 +499,9 @@
 	}}
 >
 	{#if isEdit}<input type="hidden" name="version" value={version} />{/if}
+
+	<!-- The announcer says it once; this line stays for whoever looks. -->
+	{#if draftRestored}<p class="hint draft-note">{m.admin_commissions_draft_restored()}</p>{/if}
 
 	<fieldset>
 		<legend>{m.admin_commissions_legend_artist()}</legend>
@@ -835,8 +843,8 @@
 	.lookup-line .handle { font-weight: 500; }
 	.outcome { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; }
 	.outcome :global(svg) { flex: none; margin-top: 3px; color: var(--status-ok); }
-	.match { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-	.match:not(:has(.name)) { justify-content: flex-start; }
+	/* The Use button sits beside the name it picks, not across the row. */
+	.match { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 	.match .name { font-size: 14px; font-weight: 500; }
 	.lookup .hint a { color: var(--foreground); text-decoration: underline; }
 	.lookup-msg { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
@@ -845,6 +853,7 @@
 	.hint a { color: var(--foreground); text-decoration: underline; }
 	/* After .hint, which it overrides at the same specificity. */
 	.hint-warn { color: var(--status-warn); }
+	.draft-note { margin: 0; }
 	/* A field with an error gets a red edge as well as its message. The edge
 	   only adds to the text, which carries the error on its own; the
 	   --destructive token measures at least 4.5:1 on --background in every
@@ -910,6 +919,8 @@
 	/* Cancel and Save share the row on a phone. */
 	@media (max-width: 768px) {
 		.form-actions > :is(a, button) { flex: 1; }
+		/* A full-size tap target on a phone; the compact tier stays on desktop. */
+		.lookup .btn-compact { min-height: 44px; }
 	}
 
 </style>
