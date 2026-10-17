@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
-	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Camera, Sticker, Box, CalendarDays, Activity, X } from 'lucide-svelte';
+	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Camera, Sticker, Box, CalendarDays, Activity, ClipboardList, X } from 'lucide-svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
@@ -68,6 +68,7 @@
 		{ href: '/admin/images', label: m.admin_nav_all_images, icon: Images },
 		{ href: '/admin/collections', label: m.admin_nav_collections, icon: Folder },
 		{ href: '/admin/artists', label: m.admin_nav_artists, icon: User },
+		{ href: '/admin/commissions', label: m.admin_nav_commissions, icon: ClipboardList },
 		{ href: '/admin/characters', label: m.admin_nav_characters, icon: PawPrint },
 		{ href: '/admin/fursuit', label: m.admin_nav_fursuit_photos, icon: Camera },
 		{ href: '/admin/stickers', label: m.admin_nav_stickers, icon: Sticker },
