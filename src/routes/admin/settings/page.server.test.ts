@@ -55,6 +55,7 @@ vi.mock('$lib/server/supporter-key', async (importActual) =>
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	// artists: the syncNow action runs the real artist-sync against this table.
+	// The other tables let its ledger-only filter run (SONA-236).
 	sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 	CREATE TABLE artists (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
@@ -62,7 +63,12 @@ function makeDb() {
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
 		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
-	);`);
+	);
+	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
+	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
+	CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER);
+	CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
+	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
 	const d1 = makeD1(sqlite);
 	return {
 		db: drizzle(d1, { schema }),
@@ -1728,6 +1734,114 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 });
 
 describe('deleteAll — every content table in the backup is wiped', () => {
+	// Full-schema in-memory DB with REAL foreign keys and one row in every table.
+	function seededSite() {
+	const sqlite = new Database(':memory:');
+	sqlite.pragma('foreign_keys = ON');
+	sqlite.exec(`
+		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT);
+		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT);
+		CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL);
+		CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+		CREATE TABLE collections (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+		CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+		CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
+		CREATE TABLE vr_avatars (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL, name TEXT NOT NULL,
+			character_id INTEGER NOT NULL REFERENCES characters(id),
+			model_url TEXT, downloadable INTEGER NOT NULL DEFAULT 0, nsfw INTEGER NOT NULL DEFAULT 0,
+			published INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
+		);
+		CREATE TABLE avatar_credits (
+			avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
+			artist_id INTEGER NOT NULL REFERENCES artists(id),
+			role TEXT NOT NULL, role_label TEXT, position INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE avatar_media (
+			avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
+			kind TEXT NOT NULL, url TEXT NOT NULL, width INTEGER, height INTEGER,
+			position INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE avatar_platforms (
+			avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
+			platform TEXT NOT NULL
+		);
+		CREATE TABLE sticker_packs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL,
+			character_id INTEGER NOT NULL REFERENCES characters(id),
+			manager_artist_id INTEGER REFERENCES artists(id),
+			source TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 1, created_at TEXT
+		);
+		CREATE TABLE stickers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			pack_id INTEGER NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+			artist_id INTEGER REFERENCES artists(id),
+			image_url TEXT NOT NULL
+		);
+		CREATE TABLE sticker_emojis (
+			sticker_id INTEGER NOT NULL REFERENCES stickers(id) ON DELETE CASCADE,
+			emoji TEXT NOT NULL
+		);
+		CREATE TABLE fursuit_photos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, furtrack_post_id INTEGER NOT NULL,
+			character TEXT NOT NULL, image_url TEXT NOT NULL, photographer TEXT NOT NULL,
+			license TEXT NOT NULL, furtrack_url TEXT NOT NULL, created_at TEXT NOT NULL
+		);
+		CREATE TABLE conventions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+			start_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'confirmed', created_at TEXT NOT NULL
+		);
+		CREATE TABLE commissions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL REFERENCES artists(id),
+			title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'applied', payment TEXT NOT NULL DEFAULT 'unpaid',
+			image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		);
+		CREATE TABLE commission_characters (
+			commission_id INTEGER NOT NULL REFERENCES commissions(id) ON DELETE CASCADE,
+			character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE
+		);
+	`);
+	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
+	sqlite.prepare('INSERT INTO artists (id, name) VALUES (1, ?)').run('Alba');
+	sqlite
+		.prepare(
+			"INSERT INTO vr_avatars (id, slug, name, character_id, model_url, created_at) VALUES (1, 'taro', 'Taro', 1, '/img/vr-models/taro.vrm', '2026-08-01')"
+		)
+		.run();
+	sqlite.prepare("INSERT INTO avatar_credits (avatar_id, artist_id, role) VALUES (1, 1, 'modeler')").run();
+	sqlite.prepare("INSERT INTO avatar_media (avatar_id, kind, url) VALUES (1, 'image', '/img/vr-media/a.png')").run();
+	sqlite.prepare("INSERT INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat')").run();
+	sqlite
+		.prepare(
+			"INSERT INTO sticker_packs (id, name, slug, character_id, manager_artist_id, source) VALUES (1, 'Taro Pack', 'taro-pack', 1, 1, 'self-hosted')"
+		)
+		.run();
+	sqlite.prepare("INSERT INTO stickers (id, pack_id, artist_id, image_url) VALUES (1, 1, 1, '/img/stickers/a.webp')").run();
+	sqlite.prepare("INSERT INTO sticker_emojis (sticker_id, emoji) VALUES (1, '🦊')").run();
+	sqlite
+		.prepare(
+			"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, license, furtrack_url, created_at) VALUES (7, 'Taro', '/f.jpg', 'Cam', 'cc-by', 'https://furtrack.example/7', '2026-08-01')"
+		)
+		.run();
+	sqlite.prepare("INSERT INTO conventions (name, start_date, created_at) VALUES ('FC', '2027-01-14', '2026-08-01')").run();
+	sqlite.prepare("INSERT INTO images (id, image_url) VALUES (1, '/img/uploads/a.png')").run();
+	sqlite.prepare("INSERT INTO tags (id, name) VALUES (1, 'fox')").run();
+	sqlite.prepare("INSERT INTO collections (id, name) VALUES (1, 'Faves')").run();
+	sqlite.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (1, 1)').run();
+	sqlite.prepare('INSERT INTO image_characters (image_id, character_id) VALUES (1, 1)').run();
+	// A ledger entry linked to the artist, the character, and the image: the
+	// artist reference has no cascade, so the entries must go first.
+	sqlite
+		.prepare(
+			"INSERT INTO commissions (id, artist_id, title, image_id, created_at, updated_at) VALUES (1, 1, 'Ref sheet', 1, '2026-10-01', '2026-10-01')"
+		)
+		.run();
+	sqlite.prepare('INSERT INTO commission_characters (commission_id, character_id) VALUES (1, 1)').run();
+		return sqlite;
+	}
+
 	it('removes VR avatars, sticker packs, fursuit photos and conventions (FK order + cascades)', async () => {
 		// Full-schema in-memory DB with REAL foreign keys: vr_avatars.character_id,
 		// sticker_packs.character_id and *.artist_id reference characters/artists
@@ -1735,91 +1849,7 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 		// first, this test fails with a FOREIGN KEY constraint error — the
 		// regression it exists to catch. The child tables prove the ON DELETE
 		// cascades instead (credits/media/platforms; stickers → sticker_emojis).
-		const sqlite = new Database(':memory:');
-		sqlite.pragma('foreign_keys = ON');
-		sqlite.exec(`
-			CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-			CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT);
-			CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT);
-			CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL);
-			CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
-			CREATE TABLE collections (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
-			CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
-			CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
-			CREATE TABLE vr_avatars (
-				id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL, name TEXT NOT NULL,
-				character_id INTEGER NOT NULL REFERENCES characters(id),
-				model_url TEXT, downloadable INTEGER NOT NULL DEFAULT 0, nsfw INTEGER NOT NULL DEFAULT 0,
-				published INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
-			);
-			CREATE TABLE avatar_credits (
-				avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
-				artist_id INTEGER NOT NULL REFERENCES artists(id),
-				role TEXT NOT NULL, role_label TEXT, position INTEGER NOT NULL DEFAULT 0
-			);
-			CREATE TABLE avatar_media (
-				avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
-				kind TEXT NOT NULL, url TEXT NOT NULL, width INTEGER, height INTEGER,
-				position INTEGER NOT NULL DEFAULT 0
-			);
-			CREATE TABLE avatar_platforms (
-				avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
-				platform TEXT NOT NULL
-			);
-			CREATE TABLE sticker_packs (
-				id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL,
-				character_id INTEGER NOT NULL REFERENCES characters(id),
-				manager_artist_id INTEGER REFERENCES artists(id),
-				source TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 1, created_at TEXT
-			);
-			CREATE TABLE stickers (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				pack_id INTEGER NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
-				artist_id INTEGER REFERENCES artists(id),
-				image_url TEXT NOT NULL
-			);
-			CREATE TABLE sticker_emojis (
-				sticker_id INTEGER NOT NULL REFERENCES stickers(id) ON DELETE CASCADE,
-				emoji TEXT NOT NULL
-			);
-			CREATE TABLE fursuit_photos (
-				id INTEGER PRIMARY KEY AUTOINCREMENT, furtrack_post_id INTEGER NOT NULL,
-				character TEXT NOT NULL, image_url TEXT NOT NULL, photographer TEXT NOT NULL,
-				license TEXT NOT NULL, furtrack_url TEXT NOT NULL, created_at TEXT NOT NULL
-			);
-			CREATE TABLE conventions (
-				id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-				start_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'confirmed', created_at TEXT NOT NULL
-			);
-		`);
-		sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
-		sqlite.prepare('INSERT INTO artists (id, name) VALUES (1, ?)').run('Alba');
-		sqlite
-			.prepare(
-				"INSERT INTO vr_avatars (id, slug, name, character_id, model_url, created_at) VALUES (1, 'taro', 'Taro', 1, '/img/vr-models/taro.vrm', '2026-08-01')"
-			)
-			.run();
-		sqlite.prepare("INSERT INTO avatar_credits (avatar_id, artist_id, role) VALUES (1, 1, 'modeler')").run();
-		sqlite.prepare("INSERT INTO avatar_media (avatar_id, kind, url) VALUES (1, 'image', '/img/vr-media/a.png')").run();
-		sqlite.prepare("INSERT INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat')").run();
-		sqlite
-			.prepare(
-				"INSERT INTO sticker_packs (id, name, slug, character_id, manager_artist_id, source) VALUES (1, 'Taro Pack', 'taro-pack', 1, 1, 'self-hosted')"
-			)
-			.run();
-		sqlite.prepare("INSERT INTO stickers (id, pack_id, artist_id, image_url) VALUES (1, 1, 1, '/img/stickers/a.webp')").run();
-		sqlite.prepare("INSERT INTO sticker_emojis (sticker_id, emoji) VALUES (1, '🦊')").run();
-		sqlite
-			.prepare(
-				"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, license, furtrack_url, created_at) VALUES (7, 'Taro', '/f.jpg', 'Cam', 'cc-by', 'https://furtrack.example/7', '2026-08-01')"
-			)
-			.run();
-		sqlite.prepare("INSERT INTO conventions (name, start_date, created_at) VALUES ('FC', '2027-01-14', '2026-08-01')").run();
-		sqlite.prepare("INSERT INTO images (id, image_url) VALUES (1, '/img/uploads/a.png')").run();
-		sqlite.prepare("INSERT INTO tags (id, name) VALUES (1, 'fox')").run();
-		sqlite.prepare("INSERT INTO collections (id, name) VALUES (1, 'Faves')").run();
-		sqlite.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (1, 1)').run();
-		sqlite.prepare('INSERT INTO image_characters (image_id, character_id) VALUES (1, 1)').run();
+		const sqlite = seededSite();
 
 		const d1 = makeD1(sqlite);
 		const platform = { env: { DB: d1 } } as unknown as App.Platform;
@@ -1851,10 +1881,26 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 			'tags',
 			'collections',
 			'characters',
-			'artists'
+			'artists',
+			'commissions',
+			'commission_characters'
 		]) {
 			const row = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
 			expect(row.n, `${table} should be empty after deleteAll`).toBe(0);
+		}
+	});
+
+	it('leaves every row in place when a delete fails part-way', async () => {
+		const sqlite = seededSite();
+		// The artists delete runs last; failing it must roll back the earlier ones.
+		sqlite.exec("CREATE TRIGGER fail_artist_delete BEFORE DELETE ON artists BEGIN SELECT RAISE(ABORT, 'boom'); END;");
+		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
+
+		await expect(actions.deleteAll({ platform } as never)).rejects.toThrow(/boom/);
+
+		for (const table of ['commissions', 'commission_characters', 'vr_avatars', 'images', 'characters', 'artists']) {
+			const row = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
+			expect(row.n, `${table} should be untouched`).toBe(1);
 		}
 	});
 });
