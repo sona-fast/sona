@@ -18,7 +18,9 @@ import Database from 'better-sqlite3';
 //
 // So a new migration may not rebuild a table. One that genuinely has to must
 // save and restore its children's rows, be proven on a local D1, and then be
-// added here by name.
+// added here by name. The guard covers table rebuilds and drops only: a DELETE
+// or REPLACE on a parent table fires the same cascades and needs the same
+// review (0019 deletes rows on purpose).
 const REVIEWED_REBUILDS = new Set([
 	// Rebuilt `stickers` (parent of sticker_emojis). Arrived with 0012 in the
 	// baseline commit, so every fork ran it against empty tables.
@@ -29,10 +31,15 @@ const DRIZZLE_DIR = new URL('../../../../drizzle/', import.meta.url);
 
 /**
  * A statement with its comments blanked and its string literals emptied, so
- * prose can't trip the guard and `DROP/**\/TABLE` can't slip past it.
+ * prose can't trip the guard and `DROP/**\/TABLE` can't slip past it. Quoted
+ * identifiers (`x`, "x", [x]) are matched first and kept as written, so a quote
+ * or `--` inside one can't swallow the code after it.
  */
 function code(stmt: string): string {
-	return stmt.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m[0] === "'" ? "''" : ' '));
+	return stmt.replace(
+		/`(?:[^`]|``)*`|"(?:[^"]|"")*"|\[[^\]]*\]|'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g,
+		(m) => (m[0] === "'" ? "''" : m[0] === '-' || m[0] === '/' ? ' ' : m)
+	);
 }
 
 /** The statements in a migration that rebuild or drop a table. */
@@ -106,5 +113,11 @@ describe('migration rebuild guard', () => {
 		expect(rebuildStatements('DROP/**/TABLE images;')).toHaveLength(1);
 		expect(rebuildStatements('drop table `images`; -- tidy up')).toHaveLength(1);
 		expect(rebuildStatements('CREATE TABLE `__NEW_images` (`id` integer);')).toHaveLength(1);
+		// A quote or comment marker inside a quoted identifier must not hide a later DROP.
+		expect(
+			rebuildStatements("ALTER TABLE `images` ADD `artist's_note` text;\nDROP TABLE `images`;\n-- '")
+		).toHaveLength(1);
+		expect(rebuildStatements('CREATE TABLE `a--b` (x); DROP TABLE `images`;')).toHaveLength(1);
+		expect(rebuildStatements('ALTER TABLE "o\'brien" ADD x integer; DROP TABLE images; SELECT \'z\';')).toHaveLength(1);
 	});
 });
