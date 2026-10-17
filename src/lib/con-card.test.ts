@@ -121,6 +121,7 @@ describe('conCardFaceSvg — the badge', () => {
 			['name', (v) => ({ name: v })],
 			['species', (v) => ({ species: v })],
 			['pronouns', (v) => ({ pronouns: v })],
+			// con-card.ts doesn't draw swatch names yet; this guards that future sink.
 			['colour name', (v) => ({ colors: [{ name: v, hex: '#b45309' }] })],
 			['colour hex', (v) => ({ colors: [{ name: 'Rust', hex: v }] })],
 			['handle', (v) => ({ handles: [{ platform: 'bluesky', value: v }] })],
@@ -137,7 +138,7 @@ describe('conCardFaceSvg — the badge', () => {
 		const renders: Array<[string, (o: Partial<ConCardOptions>) => string]> = [
 			['front', front],
 			['back', back],
-			['sheet', (o) => sheet(o)]
+			['sheet', sheet]
 		];
 		for (const [field, set] of fields) {
 			for (const [where, render] of renders) {

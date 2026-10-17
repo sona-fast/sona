@@ -89,6 +89,7 @@ type GalleryData = {
 	fursuitEnabled: boolean;
 	vrEnabled: boolean;
 	stickersEnabled: boolean;
+	page: number;
 };
 
 async function loadData(platform: App.Platform, query = ''): Promise<GalleryData> {
@@ -132,7 +133,7 @@ describe('gallery load — a junk ?page= serves page 1', () => {
 
 		expect(data.degraded).toBe(false);
 		expect(data.images).toEqual([expect.objectContaining({ slug })]);
-		expect((data as unknown as { page: number }).page).toBe(1);
+		expect(data.page).toBe(1);
 	});
 });
 

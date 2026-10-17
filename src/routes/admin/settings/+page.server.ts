@@ -588,7 +588,8 @@ export const actions = {
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),
 			// Re-parse + re-serialize the swatch JSON so only well-formed { name, hex }
 			// survive, names capped like every other text field, deduped by hex,
-			// then clamped to the palette cap (the UI enforces both too).
+			// then clamped to the palette cap (the UI enforces the dedupe and the
+			// palette cap too, but not the name cap).
 			sonaColors: data.has('sonaColors')
 				? JSON.stringify(
 						dedupePalette(

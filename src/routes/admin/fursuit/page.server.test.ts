@@ -41,7 +41,8 @@ describe('fursuit import action — form fields are capped before they are store
 		);
 
 		const opts = received();
-		expect(opts.character).toBe('c'.repeat(100));
+		// 200 matches the characters.name cap, so any saved character name imports.
+		expect(opts.character).toBe('c'.repeat(200));
 		expect(opts.manualPermissions!.get(7)).toBe('p'.repeat(200));
 	});
 

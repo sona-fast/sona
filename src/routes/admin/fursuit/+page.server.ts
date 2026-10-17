@@ -69,7 +69,7 @@ export const actions = {
 		const db = getDb(platform!.env.DB);
 		const settings = await getSettings(db);
 		const data = await request.formData();
-		const character = sanitizeText(data.get('character') as string, 100) || settings.primaryCharacter;
+		const character = sanitizeText(data.get('character') as string, 200) || settings.primaryCharacter;
 		const postIds = (data.getAll('postId') as string[]).map(Number).filter((n) => Number.isInteger(n) && n > 0);
 
 		if (postIds.length === 0) return fail(400, { error: 'No photos selected.' });
