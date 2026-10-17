@@ -111,7 +111,7 @@ describe('settings clearCache action', () => {
 });
 
 // REGRESSION: the backup export once silently omitted content tables (v1 lacked
-// conventions, fursuit photos, and the stickers tables). Pin the export at v2 AND
+// conventions, fursuit photos, and the stickers tables). Pin the export at v3 AND
 // derive the expected content-table set from the live schema minus the tables we
 // deliberately exclude — so a future table someone forgets to export makes this
 // fail rather than shipping an incomplete backup.
@@ -141,14 +141,14 @@ describe('settings export action', () => {
 		return sqlite;
 	}
 
-	it('exports version 2 with every content table (minus the deliberate exclusions)', async () => {
+	it('exports version 3 with every content table (minus the deliberate exclusions)', async () => {
 		const sqlite = buildFullDb();
 		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
 
 		const result = await actions.export({ platform } as never);
 		const backup = JSON.parse((result as { export: string }).export);
 
-		expect(backup.version).toBe(2);
+		expect(backup.version).toBe(3);
 
 		const expectedContentKeys = Object.values(schema)
 			.filter((v) => is(v, SQLiteTable))
@@ -161,6 +161,43 @@ describe('settings export action', () => {
 			.sort();
 
 		expect(contentKeys).toEqual(expectedContentKeys);
+	});
+
+	// SONA-236: the ledger is private to visitors but it's the owner's data, so
+	// the backup carries every field of an entry, its dates included.
+	it('includes a commission entry with its notes, price, dates, and characters', async () => {
+		const sqlite = buildFullDb();
+		sqlite.prepare("INSERT INTO artists (id, name, created_at) VALUES (1, 'Artist A', '2026-10-01')").run();
+		sqlite.prepare("INSERT INTO characters (id, name, created_at) VALUES (1, 'Kit', '2026-10-01')").run();
+		sqlite
+			.prepare(
+				`INSERT INTO commissions (id, artist_id, title, kind, source_url, status, price_minor, currency, payment, notes,
+					requested_on, accepted_on, delivered_on, created_at, updated_at)
+				VALUES (1, 1, 'Ref sheet update', 'Ref sheet', 'https://t.me/artist_a/412', 'in_progress', 4550, 'USD', 'deposit',
+					'Transparent background.', '2026-09-03', '2026-09-05', NULL, '2026-09-03T10:00:00Z', '2026-09-05T10:00:00Z')`
+			)
+			.run();
+		sqlite.prepare('INSERT INTO commission_characters (commission_id, character_id) VALUES (1, 1)').run();
+		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
+
+		const result = await actions.export({ platform } as never);
+		const backup = JSON.parse((result as { export: string }).export);
+
+		expect(backup.commissions).toEqual([
+			expect.objectContaining({
+				title: 'Ref sheet update',
+				sourceUrl: 'https://t.me/artist_a/412',
+				status: 'in_progress',
+				priceMinor: 4550,
+				currency: 'USD',
+				payment: 'deposit',
+				notes: 'Transparent background.',
+				requestedOn: '2026-09-03',
+				acceptedOn: '2026-09-05',
+				deliveredOn: null
+			})
+		]);
+		expect(backup.commissionCharacters).toEqual([{ commissionId: 1, characterId: 1 }]);
 	});
 });
 

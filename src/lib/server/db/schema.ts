@@ -179,7 +179,10 @@ export const stickerPacks = sqliteTable('sticker_packs', {
 	source: text('source', { enum: ['telegram', 'self-hosted'] }).notNull(),
 	published: integer('published', { mode: 'boolean' }).notNull().default(true),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
-});
+}, (table) => [
+	// The /about count and the ledger-only check look packs up per manager.
+	index('sticker_packs_manager_artist_id_idx').on(table.managerArtistId)
+]);
 
 // One sticker. Attribution is PER-STICKER (`artistId`) so a self-managed pack can
 // mix artists. `format` anticipates Telegram's animated `.tgs` and video `.webm`
@@ -212,7 +215,9 @@ export const stickers = sqliteTable('stickers', {
 	// existing-ids set before either writes, so the app-level check races). The
 	// column is nullable and SQLite allows many NULLs under a unique index, so
 	// self-hosted stickers (no Telegram id) are unaffected.
-	uniqueIndex('stickers_telegram_file_unique_id_unique').on(table.telegramFileUniqueId)
+	uniqueIndex('stickers_telegram_file_unique_id_unique').on(table.telegramFileUniqueId),
+	// The /about count and the ledger-only check look stickers up per artist.
+	index('stickers_artist_id_idx').on(table.artistId)
 ]);
 
 // Many emoji per sticker; search-by-emoji filters on this junction. No PK, mirroring
@@ -333,7 +338,9 @@ export const avatarCredits = sqliteTable('avatar_credits', {
 	position: integer('position').notNull().default(0)
 }, (table) => [
 	// The public detail load fetches credits per page view by avatar_id.
-	index('avatar_credits_avatar_id_idx').on(table.avatarId)
+	index('avatar_credits_avatar_id_idx').on(table.avatarId),
+	// The /about count and the ledger-only check look credits up per artist.
+	index('avatar_credits_artist_id_idx').on(table.artistId)
 ]);
 
 // Showcase media (screenshots / clips) for an avatar, ordered by `position`.
@@ -365,4 +372,54 @@ export const avatarPlatforms = sqliteTable('avatar_platforms', {
 	// /vr does an inArray over avatar_id for platform chips; detail fetches by it.
 	index('avatar_platforms_avatar_id_idx').on(table.avatarId),
 	uniqueIndex('avatar_platforms_avatar_platform_uq').on(table.avatarId, table.platform)
+]);
+
+// Commission ledger (SONA-236): the owner's private record of commissions they
+// requested, from application to delivery. Public routes never read these
+// tables. The enum arrays live here, not in $lib, because the schema drift test
+// copies this file somewhere $lib doesn't resolve.
+export const COMMISSION_STATUSES = [
+	'applied',
+	'waitlisted',
+	'not_picked',
+	'accepted',
+	'in_progress',
+	'delivered',
+	'cancelled'
+] as const;
+export const COMMISSION_PAYMENTS = ['unpaid', 'deposit', 'paid', 'refunded'] as const;
+
+// An artist with entries can't be deleted (no ON DELETE: the default refuses),
+// because silently deleting private payment history is worse than a refused
+// delete. Deleting a piece clears image_id and keeps the entry. The dates are
+// plain YYYY-MM-DD values for the owner's record: nothing subtracts them
+// (SONA-9). updated_at also lets an edit refuse a form that's out of date.
+export const commissions = sqliteTable('commissions', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	artistId: integer('artist_id').notNull().references(() => artists.id),
+	title: text('title').notNull(),
+	kind: text('kind'),
+	sourceUrl: text('source_url'),
+	status: text('status', { enum: COMMISSION_STATUSES }).notNull().default('applied'),
+	priceMinor: integer('price_minor'),
+	currency: text('currency'),
+	payment: text('payment', { enum: COMMISSION_PAYMENTS }).notNull().default('unpaid'),
+	notes: text('notes'),
+	requestedOn: text('requested_on'),
+	acceptedOn: text('accepted_on'),
+	deliveredOn: text('delivered_on'),
+	imageId: integer('image_id').references(() => images.id, { onDelete: 'set null' }),
+	createdAt: text('created_at').notNull(),
+	updatedAt: text('updated_at').notNull()
+}, (table) => [
+	index('commissions_artist_id_idx').on(table.artistId),
+	// A piece links to at most one entry.
+	uniqueIndex('commissions_image_id_uq').on(table.imageId)
+]);
+
+export const commissionCharacters = sqliteTable('commission_characters', {
+	commissionId: integer('commission_id').notNull().references(() => commissions.id, { onDelete: 'cascade' }),
+	characterId: integer('character_id').notNull().references(() => characters.id, { onDelete: 'cascade' })
+}, (table) => [
+	uniqueIndex('commission_characters_pair_uq').on(table.commissionId, table.characterId)
 ]);
