@@ -145,6 +145,25 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	await expect(card.getByText('solo_artist is already in your artist list as Solo Artist.')).toBeVisible();
 	await expect(artist).toHaveValue('53');
 
+	// A lookup that fails says nothing about the artist, so the pick stays.
+	await page.route('**/api/admin/artist-from-link', (route) => route.abort('connectionreset'));
+	await paste(link, 'https://x.com/twin_artist/status/6');
+	await expect(
+		page.locator('#ce-link-msg').getByText("Sona couldn't look up this link. Pick the artist from the list instead.")
+	).toBeVisible();
+	await expect(artist).toHaveValue('53');
+	await page.unrouteAll({ behavior: 'wait' });
+	// A link that names several artists, or none, takes the lookup's pick away,
+	// so a save can't keep an artist nobody chose.
+	await paste(link, 'https://x.com/twin_artist/status/6');
+	await expect(card.getByText('twin_artist is in your artist list more than once. Pick one.')).toBeVisible();
+	await expect(artist).toHaveValue('');
+	await paste(link, 'https://x.com/solo_artist/status/5');
+	await expect(artist).toHaveValue('53');
+	await paste(link, 'https://x.com/nobody_here/status/3');
+	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	await expect(artist).toHaveValue('');
+
 	// The owner's own pick doesn't: a match is offered, not imposed.
 	await artist.selectOption({ label: 'Avatar Artist' });
 	await paste(link, 'https://twitter.com/E2E_Artist/status/2');
