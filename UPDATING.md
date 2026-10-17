@@ -345,6 +345,40 @@ done
 After this, only *new* migrations pulled from the template will be applied.
 **Fresh forks need none of this.**
 
+## Roll back a bad update
+
+If an update breaks your site, put the last good version back first and work
+out what went wrong after. Code and data roll back separately.
+
+**The code.** Every deploy is kept as a Pages deployment. In the Cloudflare
+dashboard, open your Pages project's deployments and roll back to the last
+production deployment that worked. It takes effect in seconds and needs no
+build. For more information, see
+[Pages rollbacks](https://developers.cloudflare.com/pages/configuration/rollbacks/).
+
+A rollback doesn't change your fork's `main`, so the next push redeploys the
+broken version. Before you push again, revert the merge on your fork
+(`git revert -m 1 <merge-commit>`) or wait for a release that fixes it.
+
+**The data.** A Pages rollback leaves D1 as it is. Migrations only add tables,
+columns, and indexes, so the previous code runs against the newer schema, and
+you usually don't need to touch the database.
+
+If an update damaged data, D1 Time Travel can restore the whole database to any
+point in the last 30 days:
+
+```sh
+npx wrangler d1 time-travel restore DATABASE_NAME --timestamp=2026-10-17T08:00:00Z
+```
+
+Replace `DATABASE_NAME` with your D1 database's name (the `D1_DATABASE_NAME` repo
+variable, `sona-db` if you never set it), and the timestamp with a time from
+before the bad deploy. The restore is all or nothing: everything written after
+that time is gone. Images uploaded since then stay in R2, but the site no longer
+knows about them. The restore also rolls
+back the `schema_migrations` table, so the next deploy applies those migrations
+again.
+
 ## When `git merge` conflicts
 
 Conflicts happen where your site customizations overlap the template's changes.
