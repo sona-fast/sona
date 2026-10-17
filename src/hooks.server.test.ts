@@ -852,33 +852,101 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');
 	});
 
-	it('prunes visitor counters past retention on a page view, without the cron', async () => {
-		// The privacy policy says these go after about 35 days. A fork with no
-		// CRON_SECRET never runs the weekly cleanup, so the page view itself has
-		// to keep that promise.
-		__resetVisitorPruneLatch();
-		const { db, sqlite } = makeMetricsDb();
-		const old = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
-		sqlite
-			.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)')
-			.run(old, 'referrer', 'spam.example', 9);
-		const waits: Promise<unknown>[] = [];
-		await authHandle({
-			event: pageviewEvent('/gallery', db, waits, { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0)' }),
-			resolve: async () =>
-				new Response('<!doctype html>ok', { status: 200, headers: { 'content-type': 'text/html' } })
-		} as never);
-		await Promise.all(waits);
-
-		expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE dim = 'spam.example'").get().c).toBe(0);
-	});
-
 	const resolveHtml = async () =>
 		new Response('<!doctype html>ok', { status: 200, headers: { 'content-type': 'text/html' } });
 	const resolveXml = async () =>
 		new Response('<rss/>', { status: 200, headers: { 'content-type': 'application/xml' } });
 
 	const REAL_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148';
+
+	// A visitor row and an operational row, both 40 days old: past the 35-day
+	// visitor retention, but only the visitor row may go.
+	function seedOldRows(sqlite: { prepare: (sql: string) => { run: (...a: unknown[]) => void } }) {
+		const old = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
+		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
+		seed.run(old, 'referrer', 'spam.example', 9);
+		seed.run(old, 'request', 'public', 100);
+		return old;
+	}
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const spamRows = (sqlite: any) =>
+		sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE dim = 'spam.example'").get().c;
+
+	it('prunes visitor counters past retention on a page view, without the cron', async () => {
+		// The privacy policy says these go after about 35 days. A fork with no
+		// CRON_SECRET never runs the weekly cleanup, so the page view itself has
+		// to keep that promise.
+		__resetVisitorPruneLatch();
+		const { db, sqlite } = makeMetricsDb();
+		const old = seedOldRows(sqlite);
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/gallery', db, waits, { 'user-agent': REAL_UA }),
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		expect(spamRows(sqlite)).toBe(0);
+		// Operational counters are never pruned, however old.
+		expect(
+			sqlite.prepare("SELECT count FROM metric_rollup WHERE day = ? AND metric = 'request'").get(old)
+		).toEqual({ count: 100 });
+	});
+
+	it('still prunes visitor counters when observability is off', async () => {
+		// A fork that collected, then turned the flag off, still owes the 35-day
+		// delete on the rows it already holds.
+		__resetVisitorPruneLatch();
+		const { db, sqlite } = makeMetricsDb();
+		seedOldRows(sqlite);
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/gallery', db, waits, { 'user-agent': REAL_UA }, {}),
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		expect(spamRows(sqlite)).toBe(0);
+		// The flag-off path only deletes; it records nothing new.
+		expect(sqlite.prepare('SELECT metric, count FROM metric_rollup').all()).toEqual([
+			{ metric: 'request', count: 100 }
+		]);
+	});
+
+	it('does not prune on a request that is not a counted page view, nor spend the daily latch', async () => {
+		const resolve404 = async () =>
+			new Response('<!doctype html>nope', { status: 404, headers: { 'content-type': 'text/html' } });
+		const cases: [string, string, () => Promise<Response>, string][] = [
+			['/admin/login', REAL_UA, resolveHtml, 'admin page'],
+			['/api/cron/refresh', REAL_UA, resolveHtml, 'cron endpoint'],
+			['/rss.xml', REAL_UA, resolveXml, 'non-HTML response'],
+			['/gallery', 'Googlebot/2.1 (+http://www.google.com/bot.html)', resolveHtml, 'known bot'],
+			['/gallery', REAL_UA, resolve404, '404']
+		];
+		for (const flags of [{ OBSERVABILITY_ENABLED: 'true' }, {}] as Record<string, string>[]) {
+			__resetVisitorPruneLatch();
+			const { db, sqlite } = makeMetricsDb();
+			seedOldRows(sqlite);
+			for (const [path, ua, resolve, label] of cases) {
+				const waits: Promise<unknown>[] = [];
+				await authHandle({
+					event: pageviewEvent(path, db, waits, { 'user-agent': ua }, flags),
+					resolve
+				} as never);
+				await Promise.all(waits);
+				expect(spamRows(sqlite), `${label}, flags ${JSON.stringify(flags)}`).toBe(1);
+			}
+
+			// None of those spent the once-a-day latch: the next real view prunes.
+			const waits: Promise<unknown>[] = [];
+			await authHandle({
+				event: pageviewEvent('/gallery', db, waits, { 'user-agent': REAL_UA }, flags),
+				resolve: resolveHtml
+			} as never);
+			await Promise.all(waits);
+			expect(spamRows(sqlite), `real view, flags ${JSON.stringify(flags)}`).toBe(0);
+		}
+	});
 
 	it('records reduced counters for a public HTML view — referrer kept to host only', async () => {
 		const { db, sqlite } = makeMetricsDb();

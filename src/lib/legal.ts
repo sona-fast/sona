@@ -112,7 +112,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Information we collect',
 			body: [
-				"From visitors, we do not require an account and do not require you to provide personal information to browse. The site stores small preference cookies for your light/dark theme and, if you pick one, your language, plus a browser-local setting for your preferred gallery layout. It sets no advertising or analytics cookies. On the public pages, the third-party scripts and files the site loads set no cookies for advertising or cross-site tracking.",
+				"From visitors, we do not require an account and do not require you to provide personal information to browse. The site stores small preference cookies for your light/dark theme and for your language, which it sets from your browser's language or from the one you pick. It also keeps a browser-local setting for your preferred gallery layout. It sets no advertising or analytics cookies. On the public pages, the third-party scripts and files the site loads set no cookies for advertising or cross-site tracking.",
 				'When the site owner signs in to manage the site, an administrative session cookie is set for the owner only.',
 				'Our hosting and content-delivery provider (Cloudflare) may process limited technical data such as IP address and request metadata to serve and secure the site. This is standard server operation, not tracking by us.',
 				'Some sites turn on an optional built-in analytics feature. If this site has visitor analytics enabled, it keeps aggregate counters in its own database to understand how the site is used: how often pages are viewed, which site referred a visit, visitor country, device type (desktop, mobile, or tablet), and how often the download button is pressed. These are counters, not profiles: they use no cookies, store no IP addresses, and keep no records tied to an individual visitor, and none of it is shared with any other site or service. The page-view, referrer, country, and device counters are deleted once they are about 35 days old. The download count is kept as a simple running total. The same feature also keeps a short diagnostic record of recent errors — the request path, the HTTP status, and an error message with personal details removed — limited to the newest 200 entries and visible only to the site owner.',
@@ -137,7 +137,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'How information is used',
 			body: [
-				'Preference cookies are used only to remember your display choices. Any technical data handled by our provider is used to operate, secure, and troubleshoot the site.',
+				'Preference cookies are used only to remember your display preferences. Any technical data handled by our provider is used to operate, secure, and troubleshoot the site.',
 				'We do not sell or share personal information, and we do not use it for cross-context behavioral advertising.'
 			]
 		},
@@ -172,13 +172,14 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Do Not Track and Global Privacy Control',
 			body: [
-				'Some browsers and extensions send a "Do Not Track" (DNT) or Global Privacy Control (GPC) signal. This site does not act on them. We do not sell or share personal information as the California Consumer Privacy Act defines those terms, and we do not use it for cross-context behavioral advertising, so these signals have no opt-out to carry here. The theme and language cookies described above remember your display choices. They do not follow you to other sites.'
+				'Some browsers and extensions send a "Do Not Track" (DNT) or Global Privacy Control (GPC) signal. This site does not act on them. We do not sell or share personal information as the California Consumer Privacy Act defines those terms, and we do not use it for cross-context behavioral advertising, so these signals have no opt-out to carry here. The theme and language cookies described above remember your display preferences. They do not follow you to other sites.'
 			]
 		},
 		{
 			heading: 'Data retention and security',
 			body: [
-				'We keep information only as long as needed to operate the site, and we use reasonable measures to protect it. No method of transmission or storage is completely secure.'
+				'We keep information only as long as needed to operate the site, and we use reasonable measures to protect it. No method of transmission or storage is completely secure.',
+				'If visitor analytics is enabled, the page-view, referrer, country, and device counters are deleted once they are about 35 days old, and the error log keeps only the newest 200 entries. Your browser deletes the theme cookie 1 year after the site last sets it, and the language cookie about 400 days after the site last sets it. The site owner\'s account email is kept until the owner changes or removes it.'
 			]
 		},
 		{

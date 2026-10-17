@@ -188,8 +188,8 @@ export function pageViewStatements(db: Database, view: PageView): BatchItem<'sql
 
 /** The retention delete itself, built but not run, so the cron can await it and
  * the page-view batch can carry it. */
-function visitorPruneStatement(db: Database, olderThanDays: number) {
-	const cutoff = dayKey(new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000));
+function visitorPruneStatement(db: Database, olderThanDays: number, now: Date = new Date()) {
+	const cutoff = dayKey(new Date(now.getTime() - olderThanDays * 24 * 60 * 60 * 1000));
 	return db
 		.delete(metricRollup)
 		.where(and(lt(metricRollup.day, cutoff), inArray(metricRollup.metric, [...VISITOR_METRICS])));
@@ -224,7 +224,7 @@ export function dailyVisitorPrune(db: Database, now: Date = new Date()): BatchIt
 	const today = dayKey(now);
 	if (lastVisitorPruneDay === today) return null;
 	lastVisitorPruneDay = today;
-	return visitorPruneStatement(db, VISITOR_RETENTION_DAYS);
+	return visitorPruneStatement(db, VISITOR_RETENTION_DAYS, now);
 }
 
 /** Test-only: forget which day this isolate last pruned. */

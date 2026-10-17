@@ -633,8 +633,8 @@ describe('dailyVisitorPrune — once per isolate per UTC day', () => {
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));
 		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
-		seed.run(dayKey(new Date(Date.now() - 40 * 86400000)), 'referrer', 'spam.example', 9);
-		seed.run(dayKey(new Date(Date.now() - 40 * 86400000)), 'request', 'public', 100);
+		seed.run('2026-09-07', 'referrer', 'spam.example', 9);
+		seed.run('2026-09-07', 'request', 'public', 100);
 
 		const first = dailyVisitorPrune(db, new Date('2026-10-17T08:00:00Z'));
 		expect(first).not.toBeNull();
@@ -643,6 +643,20 @@ describe('dailyVisitorPrune — once per isolate per UTC day', () => {
 
 		expect(dailyVisitorPrune(db, new Date('2026-10-17T23:59:00Z'))).toBeNull();
 		expect(dailyVisitorPrune(db, new Date('2026-10-18T00:01:00Z'))).not.toBeNull();
+	});
+
+	it('measures the 35-day cutoff from the day it is given, not the wall clock', async () => {
+		// The latch follows `now`, so the cutoff must too. A row dated in the
+		// future of the real clock, yet 60 days before `now`, is past retention.
+		__resetVisitorPruneLatch();
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
+		seed.run('2099-11-02', 'referrer', 'old.example', 1);
+		seed.run('2099-12-20', 'referrer', 'recent.example', 1);
+
+		await dailyVisitorPrune(db, new Date('2100-01-01T12:00:00Z'));
+		expect(sqlite.prepare('SELECT dim FROM metric_rollup').all()).toEqual([{ dim: 'recent.example' }]);
 	});
 });
 
