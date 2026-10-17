@@ -710,6 +710,44 @@ function updateEvent(platform: App.Platform, fields: Record<string, string>) {
 	} as never;
 }
 
+describe('update action — ledger-only artists stay on the site (SONA-236)', () => {
+	async function seedWithEntry(db: ReturnType<typeof makeDb>['db'], withPiece: boolean) {
+		const row = await db.insert(schema.artists).values({ name: 'Quill' }).returning({ id: schema.artists.id }).get();
+		// This file's tables carry only the columns the ledger-only check reads.
+		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (${row.id})`);
+		if (withPiece) await db.run(sql`INSERT INTO images (artist_id) VALUES (${row.id})`);
+		return row.id;
+	}
+
+	it('saves the new links without looking up the avatar', async () => {
+		const { db, platform } = makeDb();
+		const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
+		vi.stubGlobal('fetch', fetchSpy);
+		const id = await seedWithEntry(db, false);
+
+		const result = await actions.update(
+			updateEvent(platform, { id: String(id), name: 'Quill', bluesky: 'quill.bsky.social', twitter: 'quill_art' })
+		);
+		expect(result).toEqual({ success: true });
+		expect(fetchSpy).not.toHaveBeenCalled();
+
+		const after = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
+		expect(after!.blueskyUrl).toBe('https://bsky.app/profile/quill.bsky.social');
+		expect(after!.twitterUrl).toBe('https://twitter.com/quill_art');
+		expect(after!.avatarUrl).toBeNull();
+	});
+
+	it('still looks up the avatar once the artist has a piece on the site', async () => {
+		const { db, platform } = makeDb();
+		const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
+		vi.stubGlobal('fetch', fetchSpy);
+		const id = await seedWithEntry(db, true);
+
+		await actions.update(updateEvent(platform, { id: String(id), name: 'Quill', bluesky: 'quill.bsky.social' }));
+		expect(fetchSpy).toHaveBeenCalled();
+	});
+});
+
 describe('update action — avatar clobber guard (#187)', () => {
 	// The default beforeEach stub fails every fetch, so re-resolution comes back null.
 	it('keeps the existing avatar when re-resolution fails during an edit', async () => {

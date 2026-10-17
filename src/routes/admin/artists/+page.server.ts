@@ -26,6 +26,7 @@ import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
 import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registry-submissions';
 import { getRawSetting, setRawSetting, getSettings } from '$lib/server/settings';
 import { cleanMessage } from '$lib/server/metrics';
+import { artistIsLedgerOnly } from '$lib/server/artist-visibility';
 import { parseDismissed, addDismissed } from '$lib/server/registry-dismissals';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -261,7 +262,8 @@ export const actions = {
 				twitterUrl: artists.twitterUrl,
 				blueskyUrl: artists.blueskyUrl,
 				furAffinityUrl: artists.furAffinityUrl,
-				patreonUrl: artists.patreonUrl
+				patreonUrl: artists.patreonUrl,
+				ledgerOnly: sql<number>`${artistIsLedgerOnly(artists.id)}`
 			})
 			.from(artists)
 			.where(eq(artists.id, id))
@@ -272,6 +274,9 @@ export const actions = {
 		//  - EVERY avatar-capable social (bluesky/twitter/FA/patreon) posted empty →
 		//    write null: with nothing left to resolve from, this is a deliberate
 		//    removal and must actually clear a wrong avatar.
+		//  - a ledger-only artist (SONA-236) → keep the stored avatar: resolving
+		//    sends their handle to X or Bluesky, which a save doesn't ask for. The
+		//    avatar refresh fills a missing one once they have work on the site.
 		//  - avatar socials unchanged AND the stored avatar is already ours → skip
 		//    re-resolution entirely; re-hosting the same source again can't change
 		//    anything.
@@ -290,6 +295,7 @@ export const actions = {
 		if (!avatarSocialsPosted) {
 			avatarUrl = null;
 		} else if (
+			!existing?.ledgerOnly &&
 			!(
 				avatarSocialsUnchanged &&
 				existing?.avatarUrl &&
