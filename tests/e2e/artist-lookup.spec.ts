@@ -1547,6 +1547,40 @@ test.describe('with a key saved', () => {
 		);
 	});
 
+	// Art from a commission entry is refused before anything is read (SONA-236).
+	// The button is only here when the piece was linked after the page loaded,
+	// so the panel has to say why, offer nothing that would try again, and not
+	// claim a private file went out.
+	test('the edit page explains a lookup refused for art from a commission entry', async ({
+		page
+	}) => {
+		await stubLookup(page, { enabled: true, error: 'from_commission', forwarded: false }, 409);
+		await gotoEditHydrated(page);
+		await expect(page.locator('input[name="published"]')).toBeChecked();
+		const artist = page.locator('select[name="artistId"]');
+		const before = {
+			source: await sourceInput(page).inputValue(),
+			date: await dateInput(page).inputValue(),
+			artist: await artist.inputValue()
+		};
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText('Lookup not available');
+		await expect(panel(page)).toContainText(
+			"Look up artist isn't available for art you added from a commission entry. The entry already names the artist."
+		);
+		await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+		await expect(panel(page).getByRole('link', { name: /Open Settings/ })).toHaveCount(0);
+		await expect(panel(page)).not.toContainText('Sona sent this file to FuzzySearch');
+		await expect(sourceInput(page)).toHaveValue(before.source);
+		await expect(dateInput(page)).toHaveValue(before.date);
+		await expect(artist).toHaveValue(before.artist);
+
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(panel(page)).toBeHidden();
+	});
+
 	// A second lookup used to read the first one's URL as something the operator
 	// typed, fill nothing, and leave a "From lookup" tag sitting on a value from
 	// the other post. Only the source pin can see the reset exists; this is what

@@ -303,6 +303,12 @@
 					     Close is the only action below. -->
 					<div class="lookup-eyebrow warn">{m.admin_lookup_gone_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_gone_body()}</p>
+				{:else if lookup.reason === 'from_commission'}
+					<!-- The piece was linked to an entry after this page loaded, so the
+					     button is still here. Nothing was sent, and Close is the only
+					     action below: the entry already names the artist. -->
+					<div class="lookup-eyebrow">{m.admin_lookup_off_eyebrow()}</div>
+					<p class="lookup-lead">{m.admin_lookup_off_commission()}</p>
 				{:else if lookup.reason === 'signed_out'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_signed_out_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_signed_out_body()}</p>

@@ -487,7 +487,7 @@ const PNG = Buffer.from(
  * the stub answers with an asset the site already serves, so the piece
  * renders. setInputFiles doesn't reach Svelte's delegated change handler, so
  * the change is dispatched by hand, retried until hydration attaches it. */
-async function uploadPiece(page: Page, title: string, lands: RegExp = /\/admin\/commissions\?added=\d+$/) {
+async function uploadPiece(page: Page, title: string | null, lands: RegExp = /\/admin\/commissions\?added=\d+$/) {
 	await page.route(
 		(url) => url.pathname === '/api/upload',
 		(route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/e2e-avatar.svg' }) })
@@ -499,7 +499,8 @@ async function uploadPiece(page: Page, title: string, lands: RegExp = /\/admin\/
 		);
 		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/e2e-avatar.svg', { timeout: 2000 });
 	}).toPass({ timeout: 20_000 });
-	await page.locator('input[name="title"]').fill(title);
+	// A variant has no title of its own: it takes its piece's.
+	if (title !== null) await page.locator('input[name="title"]').fill(title);
 	await page.getByRole('button', { name: 'Upload Artwork' }).click();
 	await expect(page).toHaveURL(lands);
 }
@@ -602,6 +603,58 @@ test('Add to gallery uploads a new piece and links it to the entry', async ({ pa
 	await expect(page.locator('input[name="groupMode"]')).toHaveCount(0);
 	await expect(page.locator('input[name="useAsReference"]')).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-upload-variant.png'));
+});
+
+const ENTRY_ART_HINT =
+	"Look up artist isn't available for art you added from a commission entry. The entry already names the artist.";
+
+/** Saves or removes a throwaway FuzzySearch key through the settings page's own
+ * actions. Never used: the tests below only check what the edit page offers. */
+async function setLookupKey(page: Page, on: boolean) {
+	const action = on ? 'saveFuzzysearchKey' : 'removeFuzzysearchKey';
+	const res = await page.request.post(`/admin/settings?/${action}`, {
+		form: on ? { fuzzysearchApiKey: 'e2e-not-a-real-key' } : {},
+		headers: { origin: new URL(page.url()).origin, 'x-sveltekit-action': 'true' }
+	});
+	expect(res.ok()).toBe(true);
+	expect(((await res.json()) as { type: string }).type).toBe('success');
+}
+
+test('a piece added from an entry offers no Look up artist, and says why', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	const row = section(page, 'Finished').getByRole('row', { name: new RegExp(TITLE) });
+	const pieceUrl = await row.getByRole('link', { name: 'E2E Snowfall' }).getAttribute('href');
+	const entryUrl = await row.getByRole('link', { name: `Edit ${TITLE}` }).getAttribute('href');
+	await setLookupKey(page, true);
+	try {
+		// With the key saved, a piece no entry links to offers the lookup.
+		await open(page, '/admin/images/1/edit');
+		await expect(page.getByRole('button', { name: 'Look up artist' })).toBeVisible();
+
+		// The entry's piece doesn't, and the hint says why.
+		await open(page, pieceUrl!);
+		await expect(page.locator('input[name="title"]')).toHaveValue('E2E Snowfall');
+		await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
+		await expect(page.locator('#lookup-hint')).toHaveText(
+			ENTRY_ART_HINT
+		);
+		await settledShot(page, testInfo.outputPath('commission-piece-no-lookup.png'));
+
+		// A variant added from the entry is entry art too.
+		await open(page, entryUrl!);
+		await galleryPanel(page).getByRole('link', { name: 'Add a variant' }).click();
+		await waitForHydration(page);
+		await uploadPiece(page, null, /\/admin\/commissions\?added=\d+&variants=\d+$/);
+		const variantId = new URL(page.url()).searchParams.get('variants');
+		await open(page, `/admin/images/${variantId}/edit`);
+		await expect(page.getByRole('button', { name: 'Look up artist' })).toHaveCount(0);
+		await expect(page.locator('#lookup-hint')).toHaveText(
+			ENTRY_ART_HINT
+		);
+	} finally {
+		await setLookupKey(page, false);
+	}
 });
 
 test('phone width: the ledger and the prefilled upload, light and dark', async ({ page }, testInfo) => {

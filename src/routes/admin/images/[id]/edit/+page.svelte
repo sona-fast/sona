@@ -613,6 +613,10 @@
 					<small class="hint" class:hint-warn={sendingPrivate} id="lookup-hint">
 						{sendingPrivate ? m.admin_lookup_hint_private() : m.admin_lookup_hint()}
 					</small>
+				{:else if data.fromCommission}
+					<!-- Said even without a key: adding one wouldn't turn the lookup on
+					     for this piece, so the Settings hint would point nowhere. -->
+					<small class="hint" id="lookup-hint">{m.admin_lookup_off_commission()}</small>
 				{:else}
 					<small class="hint" id="lookup-hint">
 						{m.admin_lookup_no_key_pre()}<a class="link" href="/admin/settings?tab=connections"

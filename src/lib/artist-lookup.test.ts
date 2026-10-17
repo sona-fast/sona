@@ -1609,6 +1609,17 @@ describe('stateFromResponse', () => {
 			await stateFromResponse(jsonResponse({ enabled: true, error: 'rate_limited' }, 404))
 		).toEqual({ kind: 'failed', reason: 'rate_limited', sent: true });
 	});
+
+	// Art from a commission entry is refused before anything is read (SONA-236).
+	// Unknown to the client, it would read as an outage that may have sent the
+	// file, and the panel would offer Try again and the private-image notice.
+	it('reads the entry-art refusal as its own reason, with nothing sent', async () => {
+		const state = await stateFromResponse(
+			jsonResponse({ enabled: true, error: 'from_commission', forwarded: false }, 409)
+		);
+		expect(state).toEqual({ kind: 'failed', reason: 'from_commission', sent: false });
+		expect(lookupSentFile(state)).toBe(false);
+	});
 });
 
 describe('lookupSentFile', () => {
