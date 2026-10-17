@@ -282,6 +282,17 @@ describe('settings saveSite — three-path profile fields', () => {
 		expect(saved).toHaveLength(MAX_SONA_COLORS);
 		expect(saved).toEqual(swatches.slice(0, MAX_SONA_COLORS));
 	});
+
+	it('caps a swatch name like any other text field', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(
+			saveSiteEvent(platform, { sonaColors: JSON.stringify([{ name: 'r'.repeat(10_000), hex: '#b45309' }]) })
+		);
+
+		const [saved] = JSON.parse((await getRawSetting(db, 'sonaColors'))!);
+		expect(saved).toEqual({ name: 'r'.repeat(60), hex: '#b45309' });
+	});
 });
 
 describe('settings saveSite — siteUrl + emailLanguage', () => {

@@ -109,6 +109,45 @@ describe('conCardFaceSvg — the badge', () => {
 		);
 	});
 
+	it('escapes every operator-controlled field on both faces and the print sheet', () => {
+		// The faces render through {@html} in ConCard.svelte, so one field
+		// interpolated raw is markup injection on the settings page. The payload
+		// carries both quote forms, a tag, an ampersand, an emoji and RTL text.
+		// Escaped, it adds no element and no attribute quote compared to a plain
+		// value; raw, it adds both.
+		const PAYLOAD = `"'<x>&🦊עב`;
+		const PLAIN = 'Plainvalue';
+		const fields: Array<[string, (v: string) => Partial<ConCardOptions>]> = [
+			['name', (v) => ({ name: v })],
+			['species', (v) => ({ species: v })],
+			['pronouns', (v) => ({ pronouns: v })],
+			['colour name', (v) => ({ colors: [{ name: v, hex: '#b45309' }] })],
+			['colour hex', (v) => ({ colors: [{ name: 'Rust', hex: v }] })],
+			['handle', (v) => ({ handles: [{ platform: 'bluesky', value: v }] })],
+			['avatar href', (v) => ({ avatarHref: v })],
+			['art credit', (v) => ({ artCredit: v })],
+			['display domain', (v) => ({ displayDomain: v })],
+			['made with', (v) => ({ madeWith: v })],
+			['title', (v) => ({ title: v })]
+		];
+		const shape = (svg: string) => ({
+			tags: [...svg.matchAll(/<\/?([A-Za-z][\w:-]*)/g)].map((m) => m[1]),
+			quotes: (svg.match(/"/g) ?? []).length
+		});
+		const renders: Array<[string, (o: Partial<ConCardOptions>) => string]> = [
+			['front', front],
+			['back', back],
+			['sheet', (o) => sheet(o)]
+		];
+		for (const [field, set] of fields) {
+			for (const [where, render] of renders) {
+				const svg = render(set(PAYLOAD));
+				expect(svg, `${field} on ${where}`).not.toContain('<x>');
+				expect(shape(svg), `${field} on ${where}`).toEqual(shape(render(set(PLAIN))));
+			}
+		}
+	});
+
 	it('drops half a surrogate pair left behind by an older cut', () => {
 		// Settings saved before the clamp counted grapheme clusters were cut by code
 		// unit, so a stored value can end mid-emoji and the write path can never

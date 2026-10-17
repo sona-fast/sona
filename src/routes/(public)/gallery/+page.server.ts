@@ -13,6 +13,7 @@ import { resolveGallerySort } from '$lib/gallery';
 import { withTimeout } from '$lib/server/timeout';
 import type { FursuitPhoto } from '$lib/furtrack/types';
 import type { PageServerLoad } from './$types';
+import { parsePageParam } from '$lib/server/validate';
 
 // The gallery makes several sequential D1 reads; under a latency spike that can
 // stack past the edge timeout. Bound the whole data fetch and degrade to an
@@ -31,7 +32,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// the site's configured default gallery sort.
 	const settings = await getSettings(db);
 	const sort = resolveGallerySort(url.searchParams.get('sort'), settings.galleryDefaultSort);
-	const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+	const page = parsePageParam(url.searchParams.get('page'));
 	const perPage = 20;
 	const photographerFilter = url.searchParams.get('photographer') || '';
 	const eventFilter = url.searchParams.get('event') || '';

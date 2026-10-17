@@ -106,3 +106,13 @@ export function sanitizeText(text: string | null | undefined, maxLength = 500): 
  * is where every other validator lives.
  */
 export { sanitizeTag } from '$lib/tags';
+
+/**
+ * A `?page=` query value as a 1-based page number. Anything that isn't a finite
+ * number (`abc`, `Infinity`, an empty value) is page 1 rather than NaN, which
+ * would otherwise reach the OFFSET and fail the query instead of serving a page.
+ */
+export function parsePageParam(raw: string | null): number {
+	const n = Math.floor(Number(raw));
+	return Number.isFinite(n) && n > 1 ? n : 1;
+}
