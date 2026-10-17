@@ -66,3 +66,63 @@ export async function bufferStream(
 	}
 	return out;
 }
+
+/**
+ * A timeout on a source going quiet, not on how long it takes overall. The
+ * timer starts at once (covering the wait for headers), and `watch` re-arms it
+ * on every read of the body, so a slow source that keeps sending finishes
+ * while one that stops sending fails. It only runs while waiting on the
+ * source: a slow consumer between reads never trips it.
+ *
+ * When it fires, `signal` aborts with `reason()` and a watched body errors
+ * with that same reason, so the caller sees one message whichever wait it hit.
+ * Call `clear` once the copy is done.
+ */
+export function idleTimeout(
+	ms: number,
+	reason: () => Error
+): {
+	signal: AbortSignal;
+	watch(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array>;
+	clear(): void;
+} {
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const arm = () => {
+		clearTimeout(timer);
+		timer = setTimeout(() => controller.abort(reason()), ms);
+	};
+	const clear = () => clearTimeout(timer);
+	const aborted = new Promise<never>((_resolve, reject) => {
+		controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+	});
+	// Nothing may be racing it when it fires; callers read the reason off `signal`.
+	aborted.catch(() => {});
+	arm();
+	return {
+		signal: controller.signal,
+		clear,
+		watch(body) {
+			const reader = body.getReader();
+			return new ReadableStream<Uint8Array>({
+				async pull(c) {
+					arm();
+					let chunk: ReadableStreamReadResult<Uint8Array>;
+					try {
+						chunk = await Promise.race([reader.read(), aborted]);
+					} catch (e) {
+						await reader.cancel(e).catch(() => {});
+						throw e;
+					}
+					clear();
+					if (chunk.done) c.close();
+					else c.enqueue(chunk.value);
+				},
+				cancel(r) {
+					clear();
+					return reader.cancel(r);
+				}
+			});
+		}
+	};
+}

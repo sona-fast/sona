@@ -188,33 +188,26 @@ export async function importFursuitPhotos(opts: {
 			result.items.push({ postId: photo.id, status: 'skipped' });
 			continue;
 		}
+		// One photo that stalls mid-download fails its own row instead of holding
+		// the whole import open. The bound covers the body too, which the
+		// 10 MiB cap keeps short.
+		const download = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
 		try {
-			// One photo that stalls mid-download fails its own row instead of holding
-			// the whole import open. The bound covers the body too, which the
-			// 10 MiB cap keeps short.
-			const controller = new AbortController();
-			const downloadTimer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
-			let contentType: string;
-			let bytes: Uint8Array;
-			try {
-				const res = await fetchFn(photo.imageUrl, {
-					headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent },
-					signal: controller.signal
-				});
-				if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
-				contentType = res.headers.get('content-type') ?? 'image/jpeg';
-				// Only self-host safe raster images. A non-image (or SVG) response would be
-				// served as active content from the R2 custom domain — refuse it.
-				if (!isAllowedImageType(contentType)) throw new Error(`unsupported image type: ${contentType}`);
-				// Buffer with the remote byte cap (M8; rationale on the constant), then
-				// verify the actual leading bytes match an allowed raster type (M7) -
-				// the remote Content-Type can lie.
-				bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
-				if (!isAllowedImageType(sniffImageType(bytes))) {
-					throw new Error('image contents do not match an allowed raster type');
-				}
-			} finally {
-				clearTimeout(downloadTimer);
+			const res = await fetchFn(photo.imageUrl, {
+				headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent },
+				signal: download
+			});
+			if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
+			const contentType = res.headers.get('content-type') ?? 'image/jpeg';
+			// Only self-host safe raster images. A non-image (or SVG) response would be
+			// served as active content from the R2 custom domain — refuse it.
+			if (!isAllowedImageType(contentType)) throw new Error(`unsupported image type: ${contentType}`);
+			// Buffer with the remote byte cap (M8; rationale on the constant), then
+			// verify the actual leading bytes match an allowed raster type (M7) -
+			// the remote Content-Type can lie.
+			const bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
+			if (!isAllowedImageType(sniffImageType(bytes))) {
+				throw new Error('image contents do not match an allowed raster type');
 			}
 			const ext = extFromContentType(contentType);
 
@@ -251,10 +244,20 @@ export async function importFursuitPhotos(opts: {
 			// ("jpeg: segment 0x…") goes to the log.
 			const unscrubbable = isUnscrubbable(e);
 			if (unscrubbable) console.warn('fursuit import: unscrubbable photo', photo.id, e);
+			// The abort's own wording ("The operation was aborted due to timeout")
+			// doesn't say which step gave up. Matching the download's own reason
+			// keeps a storage provider's timeout from reading as this one.
+			const timedOut = download.aborted && e === download.reason;
 			result.items.push({
 				postId: photo.id,
 				status: 'failed',
-				error: unscrubbable ? UNSCRUBBABLE_IMPORT_MESSAGE : e instanceof Error ? e.message : String(e)
+				error: unscrubbable
+					? UNSCRUBBABLE_IMPORT_MESSAGE
+					: timedOut
+						? `download timed out after ${DOWNLOAD_TIMEOUT_MS / 1000}s`
+						: e instanceof Error
+							? e.message
+							: String(e)
 			});
 		}
 	}

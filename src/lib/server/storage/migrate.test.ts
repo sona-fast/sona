@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
 import { PNG_MAGIC } from '$lib/server/test/raster-fixtures';
+import { MAX_BUFFER_BYTES } from './buffer';
 import { migrateImages, migrateNextBatch } from './migrate';
 import { UnscrubbableImageError, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
 import { avifFixture } from './scrub-metadata.fixtures';
@@ -226,9 +227,135 @@ describe('migrate copyOne bounds a misbehaving source', () => {
 
 			expect(result.failed).toBe(1);
 			expect(result.migrated).toBe(0);
+			// The fetch's own "aborted" says neither what happened nor where.
+			expect(result.items[0].error).toMatch(/timed out.*for https:\/\/old\.example\/f\/silent$/);
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	/**
+	 * A body that sends a PNG head, then `chunks` more 1 KiB chunks `gapMs`
+	 * apart, then either closes or (`stall`) goes silent. Like a real fetch body
+	 * it errors only when the request's signal aborts.
+	 */
+	function dripFetch(opts: { chunks: number; gapMs: number; sized: boolean; stall?: boolean }) {
+		const chunk = new Uint8Array(1024);
+		const total = 1024 + opts.chunks * chunk.length;
+		return vi.fn(async (_url: string, init?: RequestInit) => {
+			let sent = 0;
+			const body = new ReadableStream<Uint8Array>({
+				start(c) {
+					init?.signal?.addEventListener('abort', () => c.error(new Error('aborted')));
+				},
+				async pull(c) {
+					if (sent === 0) {
+						sent++;
+						c.enqueue(pngBytes(1024));
+						return;
+					}
+					if (sent > opts.chunks) {
+						// A stalled source: this pull never settles.
+						if (opts.stall) await new Promise(() => {});
+						else c.close();
+						return;
+					}
+					await new Promise((r) => setTimeout(r, opts.gapMs));
+					sent++;
+					c.enqueue(chunk);
+				}
+			});
+			const res = new Response(body, {
+				headers: opts.sized
+					? { 'content-type': 'image/png', 'content-length': String(total) }
+					: { 'content-type': 'image/png' }
+			});
+			if (!opts.sized) res.headers.delete('content-length');
+			return res;
+		}) as unknown as typeof fetch;
+	}
+
+	/** A target that drains the body the way a real provider would. */
+	function drainingTarget() {
+		return fakeTarget(async ({ body }) => {
+			await new Response(body as ReadableStream | Uint8Array<ArrayBuffer>).arrayBuffer();
+			return { url: 'https://cdn.example.com/x.png' };
+		});
+	}
+
+	it.each([
+		['sized (streamed)', true],
+		['unsized (buffered)', false]
+	])('migrates a %s body that keeps sending, however long it takes', async (_label, sized) => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, db } = makeDb();
+			sqlite
+				.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+				.run('t', 'slow', 'https://old.example/f/slow');
+
+			// A chunk every 5s for 40s: well past the 15s idle bound in total, never
+			// close to it between chunks.
+			const fetchFn = dripFetch({ chunks: 8, gapMs: 5_000, sized });
+			const target = drainingTarget();
+
+			const pending = migrateImages({ db, fetchFn, target });
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await pending;
+
+			expect(result.items[0].error).toBeUndefined();
+			expect(result.migrated).toBe(1);
+			expect(result.failed).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it.each([
+		['sized (streamed)', true],
+		['unsized (buffered)', false]
+	])('fails the row when a %s body stops sending after the headers', async (_label, sized) => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, db } = makeDb();
+			sqlite
+				.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+				.run('t', 'stalled', 'https://old.example/f/stalled');
+
+			const fetchFn = dripFetch({ chunks: 2, gapMs: 1_000, sized, stall: true });
+			const target = drainingTarget();
+
+			const pending = migrateImages({ db, fetchFn, target });
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await pending;
+
+			expect(result.migrated).toBe(0);
+			expect(result.failed).toBe(1);
+			expect(result.items[0].error).toMatch(/timed out.*for https:\/\/old\.example\/f\/stalled$/);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('fails the row without copying when the declared length is over the buffer cap', async () => {
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'huge', 'https://old.example/f/huge');
+
+		const fetchFn = vi.fn(
+			async () =>
+				new Response(streamOf(pngBytes(1024)), {
+					headers: { 'content-type': 'image/png', 'content-length': String(MAX_BUFFER_BYTES + 1) }
+				})
+		) as unknown as typeof fetch;
+		const target = fakeTarget(async () => ({ url: 'https://cdn.example.com/x.png' }));
+
+		const result = await migrateImages({ db, fetchFn, target });
+
+		expect(result.failed).toBe(1);
+		expect(result.items[0]).toMatchObject({ status: 'failed', error: expect.stringMatching(/buffer cap/) });
+		expect(target.put).not.toHaveBeenCalled();
 	});
 });
 

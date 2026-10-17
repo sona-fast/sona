@@ -76,22 +76,30 @@ describe('importFursuitPhotos', () => {
 		expect(await fursuitPhotosExist(db)).toBe(true);
 	});
 
+	// AbortSignal.timeout runs on a timer fake timers can't reach, so it stands
+	// in as a controller on a plain setTimeout (the fuzzysearch.test.ts pattern).
 	it('fails a photo whose download stalls instead of holding the import open', async () => {
 		vi.useFakeTimers();
+		const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+			const controller = new AbortController();
+			setTimeout(() => controller.abort(new DOMException('timed out', 'TimeoutError')), ms);
+			return controller.signal;
+		});
 		try {
 			const { db } = makeDb();
 			// Headers arrive, then the body never sends another byte. Only an
-			// abort ends it, as with a real fetch.
+			// abort ends it, erroring with the signal's reason as a real fetch does.
 			const stalledFetch = vi.fn(async (_url: string, init?: RequestInit) => {
 				const body = new ReadableStream<Uint8Array>({
 					start(c) {
 						c.enqueue(staticWebp().slice(0, 16));
-						init?.signal?.addEventListener('abort', () => c.error(new Error('aborted')));
+						init?.signal?.addEventListener('abort', () => c.error(init.signal!.reason));
 					}
 				});
 				return new Response(body, { headers: { 'content-type': 'image/webp' } });
 			}) as unknown as typeof fetch;
 
+			let settled = false;
 			const pending = importFursuitPhotos({
 				env: testEnv,
 				settings: testSettings,
@@ -99,13 +107,21 @@ describe('importFursuitPhotos', () => {
 				fetchFn: stalledFetch,
 				character: 'Sparky',
 				postIds: [1918883]
-			});
-			await vi.advanceTimersByTimeAsync(60_000);
+			}).finally(() => (settled = true));
+			await vi.advanceTimersByTimeAsync(29_000);
+			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(2_000);
 			const result = await pending;
 
+			expect(timeout).toHaveBeenCalledWith(30_000);
 			expect(result.imported).toBe(0);
-			expect(result.items[0]).toMatchObject({ postId: 1918883, status: 'failed' });
+			expect(result.items[0]).toMatchObject({
+				postId: 1918883,
+				status: 'failed',
+				error: 'download timed out after 30s'
+			});
 		} finally {
+			timeout.mockRestore();
 			vi.useRealTimers();
 		}
 	});

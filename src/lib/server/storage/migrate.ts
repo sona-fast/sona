@@ -4,7 +4,7 @@ import type { Database } from '$lib/server/db';
 import { extFromContentType, isAllowedImageType } from './index';
 import { isUnscrubbable, SNIFF_BYTES, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
 import { sniffImageType } from './sniff';
-import { bufferStream, MAX_BUFFER_BYTES } from './buffer';
+import { bufferStream, idleTimeout, MAX_BUFFER_BYTES } from './buffer';
 import type { StorageProvider } from './types';
 
 export interface MigrationItemResult {
@@ -189,8 +189,8 @@ export async function migrateNextBatch(opts: {
 	};
 }
 
-/** How long a source gets to start answering before its row fails. */
-const MIGRATE_HEADERS_TIMEOUT_MS = 15_000;
+/** How long a source may send nothing, headers or body, before its row fails. */
+const MIGRATE_IDLE_TIMEOUT_MS = 15_000;
 
 async function copyOne(
 	fetchFn: typeof fetch,
@@ -198,17 +198,33 @@ async function copyOne(
 	url: string,
 	baseKey: string
 ): Promise<string> {
-	// Bound the wait for the source's headers, so one host that never answers
-	// can't hold the whole batch. Only the headers: a large image may still be
-	// streaming well past this, and the timer is cleared once they arrive.
-	const controller = new AbortController();
-	const headersTimer = setTimeout(() => controller.abort(), MIGRATE_HEADERS_TIMEOUT_MS);
-	let res: Response;
+	// Bound how long the source may go quiet, so one host that stops answering
+	// can't hold the whole batch. Idle, not total: the timer covers the wait for
+	// headers and re-arms on every chunk, so a large image that keeps streaming
+	// finishes however long it takes.
+	const idle = idleTimeout(
+		MIGRATE_IDLE_TIMEOUT_MS,
+		() => new Error(`source timed out (no data for ${MIGRATE_IDLE_TIMEOUT_MS / 1000}s) for ${url}`)
+	);
 	try {
-		res = await fetchFn(url, { signal: controller.signal });
+		return await copyFromSource(fetchFn, target, url, baseKey, idle);
+	} catch (e) {
+		// A fetch or target can wrap the abort in its own wording; the operator
+		// reading the failure list needs the timeout and the URL instead.
+		throw idle.signal.aborted ? idle.signal.reason : e;
 	} finally {
-		clearTimeout(headersTimer);
+		idle.clear();
 	}
+}
+
+async function copyFromSource(
+	fetchFn: typeof fetch,
+	target: StorageProvider,
+	url: string,
+	baseKey: string,
+	idle: ReturnType<typeof idleTimeout>
+): Promise<string> {
+	const res = await fetchFn(url, { signal: idle.signal });
 	if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
 	// Stream when the source declares its usable length (both providers upload
 	// without materializing given a size). Content-Encoding responses can't
@@ -223,6 +239,14 @@ async function copyOne(
 		Number.isFinite(declaredSize) &&
 		declaredSize > 0 &&
 		!res.headers.get('content-encoding');
+	// The streaming path never buffers, so it holds a source to the same cap by
+	// its declared length: nothing stored through an upload is larger.
+	if (streamable && declaredSize > MAX_BUFFER_BYTES) {
+		await res.body!.cancel().catch(() => {});
+		throw new Error(
+			`source declares ${declaredSize} bytes, over the ${MAX_BUFFER_BYTES}-byte buffer cap, for ${url}`
+		);
+	}
 
 	// Verify the LEADING BYTES are an allowed raster image (M7, the same defense
 	// as /api/upload) rather than trusting the source's Content-Type header:
@@ -236,13 +260,13 @@ async function copyOne(
 	let head: Uint8Array;
 	let sourceReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	if (streamable) {
-		const reader = res.body!.getReader();
+		const reader = idle.watch(res.body!).getReader();
 		sourceReader = reader;
 		const { chunks, bytes } = await readAtLeast(reader, SNIFF_BYTES);
 		head = bytes;
 		body = prependChunks(chunks, reader);
 	} else {
-		const buffered = res.body ? await bufferStream(res.body, MAX_BUFFER_BYTES) : new Uint8Array();
+		const buffered = res.body ? await bufferStream(idle.watch(res.body), MAX_BUFFER_BYTES) : new Uint8Array();
 		head = buffered;
 		body = buffered;
 	}
