@@ -10,8 +10,11 @@ import Database from 'better-sqlite3';
 // every child's ON DELETE action. Rebuild `images` and every fork loses its
 // image_tags and image_characters rows at deploy, and the
 // characters.reference_image_id and vr_avatars.poster_image_id links go NULL.
-// The PRAGMA foreign_keys=OFF line drizzle writes doesn't help inside the
-// transaction the migration runs in.
+// The PRAGMA foreign_keys=OFF line drizzle writes can't help: D1 always
+// enforces foreign keys and runs each query in an implicit transaction
+// (https://developers.cloudflare.com/d1/sql-api/foreign-keys/). The cascade on
+// DROP is SQLite's behavior, shown by the test below; it hasn't been run on D1
+// itself yet.
 //
 // So a new migration may not rebuild a table. One that genuinely has to must
 // save and restore its children's rows, be proven on a local D1, and then be
@@ -24,12 +27,23 @@ const REVIEWED_REBUILDS = new Set([
 
 const DRIZZLE_DIR = new URL('../../../../drizzle/', import.meta.url);
 
+/**
+ * A statement with its comments blanked and its string literals emptied, so
+ * prose can't trip the guard and `DROP/**\/TABLE` can't slip past it.
+ */
+function code(stmt: string): string {
+	return stmt.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m[0] === "'" ? "''" : ' '));
+}
+
 /** The statements in a migration that rebuild or drop a table. */
 function rebuildStatements(sql: string): string[] {
 	return sql
 		.split('--> statement-breakpoint')
 		.map((s) => s.trim())
-		.filter((s) => /\b__new_\w+/.test(s) || /\bDROP\s+TABLE\b/i.test(s));
+		.filter((s) => {
+			const c = code(s);
+			return /\b__new_\w+/i.test(c) || /\bDROP\s+TABLE\b/i.test(c);
+		});
 }
 
 describe('migration rebuild guard', () => {
@@ -44,6 +58,11 @@ describe('migration rebuild guard', () => {
 		expect(unreviewed, 'see the comment at the top of this file').toEqual([]);
 	});
 
+	it('every reviewed rebuild still names a migration in drizzle/', () => {
+		const files = new Set(readdirSync(DRIZZLE_DIR));
+		expect([...REVIEWED_REBUILDS].filter((f) => !files.has(f))).toEqual([]);
+	});
+
 	it('catches the rebuild drizzle-kit generates, and the data loss it causes', () => {
 		// The shape drizzle-kit writes for a column change on a referenced table.
 		const generated = [
@@ -56,7 +75,7 @@ describe('migration rebuild guard', () => {
 		].join('\n--> statement-breakpoint\n');
 		expect(rebuildStatements(generated)).toHaveLength(4);
 
-		// Run as one transaction, the way the migration runner applies a file.
+		// Run the file as one transaction, with foreign keys on as D1 has them.
 		// The image survives the rebuild; its tag row does not.
 		const sqlite = new Database(':memory:');
 		sqlite.pragma('foreign_keys = ON');
@@ -74,5 +93,18 @@ describe('migration rebuild guard', () => {
 	it('leaves additive migrations alone', () => {
 		expect(rebuildStatements('CREATE INDEX IF NOT EXISTS `x_idx` ON `images` (`artist_id`);')).toEqual([]);
 		expect(rebuildStatements('ALTER TABLE `images` ADD `nsfw` integer DEFAULT 0 NOT NULL;')).toEqual([]);
+		expect(rebuildStatements('DROP INDEX IF EXISTS `x_idx`;')).toEqual([]);
+	});
+
+	it('ignores comments and string literals that mention a drop', () => {
+		expect(rebuildStatements('-- we never drop table rows here\nCREATE INDEX `y_idx` ON `images` (`id`);')).toEqual([]);
+		expect(rebuildStatements('/* no DROP TABLE, no __new_images */ SELECT 1;')).toEqual([]);
+		expect(rebuildStatements("UPDATE `site_config` SET `note` = 'drop table it''s fine';")).toEqual([]);
+	});
+
+	it('sees through comments hiding a rebuild, in any case', () => {
+		expect(rebuildStatements('DROP/**/TABLE images;')).toHaveLength(1);
+		expect(rebuildStatements('drop table `images`; -- tidy up')).toHaveLength(1);
+		expect(rebuildStatements('CREATE TABLE `__NEW_images` (`id` integer);')).toHaveLength(1);
 	});
 });
