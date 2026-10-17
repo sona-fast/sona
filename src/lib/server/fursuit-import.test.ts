@@ -76,6 +76,40 @@ describe('importFursuitPhotos', () => {
 		expect(await fursuitPhotosExist(db)).toBe(true);
 	});
 
+	it('fails a photo whose download stalls instead of holding the import open', async () => {
+		vi.useFakeTimers();
+		try {
+			const { db } = makeDb();
+			// Headers arrive, then the body never sends another byte. Only an
+			// abort ends it, as with a real fetch.
+			const stalledFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+				const body = new ReadableStream<Uint8Array>({
+					start(c) {
+						c.enqueue(staticWebp().slice(0, 16));
+						init?.signal?.addEventListener('abort', () => c.error(new Error('aborted')));
+					}
+				});
+				return new Response(body, { headers: { 'content-type': 'image/webp' } });
+			}) as unknown as typeof fetch;
+
+			const pending = importFursuitPhotos({
+				env: testEnv,
+				settings: testSettings,
+				db,
+				fetchFn: stalledFetch,
+				character: 'Sparky',
+				postIds: [1918883]
+			});
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await pending;
+
+			expect(result.imported).toBe(0);
+			expect(result.items[0]).toMatchObject({ postId: 1918883, status: 'failed' });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('fails a photo whose remote body exceeds the 10 MiB import cap', async () => {
 		const { db } = makeDb();
 		// Remote import bodies keep the old 10 MiB bound, decoupled from the raised

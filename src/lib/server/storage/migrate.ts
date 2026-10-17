@@ -4,6 +4,7 @@ import type { Database } from '$lib/server/db';
 import { extFromContentType, isAllowedImageType } from './index';
 import { isUnscrubbable, SNIFF_BYTES, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
 import { sniffImageType } from './sniff';
+import { bufferStream, MAX_BUFFER_BYTES } from './buffer';
 import type { StorageProvider } from './types';
 
 export interface MigrationItemResult {
@@ -188,20 +189,34 @@ export async function migrateNextBatch(opts: {
 	};
 }
 
+/** How long a source gets to start answering before its row fails. */
+const MIGRATE_HEADERS_TIMEOUT_MS = 15_000;
+
 async function copyOne(
 	fetchFn: typeof fetch,
 	target: StorageProvider,
 	url: string,
 	baseKey: string
 ): Promise<string> {
-	const res = await fetchFn(url);
+	// Bound the wait for the source's headers, so one host that never answers
+	// can't hold the whole batch. Only the headers: a large image may still be
+	// streaming well past this, and the timer is cleared once they arrive.
+	const controller = new AbortController();
+	const headersTimer = setTimeout(() => controller.abort(), MIGRATE_HEADERS_TIMEOUT_MS);
+	let res: Response;
+	try {
+		res = await fetchFn(url, { signal: controller.signal });
+	} finally {
+		clearTimeout(headersTimer);
+	}
 	if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
 	// Stream when the source declares its usable length (both providers upload
 	// without materializing given a size). Content-Encoding responses can't
 	// stream: their Content-Length counts compressed bytes while res.body
 	// yields decoded ones, so the declared size would be wrong. A response
-	// without a usable length falls back to buffering the whole body — uncapped,
-	// the pre-existing behavior of this path.
+	// without a usable length falls back to buffering the whole body, under the
+	// same cap as an upload so an endless body fails the row instead of the
+	// isolate.
 	const declaredSize = Number(res.headers.get('content-length'));
 	const streamable =
 		res.body &&
@@ -227,7 +242,7 @@ async function copyOne(
 		head = bytes;
 		body = prependChunks(chunks, reader);
 	} else {
-		const buffered = new Uint8Array(await res.arrayBuffer());
+		const buffered = res.body ? await bufferStream(res.body, MAX_BUFFER_BYTES) : new Uint8Array();
 		head = buffered;
 		body = buffered;
 	}

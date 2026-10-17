@@ -168,6 +168,70 @@ describe('migrate copyOne streaming', () => {
 	});
 });
 
+describe('migrate copyOne bounds a misbehaving source', () => {
+	it('fails the row, not the isolate, when an unsized body runs past the buffer cap', async () => {
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'endless', 'https://old.example/f/endless');
+
+		// No Content-Length, so the copy buffers. The body never ends: one PNG
+		// head, then 1 MiB chunks for as long as anyone keeps reading.
+		const chunk = new Uint8Array(1024 * 1024);
+		let pulled = 0;
+		const fetchFn = vi.fn(async () => {
+			const res = new Response(
+				new ReadableStream<Uint8Array>({
+					pull(c) {
+						c.enqueue(pulled++ === 0 ? pngBytes(1024) : chunk);
+					}
+				}),
+				{ headers: { 'content-type': 'image/png' } }
+			);
+			res.headers.delete('content-length');
+			return res;
+		}) as unknown as typeof fetch;
+		const target = fakeTarget(async () => ({ url: 'https://cdn.example.com/x.png' }));
+
+		const result = await migrateImages({ db, fetchFn, target });
+
+		expect(result.failed).toBe(1);
+		expect(result.items[0]).toMatchObject({ status: 'failed', error: expect.stringMatching(/buffer cap/) });
+		expect(target.put).not.toHaveBeenCalled();
+		// It stopped reading at the cap rather than draining forever.
+		expect(pulled).toBeLessThan(80);
+	});
+
+	it('fails the row when the source never answers', async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, db } = makeDb();
+			sqlite
+				.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+				.run('t', 'silent', 'https://old.example/f/silent');
+
+			// A host that accepts the connection and never sends headers: the fetch
+			// settles only when its signal aborts, as a real fetch does.
+			const fetchFn = vi.fn(
+				(_url: string, init?: RequestInit) =>
+					new Promise<Response>((_resolve, reject) => {
+						init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+					})
+			) as unknown as typeof fetch;
+			const target = fakeTarget(async () => ({ url: 'https://cdn.example.com/x.png' }));
+
+			const pending = migrateImages({ db, fetchFn, target });
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await pending;
+
+			expect(result.failed).toBe(1);
+			expect(result.migrated).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
 describe('migrate copyOne content sniffing (SONA-141)', () => {
 	it('fails the row when the source bytes are not an allowed raster image', async () => {
 		const { sqlite, db } = makeDb();

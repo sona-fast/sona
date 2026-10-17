@@ -138,6 +138,9 @@ export async function getImportCandidates(opts: {
 	return { candidates, capped: result.capped };
 }
 
+/** How long one photo download, headers and body, may take. */
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+
 /**
  * Import the selected posts for a character. Re-fetches candidates server-side
  * (so the client can't import arbitrary/restricted posts), then downloads +
@@ -186,18 +189,32 @@ export async function importFursuitPhotos(opts: {
 			continue;
 		}
 		try {
-			const res = await fetchFn(photo.imageUrl, { headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent } });
-			if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
-			const contentType = res.headers.get('content-type') ?? 'image/jpeg';
-			// Only self-host safe raster images. A non-image (or SVG) response would be
-			// served as active content from the R2 custom domain — refuse it.
-			if (!isAllowedImageType(contentType)) throw new Error(`unsupported image type: ${contentType}`);
-			// Buffer with the remote byte cap (M8; rationale on the constant), then
-			// verify the actual leading bytes match an allowed raster type (M7) -
-			// the remote Content-Type can lie.
-			const bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
-			if (!isAllowedImageType(sniffImageType(bytes))) {
-				throw new Error('image contents do not match an allowed raster type');
+			// One photo that stalls mid-download fails its own row instead of holding
+			// the whole import open. The bound covers the body too, which the
+			// 10 MiB cap keeps short.
+			const controller = new AbortController();
+			const downloadTimer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+			let contentType: string;
+			let bytes: Uint8Array;
+			try {
+				const res = await fetchFn(photo.imageUrl, {
+					headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent },
+					signal: controller.signal
+				});
+				if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
+				contentType = res.headers.get('content-type') ?? 'image/jpeg';
+				// Only self-host safe raster images. A non-image (or SVG) response would be
+				// served as active content from the R2 custom domain — refuse it.
+				if (!isAllowedImageType(contentType)) throw new Error(`unsupported image type: ${contentType}`);
+				// Buffer with the remote byte cap (M8; rationale on the constant), then
+				// verify the actual leading bytes match an allowed raster type (M7) -
+				// the remote Content-Type can lie.
+				bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
+				if (!isAllowedImageType(sniffImageType(bytes))) {
+					throw new Error('image contents do not match an allowed raster type');
+				}
+			} finally {
+				clearTimeout(downloadTimer);
 			}
 			const ext = extFromContentType(contentType);
 
