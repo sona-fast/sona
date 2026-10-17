@@ -26,6 +26,9 @@ async function open(page: Page, url: string) {
 	await waitForHydration(page);
 }
 
+// The visible line, not the announcer's copy of it outside the form.
+const draftNote = (page: Page) => page.locator('form.entry-form').getByText('Your draft is back.');
+
 const section = (page: Page, heading: 'Active' | 'Finished') =>
 	page.locator('section', { has: page.getByRole('heading', { level: 2, name: heading }) });
 
@@ -116,6 +119,8 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	const artist = page.getByLabel('Artist', { exact: true });
 	const card = page.locator('.lookup');
 	await expect(artist).toHaveValue('');
+	// A fresh form brought nothing back.
+	await expect(draftNote(page)).toHaveCount(0);
 
 	// No artist chosen yet: the one artist with the handle is picked. Their
 	// stored link is twitter.com in another letter case.
@@ -129,6 +134,9 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	).toHaveCount(1);
 	await settledShot(page, testInfo.outputPath('commission-link-match.png'));
 	await page.setViewportSize({ width: 390, height: 844 });
+	// A full-size tap target on a phone.
+	const usingBox = await card.getByRole('button', { name: 'Using Test Artist' }).boundingBox();
+	expect(usingBox?.height).toBeGreaterThanOrEqual(44);
 	await settledShot(page, testInfo.outputPath('commission-link-match-390.png'));
 	await page.setViewportSize({ width: 1280, height: 720 });
 
@@ -203,6 +211,12 @@ test('a name that only looks like the handle, or a handle two artists share, wai
 	await expect(card.getByText('twin_artist is in your artist list more than once. Pick one.')).toBeVisible();
 	await expect(card.getByRole('button', { name: /^Use Twin/ })).toHaveCount(2);
 	await expect(artist).toHaveValue('');
+	// Each Use button sits beside the name it picks, not across the row.
+	for (const match of await card.locator('.match').all()) {
+		const name = await match.locator('.name').boundingBox();
+		const use = await match.getByRole('button').boundingBox();
+		expect(use!.x - (name!.x + name!.width)).toBeLessThan(40);
+	}
 	await settledShot(page, testInfo.outputPath('commission-link-several.png'));
 });
 
@@ -366,6 +380,7 @@ test('the draft survives a trip to the Artists page, and the lookup asks again o
 	await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
 	await expect(page.getByLabel('Title')).toHaveValue('E2E draft title');
 	await expect(link).toHaveValue('https://x.com/draft_artist/status/11');
+	await expect(draftNote(page)).toBeVisible();
 	// Asked again, so the answer knows about the new artist, and picks them.
 	await expect(card.getByText('draft_artist is already in your artist list as Draft Artist.')).toBeVisible();
 	await expect(artist).toHaveValue(String(id));
@@ -806,6 +821,7 @@ test('a draft typed against an older copy of the entry is dropped on return', as
 	await expect(kind).toHaveValue('Changed elsewhere');
 	await expect(page.getByLabel('Notes')).not.toHaveValue('E2E draft note');
 	await expect(page.getByLabel('Link to where you asked')).not.toHaveValue('https://x.com/nobody_here/status/40');
+	await expect(draftNote(page)).toHaveCount(0);
 	// Saving now keeps the other tab's change.
 	await page.getByRole('button', { name: 'Save changes' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
@@ -819,6 +835,40 @@ test('a draft typed against an older copy of the entry is dropped on return', as
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
 	await page.goBack();
 	await expect(kind).toHaveValue(keptKind);
+});
+
+test('Reload entry takes away the draft-is-back line', async ({ page, context }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	const editUrl = await page.getByRole('link', { name: new RegExp(`^Edit ${TITLE}`) }).getAttribute('href');
+	await open(page, editUrl!);
+	const notes = page.getByLabel('Notes');
+	const keptNotes = await notes.inputValue();
+
+	await notes.fill('E2E draft before reload');
+	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/41');
+	await page.locator('.lookup').getByRole('link', { name: 'Artists page' }).click();
+	await expect(page).toHaveURL(/\/admin\/artists$/);
+	await page.goBack();
+	await expect(notes).toHaveValue('E2E draft before reload');
+	await expect(draftNote(page)).toBeVisible();
+
+	// Another tab saves, so this save is out of date and offers Reload entry.
+	const other = await context.newPage();
+	await open(other, editUrl!);
+	await other.getByRole('button', { name: 'Save changes' }).click();
+	await expect(other).toHaveURL(/\/admin\/commissions$/);
+	await other.close();
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await page.getByRole('button', { name: 'Reload entry' }).click();
+	// The form shows the saved entry now, with only the typed note carried over.
+	await expect(notes).toHaveValue('E2E draft before reload');
+	await expect(draftNote(page)).toHaveCount(0);
+
+	// Leave the entry as it was for the steps after this one.
+	await notes.fill(keptNotes);
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
 });
 
 test('an entry deleted elsewhere: save says so, and delete counts as done', async ({ page }, testInfo) => {
