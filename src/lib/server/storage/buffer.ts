@@ -93,11 +93,19 @@ export function idleTimeout(
 		timer = setTimeout(() => controller.abort(reason()), ms);
 	};
 	const clear = () => clearTimeout(timer);
-	const aborted = new Promise<never>((_resolve, reject) => {
-		controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
-	});
-	// Nothing may be racing it when it fires; callers read the reason off `signal`.
-	aborted.catch(() => {});
+	// One read of `reader`, rejected with the reason if the signal aborts first.
+	// The abort listener lives only as long as the read, so a long copy doesn't
+	// pile up a reaction per chunk.
+	const readOrAbort = (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+		const signal = controller.signal;
+		let onAbort = () => {};
+		return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+			if (signal.aborted) return reject(signal.reason);
+			onAbort = () => reject(signal.reason);
+			signal.addEventListener('abort', onAbort, { once: true });
+			reader.read().then(resolve, reject);
+		}).finally(() => signal.removeEventListener('abort', onAbort));
+	};
 	arm();
 	return {
 		signal: controller.signal,
@@ -109,7 +117,7 @@ export function idleTimeout(
 					arm();
 					let chunk: ReadableStreamReadResult<Uint8Array>;
 					try {
-						chunk = await Promise.race([reader.read(), aborted]);
+						chunk = await readOrAbort(reader);
 					} catch (e) {
 						await reader.cancel(e).catch(() => {});
 						throw e;

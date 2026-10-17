@@ -192,6 +192,9 @@ export async function importFursuitPhotos(opts: {
 		// the whole import open. The bound covers the body too, which the
 		// 10 MiB cap keeps short.
 		const download = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
+		// Which step a failure came from: only a download-stage abort is this
+		// timeout, never storage.put's own.
+		let stage: 'download' | 'store' = 'download';
 		try {
 			const res = await fetchFn(photo.imageUrl, {
 				headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent },
@@ -206,6 +209,7 @@ export async function importFursuitPhotos(opts: {
 			// verify the actual leading bytes match an allowed raster type (M7) -
 			// the remote Content-Type can lie.
 			const bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
+			stage = 'store';
 			if (!isAllowedImageType(sniffImageType(bytes))) {
 				throw new Error('image contents do not match an allowed raster type');
 			}
@@ -245,9 +249,15 @@ export async function importFursuitPhotos(opts: {
 			const unscrubbable = isUnscrubbable(e);
 			if (unscrubbable) console.warn('fursuit import: unscrubbable photo', photo.id, e);
 			// The abort's own wording ("The operation was aborted due to timeout")
-			// doesn't say which step gave up. Matching the download's own reason
-			// keeps a storage provider's timeout from reading as this one.
-			const timedOut = download.aborted && e === download.reason;
+			// doesn't say which step gave up. A runtime may reject with its own
+			// AbortError/TimeoutError rather than the signal's reason, so accept
+			// either, but only from the download stage: a storage provider's
+			// timeout must not read as this one.
+			const timedOut =
+				download.aborted &&
+				stage === 'download' &&
+				(e === download.reason ||
+					(e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')));
 			result.items.push({
 				postId: photo.id,
 				status: 'failed',

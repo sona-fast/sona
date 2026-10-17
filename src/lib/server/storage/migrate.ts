@@ -281,14 +281,21 @@ async function copyFromSource(
 	}
 	const contentType = sniffed!;
 	const ext = extFromContentType(contentType);
-	const { url: newUrl } = await target.put({
-		suggestedKey: `${baseKey}.${ext}`,
-		body,
-		size: streamable ? declaredSize : undefined,
-		contentType,
-		filename: `${baseKey.split('/').pop()}.${ext}`
-	});
-	return newUrl;
+	try {
+		const { url: newUrl } = await target.put({
+			suggestedKey: `${baseKey}.${ext}`,
+			body,
+			size: streamable ? declaredSize : undefined,
+			contentType,
+			filename: `${baseKey.split('/').pop()}.${ext}`
+		});
+		return newUrl;
+	} catch (e) {
+		// A target that fails mid-stream may leave the source half-read; release
+		// it, as on the sniff failure above, so the connection doesn't stay open.
+		await sourceReader?.cancel(e).catch(() => {});
+		throw e;
+	}
 }
 
 /** Read chunks off `reader` until at least `n` bytes have arrived (or EOF). */

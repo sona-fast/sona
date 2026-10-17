@@ -337,6 +337,38 @@ describe('migrate copyOne bounds a misbehaving source', () => {
 		}
 	});
 
+	it('cancels the source when the target fails mid-stream', async () => {
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'half', 'https://old.example/f/half');
+
+		// A sized source that sends its head and then keeps the body open.
+		const cancel = vi.fn();
+		const fetchFn = vi.fn(async () => {
+			const body = new ReadableStream<Uint8Array>({
+				start(c) {
+					c.enqueue(pngBytes(1024));
+				},
+				pull: () => new Promise(() => {}),
+				cancel
+			});
+			return new Response(body, {
+				headers: { 'content-type': 'image/png', 'content-length': String(64 * 1024) }
+			});
+		}) as unknown as typeof fetch;
+		// The target reads the first chunk, then gives up without cancelling.
+		const target = fakeTarget(async ({ body }) => {
+			await (body as ReadableStream<Uint8Array>).getReader().read();
+			throw new Error('target write failed');
+		});
+
+		const result = await migrateImages({ db, fetchFn, target });
+
+		expect(result.items[0]).toMatchObject({ status: 'failed', error: 'target write failed' });
+		expect(cancel).toHaveBeenCalled();
+	});
+
 	it('fails the row without copying when the declared length is over the buffer cap', async () => {
 		const { sqlite, db } = makeDb();
 		sqlite

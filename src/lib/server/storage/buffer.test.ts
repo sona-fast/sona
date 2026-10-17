@@ -88,6 +88,19 @@ describe('idleTimeout', () => {
 		expect(idle.signal.aborted).toBe(true);
 	});
 
+	it('leaves no abort listener behind once each read settles', async () => {
+		const idle = idleTimeout(1_000, () => new Error('quiet'));
+		const add = vi.spyOn(idle.signal, 'addEventListener');
+		const remove = vi.spyOn(idle.signal, 'removeEventListener');
+		const chunk = new Uint8Array(4);
+		const out = await bufferStream(idle.watch(streamOf(chunk, 5)));
+		idle.clear();
+		expect(out.length).toBe(20);
+		// One listener per read of the source, each gone when its read settled.
+		expect(add.mock.calls.length).toBeGreaterThan(0);
+		expect(remove.mock.calls.length).toBe(add.mock.calls.length);
+	});
+
 	it('does not count a slow consumer against the source', async () => {
 		vi.useFakeTimers();
 		const idle = idleTimeout(1_000, () => new Error('quiet'));
