@@ -173,7 +173,7 @@ describe('settings export action', () => {
 			.prepare(
 				`INSERT INTO commissions (id, artist_id, title, kind, source_url, status, price_minor, currency, payment, notes,
 					requested_on, accepted_on, delivered_on, created_at, updated_at)
-				VALUES (1, 1, 'Ref sheet update', 'Ref sheet', 'https://t.me/artist_a/412', 'in_progress', 4550, 'USD', 'deposit',
+				VALUES (1, 1, 'Ref sheet update', 'Ref sheet', 'https://example.com/commissions/412', 'in_progress', 4550, 'USD', 'deposit',
 					'Transparent background.', '2026-09-03', '2026-09-05', NULL, '2026-09-03T10:00:00Z', '2026-09-05T10:00:00Z')`
 			)
 			.run();
@@ -186,7 +186,7 @@ describe('settings export action', () => {
 		expect(backup.commissions).toEqual([
 			expect.objectContaining({
 				title: 'Ref sheet update',
-				sourceUrl: 'https://t.me/artist_a/412',
+				sourceUrl: 'https://example.com/commissions/412',
 				status: 'in_progress',
 				priceMinor: 4550,
 				currency: 'USD',
