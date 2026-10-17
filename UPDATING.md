@@ -358,27 +358,19 @@ build. For more information, see
 
 A rollback doesn't change your fork's `main`, so the next push redeploys the
 broken version. Before you push again, undo the update on `main`. In a clone of
-your fork, run `git switch main` and `git pull origin main` so the clone has the
-update. Next, depending on how you updated:
+your fork, make one commit that restores the last good version, and push it:
 
-- If the update made a merge commit, run `git revert -m 1 <merge-commit>`.
-  `<merge-commit>` is the merge that brought in `upstream/main`. To find it,
-  list merges with `git log --merges --oneline`. To confirm you have the right
-  one, check that `git diff <merge-commit>^1 <merge-commit>` shows the template
-  update.
-- If the update fast-forwarded `main` (for example, **Sync fork** on GitHub),
-  make one commit that restores the last good version:
+```sh
+git switch main
+git pull origin main
+git restore --source=<last-good> --staged --worktree :/
+git commit -m "Roll back to <last-good>"
+git push origin main
+```
 
-  ```sh
-  git restore --source=<last-good> --staged --worktree :/
-  git commit -m "Roll back to <last-good>"
-  ```
-
-  `<last-good>` is the commit of the Pages deployment you rolled back to.
-  Untracked files stay as they are. This also removes any commits you made after
-  `<last-good>`; reverting the rollback later brings them back.
-
-Then push to `main`.
+`<last-good>` is the commit of the Pages deployment you rolled back to.
+Untracked files stay as they are. This also removes any commits made after
+`<last-good>`. They come back when you revert the rollback.
 
 Alternatively, leave `main` as it is, don't push to it until a release that
 fixes the problem is out, and then update as usual.
@@ -388,13 +380,15 @@ problem is out. Update from a clone instead of **Sync fork**, and push once with
 both commits in place:
 
 ```sh
+git switch main
+git pull origin main
 git fetch upstream
 git revert <rollback-commit>
 git merge upstream/main
 git push origin main
 ```
 
-`<rollback-commit>` is the commit that your revert or restore made. Without the
+`<rollback-commit>` is the commit the restore made. Without the
 revert, Git treats the rolled-back changes as already merged and leaves them out
 of the update. Every push to `main` deploys, so if you push the revert by
 itself, it redeploys the broken version, and reapplies its migrations if you
