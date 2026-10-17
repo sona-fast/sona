@@ -8,6 +8,7 @@ import {
 	getRawSetting,
 	getRawSettings,
 	setRawSetting,
+	upsertSetting,
 	clearSettingsCache,
 	clearSupporterKeyStatusCache,
 	parseSonaColors
@@ -817,10 +818,7 @@ export const actions = {
 		// once the operator moves recovery elsewhere, so drop any pending token in
 		// the same batch that writes the new address.
 		await db.batch([
-			db
-				.insert(siteSettings)
-				.values({ key: 'adminEmail', value: adminEmail })
-				.onConflictDoUpdate({ target: siteSettings.key, set: { value: adminEmail } }),
+			upsertSetting(db, 'adminEmail', adminEmail),
 			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
 		]);
 		return { recoveryEmailSaved: true };

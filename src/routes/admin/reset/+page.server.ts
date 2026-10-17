@@ -66,6 +66,11 @@ export const actions = {
 		// revoke EVERY admin session, and consume the reset token. A partial failure
 		// can't leave the new password set with stale sessions, or the token reusable.
 		const passwordHash = await hashPassword(password);
+		// Hashing is slow enough for a password or recovery-address change to revoke
+		// the link meanwhile; check again so the reset can't write over that change.
+		if (!(await validateResetToken(db, token))) {
+			return fail(400, { invalidToken: true, error: m.admin_reset_invalid() });
+		}
 		await db.batch([
 			db
 				.insert(siteSettings)

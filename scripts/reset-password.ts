@@ -7,9 +7,10 @@
  *
  * Prompts for a new password, PBKDF2-hashes it with the SAME parameters as
  * src/lib/server/admin-auth.ts (so the app's verifyPasswordHash accepts it), and
- * writes it to the remote D1 (`adminPasswordHash`), clearing every session. The
- * D1 name is read from wrangler.toml (as `npm run setup` writes it). Requires
- * `wrangler login` (or CLOUDFLARE_API_TOKEN), like the rest of the CLI tooling.
+ * writes it to the remote D1 (`adminPasswordHash`), clearing every session and any
+ * pending reset link. The D1 name is read from wrangler.toml (as `npm run setup`
+ * writes it). Requires `wrangler login` (or CLOUDFLARE_API_TOKEN), like the rest
+ * of the CLI tooling.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
@@ -46,6 +47,20 @@ export async function hashPasswordPbkdf2(password: string): Promise<string> {
 	);
 	const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
 	return `pbkdf2$sha256$${PBKDF2_ITERATIONS}$${b64(salt)}$${b64(new Uint8Array(bits))}`;
+}
+
+/**
+ * The SQL the CLI applies: set the new hash, clear every session, and void any
+ * pending "Forgot password" link, which would otherwise still set a password
+ * over this one. Exported so the test can run it against SQLite.
+ */
+export function buildResetSql(hash: string): string {
+	const esc = (s: string) => s.replace(/'/g, "''");
+	return (
+		`INSERT OR REPLACE INTO site_settings (key,value) VALUES ('adminPasswordHash','${esc(hash)}');\n` +
+		`DELETE FROM sessions;\n` +
+		`DELETE FROM site_settings WHERE key='passwordResetToken';\n`
+	);
 }
 
 /** Read the D1 database name the app deploys against from wrangler.toml. */
@@ -98,8 +113,7 @@ async function main() {
 		// The hash contains `$` separators, so it must NOT go through a shell
 		// `--command` string (the shell would expand `$sha256`, `$100000`, …). Write
 		// it to a temp .sql file and use `--file`, the same way setup.ts applies SQL.
-		const esc = (s: string) => s.replace(/'/g, "''");
-		const sql = `INSERT OR REPLACE INTO site_settings (key,value) VALUES ('adminPasswordHash','${esc(hash)}');\nDELETE FROM sessions;\n`;
+		const sql = buildResetSql(hash);
 		const written = writePrivateTempSql(sql, 'sona-reset-');
 		sqlDir = written.dir;
 

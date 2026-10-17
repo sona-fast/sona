@@ -26,8 +26,8 @@ import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
 import { EARLY_ACCESS } from '$lib/early-access';
-import { hashPassword, hashToken } from '$lib/server/admin-auth';
-import { PASSWORD_RESET_SETTING, validateResetToken } from '$lib/server/password-reset';
+import { hashPassword, hashToken, verifyAdminPassword } from '$lib/server/admin-auth';
+import { PASSWORD_RESET_SETTING, hashResetAddress, validateResetToken } from '$lib/server/password-reset';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -430,6 +430,7 @@ describe('settings saveSecurityEmail — admin recovery address', () => {
 describe('settings — pending reset link is revoked', () => {
 	const TOKEN = 'pending-reset-token';
 	const OLD_PASSWORD = 'old-password-123';
+	const NEW_PASSWORD = 'brand-new-password-456';
 
 	async function seedPendingReset() {
 		const sqlite = new Database(':memory:');
@@ -446,7 +447,8 @@ describe('settings — pending reset link is revoked', () => {
 			JSON.stringify({
 				tokenHash: await hashToken(TOKEN),
 				expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-				requestedAt: new Date().toISOString()
+				requestedAt: new Date().toISOString(),
+				emailHash: await hashResetAddress('old@x.y')
 			})
 		);
 		expect(await validateResetToken(db, TOKEN)).toBe(true);
@@ -469,13 +471,19 @@ describe('settings — pending reset link is revoked', () => {
 		const result = await actions.changePassword(
 			changePasswordEvent(platform, {
 				currentPassword: OLD_PASSWORD,
-				newPassword: 'brand-new-password-456',
-				confirmPassword: 'brand-new-password-456'
+				newPassword: NEW_PASSWORD,
+				confirmPassword: NEW_PASSWORD
 			})
 		);
 
 		expect(result).not.toMatchObject({ status: expect.any(Number) });
 		expect(await validateResetToken(db, TOKEN)).toBe(false);
+		// Only the reset row goes: a delete missing its key filter would also wipe
+		// the new hash and the recovery address, and still void the link.
+		expect(await verifyAdminPassword(db, platform.env, NEW_PASSWORD)).toBe(true);
+		expect(await verifyAdminPassword(db, platform.env, OLD_PASSWORD)).toBe(false);
+		expect(await getRawSetting(db, 'adminEmail')).toBe('old@x.y');
+		expect(await db.select().from(schema.sessions)).toHaveLength(1);
 	});
 
 	it('a refused password change leaves the pending reset link alone', async () => {
@@ -500,6 +508,18 @@ describe('settings — pending reset link is revoked', () => {
 
 		expect(result).toEqual({ recoveryEmailSaved: true });
 		expect(await getRawSetting(db, 'adminEmail')).toBe('new@x.y');
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
+		expect(await validateResetToken(db, TOKEN)).toBe(false);
+	});
+
+	it('clearing the recovery address invalidates the pending reset link', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, ''));
+
+		expect(result).toEqual({ recoveryEmailSaved: true });
+		expect(await getRawSetting(db, 'adminEmail')).toBe('');
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
 		expect(await validateResetToken(db, TOKEN)).toBe(false);
 	});
 

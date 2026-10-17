@@ -1,20 +1,39 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { isRedirect } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { sessions } from '$lib/server/db/schema';
 import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import { hashPassword, hashToken, verifyAdminPassword } from '$lib/server/admin-auth';
-import { PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
+import { PASSWORD_RESET_SETTING, hashResetAddress } from '$lib/server/password-reset';
 import { RESET_TOKEN_COOKIE } from '$lib/config';
 import * as m from '$lib/paraglide/messages';
 import { setLocale, baseLocale } from '$lib/paraglide/runtime';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+
+// Lets a test run something while the action is hashing the new password — the
+// slow step where a concurrent revoke can land. Passes through otherwise.
+const duringHash = vi.hoisted(() => ({ run: null as null | (() => Promise<void>) }));
+vi.mock('$lib/server/admin-auth', async (importOriginal) => {
+	const orig = await importOriginal<typeof import('$lib/server/admin-auth')>();
+	return {
+		...orig,
+		hashPassword: async (password: string) => {
+			const hash = await orig.hashPassword(password);
+			await duringHash.run?.();
+			return hash;
+		}
+	};
+});
+afterEach(() => {
+	duringHash.run = null;
+});
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -65,9 +84,11 @@ const OLD_PASSWORD = 'old-password-123';
 const NEW_PASSWORD = 'brand-new-password-456';
 const TOKEN = 'reset-token-under-test';
 
-/** Seed an old admin password, two live sessions, and a stored reset row. */
+/** Seed an old admin password, a recovery address, two live sessions, and a
+ * stored reset row bound to that address. */
 async function seed(db: ReturnType<typeof makeDb>['db'], tokenExpiresInMs: number) {
 	await setRawSetting(db, 'adminPasswordHash', await hashPassword(OLD_PASSWORD));
+	await setRawSetting(db, 'adminEmail', 'admin@taro.surf');
 	await db.insert(sessions).values({ token: 'sess-a', expiresAt: new Date(Date.now() + 1e9).toISOString() });
 	await db.insert(sessions).values({ token: 'sess-b', expiresAt: new Date(Date.now() + 1e9).toISOString() });
 	await setRawSetting(
@@ -76,7 +97,8 @@ async function seed(db: ReturnType<typeof makeDb>['db'], tokenExpiresInMs: numbe
 		JSON.stringify({
 			tokenHash: await hashToken(TOKEN),
 			expiresAt: new Date(Date.now() + tokenExpiresInMs).toISOString(),
-			requestedAt: new Date().toISOString()
+			requestedAt: new Date().toISOString(),
+			emailHash: await hashResetAddress('admin@taro.surf')
 		})
 	);
 }
@@ -189,6 +211,59 @@ describe('reset action', () => {
 		} finally {
 			setLocale(baseLocale, { reload: false });
 		}
+	});
+
+	it('does not overwrite a password change that revoked the link while the new password was hashing', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
+		// What changePassword's batch does: a new hash, and the reset row deleted.
+		const settingsHash = await hashPassword('settings-password-789');
+		duringHash.run = async () => {
+			await setRawSetting(db, 'adminPasswordHash', settingsHash);
+			await db.delete(schema.siteSettings).where(eq(schema.siteSettings.key, PASSWORD_RESET_SETTING));
+		};
+
+		const result = await actions.default(
+			resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+		);
+
+		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
+		expect(await verifyAdminPassword(db, undefined, 'settings-password-789')).toBe(true);
+		expect(await verifyAdminPassword(db, undefined, NEW_PASSWORD)).toBe(false);
+		expect(await db.select().from(sessions)).toHaveLength(2);
+	});
+
+	it('rejects a link mailed to an address that is no longer the recovery address', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 30 * 60 * 1000);
+		// A send in flight when recovery moved writes its row after the revoke; the
+		// row survives, but it is bound to the old address.
+		await setRawSetting(db, 'adminEmail', 'new@taro.surf');
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
+
+		const result = await actions.default(
+			resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+		);
+
+		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
+		expect(await verifyAdminPassword(db, undefined, OLD_PASSWORD)).toBe(true);
+	});
+
+	it('rejects a stored row that predates address binding', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 30 * 60 * 1000);
+		const row = JSON.parse((await getRawSetting(db, PASSWORD_RESET_SETTING))!);
+		delete row.emailHash;
+		await setRawSetting(db, PASSWORD_RESET_SETTING, JSON.stringify(row));
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
+
+		const result = await actions.default(
+			resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+		);
+
+		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
+		expect(await verifyAdminPassword(db, undefined, OLD_PASSWORD)).toBe(true);
 	});
 
 	it('rejects reuse of a token after a successful reset', async () => {

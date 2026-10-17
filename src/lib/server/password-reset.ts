@@ -12,7 +12,7 @@
 // caller can't tell configured from unconfigured — see the route).
 
 import { hashToken, constantTimeEqual } from './admin-auth';
-import { getRawSetting, setRawSetting } from './settings';
+import { getRawSetting, getRawSettings, setRawSetting } from './settings';
 import { recordEmail } from './metrics';
 import { APP_NAME } from '$lib/config';
 import * as m from '$lib/paraglide/messages';
@@ -37,6 +37,16 @@ interface StoredReset {
 	tokenHash: string;
 	expiresAt: string;
 	requestedAt: string;
+	/** Hash of the address the link was mailed to (see hashResetAddress). Optional
+	 * only so a row written before this field existed still anchors the cooldown;
+	 * validateResetToken rejects a row without it. */
+	emailHash?: string;
+}
+
+/** Hash of a recovery address, normalized the way requestPasswordReset matches
+ * it, so a link can be bound to the address it was mailed to. */
+export function hashResetAddress(email: string): Promise<string> {
+	return hashToken(email.trim().toLowerCase());
 }
 
 function parseStored(raw: string | null): StoredReset | null {
@@ -141,7 +151,8 @@ export async function requestPasswordReset(
 	const record: StoredReset = {
 		tokenHash: await hashToken(token),
 		expiresAt: new Date(now + RESET_TTL_MS).toISOString(),
-		requestedAt: new Date(now).toISOString()
+		requestedAt: new Date(now).toISOString(),
+		emailHash: await hashResetAddress(adminEmail)
 	};
 	await setRawSetting(db, PASSWORD_RESET_SETTING, JSON.stringify(record));
 }
@@ -238,14 +249,21 @@ async function sendResetEmail(
 
 /**
  * Validate a token from /admin/reset against the stored row: it must exist, be
- * unexpired, and match constant-time. Read-only — the caller deletes the row on
- * a successful reset.
+ * unexpired, be bound to the current recovery address, and match constant-time.
+ * Read-only — the caller deletes the row on a successful reset.
  */
 export async function validateResetToken(db: Database, token: string): Promise<boolean> {
 	if (!token) return false;
-	const stored = parseStored(await getRawSetting(db, PASSWORD_RESET_SETTING));
+	const rows = await getRawSettings(db, [PASSWORD_RESET_SETTING, 'adminEmail']);
+	const stored = parseStored(rows[PASSWORD_RESET_SETTING]);
 	if (!stored) return false;
 	if (Date.now() > Date.parse(stored.expiresAt)) return false;
+	// Changing the recovery address deletes the row, but a send still in flight
+	// at that moment writes its row afterwards. Binding the link to the address it
+	// was mailed to keeps that late row dead once recovery has moved elsewhere.
+	const adminEmail = rows.adminEmail?.trim();
+	if (!stored.emailHash || !adminEmail) return false;
+	if (!constantTimeEqual(await hashResetAddress(adminEmail), stored.emailHash)) return false;
 	const providedHash = await hashToken(token);
 	return constantTimeEqual(providedHash, stored.tokenHash);
 }
