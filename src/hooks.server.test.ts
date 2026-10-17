@@ -280,6 +280,20 @@ describe('authHandle — /api/admin/ref-image stays behind the admin gate', () =
 	});
 });
 
+describe('authHandle — /api/admin/artist-from-link stays behind the admin gate', () => {
+	it('returns 401 to a POST without a session, before the endpoint reads the link', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('complete');
+		const reached = vi.fn(resolve);
+		const res = (await authHandle({
+			event: makeEvent('/api/admin/artist-from-link', makeDb(), 'POST'),
+			resolve: reached
+		} as never)) as Response;
+
+		expect(res.status).toBe(401);
+		expect(reached).not.toHaveBeenCalled();
+	});
+});
+
 describe('authHandle — /api/metrics/download is public', () => {
 	it('reaches the endpoint without a session (an anonymous visitor pressed download)', async () => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');

@@ -2,7 +2,8 @@
 	import { tick, type Snippet } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
-	import { Check, CircleAlert, ImagePlus, Loader2, Plus, RefreshCw } from 'lucide-svelte';
+	import { Check, CircleAlert, ImagePlus, Loader2, Plus, RefreshCw, TriangleAlert } from 'lucide-svelte';
+	import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from '$lib/social-label';
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
@@ -139,13 +140,172 @@
 		version = entry?.version ?? '';
 		values = merged.values;
 		restoredNote = merged.restoredNote;
+		// The form now shows the entry as saved, not the draft.
+		draftRestored = false;
 		failure = null;
 		staleText = '';
+		// The reloaded entry has its own link; the last lookup was about another.
+		// (No auto-pick to forget: an entry always has an artist, so the lookup
+		// never picks one on the edit page.)
+		clearLookup();
 		announcer.say(
 			merged.restoredNote ? m.admin_commissions_reloaded_announce_note() : m.admin_commissions_reloaded_announce()
 		);
 		await tick();
 		(merged.restoredNote ? notesInput : titleInput)?.focus();
+	}
+
+
+	// Paste a link (SONA-236): the link field looks up the artist it names. The
+	// server parses the link and never fetches it; the link itself stays in this
+	// field, the entry's private record, and never becomes a piece's source.
+	type ArtistChoice = { id: number; name: string };
+	type LinkLookup =
+		| { kind: 'idle' }
+		| { kind: 'searching' }
+		| { kind: 'refused'; reason: 'invalid' | 'unsupported' | 'no_handle' | 'failed' }
+		| { kind: 'found'; platform: SocialPlatform; handle: string; matches: ArtistChoice[]; nameMatches: ArtistChoice[] };
+	let lookup = $state<LinkLookup>({ kind: 'idle' });
+	// The link last sent, so a blur after a paste doesn't ask twice.
+	let lookedUp = '';
+	// Which request is current: an answer to any earlier one is stale.
+	let lookupSeq = 0;
+	// The artist the lookup picked by itself, while the owner hasn't picked one.
+	// A later link's match may replace it; it never replaces the owner's pick.
+	let autoPicked: string | null = null;
+	// A draft came back, so the owner sees why the form isn't empty.
+	let draftRestored = $state(false);
+
+	/** The owner chose an artist, from a Use button or the select. */
+	function ownerPicked() {
+		autoPicked = null;
+	}
+
+	function useArtist(artist: ArtistChoice) {
+		values.artistId = String(artist.id);
+		ownerPicked();
+		announcer.say(m.admin_commissions_link_using_announce({ name: artist.name }));
+	}
+
+	async function lookUpLink(raw: string) {
+		const link = raw.trim();
+		if (!link) {
+			clearLookup();
+			return;
+		}
+		if (link === lookedUp) return;
+		lookedUp = link;
+		const seq = ++lookupSeq;
+		lookup = { kind: 'searching' };
+		let next: LinkLookup;
+		try {
+			const res = await fetch('/api/admin/artist-from-link', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ url: link })
+			});
+			const body = await res.json();
+			next = body.ok
+				? { kind: 'found', platform: body.platform, handle: body.handle, matches: body.matches, nameMatches: body.nameMatches }
+				: { kind: 'refused', reason: body.reason ?? 'failed' };
+		} catch {
+			next = { kind: 'refused', reason: 'failed' };
+		}
+		// A newer lookup went out, or the owner has changed the field since: this
+		// answer is about a link that's no longer there.
+		if (seq !== lookupSeq) return;
+		if (values.sourceUrl.trim() !== link) {
+			// Nothing newer is on its way, so stop searching, and let the link be
+			// asked again if the field comes back to it.
+			lookup = { kind: 'idle' };
+			lookedUp = '';
+			return;
+		}
+		lookup = next;
+		// A lookup that didn't get through can be tried again with the same link.
+		if (next.kind === 'refused' && next.reason === 'failed') lookedUp = '';
+		// One artist holds this handle: that's the artist, unless the owner has
+		// already chosen one. Several, or a name that only looks the same, wait
+		// for the owner.
+		const single = next.kind === 'found' && next.matches.length === 1 ? next.matches[0] : null;
+		const outcome = lookupOutcome(next);
+		if (single && (!values.artistId || values.artistId === autoPicked)) {
+			values.artistId = autoPicked = String(single.id);
+			const using = m.admin_commissions_link_using_announce({ name: single.name });
+			announcer.say(`${outcome}${getLocale() === 'ja' ? '' : ' '}${using}`);
+			return;
+		}
+		// The lookup's own pick came from the last link. A link that names no one,
+		// or someone else, takes it away so a save can't keep it unchosen. A failed
+		// lookup says nothing about the artist, so the pick stays.
+		const failed = next.kind === 'refused' && next.reason === 'failed';
+		if (!single && !failed && autoPicked !== null && values.artistId === autoPicked) {
+			values.artistId = '';
+			autoPicked = null;
+		}
+		announcer.say(outcome);
+	}
+
+	/** No lookup on screen, and any answer still on its way ignored. */
+	function clearLookup() {
+		lookup = { kind: 'idle' };
+		lookedUp = '';
+		lookupSeq++;
+	}
+
+	// Set once a save has gone through: what's on the page then is saved, and
+	// coming back to it must not bring an older copy back.
+	let saved = false;
+
+	/**
+	 * The draft for the page's snapshot, so following a link off the form (the
+	 * lookup's Artists page) and coming back keeps what the owner typed.
+	 * Nothing when there's nothing unsaved: an untouched form, or one whose
+	 * save went through.
+	 */
+	export function captureDraft() {
+		if (saved || !dirty) return undefined;
+		return {
+			// The entry's version the draft was typed against.
+			version,
+			values: $state.snapshot(values),
+			// Only while it still holds: the lookup's own pick, not the owner's.
+			autoPicked: autoPicked === values.artistId ? autoPicked : null
+		};
+	}
+
+	/**
+	 * Puts a draft back. A draft typed against an older version of the entry is
+	 * dropped: the page shows the current entry, so a save can't quietly undo
+	 * another tab's change. The lookup is asked again rather than restored,
+	 * because the artist list may have changed while the owner was away.
+	 */
+	export function restoreDraft(draft: NonNullable<ReturnType<typeof captureDraft>>) {
+		if (draft.version !== version) return;
+		values = draft.values;
+		autoPicked = draft.autoPicked;
+		clearLookup();
+		draftRestored = true;
+		announcer.say(m.admin_commissions_draft_restored());
+		if (values.sourceUrl.trim()) lookUpLink(values.sourceUrl);
+	}
+
+	/** The sentence that says how a lookup went, shown and read out. */
+	function lookupOutcome(result: LinkLookup): string {
+		if (result.kind === 'refused') {
+			return {
+				invalid: m.admin_commissions_link_invalid,
+				unsupported: m.admin_commissions_link_unsupported,
+				no_handle: m.admin_commissions_link_no_handle,
+				failed: m.admin_commissions_link_failed
+			}[result.reason]();
+		}
+		if (result.kind !== 'found') return '';
+		const { handle, matches } = result;
+		if (matches.length === 1) return m.admin_commissions_link_found({ handle, name: matches[0].name });
+		if (matches.length > 1) return m.admin_commissions_link_found_several({ handle });
+		if (result.nameMatches.length > 0) return m.admin_commissions_link_name_only({ handle });
+		return m.admin_commissions_link_not_found({ handle });
 	}
 
 	const DATE_FIELDS = [
@@ -180,6 +340,30 @@
 			<CircleAlert size={14} aria-hidden="true" /><span>{errors[field]}</span>
 		</p>
 	{/if}
+{/snippet}
+
+<!-- `named` lists the artist's name beside the button, for when several share
+     a handle. A single match is already named by the line above and the button. -->
+{#snippet choice(artist: ArtistChoice, named: boolean)}
+	{@const using = values.artistId === String(artist.id)}
+	<div class="match">
+		{#if named}<span class="name">{artist.name}</span>{/if}
+		<!-- The label says the state: "Use X" until chosen, then "Using X" with a
+		     check, as in ArtistLookupPanel. -->
+		<button type="button" class="btn-compact btn-tap-mobile" onclick={() => useArtist(artist)}>
+			{#if using}<Check size={14} aria-hidden="true" />{m.admin_lookup_using_artist({ name: artist.name })}{:else}{m.admin_lookup_use_artist({ name: artist.name })}{/if}
+		</button>
+	</div>
+{/snippet}
+
+<!-- No artist holds the handle. Creating one from a link waits on an owner
+     decision (SONA-236 Q26), so this points at the Artists page. Swapping in the
+     new-artist dialog later means changing this snippet only. -->
+{#snippet addArtistHint()}
+	<p class="hint">
+		{m.admin_commissions_link_add_pre()}<a href="/admin/artists">{m.admin_commissions_link_add_link()}</a
+		>{m.admin_commissions_link_add_post()}
+	</p>
 {/snippet}
 
 {#snippet optional()}
@@ -305,6 +489,7 @@
 			// A save redirects to the ledger, which enhance follows; a refusal stays
 			// here with what the owner typed. An error is left out: update() would
 			// render the error page in place of the form and lose the typing.
+			if (result.type === 'redirect') saved = true;
 			if (result.type !== 'error') await update({ reset: false });
 			saving = false;
 			if (refusal) {
@@ -323,6 +508,9 @@
 >
 	{#if isEdit}<input type="hidden" name="version" value={version} />{/if}
 
+	<!-- The announcer says it once; this line stays for whoever looks. -->
+	{#if draftRestored}<p class="hint draft-note">{m.admin_commissions_draft_restored()}</p>{/if}
+
 	<fieldset>
 		<legend>{m.admin_commissions_legend_artist()}</legend>
 		<div class="field">
@@ -336,12 +524,58 @@
 				name="sourceUrl"
 				autocomplete="off"
 				bind:value={values.sourceUrl}
+				oninput={(e) => {
+					// A paste is the moment to look; typed text waits for the owner to leave
+					// the field, so a half-typed link isn't sent.
+					if (e instanceof InputEvent && e.inputType === 'insertFromPaste') lookUpLink(e.currentTarget.value);
+					else if (!e.currentTarget.value.trim()) lookUpLink('');
+				}}
+				onchange={(e) => lookUpLink(e.currentTarget.value)}
 				aria-invalid={errors.sourceUrl ? 'true' : undefined}
-				aria-describedby={describedBy('sourceUrl', 'ce-link-hint')}
+				aria-describedby={describedBy('sourceUrl', 'ce-link-hint', lookup.kind === 'refused' ? 'ce-link-msg' : '')}
 			/>
 			{@render fieldError('sourceUrl')}
 			<small class="hint" id="ce-link-hint">{m.admin_commissions_hint_link()}</small>
+			{#if lookup.kind === 'refused'}
+				<p class="hint hint-warn lookup-msg" id="ce-link-msg">
+					<TriangleAlert size={14} aria-hidden="true" /><span>{lookupOutcome(lookup)}</span>
+				</p>
+			{/if}
 		</div>
+		{#if lookup.kind === 'searching'}
+			<!-- The card's place, held while the answer comes, so the Artist select
+			     below doesn't jump when it arrives. -->
+			<div class="lookup"><p class="hint">{m.admin_commissions_link_searching()}</p></div>
+		{:else if lookup.kind === 'found'}
+			{@const found = lookup}
+			<!-- Once the owner takes a suggestion, "isn't in your list yet" and the
+			     Artists page hint would contradict the choice beside them. -->
+			{@const suggestionTaken =
+				found.matches.length === 0 && found.nameMatches.some((a) => String(a.id) === values.artistId)}
+			<div class="lookup">
+				<p class="lookup-line">
+					<span class="platform">{SOCIAL_PLATFORM_NAMES[found.platform]}</span>
+					<span class="handle">{found.handle}</span>
+				</p>
+				{#if !suggestionTaken}
+					<p class="outcome">
+						{#if found.matches.length === 1 && values.artistId === String(found.matches[0].id)}<Check
+								size={14}
+								aria-hidden="true"
+							/>{/if}<span>{lookupOutcome(found)}</span>
+					</p>
+				{/if}
+				{#each found.matches as artist (artist.id)}
+					{@render choice(artist, found.matches.length > 1)}
+				{/each}
+				{#if found.matches.length === 0}
+					{#each found.nameMatches as artist (artist.id)}
+						{@render choice(artist, false)}
+					{/each}
+					{#if !suggestionTaken}{@render addArtistHint()}{/if}
+				{/if}
+			</div>
+		{/if}
 		<div class="field">
 			<label class="field-label" for="ce-artistId">{m.admin_commissions_field_artist()}</label>
 			<select
@@ -350,6 +584,7 @@
 				name="artistId"
 				required
 				bind:value={values.artistId}
+				onchange={ownerPicked}
 				aria-invalid={errors.artistId ? 'true' : undefined}
 				aria-describedby={describedBy('artistId', artists.length === 0 ? 'ce-no-artists' : '')}
 			>
@@ -604,8 +839,29 @@
 	.field-label { font-size: 14px; font-weight: 500; }
 	.label-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.optional { font-weight: 400; color: var(--muted-foreground); font-size: 12px; }
+
+	/* Paste a link: what the link named, and which artist that is. */
+	.lookup {
+		background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-s);
+		padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere;
+	}
+	.lookup p { margin: 0; }
+	.lookup-line { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+	.lookup-line .platform { color: var(--muted-foreground); font-size: 12px; }
+	.lookup-line .handle { font-weight: 500; }
+	.outcome { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; }
+	.outcome :global(svg) { flex: none; margin-top: 3px; color: var(--status-ok); }
+	/* The Use button sits beside the name it picks, not across the row. */
+	.match { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+	.match .name { font-size: 14px; font-weight: 500; }
+	.lookup .hint a { color: var(--foreground); text-decoration: underline; }
+	.lookup-msg { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
+	.lookup-msg :global(svg) { flex: none; margin-top: 2px; }
 	.hint { font-size: 12px; color: var(--muted-foreground); line-height: 1.45; }
 	.hint a { color: var(--foreground); text-decoration: underline; }
+	/* After .hint, which it overrides at the same specificity. */
+	.hint-warn { color: var(--status-warn); }
+	.draft-note { margin: 0; }
 	/* A field with an error gets a red edge as well as its message. The edge
 	   only adds to the text, which carries the error on its own; the
 	   --destructive token measures at least 4.5:1 on --background in every

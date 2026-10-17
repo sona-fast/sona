@@ -6,7 +6,9 @@ import { expect, test } from '@playwright/test';
 // machine rejects as an uncaught page error, whatever page is under test. A
 // separate PR off main handles that rejection in the root layout; once the
 // stack picks it up, delete this constant and its one use below.
-const LAYOUT_TRANSITION_TIMEOUT = /^Transition was aborted because of timeout in DOM update/;
+// A Back press that interrupts a navigation also rejects them as "Transition
+// was skipped" and "navigation aborted"; the same PR handles those.
+const LAYOUT_TRANSITION_TIMEOUT = /^(Transition was aborted because of timeout in DOM update|Transition was skipped|navigation aborted)/;
 
 // Fails a test when any page it opens throws an uncaught error, such as a
 // Svelte effect looping on its own write. The page can look fine while that

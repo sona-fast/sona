@@ -350,6 +350,12 @@ input, select, textarea {
 	.btn-desktop-only {
 		display: none;
 	}
+
+	/* A compact button that grows to a full 44px tap target on a phone, where
+	   it's the main way to act on a row (the ledger's Use buttons). */
+	.btn-tap-mobile {
+		min-height: 44px;
+	}
 }
 
 /* Tags / Labels — matches Icon Label/Secondary */

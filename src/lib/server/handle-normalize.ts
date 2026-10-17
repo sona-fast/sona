@@ -11,6 +11,7 @@ import { sanitizeUrl, stripControlChars } from './validate';
 import { SOCIAL_KEY_TO_PLATFORM, normalizeHandle } from '../handle-classify';
 import {
 	RESERVED_SEGMENTS,
+	deviantArtUserSubdomain,
 	extractHandle,
 	platformDomains,
 	type Platform,
@@ -49,6 +50,44 @@ export function handlesOverlap(a: Record<string, unknown>, b: Record<string, unk
 	if (bh.length === 0) return false;
 	const set = new Set(bh.map((h) => `${h.platform} ${h.handleNorm}`));
 	return socialsToHandles(a).some((h) => set.has(`${h.platform} ${h.handleNorm}`));
+}
+
+/**
+ * Rows whose stored socials hold one of `handles` on `platform`. Compares the
+ * normalized forms `handlesOverlap` uses, so a pasted x.com link finds an
+ * artist stored as twitter.com in any letter case, and the same name on another
+ * platform is someone else. A full scan: there's no handle index, and a site
+ * has tens to hundreds of artists.
+ */
+export function findLocalArtistsByHandle<T extends Record<string, unknown>>(
+	rows: T[],
+	platform: Platform,
+	handles: string[]
+): T[] {
+	const wanted = new Set(handles.map((h) => normalizeHandle(platform, h)).filter((h) => h !== ''));
+	if (wanted.size === 0) return [];
+	return rows.filter(
+		(row) =>
+			socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm)) ||
+			(platform === 'deviantart' && wanted.has(legacyDeviantArtHandle(row.deviantArtUrl) ?? ''))
+	);
+}
+
+/**
+ * The user in a stored legacy DeviantArt link, https://<user>.deviantart.com/,
+ * case-folded. normalizeHandle reads that host as the handle
+ * "<user>.deviantart.com", and changing it would change registry matching on
+ * every fork, so only this lookup reads the legacy form.
+ */
+function legacyDeviantArtHandle(stored: unknown): string | null {
+	if (typeof stored !== 'string' || !stored.trim()) return null;
+	const text = stored.trim();
+	try {
+		const url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text.replace(/^\/\//, '')}`);
+		return deviantArtUserSubdomain(url.hostname)?.toLowerCase() ?? null;
+	} catch {
+		return null;
+	}
 }
 
 /** Canonical profile-URL prefix, used to build a URL from a bare handle. */

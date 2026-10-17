@@ -146,11 +146,36 @@ export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
 		'settings',
 		'notifications'
 	],
-	deviantart: ['tag', 'art', 'journal', 'search', 'shop', 'daily-deviations'],
+	// Sections of the site rather than people: a profile is /<user>, and these
+	// are what else a pasted DeviantArt link's first segment can be.
+	deviantart: [
+		'tag',
+		'art',
+		'journal',
+		'search',
+		'shop',
+		'daily-deviations',
+		'stash',
+		'users',
+		'watch',
+		'notifications',
+		'groups',
+		'comments',
+		'download',
+		'view',
+		'settings',
+		'oembed',
+		'about',
+		'messages',
+		'notes',
+		'submit'
+	],
 	// 'addstickers' matters here beyond tidiness: this repo imports sticker packs
 	// from t.me/addstickers/<pack> (see server/telegram.ts), so pasting one into
 	// the Telegram setting is a realistic slip, and it read as "@addstickers".
-	telegram: ['s', 'joinchat', 'addstickers', 'share', 'proxy']
+	// t.me/c/<id>/<post> is a message in a private channel, which has no public
+	// name: the 'c' is the path, not an account (usernames run 5+ characters).
+	telegram: ['s', 'c', 'joinchat', 'addstickers', 'share', 'proxy']
 };
 
 /**
@@ -182,4 +207,55 @@ export function extractHandle(platform: SocialPlatform, raw: string | null | und
 	s = s.replace(/^@+/, '');
 	s = s.replace(/[/?#].*$/, '');
 	return s;
+}
+
+/**
+ * DeviantArt's own subdomains. Anything else in front of deviantart.com is a
+ * legacy profile host, <user>.deviantart.com, from before profiles moved to
+ * www.deviantart.com/<user>. A user named like one of these loses only the
+ * legacy form; www.deviantart.com/<user> still reads.
+ */
+export const DEVIANTART_SERVICE_SUBDOMAINS: readonly string[] = [
+	'www',
+	'm',
+	'backend',
+	'comments',
+	'forum',
+	'chat',
+	'help',
+	'about',
+	'shop',
+	'my',
+	'api',
+	'sta',
+	'st',
+	'store',
+	'support',
+	'blog',
+	'groups',
+	'news',
+	'welcome',
+	'fav',
+	'images',
+	'portfolio',
+	'browse'
+];
+
+/** The subdomain in front of deviantart.com, or null for any other host. */
+function deviantArtSubdomain(hostname: string): string | null {
+	return /^([a-z0-9-]+)\.deviantart\.com$/i.exec(hostname)?.[1] ?? null;
+}
+
+/** The user a legacy <user>.deviantart.com host names, or null for any other
+ * host, DeviantArt's own subdomains included. */
+export function deviantArtUserSubdomain(hostname: string): string | null {
+	const sub = deviantArtSubdomain(hostname);
+	return sub && !DEVIANTART_SERVICE_SUBDOMAINS.includes(sub.toLowerCase()) ? sub : null;
+}
+
+/** A DeviantArt subdomain of its own that serves no profiles: all of them but
+ * www. and m., which serve profiles at /<user>. */
+export function isDeviantArtServiceHost(hostname: string): boolean {
+	const sub = deviantArtSubdomain(hostname)?.toLowerCase();
+	return !!sub && sub !== 'www' && sub !== 'm' && DEVIANTART_SERVICE_SUBDOMAINS.includes(sub);
 }
