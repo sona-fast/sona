@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { characters, images } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
@@ -19,6 +19,8 @@ function makeDb() {
 	sqlite.exec(`
 		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+		-- The variant actions refuse a piece linked to a commission entry (SONA-236).
+		CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, image_id INTEGER);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, image_url TEXT NOT NULL,
 			thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER, md5hash TEXT,
@@ -82,6 +84,35 @@ describe('admin images — grouping the designated reference sheet as a variant'
 		// tells the operator how to proceed.
 		expect((result as { data: { error: string } }).data.error).toBe(REFERENCE_BECOMES_VARIANT_ERROR);
 		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(null);
+	});
+
+	// SONA-236: a piece linked to a commission entry stays a parent, so Add to
+	// gallery always adds variants to a parent.
+	it('refuses to group a piece linked to a commission entry as a variant', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(images).values([
+			{ id: 5, title: 'Snowfall', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1 },
+			{ id: 8, title: 'Other', slug: 'art-8', imageUrl: 'https://cdn.example.com/8.png', artistId: 1 },
+			{ id: 9, title: 'Parent', slug: 'art-9', imageUrl: 'https://cdn.example.com/9.png', artistId: 1 }
+		]);
+		await db.run(sql`INSERT INTO commissions (image_id) VALUES (5)`);
+
+		const result = (await actions.groupVariants({
+			request: form({ parentId: '9', ids: '5,8,9' }),
+			platform
+		} as never)) as { status: number; data: { error: string } };
+		expect(result.status).toBe(400);
+		expect(result.data.error).toBe(
+			"Snowfall is linked to a commission entry, so it can't become a variant. Pick it as the parent, or leave it out of the group."
+		);
+		// Nothing regrouped, not even the unlinked image beside it.
+		const parents = await db.select({ id: images.id, p: images.parentImageId }).from(images);
+		expect(parents.every((r) => r.p === null)).toBe(true);
+
+		// Picked as the parent, the linked piece groups fine.
+		expect(await actions.groupVariants({ request: form({ parentId: '5', ids: '5,8' }), platform } as never)).toEqual({
+			success: true
+		});
 	});
 
 	it('still groups images that are not the reference sheet', async () => {

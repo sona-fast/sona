@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { adminLogin, waitForHydration } from './admin-login';
+import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 import { settledShot } from './settled-shot';
+import { failOnPageErrors } from './page-errors';
 
 // The commission ledger pages (SONA-236 PR 2), driven in a real browser. The
 // server actions are covered against a real schema in the vitest suites beside
@@ -15,9 +16,11 @@ import { settledShot } from './settled-shot';
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
 
+failOnPageErrors();
+
 test('the ledger lists nothing yet and says who can read it', async ({ page }, testInfo) => {
-	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/commissions');
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/commissions');
 
 	await expect(page.getByRole('heading', { level: 1, name: 'Commissions' })).toBeVisible();
 	await expect(page.getByText(/Visitors never see your commission ledger/)).toBeVisible();
@@ -49,8 +52,8 @@ test('with no artists yet, the form points to the Artists page', async ({ page }
 		if (!emptied) throw new Error('no artists list in the page data to empty');
 		await route.fulfill({ response, json: body });
 	});
-	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/commissions');
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/commissions');
 	await waitForHydration(page);
 	await page.getByRole('link', { name: 'New entry' }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
@@ -65,8 +68,8 @@ test('with no artists yet, the form points to the Artists page', async ({ page }
 });
 
 test("moving an entry to Accepted fills today's date, and a set date stays", async ({ page }, testInfo) => {
-	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/commissions/new');
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/commissions/new');
 	// The status select and use:enhance are client-side: before hydration a pick
 	// fills nothing and a save posts natively.
 	await waitForHydration(page);
@@ -100,8 +103,8 @@ test("moving an entry to Accepted fills today's date, and a set date stays", asy
 });
 
 test('a refused price shows its error on the field, and nothing is saved', async ({ page }, testInfo) => {
-	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/commissions/new');
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/commissions/new');
 	// The status select and use:enhance are client-side: before hydration a pick
 	// fills nothing and a save posts natively.
 	await waitForHydration(page);
@@ -141,7 +144,7 @@ test('a refused price shows its error on the field, and nothing is saved', async
 // server renders the refusal: the typing and the field's error both have to be
 // in that HTML.
 test('without JavaScript, a refused save keeps what was typed and shows the error', async ({ page, browser }, testInfo) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page, PASSWORD);
 	const context = await browser.newContext({
 		baseURL: testInfo.project.use.baseURL,
 		storageState: await page.context().storageState(),
@@ -196,8 +199,8 @@ for (const [name, answer] of [
 	['the server errors', { status: 500, contentType: 'application/json', body: JSON.stringify({ type: 'error', error: { message: 'Internal Error' } }) }]
 ] as const) {
 	test(`when ${name}, the form keeps what was typed and says so`, async ({ page }, testInfo) => {
-		await adminLogin(page, PASSWORD);
-		await page.goto('/admin/commissions/new');
+		await loginRetrying(page, PASSWORD);
+		await gotoAfterLogin(page, '/admin/commissions/new');
 		await waitForHydration(page);
 		await stubCreate(page, answer);
 		await fillEntry(page);
@@ -216,8 +219,8 @@ for (const [name, answer] of [
 }
 
 test('a refusal with no field to point at keeps focus on Save', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/commissions/new');
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/commissions/new');
 	await waitForHydration(page);
 	// A SvelteKit action failure whose data names no field, no gate, no stale save.
 	await stubCreate(page, {
