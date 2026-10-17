@@ -1,6 +1,9 @@
 # Monthly dependency updates, grouped so each ecosystem opens one PR a month
-# rather than one per package. Security updates for a known advisory are
-# separate: they come from the repository's Dependabot security updates
+# for minor and patch bumps rather than one per package. npm major bumps sit
+# outside the group and open their own PRs, so each gets its own look. A
+# 7-day cooldown skips releases younger than a week, so a compromised version
+# pulled within days is never proposed. Security updates for a known advisory
+# are separate: they come from the repository's Dependabot security updates
 # setting, not from this file, and open as soon as the advisory lands.
 #
 # Actions stay pinned by full commit SHA; Dependabot bumps the SHA and its
@@ -11,7 +14,8 @@ updates:
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
@@ -19,6 +23,8 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ['*']
