@@ -1,0 +1,24 @@
+# Monthly dependency updates, grouped so each ecosystem opens one PR a month
+# rather than one per package. Security updates for a known advisory are
+# separate: they come from the repository's Dependabot security updates
+# setting, not from this file, and open as soon as the advisory lands.
+#
+# Actions stay pinned by full commit SHA; Dependabot bumps the SHA and its
+# version comment together.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']

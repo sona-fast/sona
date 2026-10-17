@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { FLOORS, compare, scanLockfile } from './check-lockfile-security-lib.mjs';
 
 // The guard is what stands between an old-npm lockfile regen and a silent
-// downgrade of cookie/esbuild/nanoid/undici, so its two rules — how versions
+// downgrade of cookie/devalue/esbuild/nanoid/undici, so its two rules — how versions
 // compare and which lockfile entries get compared — are pinned here against
 // synthetic lock objects rather than only against the committed
 // package-lock.json.
@@ -72,6 +72,19 @@ describe('scanLockfile', () => {
 		]);
 	});
 
+	it('flags the devalue and undici releases with open advisories', () => {
+		// devalue 5.9.0 came in under @sveltejs/kit and ships in the Worker; the
+		// undici advisories reach 7.29.0. Both must fail the guard.
+		const { offenders } = scanLockfile({
+			packages: packages({
+				'node_modules/@sveltejs/kit/node_modules/devalue': entry('5.9.0'),
+				'node_modules/devalue': entry('5.9.3'),
+				'node_modules/undici': entry('7.29.0')
+			})
+		});
+		expect(offenders.map((o) => `${o.name}@${o.version}`)).toEqual(['devalue@5.9.0', 'undici@7.29.0']);
+	});
+
 	it('passes an entry exactly at the floor', () => {
 		const { offenders, checked } = scanLockfile({
 			packages: packages({ 'node_modules/cookie': entry(FLOORS.cookie) })
@@ -95,7 +108,7 @@ describe('scanLockfile', () => {
 		const { missing } = scanLockfile({
 			packages: packages({ 'node_modules/cookie': entry('0.7.2') })
 		});
-		expect(missing).toEqual(['esbuild', 'nanoid', 'undici']);
+		expect(missing).toEqual(['devalue', 'esbuild', 'nanoid', 'undici']);
 	});
 
 	it('matches an aliased entry by its name field, not the path tail', () => {
