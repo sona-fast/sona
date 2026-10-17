@@ -233,9 +233,17 @@
 			values.artistId = autoPicked = String(single.id);
 			const using = m.admin_commissions_link_using_announce({ name: single.name });
 			announcer.say(`${outcome}${getLocale() === 'ja' ? '' : ' '}${using}`);
-		} else {
-			announcer.say(outcome);
+			return;
 		}
+		// The lookup's own pick came from the last link. A link that names no one,
+		// or someone else, takes it away so a save can't keep it unchosen. A failed
+		// lookup says nothing about the artist, so the pick stays.
+		const failed = next.kind === 'refused' && next.reason === 'failed';
+		if (!single && !failed && autoPicked !== null && values.artistId === autoPicked) {
+			values.artistId = '';
+			autoPicked = null;
+		}
+		announcer.say(outcome);
 	}
 
 	/** No lookup on screen, and any answer still on its way ignored. */
