@@ -157,6 +157,8 @@ graph TB
   zone rather than the reader's or UTC.
 - Telegram, FurTrack, FuzzySearch, Resend, and Turnstile are optional
   integrations, keyed off secrets or settings (see `wrangler.toml.example` for the full list).
+- The artist lookup never sends FuzzySearch a piece linked to a commission
+  ledger entry, or a variant of one: the entry already names the artist.
 - entail.dev needs no key or secret. The app calls it only when an operator
   asks for tag suggestions on an image whose source post is on Bluesky or X,
   and never on a render path or a schedule. Three admin surfaces ask: the

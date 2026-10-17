@@ -94,7 +94,8 @@ const DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NU
 		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, global_id TEXT UNIQUE,
 		registry_version INTEGER, registry_synced_at TEXT, aliases TEXT,
-		avatar_resolved_at TEXT, created_at TEXT NOT NULL);`;
+		avatar_resolved_at TEXT, created_at TEXT NOT NULL);
+	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, image_id INTEGER UNIQUE);`;
 
 /** A PNG stand-in — the endpoint never decodes, but it does sniff the leading
  * bytes of an uploaded file, so the signature has to be the real one. */
@@ -890,6 +891,144 @@ describe('artist-lookup — stored image by id', () => {
 
 		expect(res.status).toBe(200);
 		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/png');
+	});
+});
+
+// Art that came from a commission entry never goes to FuzzySearch (SONA-236).
+// The edit page hides the button for it; this is the refusal behind that, for
+// a page loaded before the piece was linked or a request made by hand.
+describe('artist-lookup — art from a commission entry', () => {
+	function seedStored(sqlite: { exec(sql: string): void }) {
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01'),
+			        (2, 'Other', 'other', 'https://cdn.example.com/other.png', '2026-01-01');`
+		);
+	}
+
+	it('refuses a piece an entry links to, before its bytes are fetched or sent', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (1);`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ enabled: true, error: 'from_commission', forwarded: false });
+		// Not even the stored copy was read, so nothing existed to hand over.
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// Checked before the key: a page loaded while a key was saved, on a piece
+	// linked since, would otherwise say "no key" and send the owner to Settings
+	// for a lookup that wouldn't run with one either.
+	it('says from_commission rather than no key, with no key saved', async () => {
+		const { sqlite, platform } = makeEnv();
+		seedStored(sqlite);
+		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (1);`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ enabled: true, error: 'from_commission', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('still answers enabled:false with no key for a piece no entry links to', async () => {
+		const { sqlite, platform } = makeEnv();
+		seedStored(sqlite);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ enabled: false, forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+	});
+
+	// The entry check reads the row before the key; only its refusal may answer
+	// there. A missing row or a bad id still gets the no-key answer.
+	it.each([
+		['a piece that is gone', 404],
+		['an id that is not a number', 'x']
+	])('still answers enabled:false with no key for %s', async (_label, imageId) => {
+		const { sqlite, platform } = makeEnv();
+		seedStored(sqlite);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ enabled: false, forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+	});
+
+	it('still looks up a piece when the entry links a different one', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		// And an entry with no piece yet: image 1 has no parent, and that null must
+		// not match the entry's null image_id.
+		sqlite.exec(`INSERT INTO commissions (image_id) VALUES (2), (NULL);`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(fetcher.calls).toEqual(['https://cdn.example.com/stored.png']);
+		expect(searchImage).toHaveBeenCalledTimes(1);
+	});
+
+	it('refuses a variant whose parent an entry links to, before anything is fetched', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, parent_image_id, created_at)
+			 VALUES (3, 'Alt', 'alt', 'https://cdn.example.com/alt.png', 1, '2026-01-01');
+			 INSERT INTO commissions (image_id) VALUES (1);`
+		);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 3 }, fetcher.fn));
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ enabled: true, error: 'from_commission', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('still looks up a variant whose parent no entry links to', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, parent_image_id, created_at)
+			 VALUES (3, 'Alt', 'alt', 'https://cdn.example.com/alt.png', 1, '2026-01-01');
+			 INSERT INTO commissions (image_id) VALUES (2);`
+		);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 3 }, fetcher.fn));
+
+		expect(res.status).toBe(200);
+		expect(fetcher.calls).toEqual(['https://cdn.example.com/alt.png']);
+		expect(searchImage).toHaveBeenCalledTimes(1);
+	});
+
+	it('answers a failed entry check as not sent, rather than looking the piece up anyway', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		seedStored(sqlite);
+		sqlite.exec(`DROP TABLE commissions;`);
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
 	});
 });
 

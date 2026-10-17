@@ -1,7 +1,8 @@
 import { json, error } from '@sveltejs/kit';
 import { count, eq, isNotNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
-import { images, artists } from '$lib/server/db/schema';
+import { images, artists, commissions } from '$lib/server/db/schema';
+import { entryLinksPiece } from '$lib/server/commissions';
 import { proxyStoredImage } from '$lib/server/image-proxy';
 import { isAllowedImageType } from '$lib/server/storage/allowlist';
 import { bufferStream, MaxBytesExceededError } from '$lib/server/storage/buffer';
@@ -148,6 +149,15 @@ function failure(reason: LookupFailure, forwarded: boolean) {
 	return json({ enabled: true, error: reason, forwarded }, { status: FAILURE_STATUS[reason] });
 }
 
+/** Art that came from a commission entry is never looked up (SONA-236): the
+ * entry already names the artist. Refused before the stored copy is read, so
+ * nothing about the piece exists in this request to hand over. 409, under 500
+ * so it stays out of the error rollup, and neither 401 nor 403, which the client
+ * reads as a session that ended. */
+function fromCommissionRefusal() {
+	return json({ enabled: true, error: 'from_commission', forwarded: false }, { status: 409 });
+}
+
 /** Whether the leading bytes ARE one of the raster types on the allowlist.
  * Both request shapes get their type from someone else's word for it — the
  * browser's file.type, the upstream's Content-Type — so both hold the bytes
@@ -167,6 +177,42 @@ interface ArtistHit {
 
 export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	const db = getDb(platform!.env.DB);
+	const contentType = request.headers.get('content-type') ?? '';
+
+	// The imageId shape reads its row before the key, so art from an entry is
+	// refused as that even with no key saved: "add a key" would send the owner to
+	// Settings for a lookup that wouldn't run with one either. Only that refusal
+	// is answered here. An invalid id, a missing row, and a failed read keep
+	// their answers below the key check, as before.
+	const imageId = contentType.includes('multipart/form-data')
+		? null
+		: Number(((await request.json().catch(() => null)) as { imageId?: unknown } | null)?.imageId);
+	let row:
+		| { id: number; imageUrl: string; parentImageId: number | null; commissionId: number | null }
+		| undefined;
+	let rowFailed = false;
+	if (imageId !== null && Number.isInteger(imageId) && imageId > 0) {
+		// And the same for D1 as for the key read below: a busy or unreachable
+		// database throws, and a typed answer the client can read beats a 500 it
+		// cannot.
+		try {
+			row = await db
+				.select({
+					id: images.id,
+					imageUrl: images.imageUrl,
+					parentImageId: images.parentImageId,
+					commissionId: commissions.id
+				})
+				.from(images)
+				// The piece or its parent: a variant of entry art is entry art too.
+				.leftJoin(commissions, entryLinksPiece(images.id, images.parentImageId))
+				.where(eq(images.id, imageId))
+				.get();
+		} catch {
+			rowFailed = true;
+		}
+		if (row && row.commissionId !== null) return fromCommissionRefusal();
+	}
 
 	// No key configured: the integration is off, not broken. The UI hides the
 	// button on this answer instead of showing an error (the registry shape).
@@ -183,8 +229,6 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		return failure('unavailable', false);
 	}
 	if (!resolved) return json({ enabled: false, forwarded: false });
-
-	const contentType = request.headers.get('content-type') ?? '';
 
 	let bytes: Blob;
 	/** Set on the imageId shape: the image being looked up, excluded from its
@@ -246,23 +290,9 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		if (!hasAllowedImageBytes(head)) return failure('invalid_image', false);
 		bytes = file;
 	} else {
-		const body = (await request.json().catch(() => null)) as { imageId?: unknown } | null;
-		const imageId = Number(body?.imageId);
-		if (!Number.isInteger(imageId) || imageId <= 0)
+		if (imageId === null || !Number.isInteger(imageId) || imageId <= 0)
 			error(400, { message: 'Invalid image id', forwarded: false });
-
-		// And the same for D1: a busy or unreachable database throws, and a typed
-		// answer the client can read beats a 500 it cannot.
-		let row: { id: number; imageUrl: string; parentImageId: number | null } | undefined;
-		try {
-			row = await db
-				.select({ id: images.id, imageUrl: images.imageUrl, parentImageId: images.parentImageId })
-				.from(images)
-				.where(eq(images.id, imageId))
-				.get();
-		} catch {
-			return failure('unavailable', false);
-		}
+		if (rowFailed) return failure('unavailable', false);
 		if (!row) error(404, { message: 'Image not found', forwarded: false });
 		selfImage = { id: row.id, parentImageId: row.parentImageId };
 
