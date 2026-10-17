@@ -362,17 +362,23 @@ broken version. Before you push again, undo the update on `main`:
 - If the update made a merge commit, run `git revert -m 1 <merge-commit>`.
   `<merge-commit>` is that merge commit; `git log --merges -1` shows it.
 - If the update fast-forwarded `main` (for example, **Sync fork** on GitHub),
-  run `git revert --no-edit <last-good>..HEAD`. `<last-good>` is the commit of
-  the Pages deployment you rolled back to.
+  make one commit that restores the last good version:
+
+  ```sh
+  git restore --source=<last-good> --staged --worktree :/
+  git commit -m "Roll back to <last-good>"
+  ```
+
+  `<last-good>` is the commit of the Pages deployment you rolled back to.
+  Untracked files stay as they are.
 
 Alternatively, wait for a release that fixes it, and don't push to `main` until
 then.
 
-If you reverted, revert the revert before your next `git merge upstream/main`
-or **Sync fork**: run `git revert <revert-commit>`, where `<revert-commit>` is
-the commit your revert made. If you reverted a range, revert each commit it
-made. Otherwise git treats the reverted changes as already merged and leaves
-them out of the update.
+If you rolled back `main`, undo that before your next `git merge upstream/main`
+or **Sync fork**: run `git revert <rollback-commit>`, where `<rollback-commit>`
+is the commit that your revert or rollback made. Otherwise git treats the
+rolled-back changes as already merged and leaves them out of the update.
 
 **The data.** A Pages rollback leaves D1 as it is. Each migration so far keeps
 the tables and columns the previous release reads, so the previous code runs
@@ -383,13 +389,13 @@ If an update damaged data, D1 Time Travel can restore the whole database to any
 point in the last 30 days on Workers Paid, or the last 7 days on the Free plan.
 
 Before you restore, disable the orphan cleanup: in your fork on GitHub, go to
-**Actions**, select **Storage orphan cleanup**, and click **Disable workflow**.
-The restore removes the database rows for anything uploaded after the restore
-point, and the weekly sweep then deletes those files from storage (R2 or
-UploadThing) for good.
+**Actions**, select **Storage orphan cleanup**, click the **...** menu, and then
+click **Disable workflow**. The restore removes the database rows for anything
+uploaded after the restore point, and the weekly sweep then deletes those files
+from storage (R2 or UploadThing) permanently.
 
-To restore, run `npx wrangler login` on the Cloudflare account that owns the
-database, then run:
+To restore, sign in with `npx wrangler login` as a user on the Cloudflare
+account that owns the database, then run:
 
 ```sh
 npx wrangler d1 time-travel restore <database> --timestamp=<time>
@@ -402,12 +408,16 @@ npx wrangler d1 time-travel restore <database> --timestamp=<time>
   Use the run's start time in **Actions**, not the Pages deployment time,
   because the workflow runs migrations before it deploys.
 
-The restore is all or nothing: everything written after that time is gone. It
-also rolls back the `schema_migrations` table, so the next deploy applies those
-migrations again. Media that you deleted after the restore point stays deleted,
-so some restored rows can point at missing files.
+The restore replaces the whole database: everything written after that time
+disappears from it. It also rolls back the `schema_migrations` table, so the
+next deploy applies those migrations again. Media that you deleted after the
+restore point stays deleted, so some restored rows can point at missing files.
 
-After you re-add the uploads you want to keep, or decide to let them go,
+The command prints a bookmark for the database's state before the restore. Save
+it. To undo the restore, run the same command with `--bookmark=<bookmark>`
+instead of `--timestamp`, where `<bookmark>` is the bookmark you saved.
+
+After you re-add the uploads you want to keep, or decide not to keep them,
 re-enable **Storage orphan cleanup** in **Actions**.
 
 ## When `git merge` conflicts
