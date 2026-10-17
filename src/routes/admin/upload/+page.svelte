@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { tick } from 'svelte';
-	import { CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
+	import { CircleAlert, ClipboardList, CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
 	import TagRatingNote from '$lib/components/TagRatingNote.svelte';
@@ -38,23 +38,49 @@
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
+	import { localToday, STATUS_LABELS } from '$lib/commissions';
+	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
+	import type { CommissionRefusal } from '$lib/server/commission-gallery';
 	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
+
+	// Add to gallery from a commission entry (SONA-236). The prefill seeds the
+	// artist, characters, Private, the group target, and the date, once; the
+	// owner can change any of them before saving. Its title only names the
+	// entry in the note above the form.
+	// svelte-ignore state_referenced_locally
+	const prefill = data.prefill;
+	const prefillCharacters = new Set(prefill?.characterIds ?? []);
+	const linkedPiece = $derived(
+		prefill?.existingParentId != null
+			? (data.parentCandidates.find((c) => c.id === prefill.existingParentId) ?? null)
+			: null
+	);
+	const cancelHref = prefill ? `/admin/commissions/${prefill.id}/edit` : '/admin/images';
+
+	// Why a save from an entry was refused, narrowed once from the action data.
+	const refusal = $derived(form && 'commission' in form ? (form as CommissionRefusal) : null);
+	// From an entry while adding to the ledger waits for the GA date.
+	const uploadClosed = $derived(!!data.commissionGate && !data.commissionGate.open);
+	let refusalBox = $state<HTMLElement>();
+	$effect(() => {
+		if (refusal && refusalBox) refusalBox.focus();
+	});
 
 	// A newly created artist (via the New Artist dialog) is appended here so it
 	// appears in the select without a reload. `data.artists` is left untouched.
 	let artistList = $state<{ id: number; name: string }[]>(
 		data.artists.map((a) => ({ id: a.id, name: a.name }))
 	);
-	let selectedArtistId = $state<string | number>('');
+	let selectedArtistId = $state<string | number>(prefill?.artistId ?? '');
 	let showNewArtist = $state(false);
 	let saving = $state(false);
 	// Two identical batches say the same thing, so the region is keyed on a
 	// counter rather than on the text — see `$lib/live-announcer.svelte`.
 	const announcer = new Announcer();
-	let fileInput: HTMLInputElement;
+	let fileInput = $state<HTMLInputElement>();
 
 	// The Tags field is bound so the suggestion control can write accepted tags
 	// back into it; it still submits through its own name attribute, unchanged.
@@ -110,8 +136,8 @@
 	let parentIndex = $state(0);
 	// 'new' = the set becomes a new piece (one tile is the parent);
 	// 'existing' = every file becomes a variant of an already-uploaded piece.
-	let groupMode = $state<'new' | 'existing'>('new');
-	let existingParentId = $state('');
+	let groupMode = $state<'new' | 'existing'>(prefill?.existingParentId != null ? 'existing' : 'new');
+	let existingParentId = $state(prefill?.existingParentId != null ? String(prefill.existingParentId) : '');
 	// Parent options the page did not load with, added by "Add as a variant" for a
 	// clash piece that postdates this page. Same shape as data.parentCandidates.
 	let extraParents = $state<{ id: number; title: string }[]>([]);
@@ -401,6 +427,9 @@
 		// A save in flight is already sending these tiles; the drop zone and the
 		// picker are disabled for the same reason, so paste can't be the one way in.
 		if (saving) return;
+		// From an entry while the gate is closed there's no form to fill, and the
+		// save would refuse: a paste must not upload a file nobody can use.
+		if (uploadClosed) return;
 		const dt = e.clipboardData;
 		if (!dt) return;
 		const files = extractImageFiles(dt.items);
@@ -494,7 +523,9 @@
 	// uncontrolled inputs) so a result can write them and so an edit can drop the
 	// "From lookup" tag.
 	let sourcePostUrl = $state('');
-	let commissionedAt = $state('');
+	// From an entry, a new piece starts with no date and a variant with its
+	// piece's own; never a ledger date (the prefill holds none).
+	let commissionedAt = $state(prefill?.commissionedOn ?? '');
 	let sourceTagged = $state(false);
 	// The source field can carry two descriptions at once: the tag-suggestions
 	// hint that points at it, and the "From lookup" tag (SONA-220 + SONA-156).
@@ -588,7 +619,7 @@
 	);
 	// Private is the checkbox's inverse ("Private" checked = not published), so
 	// the warn hint and the panel notice both key off it directly.
-	let isPrivate = $state(false);
+	let isPrivate = $state(!!prefill);
 
 	function startLookup(key: number) {
 		const tile = tiles.find((t) => t.key === key);
@@ -1290,7 +1321,68 @@
 	<p class="error">{form.error}</p>
 {/if}
 
-<form method="POST" use:enhance={() => {
+<!-- With the gate closed the page already shows its notice in place of the
+     form, so a gated refusal would only say it twice. -->
+{#if refusal && !(refusal.commission === 'gated' && uploadClosed)}
+	<!-- A save from an entry the server refused before writing anything. It
+	     takes focus when it appears, after an enhanced save or a full reload. -->
+	{#if refusal.commission === 'just_added'}
+		<div class="notice" role="alert" tabindex="-1" bind:this={refusalBox}>
+			<p>
+				{m.admin_upload_commission_just_added()}{#if refusal.imageId}<a href="/admin/images/{refusal.imageId}/edit"
+						>{m.admin_upload_commission_view_piece()}</a
+					>{m.admin_upload_commission_or()}{/if}<a href="/admin/commissions"
+					>{m.admin_upload_commission_back_lower()}</a
+				>{m.admin_upload_commission_just_added_post()}
+			</p>
+		</div>
+	{:else if refusal.commission === 'gated'}
+		<p class="error" role="alert" tabindex="-1" bind:this={refusalBox}>
+			<CircleAlert size={16} aria-hidden="true" /><span
+				>{m.admin_upload_commission_gated({ date: refusal.gaDate ?? '' })}<a
+					href="/admin/settings?tab=account#supporter-key">{m.admin_commissions_refused_link()}</a
+				>{m.admin_commissions_refused_post()}</span
+			>
+		</p>
+	{:else}
+		<p class="error" role="alert" tabindex="-1" bind:this={refusalBox}>
+			<CircleAlert size={16} aria-hidden="true" /><span
+				>{#if refusal.commission === 'missing'}{m.admin_upload_commission_missing()}{:else if refusal.commission === 'closed' && refusal.status}{m.admin_upload_commission_closed(
+						{ status: STATUS_LABELS[refusal.status]() }
+					)}{:else if refusal.commission === 'mismatch'}{m.admin_upload_commission_mismatch()}{:else}{m.admin_upload_commission_group()}{/if}<a
+					href="/admin/commissions">{m.admin_upload_commission_back()}</a
+				>{m.admin_upload_commission_back_post()}</span
+			>
+		</p>
+	{/if}
+{/if}
+
+{#if uploadClosed && data.commissionGate}
+	<!-- From an entry while the gate is closed: the save would refuse, so say so
+	     before any file goes up. -->
+	<CommissionIntro gate={data.commissionGate} empty />
+	<p><a class="back-to-entry" href={cancelHref}>{m.admin_upload_commission_back_to_entry()}</a></p>
+{:else}
+{#if prefill}
+	<!-- The entry's title appears here and nowhere else on the page: the piece
+	     gets its own public title below. -->
+	<div class="from-note" role="note">
+		<span class="ico"><ClipboardList size={16} aria-hidden="true" /></span>
+		<p>
+			{m.admin_upload_from_commission_pre()}<a href="/admin/commissions/{prefill.id}/edit"
+				><strong>{prefill.title}</strong></a
+			>{linkedPiece
+				? m.admin_upload_from_commission_variant({ piece: linkedPiece.title })
+				: m.admin_upload_from_commission_new()}
+		</p>
+	</div>
+{/if}
+
+<form method="POST" use:enhance={({ formData }) => {
+	// The owner's own date, for an empty Delivered date on the entry (open
+	// question Q17, built as drawn). It stays on the entry and never becomes the
+	// piece's commissioned date.
+	if (prefill) formData.set('commissionDeliveredOn', localToday());
 	saving = true;
 	return async ({ update }) => {
 		await update();
@@ -1298,6 +1390,11 @@
 	};
 }} class="upload-form">
 	<input type="hidden" name="count" value={tiles.length} />
+	{#if prefill}
+		<input type="hidden" name="commissionId" value={prefill.id} />
+		<!-- Said outright, so a form that loses the Private box saves privately. -->
+		<input type="hidden" name="commissionVisibility" value={isPrivate ? 'private' : 'public'} />
+	{/if}
 	{#if groupMode === 'new'}
 		<input type="hidden" name="parentIndex" value={parentIndex} />
 	{:else}
@@ -1536,7 +1633,20 @@
 		style="display: none"
 	/>
 
-	{#if tiles.length > 0}
+	{#if prefill}
+		<!-- From an entry the group target is fixed: a linked entry takes variants
+		     of its piece, and an unlinked one takes a new piece. The server refuses
+		     anything else. -->
+		{#if linkedPiece}
+			<fieldset class="group-section">
+				<legend>{m.admin_variant_group_legend()}</legend>
+				<div class="field">
+					<span class="field-label">{m.admin_field_variant_of()}</span>
+					<span class="field-value">{linkedPiece.title}</span>
+				</div>
+			</fieldset>
+		{/if}
+	{:else if tiles.length > 0}
 		<fieldset class="group-section">
 			<legend>{m.admin_variant_group_legend()}</legend>
 			<label class="radio-label">
@@ -1642,7 +1752,7 @@
 				{:else if isPrivate}{m.admin_lookup_hint_private()}
 				{:else}{m.admin_lookup_hint()}{/if}
 			</small>
-		{:else}
+		{:else if !prefill}
 			<small class="hint" id="lookup-hint">
 				<!-- The third Settings remedy, and a new tab for the same reason as the
 				     other two: this page holds a batch that a same-tab navigation
@@ -1712,7 +1822,7 @@
 			<div class="character-chips">
 				{#each data.characters as char}
 					<label class="chip">
-						<input type="checkbox" name="char-{char.id}" onchange={(e) => {
+						<input type="checkbox" name="char-{char.id}" checked={prefillCharacters.has(char.id)} onchange={(e) => {
 							const el = document.querySelector('input[name="characters"]') as HTMLInputElement;
 							const current = new Set(el.value.split(',').filter(Boolean));
 							if (e.currentTarget.checked) current.add(String(char.id));
@@ -1724,7 +1834,7 @@
 					</label>
 				{/each}
 			</div>
-			<input type="hidden" name="characters" value="" />
+			<input type="hidden" name="characters" value={[...prefillCharacters].join(',')} />
 		</div>
 	{/if}
 
@@ -1795,7 +1905,9 @@
 		<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 	</label>
 
-	{#if data.ownerCharacter}
+	<!-- Not for variants of an entry's piece: the reference sheet is a parent,
+	     and these uploads only add variants to one. -->
+	{#if data.ownerCharacter && !linkedPiece}
 		<label class="checkbox-label">
 			<input type="checkbox" name="useAsReference" />
 			<span>{m.admin_image_reference_set({ name: data.ownerCharacter.name })}{#if data.ownerCharacter.hasReference} <span class="checkbox-helper">{m.admin_image_reference_replaces()}</span>{/if}</span>
@@ -1825,12 +1937,13 @@
 	</div>
 
 	<div class="form-actions">
-		<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
+		<a href={cancelHref} class="btn btn-secondary">{m.admin_cancel()}</a>
 		<button type="submit" class="btn btn-primary" disabled={!allUploaded || isUploading || saving}>
 			{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_upload_submit()}{/if}
 		</button>
 	</div>
 </form>
+{/if}
 
 {#if showNewArtist}
 	<NewArtistDialog
@@ -1864,6 +1977,26 @@
 		font-size: 14px;
 		margin-bottom: 16px;
 	}
+	/* A refusal from an entry carries an icon and links back. */
+	.error:has(:global(svg)) { display: flex; gap: 8px; align-items: flex-start; max-width: 800px; }
+	.error :global(svg) { flex: none; margin-top: 2px; }
+	.error a { color: inherit; text-decoration: underline; }
+
+	/* "From your commission": where the prefill came from, and what it filled. */
+	.from-note,
+	.notice {
+		display: flex; align-items: flex-start; gap: 10px; max-width: 800px;
+		background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-s);
+		padding: 12px 16px; margin-bottom: 20px;
+	}
+	.from-note p,
+	.notice p { margin: 0; font-size: 13px; line-height: 1.55; min-width: 0; overflow-wrap: anywhere; }
+	.from-note a,
+	.notice a { color: var(--foreground); text-decoration: underline; }
+	.from-note .ico { color: var(--primary-text); display: inline-flex; padding-top: 2px; }
+	.from-note p { max-width: 68ch; text-wrap: pretty; }
+	.field-value { font-size: 14px; overflow-wrap: anywhere; }
+	.back-to-entry { font-size: 14px; color: var(--foreground); text-decoration: underline; }
 
 	.upload-form {
 		display: flex;

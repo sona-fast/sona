@@ -250,6 +250,18 @@ input, select, textarea {
 	background-color: color-mix(in srgb, var(--destructive) 88%, black);
 }
 
+/* A button that stays focusable but doesn't act yet (aria-disabled, so focus
+   doesn't jump away and its reason can be read). It drops to the secondary
+   look in every variant and on hover, and keeps that pair's tested text
+   contrast instead of fading its label. */
+.btn[aria-disabled='true'],
+.btn[aria-disabled='true']:hover {
+	background-color: var(--secondary);
+	color: var(--secondary-foreground);
+	box-shadow: none;
+	cursor: default;
+}
+
 .btn-primary {
 	background-color: var(--primary);
 	color: var(--primary-foreground);
@@ -297,6 +309,9 @@ input, select, textarea {
 	/* --input, the 3:1 control-boundary token (SONA-126): this 1px edge is all
 	   that marks the button as a control. */
 	border: 1px solid var(--input);
+	/* It's often a link (Add to gallery in the ledger), and a link's underline
+	   would read as text, not a control. */
+	text-decoration: none;
 	/* Square corners on purpose: the compact tier reads as a smaller, denser
 	   control beside the pill-shaped .btn and .input, and the VR form's
 	   .file-btn shares the shape. */

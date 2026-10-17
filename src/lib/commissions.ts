@@ -67,6 +67,14 @@ export function isActiveStatus(status: CommissionStatus): boolean {
 	return ACTIVE.has(status);
 }
 
+/** Entries marked these never go to the gallery: there's no art to add. The
+ * save's own guard in the database reads the same list. */
+export const CLOSED_STATUSES = ['not_picked', 'cancelled'] as const satisfies readonly CommissionStatus[];
+
+export function canAddToGallery(status: CommissionStatus): boolean {
+	return !(CLOSED_STATUSES as readonly CommissionStatus[]).includes(status);
+}
+
 // Static references to each message function, never a lookup by computed key:
 // a computed key pins the whole catalog into every route that renders a label
 // (SONA-169, scripts/check-catalog-pinning.mjs).

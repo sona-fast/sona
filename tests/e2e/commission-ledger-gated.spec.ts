@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 import { settledShot } from './settled-shot';
+import { failOnPageErrors } from './page-errors';
 
 // The commission ledger with its early-access gate closed (SONA-236 PR 2): a
 // fork with no supporter key before the GA date. Its own server (the
@@ -12,6 +13,8 @@ import { settledShot } from './settled-shot';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-commissions-gated.toml.
 const PASSWORD = 'e2e-admin-password';
+
+failOnPageErrors();
 
 // The gate reads the server's real clock, which a spec can't fake. Past the GA
 // date (or once the registry entry retires) the gate opens for everyone and
@@ -38,6 +41,8 @@ test('the ledger reads, offers the key, and hides New entry', async ({ page }, t
 	await expect(notice).toContainText('Until then, you can read and delete your entries, but not add or change them.');
 	await expect(page.getByRole('link', { name: 'New entry' })).toHaveCount(0);
 	await expect(page.getByRole('link', { name: 'View Headshot icon' })).toBeVisible();
+	// Adding to the gallery is a change, so it waits for the gate too.
+	await expect(page.getByRole('link', { name: /Add to gallery/ })).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-ledger-gated.png'));
 
 	const keyLink = notice.getByRole('link', { name: 'Add your key' });
@@ -61,6 +66,41 @@ test('the entry shows plain dates and Delete entry, with no Save', async ({ page
 	await expect(page.locator('main')).not.toContainText(/\b35\b|days?\b|ago\b|since\b/);
 	await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-entry-readonly.png'));
+});
+
+test('an upload from the entry waits for the gate too, before any file goes up', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/upload?commission=1');
+	await waitForHydration(page);
+
+	const notice = page.getByRole('note').filter({ hasText: 'Early access' });
+	await expect(notice).toContainText('A supporter key unlocks it now.');
+	await expect(notice.getByRole('link', { name: 'Add your key' })).toHaveAttribute(
+		'href',
+		'/admin/settings?tab=account#supporter-key'
+	);
+	// No form to fill: no file picker, no Upload Artwork, no prefill note.
+	await expect(page.locator('input[type="file"]')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Upload Artwork' })).toHaveCount(0);
+	await expect(page.getByText('From your commission')).toHaveCount(0);
+	// The page's way back to the entry.
+	await expect(page.getByRole('link', { name: 'Back to the entry' })).toHaveAttribute('href', '/admin/commissions/1/edit');
+	await settledShot(page, testInfo.outputPath('commission-upload-gated.png'));
+
+	// The page listens for pasted images anywhere on it. With no form to fill,
+	// a pasted image must not go up to storage.
+	let uploads = 0;
+	page.on('request', (r) => {
+		if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/upload') uploads += 1;
+	});
+	await page.evaluate(() => {
+		const clipboard = new DataTransfer();
+		clipboard.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'pasted.png', { type: 'image/png' }));
+		window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true }));
+	});
+	// A paste that went through would POST at once; give it time to show up.
+	await page.waitForTimeout(1500);
+	expect(uploads).toBe(0);
 });
 
 test('Delete entry works with the gate closed', async ({ page }, testInfo) => {

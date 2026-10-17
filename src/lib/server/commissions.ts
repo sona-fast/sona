@@ -211,6 +211,9 @@ function fields(input: CommissionInput) {
 // row by column name, so a second plain `title` (the entry's) would collide
 // with it and shift every column after it.
 const pieceTitleColumn = () => sql<string | null>`${images.title}`.as('piece_title');
+// The piece's thumbnail, falling back to the full image as the admin pickers do.
+const pieceThumbColumn = () =>
+	sql<string | null>`COALESCE(NULLIF(${images.thumbnailUrl}, ''), ${images.imageUrl})`.as('piece_thumb');
 
 /** Inserts the entry and its character links in one batch, so a failure
  * leaves neither. Returns the new entry's id. */
@@ -302,7 +305,8 @@ export async function listCommissions(db: Database) {
 				artistName: artists.name,
 				artistAvatarUrl: artists.avatarUrl,
 				imageId: commissions.imageId,
-				pieceTitle: pieceTitleColumn()
+				pieceTitle: pieceTitleColumn(),
+				pieceThumb: pieceThumbColumn()
 			})
 			.from(commissions)
 			.innerJoin(artists, eq(commissions.artistId, artists.id))
@@ -330,7 +334,10 @@ export async function listCommissions(db: Database) {
 		artistAvatarUrl: row.artistAvatarUrl,
 		characterNames: names.get(row.id) ?? [],
 		// A link to a piece that no longer exists reads as not linked.
-		piece: row.imageId !== null && row.pieceTitle !== null ? { id: row.imageId, title: row.pieceTitle } : null
+		piece:
+			row.imageId !== null && row.pieceTitle !== null
+				? { id: row.imageId, title: row.pieceTitle, thumb: row.pieceThumb }
+				: null
 	}));
 }
 
@@ -358,6 +365,7 @@ export async function loadCommission(db: Database, id: number) {
 				deliveredOn: commissions.deliveredOn,
 				imageId: commissions.imageId,
 				pieceTitle: pieceTitleColumn(),
+				pieceThumb: pieceThumbColumn(),
 				version: commissions.updatedAt
 			})
 			.from(commissions)
@@ -373,12 +381,12 @@ export async function loadCommission(db: Database, id: number) {
 	]);
 	const row = rows[0];
 	if (!row) return null;
-	const { priceMinor, imageId, pieceTitle, ...rest } = row;
+	const { priceMinor, imageId, pieceTitle, pieceThumb, ...rest } = row;
 	return {
 		...rest,
 		price: priceMinor !== null && row.currency ? formatMinor(priceMinor, row.currency) : '',
 		characters: links,
-		piece: imageId !== null && pieceTitle !== null ? { id: imageId, title: pieceTitle } : null
+		piece: imageId !== null && pieceTitle !== null ? { id: imageId, title: pieceTitle, thumb: pieceThumb } : null
 	};
 }
 
