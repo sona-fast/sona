@@ -360,7 +360,10 @@ A rollback doesn't change your fork's `main`, so the next push redeploys the
 broken version. Before you push again, undo the update on `main`:
 
 - If the update made a merge commit, run `git revert -m 1 <merge-commit>`.
-  `<merge-commit>` is that merge commit; `git log --merges -1` shows it.
+  `<merge-commit>` is the merge that brought in `upstream/main`. To find it,
+  list merges with `git log --merges --oneline`. To confirm you have the right
+  one, check that `git diff <merge-commit>^1 <merge-commit>` shows the template
+  update.
 - If the update fast-forwarded `main` (for example, **Sync fork** on GitHub),
   make one commit that restores the last good version:
 
@@ -372,13 +375,27 @@ broken version. Before you push again, undo the update on `main`:
   `<last-good>` is the commit of the Pages deployment you rolled back to.
   Untracked files stay as they are.
 
-Alternatively, wait for a release that fixes it, and don't push to `main` until
-then.
+Alternatively, leave `main` as it is, don't push to it until a release that
+fixes the problem is out, and then update as usual.
 
-If you rolled back `main`, undo that before your next `git merge upstream/main`
-or **Sync fork**: run `git revert <rollback-commit>`, where `<rollback-commit>`
-is the commit that your revert or rollback made. Otherwise git treats the
-rolled-back changes as already merged and leaves them out of the update.
+If you rolled back `main`, undo that rollback when the release that fixes the
+problem is out. Update from a clone instead of **Sync fork**, and push once with
+both commits in place:
+
+```sh
+git fetch upstream
+git revert <rollback-commit>
+git merge upstream/main
+git push origin main
+```
+
+`<rollback-commit>` is the commit that your revert or restore made. Without the
+revert, git treats the rolled-back changes as already merged and leaves them out
+of the update. Every push to `main` deploys, so if you push the revert by
+itself, it redeploys the broken version, and reapplies its migrations if you
+restored the database. **Sync fork** can't add the revert and the update in one
+push, so you can't use it for this one update. If your clone has no `upstream`
+remote, add it as shown in [The happy path](#the-happy-path).
 
 **The data.** A Pages rollback leaves D1 as it is. Each migration so far keeps
 the tables and columns the previous release reads, so the previous code runs
@@ -389,10 +406,11 @@ If an update damaged data, D1 Time Travel can restore the whole database to any
 point in the last 30 days on Workers Paid, or the last 7 days on the Free plan.
 
 Before you restore, disable the orphan cleanup: in your fork on GitHub, go to
-**Actions**, select **Storage orphan cleanup**, click the **...** menu, and then
-click **Disable workflow**. The restore removes the database rows for anything
-uploaded after the restore point, and the weekly sweep then deletes those files
-from storage (R2 or UploadThing) permanently.
+**Actions**, select **Storage orphan cleanup**, click the **Show workflow
+options** menu (**...**), and then click **Disable workflow**. The restore
+removes the database rows for anything uploaded after the restore point, and the
+weekly sweep then deletes those files from storage (R2 or UploadThing)
+permanently.
 
 To restore, sign in with `npx wrangler login` as a user on the Cloudflare
 account that owns the database, then run:
