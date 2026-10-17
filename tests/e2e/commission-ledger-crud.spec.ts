@@ -366,20 +366,22 @@ test('the draft survives a trip to the Artists page, and the lookup asks again o
 	const link = page.getByLabel('Link to where you asked');
 	const artist = page.getByLabel('Artist', { exact: true });
 	await page.getByLabel('Title').fill('E2E draft title');
-	await paste(link, 'https://x.com/draft_artist/status/11');
+	// A FurAffinity handle, because adding an artist with an X or Bluesky
+	// handle fetches their avatar from that site.
+	await paste(link, 'https://www.furaffinity.net/user/draft_artist/');
 	const card = page.locator('.lookup');
 	await expect(card.getByText("draft_artist isn't in your artist list yet.")).toBeVisible();
 	await card.getByRole('link', { name: 'Artists page' }).click();
 	await expect(page).toHaveURL(/\/admin\/artists$/);
 	// The owner adds the artist, through the same endpoint the add dialog uses.
-	const created = await page.request.post('/api/artists', { data: { name: 'Draft Artist', twitter: 'draft_artist' } });
+	const created = await page.request.post('/api/artists', { data: { name: 'Draft Artist', furaffinity: 'draft_artist' } });
 	expect(created.ok()).toBe(true);
 	const { id } = (await created.json()) as { id: number };
 
 	await page.goBack();
 	await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
 	await expect(page.getByLabel('Title')).toHaveValue('E2E draft title');
-	await expect(link).toHaveValue('https://x.com/draft_artist/status/11');
+	await expect(link).toHaveValue('https://www.furaffinity.net/user/draft_artist/');
 	await expect(draftNote(page)).toBeVisible();
 	// Asked again, so the answer knows about the new artist, and picks them.
 	await expect(card.getByText('draft_artist is already in your artist list as Draft Artist.')).toBeVisible();
