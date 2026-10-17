@@ -9,6 +9,7 @@ import {
 	metricUpsert,
 	recordError,
 	pageViewStatements,
+	dailyVisitorPrune,
 	routeClass,
 	isAssetPath,
 	deviceClass,
@@ -378,6 +379,8 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 						country: countryCode(event.request.headers.get('cf-ipcountry'))
 					})
 				);
+				const prune = dailyVisitorPrune(db);
+				if (prune) counters.push(prune);
 			}
 		}
 

@@ -11,6 +11,8 @@ import {
 	recordJobRun,
 	pageViewStatements,
 	pruneVisitorRollups,
+	dailyVisitorPrune,
+	__resetVisitorPruneLatch,
 	dayKey,
 	routeClass,
 	isAssetPath,
@@ -622,6 +624,25 @@ describe('pruneVisitorRollups — Tier-A retention, operational metrics untouche
 			{ metric: 'pageview', dim: '/' }, // Tier-A, recent, kept
 			{ metric: 'request', dim: 'public' } // operational, old, kept
 		]);
+	});
+});
+
+describe('dailyVisitorPrune — once per isolate per UTC day', () => {
+	it('hands out the retention delete on the first call of a day only', async () => {
+		__resetVisitorPruneLatch();
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
+		seed.run(dayKey(new Date(Date.now() - 40 * 86400000)), 'referrer', 'spam.example', 9);
+		seed.run(dayKey(new Date(Date.now() - 40 * 86400000)), 'request', 'public', 100);
+
+		const first = dailyVisitorPrune(db, new Date('2026-10-17T08:00:00Z'));
+		expect(first).not.toBeNull();
+		await first;
+		expect(sqlite.prepare('SELECT metric FROM metric_rollup').all()).toEqual([{ metric: 'request' }]);
+
+		expect(dailyVisitorPrune(db, new Date('2026-10-17T23:59:00Z'))).toBeNull();
+		expect(dailyVisitorPrune(db, new Date('2026-10-18T00:01:00Z'))).not.toBeNull();
 	});
 });
 

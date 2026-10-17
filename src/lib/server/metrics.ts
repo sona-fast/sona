@@ -186,21 +186,50 @@ export function pageViewStatements(db: Database, view: PageView): BatchItem<'sql
 	return stmts;
 }
 
+/** The retention delete itself, built but not run, so the cron can await it and
+ * the page-view batch can carry it. */
+function visitorPruneStatement(db: Database, olderThanDays: number) {
+	const cutoff = dayKey(new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000));
+	return db
+		.delete(metricRollup)
+		.where(and(lt(metricRollup.day, cutoff), inArray(metricRollup.metric, [...VISITOR_METRICS])));
+}
+
 /**
  * Retention for the Tier-A visitor rows: delete metric_rollup rows for the visitor
  * metrics older than `olderThanDays`. Bounds table growth from attacker-varied
  * referrer hosts (each a distinct dim). Scoped to VISITOR_METRICS so operational
  * counters — request/error/upload/email/download, which have bounded dims and feed
- * long-run health — are never touched. Runs from the weekly cleanup-orphans cron.
+ * long-run health — are never touched. Runs from the weekly cleanup-orphans cron,
+ * and daily from the page-view batch (dailyVisitorPrune).
  */
 export async function pruneVisitorRollups(
 	db: Database,
 	olderThanDays: number = VISITOR_RETENTION_DAYS
 ): Promise<void> {
-	const cutoff = dayKey(new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000));
-	await db
-		.delete(metricRollup)
-		.where(and(lt(metricRollup.day, cutoff), inArray(metricRollup.metric, [...VISITOR_METRICS])));
+	await visitorPruneStatement(db, olderThanDays);
+}
+
+// The UTC day this isolate last carried the retention delete in a page-view batch.
+let lastVisitorPruneDay: string | null = null;
+
+/**
+ * The retention delete for the page-view batch, at most once per isolate per UTC
+ * day, else null. The privacy policy promises these counters go after about 35
+ * days, and the cron that also prunes them only runs on forks with CRON_SECRET
+ * set. Riding the write that creates the rows keeps that promise on every fork
+ * that collects them.
+ */
+export function dailyVisitorPrune(db: Database, now: Date = new Date()): BatchItem<'sqlite'> | null {
+	const today = dayKey(now);
+	if (lastVisitorPruneDay === today) return null;
+	lastVisitorPruneDay = today;
+	return visitorPruneStatement(db, VISITOR_RETENTION_DAYS);
+}
+
+/** Test-only: forget which day this isolate last pruned. */
+export function __resetVisitorPruneLatch(): void {
+	lastVisitorPruneDay = null;
 }
 
 /**

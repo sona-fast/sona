@@ -17,6 +17,7 @@ vi.mock('$lib/server/admin-auth', async (orig) => ({
 
 import { getSetupState, hashToken } from '$lib/server/admin-auth';
 import { authHandle, handleError, decodePathname } from './hooks.server';
+import { __resetVisitorPruneLatch } from '$lib/server/metrics';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
@@ -849,6 +850,27 @@ function pageviewEvent(
 describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 	beforeEach(() => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');
+	});
+
+	it('prunes visitor counters past retention on a page view, without the cron', async () => {
+		// The privacy policy says these go after about 35 days. A fork with no
+		// CRON_SECRET never runs the weekly cleanup, so the page view itself has
+		// to keep that promise.
+		__resetVisitorPruneLatch();
+		const { db, sqlite } = makeMetricsDb();
+		const old = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
+		sqlite
+			.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)')
+			.run(old, 'referrer', 'spam.example', 9);
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/gallery', db, waits, { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0)' }),
+			resolve: async () =>
+				new Response('<!doctype html>ok', { status: 200, headers: { 'content-type': 'text/html' } })
+		} as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE dim = 'spam.example'").get().c).toBe(0);
 	});
 
 	const resolveHtml = async () =>
