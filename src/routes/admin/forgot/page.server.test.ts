@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { getRawSetting, setRawSetting } from '$lib/server/settings';
-import { PASSWORD_RESET_SETTING, validateResetToken } from '$lib/server/password-reset';
+import { PASSWORD_RESET_SETTING, hashResetAddress, validateResetToken } from '$lib/server/password-reset';
 import { actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -177,11 +177,12 @@ describe('forgot action', () => {
 	it('skips the send within the 2-minute cooldown, keeping the existing token', async () => {
 		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
 		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
-		// A fresh existing request (30s ago) should suppress a resend.
+		// A fresh existing request (30s ago) for the current address should suppress a resend.
 		const existing = JSON.stringify({
 			tokenHash: 'a'.repeat(64),
 			expiresAt: new Date(Date.now() + 60_000).toISOString(),
-			requestedAt: new Date(Date.now() - 30_000).toISOString()
+			requestedAt: new Date(Date.now() - 30_000).toISOString(),
+			emailHash: await hashResetAddress('admin@taro.surf')
 		});
 		await setRawSetting(db, PASSWORD_RESET_SETTING, existing);
 
@@ -191,6 +192,34 @@ describe('forgot action', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 		// The existing token row is left intact (link the operator may be following).
 		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBe(existing);
+	});
+
+	// A recent row that can never validate (bound to a previous address, or
+	// written before address binding) must not hold off a send to the current one.
+	it.each([
+		['bound to a previous address', async () => ({ emailHash: await hashResetAddress('old@taro.surf') })],
+		['unbound (written before address binding)', async () => ({})]
+	])('sends within the cooldown when the recent row is %s', async (_label, binding) => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await setRawSetting(
+			db,
+			PASSWORD_RESET_SETTING,
+			JSON.stringify({
+				tokenHash: 'a'.repeat(64),
+				expiresAt: new Date(Date.now() + 60_000).toISOString(),
+				requestedAt: new Date(Date.now() - 30_000).toISOString(),
+				...(await binding())
+			})
+		);
+
+		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(result).toEqual({ sent: true });
+		const email = sentEmail();
+		expect(email.to).toBe('admin@taro.surf');
+		const token = new URL(email.text.match(/https:\/\/\S+/)![0]).searchParams.get('token')!;
+		expect(await validateResetToken(db, token)).toBe(true);
 	});
 
 	it('does not overwrite an existing valid token when the Resend send fails', async () => {

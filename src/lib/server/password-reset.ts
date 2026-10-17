@@ -38,8 +38,8 @@ interface StoredReset {
 	expiresAt: string;
 	requestedAt: string;
 	/** Hash of the address the link was mailed to (see hashResetAddress). Optional
-	 * only so a row written before this field existed still anchors the cooldown;
-	 * validateResetToken rejects a row without it. */
+	 * only so a row written before this field existed still parses; such a row
+	 * neither validates nor anchors the resend cooldown. */
 	emailHash?: string;
 }
 
@@ -109,8 +109,16 @@ export async function requestPasswordReset(
 	const existing = parseStored(await getRawSetting(db, PASSWORD_RESET_SETTING));
 	// Cooldown: a still-fresh request means an email just went out — keep the
 	// existing (valid) link and skip a resend rather than flooding the inbox and
-	// invalidating the link the operator may already be following.
-	if (existing && now - Date.parse(existing.requestedAt) < RESEND_COOLDOWN_MS) return;
+	// invalidating the link the operator may already be following. Only a row
+	// bound to the current address counts: one with no emailHash, or a late write
+	// for a previous address, can never validate, so it mustn't block the send.
+	const emailHash = await hashResetAddress(adminEmail);
+	if (
+		existing?.emailHash &&
+		constantTimeEqual(emailHash, existing.emailHash) &&
+		now - Date.parse(existing.requestedAt) < RESEND_COOLDOWN_MS
+	)
+		return;
 
 	const token = generateToken();
 	const siteName = (await getRawSetting(db, 'siteName'))?.trim() || APP_NAME;
@@ -152,7 +160,7 @@ export async function requestPasswordReset(
 		tokenHash: await hashToken(token),
 		expiresAt: new Date(now + RESET_TTL_MS).toISOString(),
 		requestedAt: new Date(now).toISOString(),
-		emailHash: await hashResetAddress(adminEmail)
+		emailHash
 	};
 	await setRawSetting(db, PASSWORD_RESET_SETTING, JSON.stringify(record));
 }
