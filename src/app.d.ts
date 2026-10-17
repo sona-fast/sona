@@ -153,6 +153,16 @@ declare global {
 				 */
 				TURNSTILE_SITEKEY?: string;
 				TURNSTILE_SECRET?: string;
+				/**
+				 * TEST-ONLY early-access bypass (SONA-236): 'open' makes
+				 * commissionLedgerEnabled return true whatever the GA date and
+				 * supporter key say. Set ONLY in tests/e2e/wrangler.e2e*.toml: the
+				 * e2e suite drives the ledger forms while the flag is pre-GA, and a
+				 * real supporter key can't be minted in CI (the issuer key is baked
+				 * in). Honored only in dev builds. Never set it in a production
+				 * wrangler.toml.
+				 */
+				E2E_COMMISSION_GATE?: string;
 			};
 			/**
 			 * Cloudflare execution context. `waitUntil` lets fire-and-forget work

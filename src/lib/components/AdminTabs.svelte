@@ -8,6 +8,7 @@
 		{ href: '/admin/collections', label: m.admin_nav_collections },
 		{ href: '/admin/tags', label: m.admin_nav_tags },
 		{ href: '/admin/artists', label: m.admin_nav_artists },
+		{ href: '/admin/commissions', label: m.admin_nav_commissions },
 		{ href: '/admin/characters', label: m.admin_nav_characters },
 		{ href: '/admin/fursuit', label: m.admin_tab_fursuit },
 		{ href: '/admin/stickers', label: m.admin_nav_stickers },

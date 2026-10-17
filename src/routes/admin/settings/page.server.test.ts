@@ -1541,18 +1541,19 @@ describe('settings load — supporter key is raw + verified, never in public set
 			valid: true,
 			login: 'sparky',
 			tier: 2,
-			expiresAt: new Date('2026-09-01T00:00:00Z')
+			expiresAt: new Date('2026-11-01T00:00:00Z')
 		});
 
 		// A synthetic in-window flag for this test only (restored in the finally),
 		// with a GA date far enough out that the assertion below never turns into
 		// a comparison of two empty lists as the shipped registry empties.
 		EARLY_ACCESS['probe'] = { gaDate: '2999-01-01', label: () => 'Probe' };
-		// Frozen inside the con-card window. earlyAccessActive is a comparison
-		// against the wall clock, so on the real one this test goes red the morning
-		// the flag GAs, which is the day it is least worth reading a red suite.
+		// Frozen inside the commission-ledger window. earlyAccessActive is a
+		// comparison against the wall clock, so on the real one this test goes red
+		// the morning the flag GAs, which is the day it is least worth reading a
+		// red suite.
 		vi.useFakeTimers();
-		vi.setSystemTime(new Date('2026-08-20T12:00:00Z'));
+		vi.setSystemTime(new Date('2026-10-20T12:00:00Z'));
 		try {
 			const result = (await load(loadEvent(platform))) as unknown as {
 				supporterKey: { keyRecord: string; state: string; validUntil: string } | null;
@@ -1567,9 +1568,9 @@ describe('settings load — supporter key is raw + verified, never in public set
 			expect(result.supporterKey).toEqual({
 				keyRecord: 'head.tail',
 				state: 'valid',
-				validUntil: '2026.08.31',
+				validUntil: '2026.10.31',
 				// UTC-pinned twin of validUntil; keys the dismissal cookie (SONA-119).
-				dismissKey: '2026.08.31',
+				dismissKey: '2026.10.31',
 				// Reviewed for this guard: which half of the warning window the key is
 				// in. Two values, derived from the expiry the payload already carries —
 				// it tells the client nothing the token or the dates don't.
@@ -1581,13 +1582,13 @@ describe('settings load — supporter key is raw + verified, never in public set
 			// date — and nothing else rides along (a NEW field in the mapping must
 			// be re-reviewed here first).
 			//
-			// Reviewed for this guard: 'con-card' is the shipped registry's first
-			// real entry (SONA-115), and its gaDate is now the shipping value
-			// (merge date + 7) rather than the registration placeholder. The
-			// clock above is frozen inside that window, so this stays true after
-			// the date passes in the real world.
+			// Reviewed for this guard: 'commission-ledger' is the shipped
+			// registry's entry (SONA-236). Its gaDate is a placeholder that release
+			// prep resets, so update this line with it. The clock above is frozen
+			// inside that window, so this stays true after the date passes in the
+			// real world.
 			expect(result.earlyAccess).toEqual([
-				{ flag: 'con-card', gaDate: '2026.08.27' },
+				{ flag: 'commission-ledger', gaDate: '2026.10.28' },
 				{ flag: 'probe', gaDate: '2999.01.01' }
 			]);
 			// The token must never leak into the client-exposed SiteSettings.
