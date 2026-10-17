@@ -357,7 +357,9 @@ build. For more information, see
 [Pages rollbacks](https://developers.cloudflare.com/pages/configuration/rollbacks/).
 
 A rollback doesn't change your fork's `main`, so the next push redeploys the
-broken version. Before you push again, undo the update on `main`:
+broken version. Before you push again, undo the update on `main`. In a clone of
+your fork, run `git switch main` and `git pull origin main` so the clone has the
+update. Next, depending on how you updated:
 
 - If the update made a merge commit, run `git revert -m 1 <merge-commit>`.
   `<merge-commit>` is the merge that brought in `upstream/main`. To find it,
@@ -373,7 +375,10 @@ broken version. Before you push again, undo the update on `main`:
   ```
 
   `<last-good>` is the commit of the Pages deployment you rolled back to.
-  Untracked files stay as they are.
+  Untracked files stay as they are. This also removes any commits you made after
+  `<last-good>`; reverting the rollback later brings them back.
+
+Then push to `main`.
 
 Alternatively, leave `main` as it is, don't push to it until a release that
 fixes the problem is out, and then update as usual.
@@ -390,7 +395,7 @@ git push origin main
 ```
 
 `<rollback-commit>` is the commit that your revert or restore made. Without the
-revert, git treats the rolled-back changes as already merged and leaves them out
+revert, Git treats the rolled-back changes as already merged and leaves them out
 of the update. Every push to `main` deploys, so if you push the revert by
 itself, it redeploys the broken version, and reapplies its migrations if you
 restored the database. **Sync fork** can't add the revert and the update in one
