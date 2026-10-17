@@ -10,6 +10,7 @@ import {
 	recordError,
 	pageViewStatements,
 	dailyVisitorPrune,
+	releaseVisitorPruneLatch,
 	routeClass,
 	isAssetPath,
 	deviceClass,
@@ -363,9 +364,18 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		// off after collecting still owes the policy's 35-day delete, and with no
 		// CRON_SECRET nothing else would run it.
 		const prune = device ? dailyVisitorPrune(db) : null;
+		// A failed batch hands the day back so the next counted view retries the
+		// delete. Rethrown so schedule() still swallows it as before.
+		const releaseOnFail = (p: Promise<unknown>) =>
+			prune
+				? p.catch((e) => {
+						releaseVisitorPruneLatch();
+						throw e;
+					})
+				: p;
 
 		if (!isObservabilityEnabled(event.platform.env)) {
-			if (prune) schedule(event.platform, db.batch([prune]));
+			if (prune) schedule(event.platform, releaseOnFail(db.batch([prune])));
 		} else {
 			// All rolled-up counters for this request go into ONE db.batch — the request
 			// counter, the 5xx error rollup, and (below) the Tier-A page-view counters —
@@ -393,7 +403,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 			// The capped-ring error sample (a delete + insert with its own prune) stays
 			// separate from the counter batch. Fire-and-forget so visitors never wait.
 			const work: Promise<unknown>[] = [
-				db.batch(counters as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+				releaseOnFail(db.batch(counters as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]))
 			];
 			if (response.status >= 500 && !event.locals.errorSampled) {
 				work.push(recordError(db, { route: path, status: response.status, message: `HTTP ${response.status}` }));

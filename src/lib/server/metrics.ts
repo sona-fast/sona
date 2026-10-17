@@ -227,6 +227,14 @@ export function dailyVisitorPrune(db: Database, now: Date = new Date()): BatchIt
 	return visitorPruneStatement(db, VISITOR_RETENTION_DAYS, now);
 }
 
+/**
+ * Hand the day back after the batch carrying dailyVisitorPrune's statement fails,
+ * so the next counted view retries the delete instead of skipping it until tomorrow.
+ */
+export function releaseVisitorPruneLatch(): void {
+	lastVisitorPruneDay = null;
+}
+
 /** Test-only: forget which day this isolate last pruned. */
 export function __resetVisitorPruneLatch(): void {
 	lastVisitorPruneDay = null;

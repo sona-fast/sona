@@ -913,6 +913,36 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 		]);
 	});
 
+	it('a failed batch hands the daily latch back, so the next view in the same day prunes', async () => {
+		for (const flags of [{ OBSERVABILITY_ENABLED: 'true' }, {}] as Record<string, string>[]) {
+			__resetVisitorPruneLatch();
+			const { db, sqlite } = makeMetricsDb();
+			seedOldRows(sqlite);
+			const down = {
+				...db,
+				batch: async () => {
+					throw new Error('D1 unavailable');
+				}
+			} as unknown as D1Database;
+			const failed: Promise<unknown>[] = [];
+			await authHandle({
+				event: pageviewEvent('/gallery', down, failed, { 'user-agent': REAL_UA }, flags),
+				resolve: resolveHtml
+			} as never);
+			// The rejection is still swallowed.
+			await expect(Promise.all(failed)).resolves.toBeDefined();
+			expect(spamRows(sqlite), `failed batch, flags ${JSON.stringify(flags)}`).toBe(1);
+
+			const waits: Promise<unknown>[] = [];
+			await authHandle({
+				event: pageviewEvent('/gallery', db, waits, { 'user-agent': REAL_UA }, flags),
+				resolve: resolveHtml
+			} as never);
+			await Promise.all(waits);
+			expect(spamRows(sqlite), `retry view, flags ${JSON.stringify(flags)}`).toBe(0);
+		}
+	});
+
 	it('does not prune on a request that is not a counted page view, nor spend the daily latch', async () => {
 		const resolve404 = async () =>
 			new Response('<!doctype html>nope', { status: 404, headers: { 'content-type': 'text/html' } });
