@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { handlesOverlap, normalizeHandle, normalizeSocialUrl } from './handle-normalize';
+import { handlesOverlap, normalizeHandle, normalizeSocialUrl, findLocalArtistsByHandle } from './handle-normalize';
 
 describe('normalizeSocialUrl', () => {
 	it('builds the canonical profile URL from a bare handle per platform', () => {
@@ -262,5 +262,50 @@ describe('normalizeHandle (site segments on other platforms)', () => {
 
 	it('reads a Twitter site path as a plain handle', () => {
 		expect(normalizeHandle('twitter', 'twitter.com/home')).toBe('home');
+	});
+});
+
+describe('findLocalArtistsByHandle (SONA-236 paste a link)', () => {
+	const rows = [
+		{ id: 1, name: 'Artist B', twitterUrl: 'https://twitter.com/Artist_B', instagramUrl: null },
+		{ id: 2, name: 'Insta twin', twitterUrl: null, instagramUrl: 'https://www.instagram.com/artist_b' },
+		{ id: 3, name: 'Someone else', twitterUrl: 'https://twitter.com/someone', instagramUrl: null }
+	];
+
+	it('finds an artist stored as twitter.com from an x.com handle, in any letter case', () => {
+		expect(findLocalArtistsByHandle(rows, 'twitter', ['artist_b']).map((r) => r.id)).toEqual([1]);
+		expect(findLocalArtistsByHandle(rows, 'twitter', ['ARTIST_B']).map((r) => r.id)).toEqual([1]);
+	});
+
+	it('leaves out the same handle on another platform', () => {
+		expect(findLocalArtistsByHandle(rows, 'twitter', ['artist_b']).map((r) => r.id)).not.toContain(2);
+		expect(findLocalArtistsByHandle(rows, 'instagram', ['artist_b']).map((r) => r.id)).toEqual([2]);
+	});
+
+	it('finds nothing for no handles or an empty one', () => {
+		expect(findLocalArtistsByHandle(rows, 'twitter', [])).toEqual([]);
+		expect(findLocalArtistsByHandle(rows, 'twitter', [''])).toEqual([]);
+	});
+});
+
+describe('findLocalArtistsByHandle: a stored legacy DeviantArt link (SONA-236)', () => {
+	const rows = [
+		{ id: 1, name: 'Legacy', deviantArtUrl: 'https://SomeUser.deviantart.com/' },
+		{ id: 2, name: 'Current', deviantArtUrl: 'https://www.deviantart.com/other' },
+		{ id: 3, name: 'Service host', deviantArtUrl: 'https://backend.deviantart.com/' }
+	];
+
+	it('matches the user in the legacy host, from either link shape', () => {
+		// The handle a legacy link and a www link both parse to.
+		expect(findLocalArtistsByHandle(rows, 'deviantart', ['someuser']).map((r) => r.id)).toEqual([1]);
+		expect(findLocalArtistsByHandle(rows, 'deviantart', ['other']).map((r) => r.id)).toEqual([2]);
+	});
+
+	it("doesn't read DeviantArt's own hosts as a user", () => {
+		expect(findLocalArtistsByHandle(rows, 'deviantart', ['backend'])).toEqual([]);
+	});
+
+	it('leaves the shared normalizer as registry matching knows it', () => {
+		expect(normalizeHandle('deviantart', 'https://someuser.deviantart.com/')).toBe('someuser.deviantart.com');
 	});
 });

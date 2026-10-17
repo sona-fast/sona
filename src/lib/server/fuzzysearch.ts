@@ -13,7 +13,7 @@
 
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
-import { normalizeHandle, socialsToHandles, type Platform } from './handle-normalize';
+import { findLocalArtistsByHandle, type Platform } from './handle-normalize';
 import { matchKey, mergeSamePost, RATING_ORDER } from '$lib/artist-lookup';
 import type { Database } from './db';
 
@@ -432,25 +432,17 @@ const SITE_PLATFORM: Partial<Record<LookupSite, Platform>> = {
 };
 
 /**
- * Local artists whose stored socials point at one of a match's handles.
- * Compares through `normalizeHandle` and `socialsToHandles`, the same pair
- * `handlesOverlap` is built on, so this agrees with the registry import and the
- * artists API on what a match is.
- * A full scan, like every other handle matcher here — there is no handle index.
+ * Local artists whose stored socials point at one of a match's handles: the
+ * site's platform, then findLocalArtistsByHandle, which the ledger's paste-a-
+ * link lookup shares, so both agree with the registry import and the artists
+ * API on what a match is.
  */
 export function findLocalArtists<T extends Record<string, unknown>>(
 	rows: T[],
 	match: Pick<LookupMatch, 'site' | 'handles'>
 ): T[] {
 	const platform = SITE_PLATFORM[match.site];
-	if (!platform) return [];
-	const wanted = new Set(
-		match.handles.map((h) => normalizeHandle(platform, h)).filter((h) => h !== '')
-	);
-	if (wanted.size === 0) return [];
-	return rows.filter((row) =>
-		socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm))
-	);
+	return platform ? findLocalArtistsByHandle(rows, platform, match.handles) : [];
 }
 
 /**

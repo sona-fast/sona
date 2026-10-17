@@ -156,6 +156,8 @@ export const E2E_REGISTRY_SCENARIO = path.join(E2E_PERSIST_TO_REGISTRY, 'registr
 // throwaway DB + dev server on the shared wrangler config, which opens the
 // ledger's early-access gate through E2E_COMMISSION_GATE.
 export const E2E_PERSIST_TO_COMMISSIONS = path.join(persistRoot, '.wrangler-e2e-commissions');
+// Rows only this server needs: an artist with a stored handle for paste a link.
+export const E2E_COMMISSIONS_OVERLAY = path.join(here, 'fixtures', 'commissions.sql');
 export const E2E_PLATFORM_PERSIST_COMMISSIONS = path.join(E2E_PERSIST_TO_COMMISSIONS, 'v3');
 
 // The gated commission ledger spec needs the gate CLOSED, which no other server

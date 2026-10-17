@@ -457,3 +457,26 @@ describe('bare handles', () => {
 		expect(socialLabel('twitter', '@')).toBe('Twitter');
 	});
 });
+
+describe('a private Telegram channel link (SONA-236)', () => {
+	// t.me/c/<id>/<post> is a message in a channel with no public name; the 'c'
+	// is part of the path, not an account.
+	it('reads as no handle, and labels as the platform', () => {
+		expect(socialHandle('telegram', 'https://t.me/c/123456/78')).toBeNull();
+		expect(socialLabel('telegram', 'https://t.me/c/123456/78')).toBe('Telegram');
+		// A public channel still reads as its name.
+		expect(socialHandle('telegram', 'https://t.me/artist_a/412')).toBe('artist_a');
+	});
+});
+
+describe('DeviantArt section links (SONA-236)', () => {
+	// A profile is www.deviantart.com/<user>; these paths are parts of the site.
+	it('render no handle, and label as the platform', () => {
+		for (const path of ['stash/0abc', 'users/login', 'watch', 'groups/foo', 'settings']) {
+			const url = `https://www.deviantart.com/${path}`;
+			expect(socialHandle('deviantart', url), url).toBeNull();
+			expect(socialLabel('deviantart', url), url).toBe('DeviantArt');
+		}
+		expect(socialHandle('deviantart', 'https://www.deviantart.com/someuser')).toBe('someuser');
+	});
+});

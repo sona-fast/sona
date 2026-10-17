@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 // moment the shared class changes, and the drift is invisible until someone
 // opens that one page. The restatements that had accumulated across the app are
 // gone, the differences that repeated are named variants in app.css
-// (.btn-compact, .btn-full-mobile, .btn-desktop-only,
+// (.btn-compact, .btn-full-mobile, .btn-desktop-only, .btn-tap-mobile,
 // .input-sm, .input-plain, .input-form-width), and what is left is listed below
 // with the reason it stays scoped.
 //
@@ -247,7 +247,7 @@ describe('control styling lives in app.css (SONA-209)', () => {
 		const offenders = pages.filter((f) => !ALLOWED.has(f) && scopedCount(f) > 0);
 		expect(
 			offenders,
-			'a page restated a shared control class. Delete the restatement, or add a named variant to app.css (.btn-compact, .btn-full-mobile, .btn-desktop-only, .input-sm, .input-plain, .input-form-width) and use that.'
+			'a page restated a shared control class. Delete the restatement, or add a named variant to app.css (.btn-compact, .btn-full-mobile, .btn-desktop-only, .btn-tap-mobile, .input-sm, .input-plain, .input-form-width) and use that.'
 		).toEqual([]);
 	});
 });
