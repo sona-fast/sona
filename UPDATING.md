@@ -350,34 +350,65 @@ After this, only *new* migrations pulled from the template will be applied.
 If an update breaks your site, put the last good version back first and work
 out what went wrong after. Code and data roll back separately.
 
-**The code.** Every deploy is kept as a Pages deployment. In the Cloudflare
-dashboard, open your Pages project's deployments and roll back to the last
-production deployment that worked. It takes effect in seconds and needs no
+**The code.** Cloudflare keeps every deploy as a Pages deployment. In the
+Cloudflare dashboard, open your Pages project's deployments and roll back to the
+last production deployment that worked. It takes effect in seconds and needs no
 build. For more information, see
 [Pages rollbacks](https://developers.cloudflare.com/pages/configuration/rollbacks/).
 
 A rollback doesn't change your fork's `main`, so the next push redeploys the
-broken version. Before you push again, revert the merge on your fork
-(`git revert -m 1 <merge-commit>`) or wait for a release that fixes it.
+broken version. Before you push again, undo the update on `main`:
 
-**The data.** A Pages rollback leaves D1 as it is. Migrations only add tables,
-columns, and indexes, so the previous code runs against the newer schema, and
-you usually don't need to touch the database.
+- If the update made a merge commit, run `git revert -m 1 <merge-commit>`.
+  `<merge-commit>` is that merge commit; `git log --merges -1` shows it.
+- If the update fast-forwarded `main` (for example, **Sync fork** on GitHub),
+  run `git revert --no-edit <last-good>..HEAD`. `<last-good>` is the commit of
+  the Pages deployment you rolled back to.
+
+Alternatively, wait for a release that fixes it, and don't push to `main` until
+then.
+
+If you reverted, revert the revert before your next `git merge upstream/main`
+or **Sync fork**: run `git revert <revert-commit>`, where `<revert-commit>` is
+the commit your revert made. If you reverted a range, revert each commit it
+made. Otherwise git treats the reverted changes as already merged and leaves
+them out of the update.
+
+**The data.** A Pages rollback leaves D1 as it is. Each migration so far keeps
+the tables and columns the previous release reads, so the previous code runs
+against the newer schema, and you usually don't need to touch the database. A
+release that breaks this says so in its notes.
 
 If an update damaged data, D1 Time Travel can restore the whole database to any
-point in the last 30 days:
+point in the last 30 days on Workers Paid, or the last 7 days on the Free plan.
+
+Before you restore, disable the orphan cleanup: in your fork on GitHub, go to
+**Actions**, select **Storage orphan cleanup**, and click **Disable workflow**.
+The restore removes the database rows for anything uploaded after the restore
+point, and the weekly sweep then deletes those files from storage (R2 or
+UploadThing) for good.
+
+To restore, run `npx wrangler login` on the Cloudflare account that owns the
+database, then run:
 
 ```sh
-npx wrangler d1 time-travel restore DATABASE_NAME --timestamp=2026-10-17T08:00:00Z
+npx wrangler d1 time-travel restore <database> --timestamp=<time>
 ```
 
-Replace `DATABASE_NAME` with your D1 database's name (the `D1_DATABASE_NAME` repo
-variable, `sona-db` if you never set it), and the timestamp with a time from
-before the bad deploy. The restore is all or nothing: everything written after
-that time is gone. Images uploaded since then stay in R2, but the site no longer
-knows about them. The restore also rolls
-back the `schema_migrations` table, so the next deploy applies those migrations
-again.
+- `<database>` is your D1 database's name: the `D1_DATABASE_NAME` repo
+  variable, or `sona-db` if you never set it.
+- `<time>` is an RFC 3339 timestamp, such as `2026-10-17T08:00:00Z`, from
+  before the bad deploy's **Deploy to Cloudflare Pages** workflow run started.
+  Use the run's start time in **Actions**, not the Pages deployment time,
+  because the workflow runs migrations before it deploys.
+
+The restore is all or nothing: everything written after that time is gone. It
+also rolls back the `schema_migrations` table, so the next deploy applies those
+migrations again. Media that you deleted after the restore point stays deleted,
+so some restored rows can point at missing files.
+
+After you re-add the uploads you want to keep, or decide to let them go,
+re-enable **Storage orphan cleanup** in **Actions**.
 
 ## When `git merge` conflicts
 
