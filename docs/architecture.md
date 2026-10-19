@@ -181,8 +181,8 @@ graph TB
   contacted them from an operator's save, but this makes it a scheduled
   dependency rather than an occasional one. Every push to `main` runs `ci.yml` and
   `deploy.yml`, which redeploys the Pages project; `deploy.yml` also has a
-  manual dispatch for forks synced through GitHub's Sync fork button, which
-  emits no push event.
+  manual dispatch, because a fork runs no workflows until its owner enables
+  them, so its first update can land on `main` without a deploy.
 - Themes are data. Each theme lives in `src/lib/themes/*.theme.ts`, and
   `scripts/build-themes.ts` renders them into `src/lib/themes/generated.css`,
   which `src/app.css` imports. The renderer runs from `prepare`, so `npm ci`

@@ -3,9 +3,10 @@ name: Deploy to Cloudflare Pages
 on:
   push:
     branches: [main]
-  # GitHub's "Sync fork" button fast-forwards main WITHOUT emitting a push
-  # event, so a synced fork never auto-deploys. This gives operators a manual
-  # "Run workflow" button in the Actions tab for exactly that case.
+  # GitHub runs no workflows in a fork until its owner enables them on the
+  # Actions tab, so a fork's first update can move main without a deploy. This
+  # gives operators a manual "Run workflow" button for that case, once the
+  # workflows are enabled (UPDATING.md, "First sync only").
   workflow_dispatch:
 
 jobs:
