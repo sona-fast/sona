@@ -4,26 +4,33 @@ Sona is a template you **fork**, so improvements land in the template
 (`sona-fast/sona`) after you've forked. This is the operator's guide to pulling
 those updates into your fork and getting them deployed.
 
-The short version: pull the template's `main` into your fork's `main` and push.
+The short version: merge the newest release tag into your fork's `main` and
+push.
 Your fork's [deploy workflow](.github/workflows/deploy.yml) does the rest — it
 runs the tests, applies any new D1 migrations exactly once, and deploys to Pages.
 There are no manual post-update steps in the normal case.
 
 ## The happy path
 
-1. **Pull template changes into your fork.** Either use GitHub's **Sync fork**
-   button (repo home → *Sync fork* → *Update branch*), or do it from a clone:
+1. **Merge the newest release into your fork.** From a clone of your fork, run:
 
    ```sh
    git checkout main
    git remote add upstream https://github.com/sona-fast/sona.git   # first time only
-   git fetch upstream
-   git merge upstream/main
+   git fetch upstream tag <release-tag> --force
+   git merge <release-tag>
    git push origin main
    ```
 
-   (`gh repo sync <you>/<your-fork> --source sona-fast/sona` does the same as the
-   button, from the command line.)
+   `<release-tag>` is the newest release on the
+   [Releases page](https://github.com/sona-fast/sona/releases), such as `v1.6.2`.
+   The `--force` flag replaces any older local copy of that tag, so you merge the
+   release as published.
+
+   GitHub's **Sync fork** button and `gh repo sync` also update your fork, but
+   they follow the template's `main`, not its releases. `main` can include
+   changes that aren't in a release yet, so use them only if you accept updating
+   to unreleased code.
 
 2. **The deploy runs itself.** A push to `main` triggers
    [`deploy.yml`](.github/workflows/deploy.yml), which:
@@ -43,10 +50,12 @@ There are no manual post-update steps in the normal case.
 ## Seeing what changed
 
 The template is versioned with semver tags. To see what you're pulling in before
-you sync — or to catch up on what shipped since you last did — read the
+you update — or to catch up on what shipped since you last did — read the
 [Releases page](https://github.com/sona-fast/sona/releases); each release lists
-the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
-after a fetch gives the same view from a clone.
+the merged changes since the previous one. To get the same view from a clone,
+fetch both tags the same way as in step 1 and run
+`git log --oneline <current-tag>..<release-tag>`. `<current-tag>` is the release
+your fork runs now, and `<release-tag>` is the release you're about to merge.
 
 ## Nothing to do: two more themes (SONA-227)
 
@@ -242,7 +251,7 @@ That button exists because `deploy.yml` also listens for `workflow_dispatch`.
 Every sync *after* the first one is a normal push event and auto-deploys — you
 only need this once.
 
-> Doing the sync via `git push` (step 1's clone path) instead of the button
+> Doing the sync via `git push` (step 1) instead of the button
 > avoids the race entirely: a push you make always emits a push event.
 
 ## Prerequisites (set once, by `npm run setup`)

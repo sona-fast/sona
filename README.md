@@ -236,9 +236,9 @@ _(In the JA UI, Telegram/chat sticker content is always ステッカー — neve
 
 ### Keeping your fork up to date
 
-Pull template improvements into your fork with GitHub's **Sync fork** button (or
-`git merge` + push); your deploy workflow runs the tests, applies new migrations,
-and redeploys automatically. See [`UPDATING.md`](UPDATING.md) for the full guide,
+Merge the newest template release tag into your fork's `main` and push; your
+deploy workflow runs the tests, applies new migrations, and redeploys
+automatically. See [`UPDATING.md`](UPDATING.md) for the full guide,
 including the first-sync gotcha and conflict handling.
 
 ## Configuration model
