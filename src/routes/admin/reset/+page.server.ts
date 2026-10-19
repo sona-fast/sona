@@ -1,6 +1,6 @@
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { hashPassword } from '$lib/server/admin-auth';
 import { validateResetToken, validResetRow, PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
@@ -81,7 +81,9 @@ export const actions = {
 				.select(sql`SELECT 'adminPasswordHash', ${passwordHash} WHERE ${stillHeld}`)
 				.onConflictDoUpdate({ target: siteSettings.key, set: { value: passwordHash } }),
 			db.delete(sessions).where(stillHeld),
-			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
+			// Only the row just validated: a link minted meanwhile replaced it, and
+			// the operator still needs that one.
+			db.delete(siteSettings).where(and(eq(siteSettings.key, PASSWORD_RESET_SETTING), eq(siteSettings.value, row)))
 		]);
 		if (written.meta.changes === 0) {
 			return fail(400, { invalidToken: true, error: m.admin_reset_invalid() });

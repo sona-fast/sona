@@ -261,6 +261,34 @@ describe('reset action', () => {
 		expect(await db.select().from(sessions)).toHaveLength(2);
 	});
 
+	// A fresh link is minted between the last check and the write: the action
+	// refuses, and must not delete the row behind the link just mailed.
+	it('keeps a reset row that replaced the validated one just before the write', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
+		const freshRow = JSON.stringify({
+			tokenHash: await hashToken('freshly-minted-token'),
+			expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+			requestedAt: new Date().toISOString()
+		});
+		const d1 = platform.env.DB;
+		const batch = d1.batch.bind(d1);
+		d1.batch = (async (statements: Parameters<typeof d1.batch>[0]) => {
+			await setRawSetting(db, PASSWORD_RESET_SETTING, freshRow);
+			return batch(statements);
+		}) as typeof d1.batch;
+
+		const result = await actions.default(
+			resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+		);
+
+		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBe(freshRow);
+		expect(await verifyAdminPassword(db, undefined, OLD_PASSWORD)).toBe(true);
+		expect(await db.select().from(sessions)).toHaveLength(2);
+	});
+
 	it('rejects a link minted against a password that has since changed', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, 30 * 60 * 1000);

@@ -123,9 +123,13 @@ describe('password reset write under real D1', () => {
 
 		expect(v.outcome).toMatchObject({ kind: 'fail', status: 400, data: { invalidToken: true } });
 		expect(v.batches).toHaveLength(1);
-		const [upsert, sessionDelete] = v.batches[0];
+		const [upsert, sessionDelete, resetDelete] = v.batches[0];
 		expect(upsert.changes).toBe(0);
 		expect(sessionDelete.changes).toBe(0);
+		// The rebound row is a different link; consuming the validated one must
+		// not delete it.
+		expect(resetDelete.changes).toBe(0);
+		expect(v.resetRowPresent).toBe(true);
 		expect(v.hashChanged).toBe(false);
 		expect(v.oldPasswordWorks).toBe(true);
 		expect(v.newPasswordWorks).toBe(false);
