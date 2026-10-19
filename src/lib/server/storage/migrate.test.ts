@@ -212,11 +212,14 @@ describe('migrate copyOne bounds a misbehaving source', () => {
 				.run('t', 'silent', 'https://old.example/f/silent');
 
 			// A host that accepts the connection and never sends headers: the fetch
-			// settles only when its signal aborts, as a real fetch does.
+			// settles only when its signal aborts, as a real fetch does, with the
+			// runtime's own AbortError.
 			const fetchFn = vi.fn(
 				(_url: string, init?: RequestInit) =>
 					new Promise<Response>((_resolve, reject) => {
-						init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+						init?.signal?.addEventListener('abort', () =>
+							reject(new DOMException('The operation was aborted.', 'AbortError'))
+						);
 					})
 			) as unknown as typeof fetch;
 			const target = fakeTarget(async () => ({ url: 'https://cdn.example.com/x.png' }));
@@ -227,7 +230,7 @@ describe('migrate copyOne bounds a misbehaving source', () => {
 
 			expect(result.failed).toBe(1);
 			expect(result.migrated).toBe(0);
-			// The fetch's own "aborted" says neither what happened nor where.
+			// The fetch's own "The operation was aborted." says neither what happened nor where.
 			expect(result.items[0].error).toMatch(/timed out.*for https:\/\/old\.example\/f\/silent$/);
 		} finally {
 			vi.useRealTimers();
@@ -367,6 +370,50 @@ describe('migrate copyOne bounds a misbehaving source', () => {
 
 		expect(result.items[0]).toMatchObject({ status: 'failed', error: 'target write failed' });
 		expect(cancel).toHaveBeenCalled();
+	});
+
+	it("keeps the target's own error when it fails after the source timed out", async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, db } = makeDb();
+			sqlite
+				.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+				.run('t', 'quota', 'https://old.example/f/quota');
+
+			// A sized source that sends its head and then goes silent.
+			const fetchFn = vi.fn(async () => {
+				let sent = false;
+				const body = new ReadableStream<Uint8Array>({
+					async pull(c) {
+						if (!sent) {
+							sent = true;
+							c.enqueue(pngBytes(1024));
+						} else await new Promise(() => {});
+					}
+				});
+				return new Response(body, {
+					headers: { 'content-type': 'image/png', 'content-length': String(64 * 1024) }
+				});
+			}) as unknown as typeof fetch;
+			// The target asks for more (arming the idle timer, which fires at 15s),
+			// then fails for a reason of its own after the source has timed out.
+			const target = fakeTarget(async ({ body }) => {
+				const reader = (body as ReadableStream<Uint8Array>).getReader();
+				await reader.read();
+				reader.read().catch(() => {});
+				await new Promise((r) => setTimeout(r, 20_000));
+				throw new Error('target quota exceeded');
+			});
+
+			const pending = migrateImages({ db, fetchFn, target });
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await pending;
+
+			expect(result.failed).toBe(1);
+			expect(result.items[0].error).toBe('target quota exceeded');
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('does not count a pause in the target against the source', async () => {

@@ -210,8 +210,13 @@ async function copyOne(
 		return await copyFromSource(fetchFn, target, url, baseKey, idle);
 	} catch (e) {
 		// A fetch or target can wrap the abort in its own wording; the operator
-		// reading the failure list needs the timeout and the URL instead.
-		throw idle.signal.aborted ? idle.signal.reason : e;
+		// reading the failure list needs the timeout and the URL instead. Only an
+		// abort is relabeled: a target that fails on its own after the timer has
+		// fired keeps its own message.
+		const isAbort =
+			e === idle.signal.reason ||
+			(e instanceof DOMException && (e.name === 'AbortError' || e.name === 'TimeoutError'));
+		throw idle.signal.aborted && isAbort ? idle.signal.reason : e;
 	} finally {
 		idle.clear();
 	}
