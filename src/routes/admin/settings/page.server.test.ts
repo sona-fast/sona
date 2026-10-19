@@ -27,7 +27,7 @@ import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
 import { EARLY_ACCESS } from '$lib/early-access';
 import { hashPassword, hashToken, verifyAdminPassword } from '$lib/server/admin-auth';
-import { PASSWORD_RESET_SETTING, hashResetAddress, validateResetToken } from '$lib/server/password-reset';
+import { PASSWORD_RESET_SETTING, hashResetAddress, hashResetPassword, validateResetToken } from '$lib/server/password-reset';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -439,7 +439,8 @@ describe('settings — pending reset link is revoked', () => {
 		const d1 = makeD1(sqlite);
 		const db = drizzle(d1, { schema });
 		const platform = { env: { DB: d1 } } as unknown as App.Platform;
-		await setRawSetting(db, 'adminPasswordHash', await hashPassword(OLD_PASSWORD));
+		const oldHash = await hashPassword(OLD_PASSWORD);
+		await setRawSetting(db, 'adminPasswordHash', oldHash);
 		await setRawSetting(db, 'adminEmail', 'old@x.y');
 		await setRawSetting(
 			db,
@@ -448,7 +449,8 @@ describe('settings — pending reset link is revoked', () => {
 				tokenHash: await hashToken(TOKEN),
 				expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
 				requestedAt: new Date().toISOString(),
-				emailHash: await hashResetAddress('old@x.y')
+				emailHash: await hashResetAddress('old@x.y'),
+				pwHash: await hashResetPassword(oldHash)
 			})
 		);
 		expect(await validateResetToken(db, TOKEN)).toBe(true);

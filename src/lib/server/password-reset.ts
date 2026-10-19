@@ -41,12 +41,23 @@ interface StoredReset {
 	 * only so a row written before this field existed still parses; such a row
 	 * neither validates nor anchors the resend cooldown. */
 	emailHash?: string;
+	/** Hash of the admin password state when the link was minted (see
+	 * hashResetPassword). Same optionality as emailHash: a row without it never
+	 * validates. */
+	pwHash?: string;
 }
 
 /** Hash of a recovery address, normalized the way requestPasswordReset matches
  * it, so a link can be bound to the address it was mailed to. */
 export function hashResetAddress(email: string): Promise<string> {
 	return hashToken(email.trim().toLowerCase());
+}
+
+/** Hash of the stored adminPasswordHash ('' when none is set), so a link can be
+ * bound to the password it was minted against. Every password write changes the
+ * stored hash, so a link minted before one stops validating. */
+export function hashResetPassword(adminPasswordHash: string | null | undefined): Promise<string> {
+	return hashToken(adminPasswordHash ?? '');
 }
 
 function parseStored(raw: string | null): StoredReset | null {
@@ -107,15 +118,21 @@ export async function requestPasswordReset(
 
 	const now = Date.now();
 	const existing = parseStored(await getRawSetting(db, PASSWORD_RESET_SETTING));
+	// Capture the password state BEFORE sending: a password change that commits
+	// while Resend is answering must leave the row written afterwards dead.
+	const pwHash = await hashResetPassword(await getRawSetting(db, 'adminPasswordHash'));
 	// Cooldown: a still-fresh request means an email just went out — keep the
 	// existing (valid) link and skip a resend rather than flooding the inbox and
 	// invalidating the link the operator may already be following. Only a row
-	// bound to the current address counts: one with no emailHash, or a late write
-	// for a previous address, can never validate, so it mustn't block the send.
+	// bound to the current address and password counts: one missing either
+	// binding, or a late write from before a change, can never validate, so it
+	// mustn't block the send.
 	const emailHash = await hashResetAddress(adminEmail);
 	if (
 		existing?.emailHash &&
+		existing.pwHash &&
 		constantTimeEqual(emailHash, existing.emailHash) &&
+		constantTimeEqual(pwHash, existing.pwHash) &&
 		now - Date.parse(existing.requestedAt) < RESEND_COOLDOWN_MS
 	)
 		return;
@@ -160,7 +177,8 @@ export async function requestPasswordReset(
 		tokenHash: await hashToken(token),
 		expiresAt: new Date(now + RESET_TTL_MS).toISOString(),
 		requestedAt: new Date(now).toISOString(),
-		emailHash
+		emailHash,
+		pwHash
 	};
 	await setRawSetting(db, PASSWORD_RESET_SETTING, JSON.stringify(record));
 }
@@ -257,21 +275,34 @@ async function sendResetEmail(
 
 /**
  * Validate a token from /admin/reset against the stored row: it must exist, be
- * unexpired, be bound to the current recovery address, and match constant-time.
- * Read-only — the caller deletes the row on a successful reset.
+ * unexpired, be bound to the current recovery address and password, and match
+ * constant-time. Read-only — the caller deletes the row on a successful reset.
  */
 export async function validateResetToken(db: Database, token: string): Promise<boolean> {
-	if (!token) return false;
-	const rows = await getRawSettings(db, [PASSWORD_RESET_SETTING, 'adminEmail']);
-	const stored = parseStored(rows[PASSWORD_RESET_SETTING]);
-	if (!stored) return false;
-	if (Date.now() > Date.parse(stored.expiresAt)) return false;
+	return (await validResetRow(db, token)) !== null;
+}
+
+/** validateResetToken, but returns the raw stored row it validated (null when
+ * invalid), so a caller can make its write conditional on that exact row still
+ * being there. */
+export async function validResetRow(db: Database, token: string): Promise<string | null> {
+	if (!token) return null;
+	const rows = await getRawSettings(db, [PASSWORD_RESET_SETTING, 'adminEmail', 'adminPasswordHash']);
+	const raw = rows[PASSWORD_RESET_SETTING];
+	const stored = parseStored(raw);
+	if (!raw || !stored) return null;
+	if (Date.now() > Date.parse(stored.expiresAt)) return null;
 	// Changing the recovery address deletes the row, but a send still in flight
 	// at that moment writes its row afterwards. Binding the link to the address it
 	// was mailed to keeps that late row dead once recovery has moved elsewhere.
 	const adminEmail = rows.adminEmail?.trim();
-	if (!stored.emailHash || !adminEmail) return false;
-	if (!constantTimeEqual(await hashResetAddress(adminEmail), stored.emailHash)) return false;
+	if (!stored.emailHash || !adminEmail) return null;
+	if (!constantTimeEqual(await hashResetAddress(adminEmail), stored.emailHash)) return null;
+	// Same for a password change (settings, a reset, the CLI) that commits while
+	// a send is in flight: the late row is bound to the password it was minted
+	// against, which no longer matches.
+	if (!stored.pwHash) return null;
+	if (!constantTimeEqual(await hashResetPassword(rows.adminPasswordHash), stored.pwHash)) return null;
 	const providedHash = await hashToken(token);
-	return constantTimeEqual(providedHash, stored.tokenHash);
+	return constantTimeEqual(providedHash, stored.tokenHash) ? raw : null;
 }

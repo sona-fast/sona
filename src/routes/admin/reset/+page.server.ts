@@ -1,9 +1,9 @@
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { hashPassword } from '$lib/server/admin-auth';
-import { validateResetToken, PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
+import { validateResetToken, validResetRow, PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
 import { siteSettings, sessions } from '$lib/server/db/schema';
 import { RESET_TOKEN_COOKIE } from '$lib/config';
 import * as m from '$lib/paraglide/messages';
@@ -68,17 +68,24 @@ export const actions = {
 		const passwordHash = await hashPassword(password);
 		// Hashing is slow enough for a password or recovery-address change to revoke
 		// the link meanwhile; check again so the reset can't write over that change.
-		if (!(await validateResetToken(db, token))) {
+		const row = await validResetRow(db, token);
+		if (!row) {
 			return fail(400, { invalidToken: true, error: m.admin_reset_invalid() });
 		}
-		await db.batch([
+		// A revoke can still commit between that read and the batch, so the writes
+		// only apply while the exact row just validated is still stored.
+		const stillHeld = sql`EXISTS (SELECT 1 FROM site_settings WHERE key = ${PASSWORD_RESET_SETTING} AND value = ${row})`;
+		const [written] = await db.batch([
 			db
 				.insert(siteSettings)
-				.values({ key: 'adminPasswordHash', value: passwordHash })
+				.select(sql`SELECT 'adminPasswordHash', ${passwordHash} WHERE ${stillHeld}`)
 				.onConflictDoUpdate({ target: siteSettings.key, set: { value: passwordHash } }),
-			db.delete(sessions),
+			db.delete(sessions).where(stillHeld),
 			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
 		]);
+		if (written.meta.changes === 0) {
+			return fail(400, { invalidToken: true, error: m.admin_reset_invalid() });
+		}
 
 		cookies.delete(RESET_TOKEN_COOKIE, { path: '/admin/reset' });
 		// No auto-login — send them to sign in with the new password.
