@@ -404,7 +404,8 @@ release that breaks this says so in its notes.
 If an update damaged data, D1 Time Travel can restore the whole database to any
 point in the last 30 days on Workers Paid, or the last 7 days on the Free plan.
 If your database dates from D1's alpha, Time Travel isn't available for it and
-the restore command fails, so you can't restore it this way.
+the restore command fails, so you can't restore it this way. To check, run
+`npx wrangler d1 info <database>`; an alpha database shows `version: alpha`.
 
 Before you restore, disable the orphan cleanup: in your fork on GitHub, go to
 **Actions**, select **Storage orphan cleanup**, click the **Show workflow
