@@ -479,6 +479,7 @@ describe('settings — pending reset link is revoked', () => {
 		);
 
 		expect(result).not.toMatchObject({ status: expect.any(Number) });
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
 		expect(await validateResetToken(db, TOKEN)).toBe(false);
 		// Only the reset row goes: a delete missing its key filter would also wipe
 		// the new hash and the recovery address, and still void the link.
