@@ -67,7 +67,9 @@ const PARENT_TABLES = parentTables();
 
 /**
  * A migration's statements with comments blanked and string literals emptied,
- * so prose can't trip the guard and `DROP/**\/TABLE` can't slip past it.
+ * so prose can't trip the guard and `DROP/**\/TABLE` can't slip past it. A
+ * single-quoted bare word is kept: SQLite also reads 'images' as a table name
+ * after DELETE FROM and the like, and a lone word can't spell a statement.
  * Quoted identifiers (`x`, "x", [x]) are matched first and kept as written, so
  * a quote or `--` inside one can't swallow the code after it. Blanking runs
  * before the split, so a breakpoint marker inside a literal or comment can't
@@ -78,7 +80,15 @@ function statements(sql: string): string[] {
 		.replace(
 			/`(?:[^`]|``)*`|"(?:[^"]|"")*"|\[[^\]]*\]|'(?:[^']|'')*'|--> statement-breakpoint|--[^\n]*|\/\*[\s\S]*?\*\//g,
 			(m) =>
-				m === '--> statement-breakpoint' ? m : m[0] === "'" ? "''" : m[0] === '-' || m[0] === '/' ? ' ' : m
+				m === '--> statement-breakpoint'
+					? m
+					: m[0] === "'"
+						? /^'\w+'$/.test(m)
+							? m
+							: "''"
+						: m[0] === '-' || m[0] === '/'
+							? ' '
+							: m
 		)
 		.split('--> statement-breakpoint')
 		.map((s) => s.trim());
@@ -90,9 +100,9 @@ function rebuildStatements(sql: string): string[] {
 }
 
 /** A table name, bare or quoted, with an optional schema prefix; group 1 is the name. */
-const TABLE = String.raw`(?:(?:\w+|\x60[^\x60]*\x60|"[^"]*"|\[[^\]]*\])\s*\.\s*)?[\x60"\[]?(\w+)[\x60"\]]?`;
+const TABLE = String.raw`(?:(?:\w+|\x60[^\x60]*\x60|"[^"]*"|'\w+'|\[[^\]]*\])\s*\.\s*)?[\x60"'\[]?(\w+)[\x60"'\]]?`;
 const ROW_DELETE = new RegExp(
-	String.raw`\b(?:DELETE\s+FROM|REPLACE\s+INTO|UPDATE\s+OR\s+REPLACE)(?:\s+|\s*(?=[\x60"\[]))` + TABLE,
+	String.raw`\b(?:DELETE\s+FROM|REPLACE\s+INTO|UPDATE\s+OR\s+REPLACE)(?:\s+|\s*(?=[\x60"'\[]))` + TABLE,
 	'gi'
 );
 
@@ -155,6 +165,12 @@ describe('migration rebuild guard', () => {
 		expect(parentDeleteStatements('DELETE FROM"images";')).toHaveLength(1);
 		expect(parentDeleteStatements('DELETE FROM[images];')).toHaveLength(1);
 		expect(parentDeleteStatements('REPLACE INTO`images` (`id`) VALUES (1);')).toHaveLength(1);
+		// SQLite also takes a single-quoted string as a table name here.
+		expect(parentDeleteStatements("DELETE FROM 'images';")).toHaveLength(1);
+		expect(parentDeleteStatements("DELETE FROM'images';")).toHaveLength(1);
+		expect(parentDeleteStatements("REPLACE INTO 'images' ('id') VALUES (1);")).toHaveLength(1);
+		expect(parentDeleteStatements("UPDATE OR REPLACE 'characters' SET name = 'x';")).toHaveLength(1);
+		expect(parentDeleteStatements("DELETE FROM 'main'.'images';")).toHaveLength(1);
 		expect(
 			parentDeleteStatements('DELETE FROM `image_tags`;\n--> statement-breakpoint\nDELETE FROM `images`;')
 		).toHaveLength(1);
@@ -166,6 +182,7 @@ describe('migration rebuild guard', () => {
 		expect(parentDeleteStatements('INSERT INTO `images` (`id`) VALUES (1);')).toEqual([]);
 		expect(parentDeleteStatements("UPDATE `characters` SET `name` = replace(`name`, 'a', 'b');")).toEqual([]);
 		expect(parentDeleteStatements("UPDATE `site_config` SET `note` = 'delete from images';")).toEqual([]);
+		expect(parentDeleteStatements("UPDATE `site_config` SET `note` = 'images';")).toEqual([]);
 		expect(parentDeleteStatements('-- delete from images\nCREATE INDEX `z` ON `images` (`id`);')).toEqual([]);
 	});
 
