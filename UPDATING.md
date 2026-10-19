@@ -371,8 +371,9 @@ git push origin main
 ```
 
 `<last-good>` is the commit of the Pages deployment you rolled back to.
-Untracked files stay as they are. This also undoes the changes from any commits
-made after `<last-good>`. Reverting the rollback brings them back.
+Untracked files stay as they are. Files that the bad update added are removed.
+This also undoes the changes from any commits made after `<last-good>`.
+Reverting the rollback brings them back.
 
 Alternatively, leave `main` as it is, don't push to it until a release that
 fixes the problem is out, and then update as usual.
@@ -384,7 +385,7 @@ both commits in place:
 ```sh
 git switch main
 git pull origin main
-git fetch upstream --tags
+git fetch upstream tag <release-tag> --force
 git revert <rollback-commit>
 git merge <release-tag>
 git push origin main
@@ -392,10 +393,9 @@ git push origin main
 
 `<release-tag>` is the tag of the release that fixes the problem, such as
 `v1.6.2`, from the [Releases page](https://github.com/sona-fast/sona/releases).
-Merging the tag deploys exactly that release. `<rollback-commit>` is the commit
-the restore made. Without the
-revert, Git treats the rolled-back changes as already merged and leaves them out
-of the update. Every push to `main` deploys, so if you push the revert by
+Merging the tag updates your fork to that release. `<rollback-commit>` is the
+commit the restore made. Without the revert, Git treats the rolled-back changes
+as already merged and leaves them out of the update. Every push to `main` deploys, so if you push the revert by
 itself, it redeploys the broken version, and reapplies its migrations if you
 restored the database. **Sync fork** can't add the revert and the update in one
 push, so you can't use it for this one update. If your clone has no `upstream`
@@ -409,8 +409,11 @@ release that breaks this says so in its notes.
 If an update damaged data, D1 Time Travel can restore the whole database to any
 point in the last 30 days on Workers Paid, or the last 7 days on the Free plan.
 If your database dates from D1's alpha, Time Travel isn't available for it and
-the restore command fails, so you can't restore it this way. To check, run
-`npx wrangler d1 info <database>`; an alpha database shows `version: alpha`.
+the restore command fails, so you can't restore it this way. To check, sign in
+as described below and run `npx wrangler d1 time-travel info <database>`. This
+command only reads the database. If Time Travel works, it prints the current
+bookmark, such as `The current bookmark is '<bookmark>'`. For an alpha database,
+it fails with `Time travel is not available for alpha D1 databases`.
 
 Before you restore, disable the orphan cleanup: in your fork on GitHub, go to
 **Actions**, select **Storage orphan cleanup**, click the **Show workflow
@@ -441,10 +444,17 @@ npx wrangler d1 time-travel restore <database> --timestamp=<time>
 
 - `<database>` is your D1 database's name: the `D1_DATABASE_NAME` repo
   variable, or `sona-db` if you never set it.
-- `<time>` is an RFC 3339 timestamp, such as `2026-10-17T08:00:00Z`, from
-  before the bad deploy's **Deploy to Cloudflare Pages** workflow run started.
-  Use the run's start time in **Actions**, not the Pages deployment time,
-  because the workflow runs migrations before it deploys.
+- `<time>` is an RFC 3339 timestamp from a minute or two before the bad
+  deploy's **Deploy to Cloudflare Pages** workflow run started. Use the run's
+  start time in **Actions**, not the Pages deployment time, because the
+  workflow runs migrations before it deploys. **Actions** shows that time in
+  your local time zone, so include your UTC offset, such as
+  `2026-10-17T08:00:00+02:00`, or convert the time to UTC, such as
+  `2026-10-17T06:00:00Z`.
+
+Pair the restore with the code rollback above: roll Pages back to a deployment
+from before `<time>`, and roll back `main` to that deployment's commit. That
+way, the code that runs matches the restored schema.
 
 The restore replaces the whole database: everything written after that time
 disappears from it. It also rolls back the `schema_migrations` table, so the
