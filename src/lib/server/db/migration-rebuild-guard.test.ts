@@ -56,7 +56,7 @@ function parentTables(): Set<string> {
 	for (const table of Object.values(snapshot.tables)) {
 		for (const fk of Object.values(table.foreignKeys ?? {})) {
 			if (['cascade', 'set null', 'set default'].includes(fk.onDelete?.toLowerCase() ?? '')) {
-				parents.add(fk.tableTo);
+				parents.add(fk.tableTo.toLowerCase());
 			}
 		}
 	}
@@ -92,7 +92,7 @@ function rebuildStatements(sql: string): string[] {
 /** A table name, bare or quoted, with an optional schema prefix; group 1 is the name. */
 const TABLE = String.raw`(?:(?:\w+|\x60[^\x60]*\x60|"[^"]*"|\[[^\]]*\])\s*\.\s*)?[\x60"\[]?(\w+)[\x60"\]]?`;
 const ROW_DELETE = new RegExp(
-	String.raw`\b(?:DELETE\s+FROM|REPLACE\s+INTO|UPDATE\s+OR\s+REPLACE)\s+` + TABLE,
+	String.raw`\b(?:DELETE\s+FROM|REPLACE\s+INTO|UPDATE\s+OR\s+REPLACE)(?:\s+|\s*(?=[\x60"\[]))` + TABLE,
 	'gi'
 );
 
@@ -150,6 +150,11 @@ describe('migration rebuild guard', () => {
 		expect(parentDeleteStatements('REPLACE INTO `characters` (`id`, `name`) VALUES (1, \'x\');')).toHaveLength(1);
 		expect(parentDeleteStatements('INSERT OR REPLACE INTO "characters" ("id") VALUES (1);')).toHaveLength(1);
 		expect(parentDeleteStatements('UPDATE OR REPLACE [characters] SET name = \'x\';')).toHaveLength(1);
+		// SQLite needs no space before a quoted table name.
+		expect(parentDeleteStatements('DELETE FROM`images`;')).toHaveLength(1);
+		expect(parentDeleteStatements('DELETE FROM"images";')).toHaveLength(1);
+		expect(parentDeleteStatements('DELETE FROM[images];')).toHaveLength(1);
+		expect(parentDeleteStatements('REPLACE INTO`images` (`id`) VALUES (1);')).toHaveLength(1);
 		expect(
 			parentDeleteStatements('DELETE FROM `image_tags`;\n--> statement-breakpoint\nDELETE FROM `images`;')
 		).toHaveLength(1);
