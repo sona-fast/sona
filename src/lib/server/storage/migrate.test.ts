@@ -369,6 +369,57 @@ describe('migrate copyOne bounds a misbehaving source', () => {
 		expect(cancel).toHaveBeenCalled();
 	});
 
+	it('does not count a pause in the target against the source', async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, db } = makeDb();
+			sqlite
+				.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+				.run('t', 'paused', 'https://old.example/f/paused');
+
+			// A sized source that sends its head, then holds the tail until the
+			// target has finished pausing: any read ahead of the target would
+			// sit on the silent source past the 15s idle bound.
+			let release = () => {};
+			const gate = new Promise<void>((r) => (release = r));
+			const head = pngBytes(1024);
+			const tail = new Uint8Array(1024);
+			let sent = 0;
+			const fetchFn = vi.fn(async () => {
+				const body = new ReadableStream<Uint8Array>({
+					async pull(c) {
+						if (sent === 0) c.enqueue(head);
+						else if (sent === 1) {
+							await gate;
+							c.enqueue(tail);
+						} else c.close();
+						sent++;
+					}
+				});
+				return new Response(body, {
+					headers: { 'content-type': 'image/png', 'content-length': String(head.length + tail.length) }
+				});
+			}) as unknown as typeof fetch;
+			const target = fakeTarget(async ({ body }) => {
+				const reader = (body as ReadableStream<Uint8Array>).getReader();
+				await reader.read();
+				await new Promise((r) => setTimeout(r, 30_000));
+				release();
+				while (!(await reader.read()).done);
+				return { url: 'https://cdn.example.com/x.png' };
+			});
+
+			const pending = migrateImages({ db, fetchFn, target });
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await pending;
+
+			expect(result.items[0].error).toBeUndefined();
+			expect(result.migrated).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('fails the row without copying when the declared length is over the buffer cap', async () => {
 		const { sqlite, db } = makeDb();
 		sqlite

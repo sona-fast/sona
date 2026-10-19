@@ -342,5 +342,7 @@ function prependChunks(
 		cancel(reason) {
 			return reader.cancel(reason);
 		}
-	});
+		// No read-ahead: pull only when the provider asks, so a pause in the
+		// provider never turns into a wait on the idle-watched source.
+	}, { highWaterMark: 0 });
 }

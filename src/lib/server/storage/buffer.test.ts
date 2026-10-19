@@ -116,4 +116,23 @@ describe('idleTimeout', () => {
 		expect((await second).value).toEqual(new Uint8Array([2]));
 		idle.clear();
 	});
+
+	it('does not read ahead of the consumer while it pauses', async () => {
+		vi.useFakeTimers();
+		const idle = idleTimeout(1_000, () => new Error('quiet'));
+		// One chunk, then a source that never sends again.
+		const reader = idle.watch(drip(1, 10, true)).getReader();
+		const first = reader.read();
+		await vi.advanceTimersByTimeAsync(20);
+		expect((await first).value).toEqual(new Uint8Array([1]));
+		// The consumer pauses far past the timeout without asking for more, so
+		// nothing is waiting on the silent source and nothing may time out.
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(idle.signal.aborted).toBe(false);
+		// Once it asks, the silent source does count.
+		const second = expect(reader.read()).rejects.toThrow('quiet');
+		await vi.advanceTimersByTimeAsync(1_001);
+		await second;
+		expect(idle.signal.aborted).toBe(true);
+	});
 });

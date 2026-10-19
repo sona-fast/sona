@@ -72,7 +72,10 @@ export async function bufferStream(
  * timer starts at once (covering the wait for headers), and `watch` re-arms it
  * on every read of the body, so a slow source that keeps sending finishes
  * while one that stops sending fails. It only runs while waiting on the
- * source: a slow consumer between reads never trips it.
+ * source: a slow consumer between reads never trips it. The watched body has
+ * a high-water mark of 0, so it reads the source only when the consumer asks;
+ * the default of 1 would read ahead and arm the timer while the consumer
+ * pauses.
  *
  * When it fires, `signal` aborts with `reason()` and a watched body errors
  * with that same reason, so the caller sees one message whichever wait it hit.
@@ -130,7 +133,7 @@ export function idleTimeout(
 					clear();
 					return reader.cancel(r);
 				}
-			});
+			}, { highWaterMark: 0 });
 		}
 	};
 }
