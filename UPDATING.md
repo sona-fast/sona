@@ -444,11 +444,12 @@ npx wrangler d1 time-travel restore <database> --timestamp=<time>
 
 - `<database>` is your D1 database's name: the `D1_DATABASE_NAME` repo
   variable, or `sona-db` if you never set it.
-- `<time>` is an RFC 3339 timestamp from a minute or two before the bad
-  deploy's **Deploy to Cloudflare Pages** workflow run started. Use the run's
-  start time in **Actions**, not the Pages deployment time, because the
-  workflow runs migrations before it deploys. **Actions** shows that time in
-  your local time zone, so include your UTC offset, such as
+- `<time>` is an RFC 3339 timestamp after the previous good deploy's
+  **Deploy to Cloudflare Pages** workflow run finished and before the bad
+  deploy's run started. Use both runs' times in **Actions**, not the Pages
+  deployment times, because the workflow runs migrations before it deploys.
+  **Actions** shows these times in your local time zone, so include your UTC
+  offset, such as
   `2026-10-17T08:00:00+02:00`, or convert the time to UTC, such as
   `2026-10-17T06:00:00Z`.
 
