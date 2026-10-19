@@ -369,8 +369,8 @@ git push origin main
 ```
 
 `<last-good>` is the commit of the Pages deployment you rolled back to.
-Untracked files stay as they are. This also removes any commits made after
-`<last-good>`. They come back when you revert the rollback.
+Untracked files stay as they are. This also undoes the changes from any commits
+made after `<last-good>`. Reverting the rollback brings them back.
 
 Alternatively, leave `main` as it is, don't push to it until a release that
 fixes the problem is out, and then update as usual.
@@ -403,6 +403,8 @@ release that breaks this says so in its notes.
 
 If an update damaged data, D1 Time Travel can restore the whole database to any
 point in the last 30 days on Workers Paid, or the last 7 days on the Free plan.
+If your database dates from D1's alpha, Time Travel isn't available for it and
+the restore command fails, so you can't restore it this way.
 
 Before you restore, disable the orphan cleanup: in your fork on GitHub, go to
 **Actions**, select **Storage orphan cleanup**, click the **Show workflow
