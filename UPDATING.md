@@ -411,6 +411,19 @@ removes the database rows for anything uploaded after the restore point, and the
 weekly sweep then deletes those files from storage (R2 or UploadThing)
 permanently.
 
+Disabling the workflow doesn't stop a run that has already started. On the
+**Storage orphan cleanup** page in **Actions**, check for a run that is in
+progress or queued. If you find one, open it, click **Cancel workflow**, and
+wait until the run shows as cancelled before you restore.
+
+Two buttons in your site's admin delete the same files, so don't use them until
+you've re-added the uploads you want to keep:
+
+- **Clear Cache**, in the **Clear upload cache** card under **Danger Zone** on
+  the admin **Settings** page.
+- **Delete original files from UploadThing**, on the **Storage Migration**
+  page.
+
 To restore, sign in with `npx wrangler login` as a user on the Cloudflare
 account that owns the database, then run:
 
@@ -429,6 +442,12 @@ The restore replaces the whole database: everything written after that time
 disappears from it. It also rolls back the `schema_migrations` table, so the
 next deploy applies those migrations again. Media that you deleted after the
 restore point stays deleted, so some restored rows can point at missing files.
+
+Because the next deploy reruns those migrations, it can rerun a migration from
+the bad release that damaged your data. If you restored the database, read the
+notes of the release that fixes the problem before you adopt it. They say
+whether a migration from the bad release is safe to run again, or what to do
+instead.
 
 The command prints a bookmark for the database's state before the restore. Save
 it. To undo the restore, run the same command with `--bookmark=<bookmark>`
