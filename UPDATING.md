@@ -30,7 +30,9 @@ There are no manual post-update steps in the normal case.
    GitHub's **Sync fork** button and `gh repo sync` also update your fork, but
    they follow the template's `main`, not its releases. `main` can include
    changes that aren't in a release yet, so use them only if you accept updating
-   to unreleased code.
+   to unreleased code. A **Sync fork** update might not start a deploy, so check
+   **Actions** afterwards and, if no **Deploy to Cloudflare Pages** run appeared,
+   start one there with **Run workflow**.
 
 2. **The deploy runs itself.** A push to `main` triggers
    [`deploy.yml`](.github/workflows/deploy.yml), which:
@@ -233,26 +235,24 @@ Two knock-on effects worth knowing:
 
 ## First sync only: check the Actions tab
 
-There is exactly one gotcha, and it only bites the **first time** you ever sync a
-fresh fork.
+There is one gotcha, and it only affects the **first time** you update a fresh
+fork. Check for it whichever way you update, by merging a release tag (step 1)
+or with **Sync fork**.
 
-GitHub registers a fork's workflows on that first sync, and the push event can
-race that registration — so the very first **Sync fork** may fast-forward your
-`main` **without** triggering a deploy. Your code is updated but your live site
-and D1 schema are not.
+GitHub doesn't run workflows in a fork until you enable them on the fork's
+**Actions** tab, so the first update can move your `main` **without**
+triggering a deploy. Your code is updated, but your live site and D1 schema are
+not.
 
-**What to do:** after your first sync, open the **Actions** tab. If no
+**What to do:** after your first update, open the **Actions** tab. If no
 "Deploy to Cloudflare Pages" run appeared, trigger it by hand:
 
 > Actions → **Deploy to Cloudflare Pages** → **Run workflow** → branch `main` →
 > **Run workflow**.
 
 That button exists because `deploy.yml` also listens for `workflow_dispatch`.
-Every sync *after* the first one is a normal push event and auto-deploys — you
-only need this once.
-
-> Doing the sync via `git push` (step 1) instead of the button
-> avoids the race entirely: a push you make always emits a push event.
+Once the fork's workflows are enabled, a push to `main` deploys on its own, so
+you only need this check once.
 
 ## Prerequisites (set once, by `npm run setup`)
 
