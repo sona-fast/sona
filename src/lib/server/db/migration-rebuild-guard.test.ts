@@ -16,41 +16,94 @@ import Database from 'better-sqlite3';
 // DROP is SQLite's behavior, shown by the test below; it hasn't been run on D1
 // itself yet.
 //
-// So a new migration may not rebuild a table. One that genuinely has to must
-// save and restore its children's rows, be proven on a local D1, and then be
-// added here by name. The guard covers table rebuilds and drops only: a DELETE
-// or REPLACE on a parent table fires the same cascades and needs the same
-// review (0019 deletes rows on purpose).
+// A row DELETE, REPLACE INTO, INSERT OR REPLACE, or UPDATE OR REPLACE on a
+// parent table (one that another table references with ON DELETE CASCADE,
+// SET NULL, or SET DEFAULT) fires the same child actions, row by row.
+//
+// So a new migration may not rebuild or drop a table, or delete or replace
+// rows in a parent table. One that genuinely has to must save and restore its
+// children's rows (or show it only removes rows nothing should keep), be
+// proven on a local D1, and then be added below by name.
 const REVIEWED_REBUILDS = new Set([
 	// Rebuilt `stickers` (parent of sticker_emojis). Arrived with 0012 in the
 	// baseline commit, so every fork ran it against empty tables.
 	'0013_nullable_sticker_artist.sql'
 ]);
+const REVIEWED_ROW_DELETES = new Set([
+	// Deletes duplicate `stickers` rows on purpose, after deleting their
+	// sticker_emojis itself, so the cascade has nothing left to remove.
+	'0019_stickers_dedupe_unique_id.sql'
+]);
 
 const DRIZZLE_DIR = new URL('../../../../drizzle/', import.meta.url);
+const META_DIR = new URL('meta/', DRIZZLE_DIR);
 
 /**
- * A statement with its comments blanked and its string literals emptied, so
- * prose can't trip the guard and `DROP/**\/TABLE` can't slip past it. Quoted
- * identifiers (`x`, "x", [x]) are matched first and kept as written, so a quote
- * or `--` inside one can't swallow the code after it.
+ * The tables whose row deletes change other tables: every `tableTo` of a
+ * foreign key with a cascade, set null, or set default ON DELETE action, read
+ * from the latest drizzle snapshot.
  */
-function code(stmt: string): string {
-	return stmt.replace(
-		/`(?:[^`]|``)*`|"(?:[^"]|"")*"|\[[^\]]*\]|'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g,
-		(m) => (m[0] === "'" ? "''" : m[0] === '-' || m[0] === '/' ? ' ' : m)
-	);
+function parentTables(): Set<string> {
+	const latest = readdirSync(META_DIR)
+		.filter((f) => /^\d+_snapshot\.json$/.test(f))
+		.sort()
+		.at(-1);
+	if (!latest) throw new Error('no drizzle snapshot in drizzle/meta');
+	const snapshot = JSON.parse(readFileSync(new URL(latest, META_DIR), 'utf8')) as {
+		tables: Record<string, { foreignKeys?: Record<string, { tableTo: string; onDelete?: string }> }>;
+	};
+	const parents = new Set<string>();
+	for (const table of Object.values(snapshot.tables)) {
+		for (const fk of Object.values(table.foreignKeys ?? {})) {
+			if (['cascade', 'set null', 'set default'].includes(fk.onDelete?.toLowerCase() ?? '')) {
+				parents.add(fk.tableTo);
+			}
+		}
+	}
+	return parents;
+}
+
+const PARENT_TABLES = parentTables();
+
+/**
+ * A migration's statements with comments blanked and string literals emptied,
+ * so prose can't trip the guard and `DROP/**\/TABLE` can't slip past it.
+ * Quoted identifiers (`x`, "x", [x]) are matched first and kept as written, so
+ * a quote or `--` inside one can't swallow the code after it. Blanking runs
+ * before the split, so a breakpoint marker inside a literal or comment can't
+ * cut a statement in two; the real marker is kept to split on.
+ */
+function statements(sql: string): string[] {
+	return sql
+		.replace(
+			/`(?:[^`]|``)*`|"(?:[^"]|"")*"|\[[^\]]*\]|'(?:[^']|'')*'|--> statement-breakpoint|--[^\n]*|\/\*[\s\S]*?\*\//g,
+			(m) =>
+				m === '--> statement-breakpoint' ? m : m[0] === "'" ? "''" : m[0] === '-' || m[0] === '/' ? ' ' : m
+		)
+		.split('--> statement-breakpoint')
+		.map((s) => s.trim());
 }
 
 /** The statements in a migration that rebuild or drop a table. */
 function rebuildStatements(sql: string): string[] {
-	return sql
-		.split('--> statement-breakpoint')
-		.map((s) => s.trim())
-		.filter((s) => {
-			const c = code(s);
-			return /\b__new_\w+/i.test(c) || /\bDROP\s+TABLE\b/i.test(c);
-		});
+	return statements(sql).filter((c) => /\b__new_\w+/i.test(c) || /\bDROP\s+TABLE\b/i.test(c));
+}
+
+/** A table name, bare or quoted, with an optional schema prefix; group 1 is the name. */
+const TABLE = String.raw`(?:(?:\w+|\x60[^\x60]*\x60|"[^"]*"|\[[^\]]*\])\s*\.\s*)?[\x60"\[]?(\w+)[\x60"\]]?`;
+const ROW_DELETE = new RegExp(
+	String.raw`\b(?:DELETE\s+FROM|REPLACE\s+INTO|UPDATE\s+OR\s+REPLACE)\s+` + TABLE,
+	'gi'
+);
+
+/**
+ * The statements in a migration that delete or replace rows in a parent table.
+ * `REPLACE\s+INTO` also matches `INSERT OR REPLACE INTO`.
+ */
+function parentDeleteStatements(sql: string): string[] {
+	return statements(sql).filter((c) =>
+		[...c.matchAll(ROW_DELETE)].some((m) => PARENT_TABLES.has(m[1].toLowerCase()))
+	);
 }
 
 describe('migration rebuild guard', () => {
@@ -65,9 +118,58 @@ describe('migration rebuild guard', () => {
 		expect(unreviewed, 'see the comment at the top of this file').toEqual([]);
 	});
 
-	it('every reviewed rebuild still names a migration in drizzle/', () => {
+	it('no migration deletes or replaces parent-table rows unless it was reviewed for FK actions', () => {
+		const files = readdirSync(DRIZZLE_DIR).filter((f) => f.endsWith('.sql'));
+		expect(files.length).toBeGreaterThan(0);
+
+		const unreviewed = files
+			.filter((f) => !REVIEWED_ROW_DELETES.has(f))
+			.filter((f) => parentDeleteStatements(readFileSync(new URL(f, DRIZZLE_DIR), 'utf8')).length > 0);
+
+		expect(unreviewed, 'see the comment at the top of this file').toEqual([]);
+	});
+
+	it('every reviewed migration still names a file in drizzle/ and still trips its check', () => {
 		const files = new Set(readdirSync(DRIZZLE_DIR));
-		expect([...REVIEWED_REBUILDS].filter((f) => !files.has(f))).toEqual([]);
+		expect([...REVIEWED_REBUILDS, ...REVIEWED_ROW_DELETES].filter((f) => !files.has(f))).toEqual([]);
+		const sql = (f: string) => readFileSync(new URL(f, DRIZZLE_DIR), 'utf8');
+		expect([...REVIEWED_REBUILDS].filter((f) => rebuildStatements(sql(f)).length === 0)).toEqual([]);
+		expect([...REVIEWED_ROW_DELETES].filter((f) => parentDeleteStatements(sql(f)).length === 0)).toEqual([]);
+	});
+
+	it('derives the parent tables from the schema snapshot', () => {
+		// A parsing break must not empty the set and pass every migration.
+		expect(PARENT_TABLES).toContain('images');
+		expect(PARENT_TABLES).toContain('characters');
+		expect(PARENT_TABLES).not.toContain('image_tags');
+	});
+
+	it('flags row deletes and replaces on a parent table', () => {
+		expect(parentDeleteStatements('DELETE FROM `images` WHERE `id` = 1;')).toHaveLength(1);
+		expect(parentDeleteStatements('delete from main.images;')).toHaveLength(1);
+		expect(parentDeleteStatements('REPLACE INTO `characters` (`id`, `name`) VALUES (1, \'x\');')).toHaveLength(1);
+		expect(parentDeleteStatements('INSERT OR REPLACE INTO "characters" ("id") VALUES (1);')).toHaveLength(1);
+		expect(parentDeleteStatements('UPDATE OR REPLACE [characters] SET name = \'x\';')).toHaveLength(1);
+		expect(
+			parentDeleteStatements('DELETE FROM `image_tags`;\n--> statement-breakpoint\nDELETE FROM `images`;')
+		).toHaveLength(1);
+	});
+
+	it('leaves leaf tables and plain writes on parents alone', () => {
+		expect(parentDeleteStatements('DELETE FROM `image_tags` WHERE `tag_id` = 1;')).toEqual([]);
+		expect(parentDeleteStatements('DELETE FROM `sessions`;')).toEqual([]);
+		expect(parentDeleteStatements('INSERT INTO `images` (`id`) VALUES (1);')).toEqual([]);
+		expect(parentDeleteStatements("UPDATE `characters` SET `name` = replace(`name`, 'a', 'b');")).toEqual([]);
+		expect(parentDeleteStatements("UPDATE `site_config` SET `note` = 'delete from images';")).toEqual([]);
+		expect(parentDeleteStatements('-- delete from images\nCREATE INDEX `z` ON `images` (`id`);')).toEqual([]);
+	});
+
+	it('does not split on a breakpoint marker inside a literal or comment', () => {
+		expect(rebuildStatements("SELECT '--> statement-breakpoint'; DROP TABLE images; SELECT 'x';")).toHaveLength(1);
+		expect(rebuildStatements('/* --> statement-breakpoint */ DROP TABLE images; SELECT 1;')).toHaveLength(1);
+		expect(
+			parentDeleteStatements("SELECT '--> statement-breakpoint'; DELETE FROM images; SELECT 'x';")
+		).toHaveLength(1);
 	});
 
 	it('catches the rebuild drizzle-kit generates, and the data loss it causes', () => {
