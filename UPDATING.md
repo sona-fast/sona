@@ -382,13 +382,16 @@ both commits in place:
 ```sh
 git switch main
 git pull origin main
-git fetch upstream
+git fetch upstream --tags
 git revert <rollback-commit>
-git merge upstream/main
+git merge <release-tag>
 git push origin main
 ```
 
-`<rollback-commit>` is the commit the restore made. Without the
+`<release-tag>` is the tag of the release that fixes the problem, such as
+`v1.6.2`, from the [Releases page](https://github.com/sona-fast/sona/releases).
+Merging the tag deploys exactly that release. `<rollback-commit>` is the commit
+the restore made. Without the
 revert, Git treats the rolled-back changes as already merged and leaves them out
 of the update. Every push to `main` deploys, so if you push the revert by
 itself, it redeploys the broken version, and reapplies its migrations if you
