@@ -235,11 +235,6 @@ export function releaseVisitorPruneLatch(): void {
 	lastVisitorPruneDay = null;
 }
 
-/** Test-only: forget which day this isolate last pruned. */
-export function __resetVisitorPruneLatch(): void {
-	lastVisitorPruneDay = null;
-}
-
 /**
  * IP-literal redaction shared by cleanMessage and cleanRoute — connection errors
  * love embedding peer addresses. IPv4 dotted quads; IPv6: the full 8-group form,

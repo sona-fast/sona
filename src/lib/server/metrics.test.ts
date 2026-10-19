@@ -12,7 +12,7 @@ import {
 	pageViewStatements,
 	pruneVisitorRollups,
 	dailyVisitorPrune,
-	__resetVisitorPruneLatch,
+	releaseVisitorPruneLatch,
 	dayKey,
 	routeClass,
 	isAssetPath,
@@ -629,7 +629,7 @@ describe('pruneVisitorRollups — Tier-A retention, operational metrics untouche
 
 describe('dailyVisitorPrune — once per isolate per UTC day', () => {
 	it('hands out the retention delete on the first call of a day only', async () => {
-		__resetVisitorPruneLatch();
+		releaseVisitorPruneLatch();
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));
 		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
@@ -648,7 +648,7 @@ describe('dailyVisitorPrune — once per isolate per UTC day', () => {
 	it('measures the 35-day cutoff from the day it is given, not the wall clock', async () => {
 		// The latch follows `now`, so the cutoff must too. A row dated in the
 		// future of the real clock, yet 60 days before `now`, is past retention.
-		__resetVisitorPruneLatch();
+		releaseVisitorPruneLatch();
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));
 		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');

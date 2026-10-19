@@ -17,7 +17,7 @@ vi.mock('$lib/server/admin-auth', async (orig) => ({
 
 import { getSetupState, hashToken } from '$lib/server/admin-auth';
 import { authHandle, handleError, decodePathname } from './hooks.server';
-import { __resetVisitorPruneLatch } from '$lib/server/metrics';
+import { releaseVisitorPruneLatch } from '$lib/server/metrics';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
@@ -850,6 +850,8 @@ function pageviewEvent(
 describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 	beforeEach(() => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');
+		// Every page view below starts on a day this isolate has not pruned yet.
+		releaseVisitorPruneLatch();
 	});
 
 	const resolveHtml = async () =>
@@ -876,7 +878,6 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 		// The privacy policy says these go after about 35 days. A fork with no
 		// CRON_SECRET never runs the weekly cleanup, so the page view itself has
 		// to keep that promise.
-		__resetVisitorPruneLatch();
 		const { db, sqlite } = makeMetricsDb();
 		const old = seedOldRows(sqlite);
 		const waits: Promise<unknown>[] = [];
@@ -896,7 +897,6 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 	it('still prunes visitor counters when observability is off', async () => {
 		// A fork that collected, then turned the flag off, still owes the 35-day
 		// delete on the rows it already holds.
-		__resetVisitorPruneLatch();
 		const { db, sqlite } = makeMetricsDb();
 		seedOldRows(sqlite);
 		const waits: Promise<unknown>[] = [];
@@ -915,7 +915,7 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 
 	it('a failed batch hands the daily latch back, so the next view in the same day prunes', async () => {
 		for (const flags of [{ OBSERVABILITY_ENABLED: 'true' }, {}] as Record<string, string>[]) {
-			__resetVisitorPruneLatch();
+			releaseVisitorPruneLatch();
 			const { db, sqlite } = makeMetricsDb();
 			seedOldRows(sqlite);
 			const down = {
@@ -954,7 +954,7 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 			['/gallery', REAL_UA, resolve404, '404']
 		];
 		for (const flags of [{ OBSERVABILITY_ENABLED: 'true' }, {}] as Record<string, string>[]) {
-			__resetVisitorPruneLatch();
+			releaseVisitorPruneLatch();
 			const { db, sqlite } = makeMetricsDb();
 			seedOldRows(sqlite);
 			for (const [path, ua, resolve, label] of cases) {
