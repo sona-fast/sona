@@ -416,6 +416,52 @@ describe('migrate copyOne bounds a misbehaving source', () => {
 		}
 	});
 
+	it('reports the timeout when the target wraps the timed-out body in its own error', async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, db } = makeDb();
+			sqlite
+				.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+				.run('t', 'wrapped', 'https://old.example/f/wrapped');
+
+			// A sized source that sends its head and then goes silent.
+			const fetchFn = vi.fn(async () => {
+				let sent = false;
+				const body = new ReadableStream<Uint8Array>({
+					async pull(c) {
+						if (!sent) {
+							sent = true;
+							c.enqueue(pngBytes(1024));
+						} else await new Promise(() => {});
+					}
+				});
+				return new Response(body, {
+					headers: { 'content-type': 'image/png', 'content-length': String(64 * 1024) }
+				});
+			}) as unknown as typeof fetch;
+			// The target reads until the watched body errors on the idle timeout,
+			// then rejects the way a streaming fetch upload does.
+			const target = fakeTarget(async ({ body }) => {
+				const reader = (body as ReadableStream<Uint8Array>).getReader();
+				try {
+					while (!(await reader.read()).done);
+				} catch (cause) {
+					throw new TypeError('fetch failed', { cause });
+				}
+				return { url: 'https://cdn.example.com/x.png' };
+			});
+
+			const pending = migrateImages({ db, fetchFn, target });
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await pending;
+
+			expect(result.failed).toBe(1);
+			expect(result.items[0].error).toMatch(/timed out.*for https:\/\/old\.example\/f\/wrapped$/);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('does not count a pause in the target against the source', async () => {
 		vi.useFakeTimers();
 		try {
