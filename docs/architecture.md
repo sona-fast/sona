@@ -57,6 +57,7 @@ graph TB
         Deploy[🚀 deploy.yml — Pages deploy on push to main]
         CronWF[⏰ Scheduled workflows — sticker resync, artist sync, avatar refresh, orphan cleanup]
         Release[🏷️ release.yml — tagged v* releases]
+        Dependabot[📦 Dependabot — monthly grouped npm + Actions update PRs]
     end
 
     subgraph "Theme build"
@@ -110,6 +111,7 @@ graph TB
     RegWorker --> RegD1
 
     CI --> Deploy
+    Dependabot -->|opens PRs| CI
     Deploy -->|wrangler pages deploy| Hooks
     CronWF -->|POST /api/cron/* with CRON_SECRET| API
     API -->|fetch profile pictures to re-host, resolve tweet media| Avatars
@@ -186,7 +188,10 @@ graph TB
   day, so a fork with no `CRON_SECRET` still deletes them. Every push to `main` runs `ci.yml` and
   `deploy.yml`, which redeploys the Pages project; `deploy.yml` also has a
   manual dispatch for forks synced through GitHub's Sync fork button, which
-  emits no push event.
+  emits no push event. Dependabot (`.github/dependabot.yml`) opens one grouped
+  pull request a month per ecosystem for npm and Actions minor and patch bumps,
+  and a separate one for each major bump, after a 7-day cooldown. Those PRs run
+  `ci.yml` like any other.
 - Themes are data. Each theme lives in `src/lib/themes/*.theme.ts`, and
   `scripts/build-themes.ts` renders them into `src/lib/themes/generated.css`,
   which `src/app.css` imports. The renderer runs from `prepare`, so `npm ci`

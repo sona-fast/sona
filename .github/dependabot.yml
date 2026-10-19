@@ -1,6 +1,6 @@
 # Monthly dependency updates, grouped so each ecosystem opens one PR a month
-# for minor and patch bumps rather than one per package. npm major bumps sit
-# outside the group and open their own PRs, so each gets its own look. A
+# for minor and patch bumps rather than one per package. Major bumps sit
+# outside the groups and open their own PRs, so each gets its own look. A
 # 7-day cooldown skips releases younger than a week, so a compromised version
 # pulled within days is never proposed. Security updates for a known advisory
 # are separate: they come from the repository's Dependabot security updates
@@ -28,3 +28,4 @@ updates:
     groups:
       actions:
         patterns: ['*']
+        update-types: [minor, patch]
