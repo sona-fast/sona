@@ -38,29 +38,37 @@ const REVIEWED_ROW_DELETES = new Set([
 const DRIZZLE_DIR = new URL('../../../../drizzle/', import.meta.url);
 const META_DIR = new URL('meta/', DRIZZLE_DIR);
 
+type Snapshot = {
+	tables: Record<string, { foreignKeys?: Record<string, { tableTo: string; onDelete?: string }> }>;
+};
+
 /**
  * The tables whose row deletes change other tables: every `tableTo` of a
- * foreign key with a cascade, set null, or set default ON DELETE action, read
- * from the latest drizzle snapshot.
+ * foreign key with a cascade, set null, or set default ON DELETE action, in
+ * any of the snapshots. A migration runs against the schema of its own time,
+ * so a foreign key a later migration drops still cascades for an earlier one.
  */
-function parentTables(): Set<string> {
-	const latest = readdirSync(META_DIR)
-		.filter((f) => /^\d+_snapshot\.json$/.test(f))
-		.sort()
-		.at(-1);
-	if (!latest) throw new Error('no drizzle snapshot in drizzle/meta');
-	const snapshot = JSON.parse(readFileSync(new URL(latest, META_DIR), 'utf8')) as {
-		tables: Record<string, { foreignKeys?: Record<string, { tableTo: string; onDelete?: string }> }>;
-	};
+function parentTablesFrom(snapshots: Snapshot[]): Set<string> {
 	const parents = new Set<string>();
-	for (const table of Object.values(snapshot.tables)) {
-		for (const fk of Object.values(table.foreignKeys ?? {})) {
-			if (['cascade', 'set null', 'set default'].includes(fk.onDelete?.toLowerCase() ?? '')) {
-				parents.add(fk.tableTo.toLowerCase());
+	for (const snapshot of snapshots) {
+		for (const table of Object.values(snapshot.tables)) {
+			for (const fk of Object.values(table.foreignKeys ?? {})) {
+				if (['cascade', 'set null', 'set default'].includes(fk.onDelete?.toLowerCase() ?? '')) {
+					parents.add(fk.tableTo.toLowerCase());
+				}
 			}
 		}
 	}
 	return parents;
+}
+
+/** The parent tables across every drizzle snapshot in drizzle/meta. */
+function parentTables(): Set<string> {
+	const files = readdirSync(META_DIR).filter((f) => /^\d+_snapshot\.json$/.test(f));
+	if (files.length === 0) throw new Error('no drizzle snapshot in drizzle/meta');
+	return parentTablesFrom(
+		files.map((f) => JSON.parse(readFileSync(new URL(f, META_DIR), 'utf8')) as Snapshot)
+	);
 }
 
 const PARENT_TABLES = parentTables();
@@ -147,11 +155,18 @@ describe('migration rebuild guard', () => {
 		expect([...REVIEWED_ROW_DELETES].filter((f) => parentDeleteStatements(sql(f)).length === 0)).toEqual([]);
 	});
 
-	it('derives the parent tables from the schema snapshot', () => {
+	it('derives the parent tables from the schema snapshots', () => {
 		// A parsing break must not empty the set and pass every migration.
 		expect(PARENT_TABLES).toContain('images');
 		expect(PARENT_TABLES).toContain('characters');
 		expect(PARENT_TABLES).not.toContain('image_tags');
+	});
+
+	it('keeps a parent whose cascading foreign key a later snapshot dropped', () => {
+		const fk = (onDelete: string) => ({ stickers: { foreignKeys: { f: { tableTo: 'sticker_packs', onDelete } } } });
+		const parents = parentTablesFrom([{ tables: fk('cascade') }, { tables: fk('no action') }]);
+		expect(parents).toContain('sticker_packs');
+		expect(parentTablesFrom([{ tables: fk('no action') }])).not.toContain('sticker_packs');
 	});
 
 	it('flags row deletes and replaces on a parent table', () => {
