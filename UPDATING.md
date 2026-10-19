@@ -31,8 +31,9 @@ There are no manual post-update steps in the normal case.
    they follow the template's `main`, not its releases. `main` can include
    changes that aren't in a release yet, so use them only if you accept updating
    to unreleased code. A **Sync fork** update might not start a deploy, so check
-   **Actions** afterwards and, if no **Deploy to Cloudflare Pages** run appeared,
-   start one there with **Run workflow**.
+   **Actions** afterwards. If GitHub asks you to enable workflows on the fork, do
+   that first; then, if no **Deploy to Cloudflare Pages** run appeared, start one
+   there with **Run workflow**.
 
 2. **The deploy runs itself.** A push to `main` triggers
    [`deploy.yml`](.github/workflows/deploy.yml), which:
@@ -244,8 +245,11 @@ GitHub doesn't run workflows in a fork until you enable them on the fork's
 triggering a deploy. Your code is updated, but your live site and D1 schema are
 not.
 
-**What to do:** after your first update, open the **Actions** tab. If no
-"Deploy to Cloudflare Pages" run appeared, trigger it by hand:
+**What to do:** after your first update, open the **Actions** tab. If GitHub
+says workflows aren't being run on this forked repository, click **I understand
+my workflows, go ahead and enable them**. Enabling doesn't replay the update you
+already made, so if no "Deploy to Cloudflare Pages" run appeared, trigger it by
+hand:
 
 > Actions → **Deploy to Cloudflare Pages** → **Run workflow** → branch `main` →
 > **Run workflow**.
