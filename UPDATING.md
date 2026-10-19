@@ -358,7 +358,9 @@ build. For more information, see
 
 A rollback doesn't change your fork's `main`, so the next push redeploys the
 broken version. Before you push again, undo the update on `main`. In a clone of
-your fork, make one commit that restores the last good version, and push it:
+your fork, make one commit that restores the last good version, and push it. The
+restore discards uncommitted changes to tracked files, so commit or stash any
+local edits first:
 
 ```sh
 git switch main
