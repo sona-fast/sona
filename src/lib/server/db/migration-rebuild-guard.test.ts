@@ -82,8 +82,9 @@ describe('migration rebuild guard', () => {
 		].join('\n--> statement-breakpoint\n');
 		expect(rebuildStatements(generated)).toHaveLength(4);
 
-		// Run the file as one transaction, with foreign keys on as D1 has them.
-		// The image survives the rebuild; its tag row does not.
+		// Run the file as one transaction, with foreign keys on as D1 has them;
+		// inside a transaction the PRAGMA is a no-op, as on D1's per-query
+		// transactions. The image survives the rebuild; its tag row does not.
 		const sqlite = new Database(':memory:');
 		sqlite.pragma('foreign_keys = ON');
 		sqlite.exec(`CREATE TABLE images (id INTEGER PRIMARY KEY, title TEXT NOT NULL);
@@ -91,7 +92,11 @@ describe('migration rebuild guard', () => {
 			INSERT INTO images VALUES (1, 'art');
 			INSERT INTO image_tags VALUES (1, 7);`);
 		sqlite.transaction(() => {
-			for (const stmt of generated.split('--> statement-breakpoint')) sqlite.exec(stmt);
+			for (const stmt of generated.split('--> statement-breakpoint')) {
+				sqlite.exec(stmt);
+				// Still on after `PRAGMA foreign_keys=OFF;`, so the DROP cascades.
+				expect(sqlite.pragma('foreign_keys', { simple: true })).toBe(1);
+			}
 		})();
 		expect(sqlite.prepare('SELECT count(*) AS n FROM images').get()).toEqual({ n: 1 });
 		expect(sqlite.prepare('SELECT count(*) AS n FROM image_tags').get()).toEqual({ n: 0 });
