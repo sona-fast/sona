@@ -18,7 +18,7 @@ export const FLOORS = {
 	devalue: '5.9.3',
 	esbuild: '0.25.0',
 	nanoid: '3.3.18',
-	undici: '7.29.1'
+	undici: '7.30.1'
 };
 
 /**

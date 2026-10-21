@@ -74,15 +74,21 @@ describe('scanLockfile', () => {
 
 	it('flags the devalue and undici releases with open advisories', () => {
 		// devalue 5.9.0 came in under @sveltejs/kit and ships in the Worker; the
-		// undici advisories reach 7.29.0. Both must fail the guard.
+		// undici advisories reach 7.30.0 (7.29.1 fixed the September batch, not
+		// the October one). All three must fail the guard.
 		const { offenders } = scanLockfile({
 			packages: packages({
 				'node_modules/@sveltejs/kit/node_modules/devalue': entry('5.9.0'),
 				'node_modules/devalue': entry('5.9.3'),
-				'node_modules/undici': entry('7.29.0')
+				'node_modules/undici': entry('7.29.0'),
+				'node_modules/wrangler/node_modules/undici': entry('7.29.1')
 			})
 		});
-		expect(offenders.map((o) => `${o.name}@${o.version}`)).toEqual(['devalue@5.9.0', 'undici@7.29.0']);
+		expect(offenders.map((o) => `${o.name}@${o.version}`)).toEqual([
+			'devalue@5.9.0',
+			'undici@7.29.0',
+			'undici@7.29.1'
+		]);
 	});
 
 	it('passes an entry exactly at the floor', () => {
