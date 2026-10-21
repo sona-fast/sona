@@ -79,6 +79,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			instagramUrl: artists.instagramUrl,
 			globalId: artists.globalId,
 			aliases: artists.aliases,
+			ledgerPrivate: artists.ledgerPrivate,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
 			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`,
@@ -252,9 +253,14 @@ export const actions = {
 		const deviantArtUrl = normalizeSocialUrl('deviantart', data.get('deviantart') as string) || null;
 		const patreonUrl = normalizeSocialUrl('patreon', data.get('patreon') as string) || null;
 		const instagramUrl = normalizeSocialUrl('instagram', data.get('instagram') as string) || null;
+		const ledgerPrivate = data.get('ledgerPrivate') === 'on';
 
 		if (!id) return fail(400, { error: 'Artist ID is required' });
 		if (!name) return fail(400, { error: 'Artist name is required' });
+
+		// Store the "keep private" flag before the ledger-only check below reads it,
+		// so ticking it in this same save already skips the avatar lookup.
+		await db.update(artists).set({ ledgerPrivate }).where(eq(artists.id, id));
 
 		const existing = await db
 			.select({
@@ -274,9 +280,10 @@ export const actions = {
 		//  - EVERY avatar-capable social (bluesky/twitter/FA/patreon) posted empty →
 		//    write null: with nothing left to resolve from, this is a deliberate
 		//    removal and must actually clear a wrong avatar.
-		//  - a ledger-only artist (SONA-236) → keep the stored avatar: resolving
-		//    sends their handle to X or Bluesky, which a save doesn't ask for. The
-		//    avatar refresh fills a missing one once they have work on the site.
+		//  - a ledger-only artist (SONA-236), by entries or by the "keep private"
+		//    flag → keep the stored avatar: resolving sends their handle to X or
+		//    Bluesky, which a save doesn't ask for. The avatar refresh fills a
+		//    missing one once they have work on the site.
 		//  - avatar socials unchanged AND the stored avatar is already ours → skip
 		//    re-resolution entirely; re-hosting the same source again can't change
 		//    anything.
@@ -355,8 +362,20 @@ export const actions = {
 		const id = Number(data.get('id'));
 		if (!id) return fail(400, { error: 'Artist ID is required' });
 
-		const a = await db.select().from(artists).where(eq(artists.id, id)).get();
-		if (!a) return fail(404, { error: 'Artist not found' });
+		const row = await db
+			.select({ artist: artists, ledgerOnly: sql<number>`${artistIsLedgerOnly(artists.id)}` })
+			.from(artists)
+			.where(eq(artists.id, id))
+			.get();
+		if (!row) return fail(404, { error: 'Artist not found' });
+		const a = row.artist;
+
+		// A ledger-only artist (SONA-236) is private until the owner says otherwise:
+		// the page asks first and resubmits with confirmPrivate. No error text, so
+		// the page shows its confirm step instead of an error.
+		if (row.ledgerOnly && data.get('confirmPrivate') !== '1') {
+			return fail(409, { confirmPrivate: true, id });
+		}
 
 		let baseVersion = a.registryVersion ?? undefined;
 		if (a.globalId) {

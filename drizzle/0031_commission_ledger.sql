@@ -11,8 +11,12 @@
 -- avatar_credits.artist_id serve the /about artist count and the ledger-only
 -- check, which look these columns up once per artist.
 --
+-- artists.ledger_private (Q26) is the owner's "keep private" flag: a flagged
+-- artist with no public work is treated as ledger-only even with no entries.
+--
 -- Additive only: no existing table is rebuilt, so no existing ON DELETE action
 -- fires (see the table-rebuild guard test).
+ALTER TABLE `artists` ADD `ledger_private` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 CREATE TABLE `commission_characters` (
 	`commission_id` integer NOT NULL,
 	`character_id` integer NOT NULL,

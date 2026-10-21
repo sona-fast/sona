@@ -23,19 +23,26 @@ export function artistHasPublicWork(artistId: SQLiteColumn): SQL {
 }
 
 /**
- * True for an artist who exists only for the owner's private commission ledger:
- * they have entries, and no piece (published or not), sticker, managed pack, or
- * avatar credit. Code that sends artist data off the site on its own, like the
- * daily registry sync, the avatar refresh, and the avatar lookup when an artist
- * is saved, skips them (SONA-236). Submit to registry is the owner's explicit
- * share, so it doesn't.
+ * True for an artist who exists only for the owner's private commission ledger.
+ * Either rule makes them private:
+ *  - they have entries, and no piece (published or not), sticker, managed pack,
+ *    or avatar credit;
+ *  - the owner ticked "keep private" (artists.ledger_private) and they have no
+ *    public work, so publishing work by them ends it on its own.
+ * Code that sends artist data off the site on its own, like the daily registry
+ * sync, the avatar refresh, and the avatar lookup when an artist is saved,
+ * skips them (SONA-236). Submit to registry is the owner's explicit share, so
+ * it asks first instead.
+ *
+ * Takes the artists.id column and reads ledger_private from the same row, so
+ * call it with `artists.id` from a query over the artists table.
  */
 export function artistIsLedgerOnly(artistId: SQLiteColumn): SQL {
-	return sql`(
+	return sql`((
 		EXISTS (SELECT 1 FROM commissions WHERE commissions.artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM images WHERE images.artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM stickers WHERE stickers.artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM sticker_packs WHERE sticker_packs.manager_artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM avatar_credits WHERE avatar_credits.artist_id = ${artistId})
-	)`;
+	) OR (artists.ledger_private = 1 AND NOT ${artistHasPublicWork(artistId)}))`;
 }

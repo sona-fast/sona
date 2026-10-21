@@ -163,6 +163,25 @@ describe('settings export action', () => {
 		expect(contentKeys).toEqual(expectedContentKeys);
 	});
 
+	// Q26: the keep-private flag is the owner's choice, so the backup carries it.
+	it("includes each artist's keep-private flag", async () => {
+		const sqlite = buildFullDb();
+		sqlite
+			.prepare(
+				"INSERT INTO artists (id, name, ledger_private, created_at) VALUES (1, 'Open', 0, '2026-10-01'), (2, 'Quiet', 1, '2026-10-01')"
+			)
+			.run();
+		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
+
+		const result = await actions.export({ platform } as never);
+		const backup = JSON.parse((result as { export: string }).export);
+
+		expect(backup.artists.map((a: { name: string; ledgerPrivate: boolean }) => [a.name, a.ledgerPrivate])).toEqual([
+			['Open', false],
+			['Quiet', true]
+		]);
+	});
+
 	// SONA-236: the ledger is private to visitors but it's the owner's data, so
 	// the backup carries every field of an entry, its dates included.
 	it('includes a commission entry with its notes, price, dates, and characters', async () => {

@@ -51,6 +51,10 @@
 		/** The site the lookup filled from, named in that disclosure. Empty when
 		 * only the name was filled (Weasyl and e621 have no artist column). */
 		prefillSite?: string;
+		/** Offer the "keep private (commission ledger only)" checkbox (SONA-236).
+		 * The artists page sets it; pickers that create an artist for a piece
+		 * don't need it. */
+		allowLedgerPrivate?: boolean;
 	}
 	let {
 		oncreated,
@@ -61,7 +65,8 @@
 		initialName = '',
 		initialSocials,
 		prefillSource,
-		prefillSite = ''
+		prefillSite = '',
+		allowLedgerPrivate = false
 	}: Props = $props();
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
@@ -78,6 +83,7 @@
 	let deviantart = $state('');
 	let patreon = $state('');
 	let instagram = $state('');
+	let ledgerPrivate = $state(false);
 	let saving = $state(false);
 	let errorMsg = $state('');
 
@@ -391,7 +397,9 @@
 					instagram,
 					globalId: pulled?.globalId,
 					registryVersion: pulled?.version,
-					avatarUrl: pulled?.avatarUrl
+					avatarUrl: pulled?.avatarUrl,
+					// A registry pick is already shared, so the flag doesn't apply to it.
+					ledgerPrivate: allowLedgerPrivate && !pulled && ledgerPrivate
 				})
 			});
 			if (!res.ok) {
@@ -561,6 +569,16 @@
 				</div>
 			</div>
 
+			{#if allowLedgerPrivate && !pulled}
+				<div class="private-field">
+					<label class="private-check">
+						<input type="checkbox" bind:checked={ledgerPrivate} aria-describedby="new-artist-private-hint" />
+						<span>{m.admin_artists_ledger_private()}</span>
+					</label>
+					<p class="private-hint" id="new-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
+				</div>
+			{/if}
+
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
 				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate} aria-describedby={registryEnabled ? 'new-artist-name-hint' : undefined}>
@@ -680,6 +698,11 @@
 	.keep-updated span { font-size: 13px; color: var(--foreground); }
 	.keep-updated input { margin: 0; flex-shrink: 0; }
 	.reassure { color: var(--muted-foreground); font-size: 12px; }
+	.private-field { display: flex; flex-direction: column; gap: 4px; }
+	.private-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+	.private-check span { font-size: 13px; color: var(--foreground); }
+	.private-check input { margin: 0; flex-shrink: 0; }
+	.private-hint { margin: 0; color: var(--muted-foreground); font-size: 12px; }
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 </style>
