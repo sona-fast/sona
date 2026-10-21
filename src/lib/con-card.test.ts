@@ -131,9 +131,14 @@ describe('conCardFaceSvg — the badge', () => {
 			['made with', (v) => ({ madeWith: v })],
 			['title', (v) => ({ title: v })]
 		];
+		// A raw ' or & leaves the tags and double quotes alone, so count those too;
+		// an entity reference like &amp; is the escaped form and doesn't count.
 		const shape = (svg: string) => ({
 			tags: [...svg.matchAll(/<\/?([A-Za-z][\w:-]*)/g)].map((m) => m[1]),
-			quotes: (svg.match(/"/g) ?? []).length
+			quotes: (svg.match(/"/g) ?? []).length,
+			apostrophes: (svg.match(/'/g) ?? []).length,
+			rawAmpersands: (svg.replace(/&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi, '').match(/&/g) ?? [])
+				.length
 		});
 		const renders: Array<[string, (o: Partial<ConCardOptions>) => string]> = [
 			['front', front],
