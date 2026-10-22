@@ -2198,8 +2198,14 @@
 	   shade of artwork (light #0F766E: 4.45:1 on #E7E8E5, 5.47:1 on #FFFFFF;
 	   dark #2DD4BF: 7.30:1 on #2E2E2E). Fursuit violet: dark #C4B5FD 7.36:1
 	   on #2E2E2E, light #6D28D9 5.78:1 on #E7E8E5, 7.10:1 on #FFFFFF. Dark
-	   other #9AA5B1: 5.43:1 on #2E2E2E, clearly apart from the empty track. */
+	   other #9AA5B1: 5.43:1 on #2E2E2E, clearly apart from the empty track.
+	   Widths are shares of the plan limit, so a few-MB type is under a pixel.
+	   content-box keeps the separator outside the width (under the global
+	   border-box it ate the whole segment), and min-width keeps every
+	   non-zero type a visible sliver of color; the table has the exact sizes. */
 	.storage-seg {
+		box-sizing: content-box;
+		min-width: 4px;
 		height: 100%;
 	}
 
