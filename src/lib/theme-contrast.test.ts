@@ -2670,3 +2670,17 @@ describe('"made with" credit badge WCAG AA contrast, every host × theme × mode
 		}
 	}
 });
+
+// The ledger's Delete entry button (SONA-236) paints its label with
+// --destructive on a --background fill, at rest and on hover, and an invalid
+// entry field draws its edge with --destructive. The rendered colors are
+// checked in the browser (tests/e2e/commission-ledger-crud.spec.ts and
+// commission-ledger-pages.spec.ts); this measures the token pair in every
+// theme × mode, which a browser run on the default theme can't.
+describe('commission ledger: --destructive on --background, every theme × mode', () => {
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: --destructive on --background meets 4.5:1`, () => {
+			expect(contrast(blockToken(sel, 'destructive'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
