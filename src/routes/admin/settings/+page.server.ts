@@ -37,6 +37,8 @@ import {
 	avatarCredits,
 	avatarMedia,
 	avatarPlatforms,
+	commissions,
+	commissionCharacters,
 	sessions,
 	siteSettings
 } from '$lib/server/db/schema';
@@ -938,6 +940,8 @@ export const actions = {
 			allAvatarCredits,
 			allAvatarMedia,
 			allAvatarPlatforms,
+			allCommissions,
+			allCommissionCharacters,
 			settings
 		] = await Promise.all([
 			db.select().from(images),
@@ -956,13 +960,16 @@ export const actions = {
 			db.select().from(avatarCredits),
 			db.select().from(avatarMedia),
 			db.select().from(avatarPlatforms),
+			db.select().from(commissions),
+			db.select().from(commissionCharacters),
 			getSettings(db)
 		]);
 
 		const backup = {
 			// v2 added conventions, fursuit photos, and the stickers tables (packs,
-			// stickers, emojis) — v1 silently omitted them.
-			version: 2,
+			// stickers, emojis) — v1 silently omitted them. v3 added the commission
+			// ledger (SONA-236), which is private but still the owner's data.
+			version: 3,
 			exportedAt: new Date().toISOString(),
 			settings,
 			images: allImages,
@@ -980,7 +987,9 @@ export const actions = {
 			vrAvatars: allVrAvatars,
 			avatarCredits: allAvatarCredits,
 			avatarMedia: allAvatarMedia,
-			avatarPlatforms: allAvatarPlatforms
+			avatarPlatforms: allAvatarPlatforms,
+			commissions: allCommissions,
+			commissionCharacters: allCommissionCharacters
 		};
 
 		return { success: true, export: JSON.stringify(backup, null, 2) };
@@ -1048,18 +1057,24 @@ export const actions = {
 		// means all. Order matters: vr_avatars and sticker_packs reference
 		// characters/artists WITHOUT cascade, so they go before those deletes or
 		// the FK checks refuse the wipe. Each cascades its own children
-		// (credits/media/platforms; stickers → sticker_emojis).
-		await db.delete(vrAvatars);
-		await db.delete(stickerPacks);
-		await db.delete(fursuitPhotos);
-		await db.delete(conventions);
-		await db.delete(imageTags);
-		await db.delete(imageCharacters);
-		await db.delete(images);
-		await db.delete(tags);
-		await db.delete(characters);
-		await db.delete(collections);
-		await db.delete(artists);
+		// (credits/media/platforms; stickers → sticker_emojis). Commission entries
+		// reference artists without cascade too, and cascade their character links.
+		// One batch, so a failure part-way leaves everything in place instead of a
+		// half-wiped site (D1 runs a batch as one transaction, in order).
+		await db.batch([
+			db.delete(commissions),
+			db.delete(vrAvatars),
+			db.delete(stickerPacks),
+			db.delete(fursuitPhotos),
+			db.delete(conventions),
+			db.delete(imageTags),
+			db.delete(imageCharacters),
+			db.delete(images),
+			db.delete(tags),
+			db.delete(characters),
+			db.delete(collections),
+			db.delete(artists),
+		]);
 
 		// The wiped tables feed the per-isolate nav/tab probe caches — clear them
 		// all so this isolate's nav drops the sections immediately (same convention

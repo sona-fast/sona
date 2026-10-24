@@ -6,7 +6,8 @@ import type { SiteSettings } from './settings';
 import { getRawSettings, saveSettings } from './settings';
 import { getDb } from './db';
 import { artists } from './db/schema';
-import { eq, or, isNotNull, sql } from 'drizzle-orm';
+import { eq, or, isNotNull, sql, and, not } from 'drizzle-orm';
+import { artistIsLedgerOnly } from './artist-visibility';
 
 type Env = App.Platform['env'];
 
@@ -365,6 +366,9 @@ export async function refreshArtistAvatars(
 	// Only Twitter and Bluesky resolve today (FA/Patreon are TODO), so an artist
 	// with neither can never be refreshed — leave them out of the queue entirely.
 	// NULLs-first ordering: `avatar_resolved_at IS NOT NULL` is 0 for nulls.
+	// An artist who exists only for the owner's private commission ledger is
+	// skipped: the lookup sends their handle to X or Bluesky (SONA-236). The
+	// admin's manual refresh shares this, so it skips them too.
 	const rows = await db
 		.select({
 			id: artists.id,
@@ -376,7 +380,9 @@ export async function refreshArtistAvatars(
 			patreonUrl: artists.patreonUrl
 		})
 		.from(artists)
-		.where(or(isNotNull(artists.twitterUrl), isNotNull(artists.blueskyUrl)))
+		.where(
+			and(or(isNotNull(artists.twitterUrl), isNotNull(artists.blueskyUrl)), not(artistIsLedgerOnly(artists.id)))
+		)
 		.orderBy(sql`${artists.avatarResolvedAt} IS NOT NULL`, artists.avatarResolvedAt, artists.id);
 
 	const ours = (url: string) => isOurAvatarUrl(env, settings, origin, url);

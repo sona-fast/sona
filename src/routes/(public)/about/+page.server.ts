@@ -2,6 +2,7 @@ import { getReadDb } from '$lib/server/db';
 import { getSettings, toPublicSettings } from '$lib/server/settings';
 import { images, artists, collections, conventions } from '$lib/server/db/schema';
 import { asc, sql } from 'drizzle-orm';
+import { artistHasPublicWork } from '$lib/server/artist-visibility';
 import type { PageServerLoad } from './$types';
 
 async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {
@@ -37,7 +38,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 
 	const [imageCount, artistCount, collectionCount, upcomingCons] = await Promise.all([
 		db.select({ count: sql<number>`COUNT(*)` }).from(images).where(sql`published = 1 AND parent_image_id IS NULL`).get(),
-		db.select({ count: sql<number>`COUNT(*)` }).from(artists).get(),
+		// Only artists with public work: one added just for a private commission
+		// entry stays off this public count (SONA-236).
+		db.select({ count: sql<number>`COUNT(*)` }).from(artists).where(artistHasPublicWork(artists.id)).get(),
 		db.select({ count: sql<number>`COUNT(*)` }).from(collections).get(),
 		db
 			.select()

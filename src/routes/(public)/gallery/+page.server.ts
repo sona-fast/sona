@@ -3,7 +3,8 @@ import { images, artists, imageTags, tags, fursuitPhotos as fursuitPhotosTable }
 import { vrTabEnabled } from '$lib/server/vr-gate';
 import { stickerTabEnabled } from '$lib/server/stickers';
 import { PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
-import { eq, desc, asc, like, sql, and, inArray, isNull, type SQL } from 'drizzle-orm';
+import { eq, desc, asc, like, sql, and, inArray, isNull, not, type SQL } from 'drizzle-orm';
+import { artistIsLedgerOnly } from '$lib/server/artist-visibility';
 import { listPublicCharacterNames } from '$lib/server/characters';
 import { fursuitPhotoFromRow, fursuitPhotosExist } from '$lib/server/fursuit-import';
 import { getMode } from '$lib/server/furtrack';
@@ -88,8 +89,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 				// set, on purpose: a real current name must never be hijacked into
 				// former-name resolution (and shown under a false "formerly" banner) just
 				// because that artist has no live work. The combobox options and the
-				// alias-candidate set below stay LIVE-ONLY (allArtistsRaw).
-				const allNames = await db.select({ name: artists.name }).from(artists);
+				// alias-candidate set below stay LIVE-ONLY (allArtistsRaw). Ledger-only
+				// artists are left out: their names are private, and a name match
+				// would show by suppressing the banner (SONA-236).
+				const allNames = await db
+					.select({ name: artists.name })
+					.from(artists)
+					.where(not(artistIsLedgerOnly(artists.id)));
 				if (!allNames.some((a) => a.name.toLowerCase() === q)) {
 					// Only resolve when EXACTLY ONE live artist claims this former name — an
 					// ambiguous former name must not silently credit the wrong artist.
