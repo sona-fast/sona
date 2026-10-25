@@ -40,8 +40,8 @@ test('creates an entry that lists under Active', async ({ page }, testInfo) => {
 	await page.getByLabel('Title').fill(TITLE);
 	await page.locator('label.char-chip', { hasText: 'Taro' }).click();
 	await page.locator('label.char-chip', { hasText: 'Thistle' }).click();
-	await page.getByLabel('Price').fill('120.00');
-	await page.getByLabel('Currency').fill('USD');
+	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
+	await page.getByLabel('Amount').fill('120.00');
 	await page.getByLabel('Requested').fill('2026-10-02');
 
 	// Hold the save so a second click and an Enter land while it's in flight.
@@ -187,16 +187,46 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	await expect(artist).toBeEnabled();
 	await artist.selectOption({ label: 'Avatar Artist' });
 
-	// A handle nobody holds: the page points at the Artists page, and makes no
-	// artist itself (open question Q26).
+	// A handle nobody holds: the page offers to add them, and makes no artist
+	// until the owner asks (Q26).
 	await link.fill('https://x.com/nobody_here/status/1');
 	await link.press('Tab');
 	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
-	await expect(card.getByRole('link', { name: 'Artists page' })).toHaveAttribute('href', '/admin/artists');
+	await expect(card.getByRole('button', { name: 'Add nobody_here as a new artist' })).toBeVisible();
 	await expect(page.getByRole('dialog')).toHaveCount(0);
 	await expect(artist).toHaveValue('2');
 	await expect(link).toHaveValue('https://x.com/nobody_here/status/1');
 	await settledShot(page, testInfo.outputPath('commission-link-no-match.png'));
+
+	// Add {handle}: the dialog takes the handle, never the pasted post link, and
+	// starts private. Cancel makes nothing.
+	await paste(link, 'https://x.com/new_from_link/status/9');
+	const addHandle = card.getByRole('button', { name: 'Add new_from_link as a new artist' });
+	await addHandle.click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByLabel('Artist Name')).toHaveValue('new_from_link');
+	await expect(dialog.getByLabel('Twitter')).toHaveValue('new_from_link');
+	await expect(
+		dialog.getByText('Sona filled the name and Twitter link from the link you pasted. They\'re a guess until you check them.')
+	).toBeVisible();
+	await expect(dialog.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+	await settledShot(page, testInfo.outputPath('commission-link-add-artist.png'));
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect(addHandle).toBeFocused();
+	await expect(artist).toHaveValue('2');
+
+	await addHandle.click();
+	await dialog.getByRole('button', { name: 'Create Artist' }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect(card.getByText('Added new_from_link to your artist list.')).toBeVisible();
+	await expect(card.getByRole('button', { name: 'Using new_from_link' })).toBeVisible();
+	await expect(artist.locator('option:checked')).toHaveText('new_from_link');
+	await expect(liveRegion.filter({ hasText: 'Using new_from_link as the artist.' })).toHaveCount(1);
+	// The same link now finds the artist the owner just made.
+	await paste(link, 'https://x.com/nobody_here/status/1');
+	await paste(link, 'https://x.com/new_from_link/status/9');
+	await expect(card.getByText('new_from_link is already in your artist list as new_from_link.')).toBeVisible();
 
 	// The endpoint takes POST only, so a link never rides in a query string.
 	const get = await page.request.get('/api/admin/artist-from-link?url=https%3A%2F%2Fx.com%2Fa');
@@ -220,9 +250,9 @@ test('a name that only looks like the handle, or a handle two artists share, wai
 	await expect(artist).toHaveValue('50');
 	await expect(card.getByRole('button', { name: 'Using name_only_artist' })).toBeVisible();
 	// Taken, the suggestion isn't second-guessed: no "might be them" line and
-	// no pointer to the Artists page beside it.
+	// no offer to add the handle as a new artist beside it.
 	await expect(nameOnly).toHaveCount(0);
-	await expect(card.getByRole('link', { name: 'Artists page' })).toHaveCount(0);
+	await expect(card.getByRole('button', { name: /as a new artist$/ })).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-link-name-only.png'));
 
 	await artist.selectOption('');
@@ -390,9 +420,11 @@ test('the draft survives a trip to the Artists page, and the lookup asks again o
 	await paste(link, 'https://www.furaffinity.net/user/draft_artist/');
 	const card = page.locator('.lookup');
 	await expect(card.getByText("draft_artist isn't in your artist list yet.")).toBeVisible();
-	await card.getByRole('link', { name: 'Artists page' }).click();
+	// The owner goes to the Artists page anyway (the sidebar link; the card
+	// offers Add instead) and adds the artist there.
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Artists' }).click();
 	await expect(page).toHaveURL(/\/admin\/artists$/);
-	// The owner adds the artist, through the same endpoint the add dialog uses.
+	// Through the same endpoint the add dialog uses.
 	const created = await page.request.post('/api/artists', { data: { name: 'Draft Artist', furaffinity: 'draft_artist' } });
 	expect(created.ok()).toBe(true);
 	const { id } = (await created.json()) as { id: number };
@@ -480,7 +512,7 @@ test('moving the entry to Delivered lists it under Finished', async ({ page }, t
 	await waitForHydration(page);
 
 	// The saved price comes back in its typed form.
-	await expect(page.getByLabel('Price')).toHaveValue('120.00');
+	await expect(page.getByLabel('Amount')).toHaveValue('120.00');
 	await page.getByLabel('Status').selectOption('delivered');
 	await expect(page.getByLabel('Delivered', { exact: true })).not.toHaveValue('');
 	// A date the owner picks, which Add to gallery must keep later.
@@ -845,7 +877,7 @@ test('a draft typed against an older copy of the entry is dropped on return', as
 
 	await page.getByLabel('Notes').fill('E2E draft note');
 	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/40');
-	await page.locator('.lookup').getByRole('link', { name: 'Artists page' }).click();
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Artists' }).click();
 	await expect(page).toHaveURL(/\/admin\/artists$/);
 
 	// Meanwhile another tab changes the entry and saves.
@@ -887,7 +919,7 @@ test('Reload entry takes away the draft-is-back line', async ({ page, context })
 
 	await notes.fill('E2E draft before reload');
 	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/41');
-	await page.locator('.lookup').getByRole('link', { name: 'Artists page' }).click();
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Artists' }).click();
 	await expect(page).toHaveURL(/\/admin\/artists$/);
 	await page.goBack();
 	await expect(notes).toHaveValue('E2E draft before reload');
@@ -1002,3 +1034,77 @@ test('signing out forgets unsaved drafts', async ({ page }) => {
 	expect(await stored()).not.toContain('E2E draft before sign-out');
 });
 
+test('Other currency finds a currency, and Add New Artist makes a private artist for the entry', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+
+	// No saved entry has a price now, so the row leads with the browser's region.
+	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
+	await expect(page.locator('#ce-currency-hint')).toHaveText('Pick the currency the artist charges in.');
+
+	// Other currency: search by code, Escape closes back to the button, Enter picks.
+	const other = page.getByRole('button', { name: 'Other currency' });
+	await other.click();
+	const find = page.getByRole('combobox', { name: 'Find a currency' });
+	const results = page.getByRole('listbox', { name: 'Find a currency' });
+	await expect(find).toBeFocused();
+	await page.keyboard.press('Escape');
+	await expect(find).toBeHidden();
+	await expect(other).toBeFocused();
+	await other.click();
+	await find.fill('krw');
+	await expect(results.getByRole('option')).toHaveCount(1);
+	await page.keyboard.press('Enter');
+	const krw = page.getByRole('radio', { name: /KRW/ });
+	await expect(krw).toBeChecked();
+	await expect(krw).toBeFocused();
+	await expect(page.locator('#ce-price-hint')).toHaveText(/^KRW amounts are whole numbers\./);
+	// A name in the admin language matches too.
+	await other.click();
+	await find.fill('swiss');
+	await expect(results.getByRole('option', { name: /CHF/ })).toBeVisible();
+	await page.keyboard.press('Escape');
+	await settledShot(page, testInfo.outputPath('commission-entry-currency-picked.png'));
+
+	// Add New Artist: focus lands in the dialog, so Escape closes it.
+	const addArtist = page.getByRole('button', { name: 'Add New Artist' });
+	await addArtist.click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByLabel('Artist Name')).toBeFocused();
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeHidden();
+	await expect(addArtist).toBeFocused();
+
+	await addArtist.click();
+	// An entry's artist starts private, so a sync can't share them before Save.
+	await expect(dialog.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+	await dialog.getByLabel('Artist Name').fill('E2E Private Artist');
+	await settledShot(page, testInfo.outputPath('commission-entry-new-artist.png'));
+	await dialog.getByRole('button', { name: 'Create Artist' }).click();
+	await expect(dialog).toBeHidden();
+	const artist = page.getByLabel('Artist', { exact: true });
+	await expect(artist.locator('option:checked')).toHaveText('E2E Private Artist');
+	await expect(artist).toBeFocused();
+
+	await page.getByLabel('Title').fill('E2E won entry');
+	await page.getByLabel('Amount').fill('50000');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const row = section(page, 'Active').getByRole('row', { name: /E2E won entry/ });
+	await expect(row).toContainText('E2E Private Artist');
+
+	// The artist was stored private.
+	await open(page, '/admin/artists');
+	await page
+		.getByRole('row', { name: /E2E Private Artist/ })
+		.getByRole('button', { name: 'Edit artist' })
+		.click();
+	// The Edit Artist modal has no dialog role, so the label alone finds it.
+	await expect(page.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+
+	// Back on a new entry, the row leads with the newest saved currency.
+	await open(page, '/admin/commissions/new');
+	await expect(page.getByRole('radio').first()).toHaveAccessibleName(/KRW/);
+	await expect(page.getByRole('radio', { name: /KRW/ })).toBeChecked();
+	await expect(page.locator('#ce-currency-hint')).toHaveText('The currencies you used most recently show first.');
+});

@@ -296,7 +296,8 @@ export async function syncArtists(
 
 	// ── 2. Backfill: stamp global_id onto local-only artists by handle match ────
 	// An artist added only for the owner's private commission ledger (entries,
-	// but no piece, sticker, pack, or avatar credit) is skipped: the search sends
+	// but no piece, sticker, pack, or avatar credit; or marked "keep private"
+	// with no public work, see artistIsLedgerOnly) is skipped: the search sends
 	// their handle to the shared registry, and no screen tells the owner that
 	// happens on a schedule (SONA-236). Filtered in SQL so skipped artists don't
 	// use up the run's cap.

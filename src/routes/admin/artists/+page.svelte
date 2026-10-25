@@ -28,6 +28,10 @@
 	let deletingId = $state<number | null>(null);
 	let submittingId = $state<number | null>(null);
 	let refreshingAvatars = $state(false);
+	// Submit to registry for a ledger-only artist (SONA-236): the server refuses
+	// without confirmPrivate, and the page asks before resubmitting with it.
+	let confirmShare = $state<{ id: number; globalId: string | null } | null>(null);
+	let confirmShareForm: HTMLFormElement;
 
 	// Search runs SERVER-SIDE across all artists (not just the current page).
 	// Debounce keystrokes into a ?q= navigation; keepFocus so typing isn't interrupted.
@@ -178,6 +182,8 @@
 										submittingId = null;
 										if (result.type === 'success')
 											toast.success(artist.globalId ? m.admin_artists_registry_update_submitted() : m.admin_artists_registry_submitted());
+										else if (result.type === 'failure' && result.data?.confirmPrivate)
+											confirmShare = { id: artist.id, globalId: artist.globalId };
 										else if (result.type === 'failure')
 											toast.error((result.data?.error as string) ?? m.admin_artists_registry_failed());
 									};
@@ -256,6 +262,8 @@
 								submittingId = null;
 								if (result.type === 'success')
 									toast.success(artist.globalId ? m.admin_artists_registry_update_submitted() : m.admin_artists_registry_submitted());
+								else if (result.type === 'failure' && result.data?.confirmPrivate)
+									confirmShare = { id: artist.id, globalId: artist.globalId };
 								else if (result.type === 'failure')
 									toast.error((result.data?.error as string) ?? m.admin_artists_registry_failed());
 							};
@@ -307,6 +315,33 @@
 		message={m.admin_artists_delete_message({ name: deleteTarget.name })}
 		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
+	/>
+{/if}
+
+<form method="POST" action="?/submitToRegistry" use:enhance={() => {
+	const target = confirmShare;
+	submittingId = target?.id ?? null;
+	confirmShare = null;
+	return async ({ result, update }) => {
+		await update();
+		submittingId = null;
+		if (result.type === 'success')
+			toast.success(target?.globalId ? m.admin_artists_registry_update_submitted() : m.admin_artists_registry_submitted());
+		else if (result.type === 'failure')
+			toast.error((result.data?.error as string) ?? m.admin_artists_registry_failed());
+	};
+}} bind:this={confirmShareForm} style="display:none">
+	<input type="hidden" name="id" value={confirmShare?.id ?? ''} />
+	<input type="hidden" name="confirmPrivate" value="1" />
+</form>
+
+{#if confirmShare}
+	<ConfirmDialog
+		title={m.admin_artists_share_private_title()}
+		message={m.admin_artists_share_private_message()}
+		confirmLabel={m.admin_artists_share_private_confirm()}
+		onconfirm={() => confirmShareForm.requestSubmit()}
+		oncancel={() => (confirmShare = null)}
 	/>
 {/if}
 
@@ -383,6 +418,14 @@
 					</div>
 				</div>
 
+				<div class="private-field">
+					<label class="private-check">
+						<input type="checkbox" name="ledgerPrivate" checked={editingArtist.ledgerPrivate} disabled={saving} aria-describedby="edit-artist-private-hint" />
+						<span>{m.admin_artists_ledger_private()}</span>
+					</label>
+					<p class="private-hint" id="edit-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
+				</div>
+
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingArtist = null)}>{m.admin_cancel()}</button>
 					<button type="submit" class="btn btn-primary" disabled={saving}>
@@ -397,6 +440,7 @@
 {#if showAdd}
 	<NewArtistDialog
 		registryEnabled={data.registryEnabled}
+		allowLedgerPrivate
 		oncreated={async () => { showAdd = false; await invalidateAll(); }}
 		onimportedall={async () => { showAdd = false; await invalidateAll(); }}
 		oncancel={() => (showAdd = false)}
@@ -691,6 +735,30 @@
 		color: var(--muted-foreground);
 		min-width: 14px;
 		text-align: center;
+	}
+
+	.private-field {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.modal-form .private-check {
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
+		cursor: pointer;
+	}
+
+	.private-check input {
+		margin: 0;
+		flex-shrink: 0;
+	}
+
+	.private-hint {
+		margin: 0;
+		font-size: 13px;
+		color: var(--muted-foreground);
 	}
 
 	.modal-actions {

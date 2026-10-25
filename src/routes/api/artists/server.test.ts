@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -17,7 +17,7 @@ function makeDb() {
 		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
-		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
+		aliases TEXT, avatar_resolved_at TEXT, ledger_private INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 	);`);
 	const d1 = makeD1(sqlite);
 	const platform = { env: { DB: d1 } } as unknown as App.Platform;
@@ -147,5 +147,51 @@ describe('POST /api/artists — explicit registry import overrides the local cop
 		expect(((await res.json()) as { status: string }).status).toBe('created');
 		const row = await db.select().from(artists).where(eq(artists.globalId, GID)).get();
 		expect(row!.patreonUrl).toBe('https://www.patreon.com/Bob_Art');
+	});
+});
+
+// Q26: the "keep private (commission ledger only)" checkbox on the new-artist
+// dialog. A private artist's handle must not go to X or Bluesky for an avatar.
+describe('POST /api/artists — keep private', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	function stubOfflineFetch() {
+		const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
+		vi.stubGlobal('fetch', fetchSpy);
+		return fetchSpy;
+	}
+
+	it('stores the flag on a new local artist and skips the avatar lookup', async () => {
+		const { db, platform } = makeDb();
+		const fetchSpy = stubOfflineFetch();
+
+		const res = await post(platform, { name: 'Quiet', bluesky: 'quiet.bsky.social', ledgerPrivate: true });
+		expect(((await res.json()) as { status: string }).status).toBe('created');
+
+		const row = await db.select().from(artists).where(eq(artists.name, 'Quiet')).get();
+		expect(row!.ledgerPrivate).toBe(true);
+		expect(row!.avatarUrl).toBeNull();
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
+	it('looks up the avatar for a new artist without the flag', async () => {
+		const { db, platform } = makeDb();
+		const fetchSpy = stubOfflineFetch();
+
+		await post(platform, { name: 'Loud', bluesky: 'loud.bsky.social' });
+
+		const row = await db.select().from(artists).where(eq(artists.name, 'Loud')).get();
+		expect(row!.ledgerPrivate).toBe(false);
+		expect(fetchSpy).toHaveBeenCalled();
+	});
+
+	it('ignores the flag for an artist pulled from the registry, which is already shared', async () => {
+		const { db, platform } = makeDb();
+		stubOfflineFetch();
+
+		await post(platform, { name: 'Shared', globalId: GID, registryVersion: 1, ledgerPrivate: true });
+
+		const row = await db.select().from(artists).where(eq(artists.globalId, GID)).get();
+		expect(row!.ledgerPrivate).toBe(false);
 	});
 });

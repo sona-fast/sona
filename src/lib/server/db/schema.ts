@@ -28,6 +28,10 @@ export const artists = sqliteTable('artists', {
 	// The refresh cron rotates oldest-first (NULLs first) so re-hosted copies stay
 	// current as artists change their pictures. See avatar.ts / api/cron/refresh-avatars.
 	avatarResolvedAt: text('avatar_resolved_at'),
+	// The owner's "keep private (commission ledger only)" flag (SONA-236). While
+	// set and the artist has no public work, they count as ledger-only: see
+	// artistIsLedgerOnly. Publishing work by them ends it without clearing it.
+	ledgerPrivate: integer('ledger_private', { mode: 'boolean' }).notNull().default(false),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

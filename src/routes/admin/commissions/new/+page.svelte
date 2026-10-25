@@ -27,6 +27,9 @@
 		characters={data.characters}
 		{form}
 		gaDate={data.gate.gaDate}
+		recentCurrencies={data.recentCurrencies}
+		localeCurrency={data.localeCurrency}
+		registryEnabled={data.registryEnabled}
 	/>
 {/if}
 

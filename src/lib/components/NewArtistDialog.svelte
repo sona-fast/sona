@@ -24,6 +24,7 @@
 	 * an async handler, so a rejected invalidateAll has to land somewhere. */
 	const IMPORTED_ALL_HANDLER_THREW = 'new artist dialog: the onimportedall handler threw';
 
+	type SocialColumn = 'twitter' | 'bluesky' | 'telegram' | 'furaffinity' | 'deviantart' | 'patreon' | 'instagram';
 	interface Props {
 		/** May be async: the upload page awaits a tick to move focus after the
 		 * dialog closes. The dialog resolves whatever comes back and logs a
@@ -43,14 +44,22 @@
 		registryEnabled?: boolean;
 		/** Seed the name field (SONA-156: the handle an image match named). */
 		initialName?: string;
-		/** Seed social fields with full profile URLs, keyed by the column name. */
-		initialSocials?: Partial<Record<'twitter' | 'furaffinity', string>>;
-		/** Where the seed came from. 'lookup' adds the disclosure that Sona
+		/** Seed social fields with profile URLs or bare handles, keyed by the
+		 * column name. The server builds the profile URL from a bare handle. */
+		initialSocials?: Partial<Record<SocialColumn, string>>;
+		/** Where the seed came from: an image match ('lookup') or the link pasted
+		 * into a commission entry ('link'). Either adds the disclosure that Sona
 		 * guessed these values, and runs the registry search once on open. */
-		prefillSource?: 'lookup';
+		prefillSource?: 'lookup' | 'link';
 		/** The site the lookup filled from, named in that disclosure. Empty when
 		 * only the name was filled (Weasyl and e621 have no artist column). */
 		prefillSite?: string;
+		/** Offer the "keep private (commission ledger only)" checkbox (SONA-236).
+		 * The artists page sets it; pickers that create an artist for a piece
+		 * don't need it. */
+		allowLedgerPrivate?: boolean;
+		/** Start with Keep private ticked: a commission entry's artist (SONA-236). */
+		startPrivate?: boolean;
 	}
 	let {
 		oncreated,
@@ -61,7 +70,9 @@
 		initialName = '',
 		initialSocials,
 		prefillSource,
-		prefillSite = ''
+		prefillSite = '',
+		allowLedgerPrivate = false,
+		startPrivate = false
 	}: Props = $props();
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
@@ -72,12 +83,17 @@
 	// is the documented spelling for that (the ConCard pattern).
 	let name = $state(untrack(() => initialName));
 	let twitter = $state(untrack(() => initialSocials?.twitter ?? ''));
-	let bluesky = $state('');
-	let telegram = $state('');
+	let bluesky = $state(untrack(() => initialSocials?.bluesky ?? ''));
+	let telegram = $state(untrack(() => initialSocials?.telegram ?? ''));
 	let furaffinity = $state(untrack(() => initialSocials?.furaffinity ?? ''));
-	let deviantart = $state('');
-	let patreon = $state('');
-	let instagram = $state('');
+	let deviantart = $state(untrack(() => initialSocials?.deviantart ?? ''));
+	let patreon = $state(untrack(() => initialSocials?.patreon ?? ''));
+	let instagram = $state(untrack(() => initialSocials?.instagram ?? ''));
+	const guessed = untrack(() => prefillSource !== undefined);
+	/** The prefill mark describes each field Sona filled. */
+	const markFor = (col: SocialColumn) => (guessed && prefillSite && initialSocials?.[col] ? 'lookup-prefill-mark' : undefined);
+	let ledgerPrivate = $state(untrack(() => allowLedgerPrivate && startPrivate));
+	let nameInput = $state<HTMLInputElement>();
 	let saving = $state(false);
 	let errorMsg = $state('');
 
@@ -175,11 +191,14 @@
 	});
 
 	onMount(async () => {
+		// autofocus does nothing on an input mounted after page load, so focus
+		// stayed on the opener, outside the modal, and Escape never reached it.
+		nameInput?.focus();
 		// A lookup-seeded name has never been through oninput, so nothing has
 		// searched the registry for it. Go through onNameInput rather than
 		// searchRegistry directly, so the handle-vs-name classification and the
 		// debounce apply exactly as they would to a typed name (SONA-156).
-		if (prefillSource === 'lookup') onNameInput();
+		if (guessed) onNameInput();
 		if (!registryEnabled) return;
 		try {
 			const res = await fetch('/api/registry/import');
@@ -391,7 +410,9 @@
 					instagram,
 					globalId: pulled?.globalId,
 					registryVersion: pulled?.version,
-					avatarUrl: pulled?.avatarUrl
+					avatarUrl: pulled?.avatarUrl,
+					// A registry pick is already shared, so the flag doesn't apply to it.
+					ledgerPrivate: allowLedgerPrivate && !pulled && ledgerPrivate
 				})
 			});
 			if (!res.ok) {
@@ -431,7 +452,7 @@
 		role="dialog"
 		aria-modal="true"
 		aria-label={title}
-		aria-describedby={prefillSource === 'lookup' ? 'lookup-guess-lines' : undefined}
+		aria-describedby={guessed ? 'lookup-guess-lines' : undefined}
 		onclick={(e) => e.stopPropagation()}
 	>
 		<div class="modal-header">
@@ -439,14 +460,17 @@
 			<button class="icon-btn" onclick={oncancel} aria-label={m.admin_close()}><X size={18} /></button>
 		</div>
 
-		{#if prefillSource === 'lookup'}
-			<!-- These values came from a reverse image search, not from the artist.
-			     Say so before the operator publishes them under their own name. -->
+		{#if guessed}
+			<!-- These values came from a reverse image search or a pasted link, not
+			     from the artist. Say so before the operator publishes them under
+			     their own name. -->
 			<div class="guess-lines" id="lookup-guess-lines">
 				<p class="guess-line">
-					{prefillSite
-						? m.admin_lookup_guess_line_site({ site: prefillSite })
-						: m.admin_lookup_guess_line_name()}
+					{#if prefillSource === 'link'}
+						{prefillSite ? m.admin_lookup_guess_line_link_site({ site: prefillSite }) : m.admin_lookup_guess_line_link_name()}
+					{:else}
+						{prefillSite ? m.admin_lookup_guess_line_site({ site: prefillSite }) : m.admin_lookup_guess_line_name()}
+					{/if}
 				</p>
 				{#if registryEnabled}
 					<p class="guess-line">{m.admin_lookup_guess_line_registry()}</p>
@@ -466,6 +490,7 @@
 						type="text"
 						class="input"
 						bind:value={name}
+						bind:this={nameInput}
 						required
 						autofocus
 						placeholder={m.admin_upload_artist_name_placeholder()}
@@ -544,22 +569,32 @@
 
 			<div class="social-section">
 				<h3>{m.admin_artists_col_social()}</h3>
-				{#if prefillSource === 'lookup' && prefillSite}
+				{#if guessed && prefillSite}
 					<p class="prefill-mark" id="lookup-prefill-mark">
-						<span class="lookup-tag">{m.admin_lookup_from_lookup()}</span>
+						<span class="lookup-tag">{prefillSource === 'link' ? m.admin_lookup_from_link() : m.admin_lookup_from_lookup()}</span>
 						{prefillSite}
 					</p>
 				{/if}
-				<div class="social-grid" class:has-prefill={prefillSource === 'lookup' && prefillSite}>
-					<label class="social-field" class:span-full={!!initialSocials?.twitter}><TwitterIcon size={14} /><span class="sr-only">Twitter</span><input type="text" class="input" bind:value={twitter} placeholder="@handle" aria-describedby={prefillSource === 'lookup' && prefillSite && initialSocials?.twitter ? 'lookup-prefill-mark' : undefined} /></label>
-					<label class="social-field"><BlueskyIcon size={14} /><span class="sr-only">Bluesky</span><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" /></label>
-					<label class="social-field"><TelegramIcon size={14} /><span class="sr-only">Telegram</span><input type="text" class="input" bind:value={telegram} placeholder="t.me/lunarpaws" /></label>
-					<label class="social-field" class:span-full={!!initialSocials?.furaffinity}><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" aria-describedby={prefillSource === 'lookup' && prefillSite && initialSocials?.furaffinity ? 'lookup-prefill-mark' : undefined} /></label>
-					<label class="social-field"><DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/..." /></label>
-					<label class="social-field"><PatreonIcon size={14} /><span class="sr-only">Patreon</span><input type="text" class="input" bind:value={patreon} placeholder="patreon.com/lunarpaws" /></label>
-					<label class="social-field"><InstagramIcon size={14} /><span class="sr-only">Instagram</span><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/..." /></label>
+				<div class="social-grid" class:has-prefill={guessed && prefillSite}>
+					<label class="social-field" class:span-full={!!initialSocials?.twitter}><TwitterIcon size={14} /><span class="sr-only">Twitter</span><input type="text" class="input" bind:value={twitter} placeholder="@handle" aria-describedby={markFor('twitter')} /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.bluesky}><BlueskyIcon size={14} /><span class="sr-only">Bluesky</span><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" aria-describedby={markFor('bluesky')} /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.telegram}><TelegramIcon size={14} /><span class="sr-only">Telegram</span><input type="text" class="input" bind:value={telegram} placeholder="t.me/lunarpaws" aria-describedby={markFor('telegram')} /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.furaffinity}><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" aria-describedby={markFor('furaffinity')} /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.deviantart}><DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/..." aria-describedby={markFor('deviantart')} /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.patreon}><PatreonIcon size={14} /><span class="sr-only">Patreon</span><input type="text" class="input" bind:value={patreon} placeholder="patreon.com/lunarpaws" aria-describedby={markFor('patreon')} /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.instagram}><InstagramIcon size={14} /><span class="sr-only">Instagram</span><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/..." aria-describedby={markFor('instagram')} /></label>
 				</div>
 			</div>
+
+			{#if allowLedgerPrivate && !pulled}
+				<div class="private-field">
+					<label class="private-check">
+						<input type="checkbox" bind:checked={ledgerPrivate} aria-describedby="new-artist-private-hint" />
+						<span>{m.admin_artists_ledger_private()}</span>
+					</label>
+					<p class="private-hint" id="new-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
+				</div>
+			{/if}
 
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
@@ -680,6 +715,11 @@
 	.keep-updated span { font-size: 13px; color: var(--foreground); }
 	.keep-updated input { margin: 0; flex-shrink: 0; }
 	.reassure { color: var(--muted-foreground); font-size: 12px; }
+	.private-field { display: flex; flex-direction: column; gap: 4px; }
+	.private-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+	.private-check span { font-size: 13px; color: var(--foreground); }
+	.private-check input { margin: 0; flex-shrink: 0; }
+	.private-hint { margin: 0; color: var(--muted-foreground); font-size: 12px; }
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 </style>

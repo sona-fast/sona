@@ -46,12 +46,13 @@ function makeDb() {
 		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
-		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
+		aliases TEXT, avatar_resolved_at TEXT, ledger_private INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 	);
-	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
-	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
-	CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER);
+	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL, published INTEGER NOT NULL DEFAULT 1, parent_image_id INTEGER);
+	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER, pack_id INTEGER);
+	CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER, published INTEGER NOT NULL DEFAULT 1);
 	CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
+	CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
 	return drizzle(makeD1(sqlite), { schema });
 }
@@ -438,6 +439,24 @@ describe('syncArtists backfill — identity verification', () => {
 		for (const handle of ['hasapiece', 'hasasticker', 'managesapack', 'hasacredit']) {
 			expect(searched.some((u) => u.includes(handle)), handle).toBe(true);
 		}
+	});
+
+	// Q26: the owner's "keep private" flag skips the search with no entries at
+	// all, until work by the artist is published.
+	it('skips a flagged artist with no entries, and searches them once a piece by them is published', async () => {
+		const db = makeDb();
+		await db.insert(artists).values([
+			{ id: 1, name: 'flagged', twitterUrl: 'https://twitter.com/flaggedonly', ledgerPrivate: true, createdAt: now },
+			{ id: 2, name: 'flagged published', twitterUrl: 'https://twitter.com/flaggedpub', ledgerPrivate: true, createdAt: now }
+		]);
+		await db.run(sql`INSERT INTO images (artist_id, published) VALUES (2, 1)`);
+
+		stubRegistry([]);
+
+		await syncArtists(db, ENV, SETTINGS);
+		const searched = searchCalls().map(([url]) => decodeURIComponent(String(url)));
+		expect(searched.some((u) => u.includes('flaggedonly'))).toBe(false);
+		expect(searched.some((u) => u.includes('flaggedpub'))).toBe(true);
 	});
 
 	it('leaves the artist unlinked when the search returns no candidates', async () => {

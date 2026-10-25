@@ -97,7 +97,9 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	}
 
 	// 3. No existing match → create. Re-host a socially-resolved avatar to our CDN
-	// (a registry-provided avatarUrl is used as-is and isn't re-resolved).
+	// (a registry-provided avatarUrl is used as-is and isn't re-resolved). The
+	// "keep private" flag applies only to a new local artist: one pulled from the
+	// registry is already shared.
 	const settings = await getSettings(db);
 	const id = await resolveOrCreateArtist(db, {
 		artistId: null,
@@ -106,7 +108,8 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 		globalId,
 		registryVersion,
 		avatarUrl: globalId ? sanitizeUrl(body.avatarUrl ?? '') || null : null,
-		rehost: { env: platform?.env, settings, origin: url.origin, keyHint: name }
+		rehost: { env: platform?.env, settings, origin: url.origin, keyHint: name },
+		ledgerPrivate: !globalId && (body as Record<string, unknown>).ledgerPrivate === true
 	});
 	if (!id) error(400, 'Could not create artist');
 
