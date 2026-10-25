@@ -51,7 +51,7 @@ const remove = (platform: App.Platform, id: string) => runAction(actions.delete 
 
 async function loadStatus(platform: App.Platform, id: string): Promise<number | 'ok'> {
 	try {
-		await load({ platform, params: { id } } as never);
+		await load({ platform, request: new Request('http://x/'), params: { id } } as never);
 		return 'ok';
 	} catch (e) {
 		if (isHttpError(e)) return e.status;
@@ -71,7 +71,7 @@ describe('load', () => {
 		setLedgerGa('future');
 		const { sqlite, platform } = ledgerDb();
 		const id = seedEntry(sqlite, { title: 'Headshot icon' });
-		const data = (await load({ platform, params: { id: String(id) } } as never)) as {
+		const data = (await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
 			entry: { title: string };
 			gate: { open: boolean };
 		};
@@ -92,7 +92,7 @@ describe('load', () => {
 			currency: 'USD',
 			characterIds: [2, 1]
 		});
-		const { entry } = (await load({ platform, params: { id: String(id) } } as never)) as {
+		const { entry } = (await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
 			entry: Record<string, unknown>;
 		};
 		expect(Object.keys(entry).sort()).toEqual(

@@ -8,12 +8,14 @@ import {
 	parseCommissionForm,
 	submittedValues
 } from '$lib/server/commissions';
+import { localeCurrency } from '$lib/currencies';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ platform }) => {
+export const load: PageServerLoad = async ({ platform, request }) => {
 	const db = getDb(platform!.env.DB);
 	const [choices, gate] = await Promise.all([loadCommissionChoices(db), commissionGateView(db, platform?.env)]);
-	return { ...choices, gate };
+	// The browser's languages say where the owner is, for the currency picker.
+	return { ...choices, gate, localeCurrency: localeCurrency(request.headers.get('accept-language')) };
 };
 
 export const actions = {

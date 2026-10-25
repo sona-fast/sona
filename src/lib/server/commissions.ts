@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, or, sql, type Column } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, or, sql, type Column } from 'drizzle-orm';
 import type { Database } from './db';
 import { artists, characters, commissions, commissionCharacters, images } from './db/schema';
 import { sanitizeUrl } from './validate';
@@ -17,6 +17,7 @@ import {
 	type CommissionPayment,
 	type CommissionStatus
 } from '$lib/commissions';
+import { CURRENCY_ROW_MAX } from '$lib/currencies';
 import * as m from '$lib/paraglide/messages';
 
 // Commission ledger (SONA-236): form parsing, the reference checks, the writes,
@@ -66,6 +67,12 @@ function text(data: FormData, name: string): string {
 	return typeof value === 'string' ? value.trim() : '';
 }
 
+/** The picked currency. Without JavaScript, Other currency is a plain select
+ * (`currencyOther`), and a code picked there wins over the row's radios. */
+function submittedCurrency(data: FormData): string {
+	return text(data, 'currencyOther') || text(data, 'currency');
+}
+
 /**
  * Every field rule from the design doc's table, checked without touching the
  * database. Errors are keyed by field and already localized, so the page ties
@@ -111,12 +118,12 @@ export function parseCommissionForm(
 	const payment = text(data, 'payment');
 	if (!isCommissionPayment(payment)) errors.payment = m.admin_commissions_error_payment();
 
-	// Price and currency travel together: both or neither.
+	// A price needs its currency. With no amount there's no price, so the
+	// currency the picker still has selected is dropped, not refused.
 	const price = text(data, 'price');
-	const currency = text(data, 'currency').toUpperCase();
+	const currency = submittedCurrency(data).toUpperCase();
 	let priceMinor: number | null = null;
 	if (price && !currency) errors.currency = m.admin_commissions_error_currency_missing();
-	else if (!price && currency) errors.price = m.admin_commissions_error_price_missing();
 	else if (price && currency) {
 		if (currencyFractionDigits(currency) === null) {
 			errors.currency = m.admin_commissions_error_currency_code();
@@ -173,7 +180,7 @@ export function submittedValues(data: FormData): CommissionFormValues {
 		status: isCommissionStatus(status) ? status : 'applied',
 		payment: isCommissionPayment(payment) ? payment : 'unpaid',
 		price: text(data, 'price'),
-		currency: text(data, 'currency'),
+		currency: submittedCurrency(data),
 		notes: text(data, 'notes').replace(/\r\n?/g, '\n'),
 		requestedOn: text(data, 'requestedOn'),
 		acceptedOn: text(data, 'acceptedOn'),
@@ -400,14 +407,26 @@ export async function loadCommission(db: Database, id: number) {
 	};
 }
 
-/** The artist and character choices for the entry form. */
+/** The artist and character choices for the entry form, and the currencies
+ * saved entries use, most recently saved first (the picker's row). */
 export async function loadCommissionChoices(db: Database) {
-	const [artistRows, characterRows] = await db.batch([
+	const [artistRows, characterRows, currencyRows] = await db.batch([
 		db.select({ id: artists.id, name: artists.name }).from(artists).orderBy(asc(artists.name)),
 		db
 			.select({ id: characters.id, name: characters.name, ownerName: characters.ownerName })
 			.from(characters)
-			.orderBy(asc(characters.name))
+			.orderBy(asc(characters.name)),
+		db
+			.select({ currency: commissions.currency })
+			.from(commissions)
+			.where(isNotNull(commissions.currency))
+			.groupBy(commissions.currency)
+			.orderBy(desc(sql`max(${commissions.updatedAt})`))
+			.limit(CURRENCY_ROW_MAX)
 	]);
-	return { artists: artistRows, characters: characterRows };
+	return {
+		artists: artistRows,
+		characters: characterRows,
+		recentCurrencies: currencyRows.map((r) => r.currency).filter((c): c is string => c !== null)
+	};
 }

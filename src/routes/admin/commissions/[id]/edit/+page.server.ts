@@ -11,11 +11,12 @@ import {
 	submittedValues,
 	updateCommission
 } from '$lib/server/commissions';
+import { localeCurrency } from '$lib/currencies';
 import type { Actions, PageServerLoad } from './$types';
 
 // Readable whether or not the gate is open. A closed gate shows the entry
 // read-only, with Delete entry still offered.
-export const load: PageServerLoad = async ({ params, platform }) => {
+export const load: PageServerLoad = async ({ params, platform, request }) => {
 	const id = parseId(params.id);
 	if (id === null) error(404, 'Entry not found');
 	const db = getDb(platform!.env.DB);
@@ -25,7 +26,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		commissionGateView(db, platform?.env)
 	]);
 	if (!entry) error(404, 'Entry not found');
-	return { entry, ...choices, gate };
+	return { entry, ...choices, gate, localeCurrency: localeCurrency(request.headers.get('accept-language')) };
 };
 
 export const actions = {
