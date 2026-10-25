@@ -26,7 +26,7 @@ function makeDb(envExtra: Record<string, string> = {}) {
 			twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 			deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 			global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
-			aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
+			aliases TEXT, avatar_resolved_at TEXT, ledger_private INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 		);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, slug TEXT NOT NULL,
@@ -44,7 +44,7 @@ function makeDb(envExtra: Record<string, string> = {}) {
 		CREATE TABLE fursuit_photos (id INTEGER PRIMARY KEY AUTOINCREMENT);
 		CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1, manager_artist_id INTEGER);
-		CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
+		CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER, pack_id INTEGER);
 		CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
 		CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
 	`);

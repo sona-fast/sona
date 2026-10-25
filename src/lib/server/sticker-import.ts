@@ -1386,6 +1386,10 @@ export async function resolveOrCreateArtist(
 		/** Storage context so a freshly-resolved avatar is re-hosted to our own CDN
 		 * (can't rot to a 404) instead of stored as a hotlink. */
 		rehost?: AvatarRehostContext;
+		/** The owner's "keep private (commission ledger only)" flag (SONA-236):
+		 * stored on the new row, and the avatar isn't looked up, since that sends
+		 * the handle to X or Bluesky. */
+		ledgerPrivate?: boolean;
 	}
 ): Promise<number | null> {
 	const {
@@ -1395,6 +1399,7 @@ export async function resolveOrCreateArtist(
 		registryVersion,
 		avatarUrl: providedAvatar,
 		rehost,
+		ledgerPrivate = false,
 		...socials
 	} = opts;
 	if (artistId && artistId !== 'new') return Number(artistId);
@@ -1404,7 +1409,7 @@ export async function resolveOrCreateArtist(
 	// links (best-effort — ignore errors).
 	let avatarUrl: string | null = providedAvatar ?? null;
 	let resolvedNow = false;
-	if (!avatarUrl) {
+	if (!avatarUrl && !ledgerPrivate) {
 		try {
 			const { resolveAvatarUrl } = await import('$lib/server/avatar');
 			avatarUrl = await resolveAvatarUrl(
@@ -1436,7 +1441,8 @@ export async function resolveOrCreateArtist(
 			...socials,
 			globalId: globalId ?? null,
 			registryVersion: registryVersion ?? null,
-			registrySyncedAt: globalId ? new Date().toISOString() : null
+			registrySyncedAt: globalId ? new Date().toISOString() : null,
+			ledgerPrivate
 		})
 		.returning({ id: artists.id });
 	return newArtist.id;

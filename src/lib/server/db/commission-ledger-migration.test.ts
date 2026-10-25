@@ -101,6 +101,18 @@ describe('migration 0031 commission ledger', () => {
 		expect(indexes.filter((i) => i.sql.startsWith('CREATE UNIQUE INDEX')).map((i) => i.name)).toEqual(['commissions_image_id_uq']);
 	});
 
+	// Q26: the keep-private flag is added in place, so artists that exist before
+	// the migration keep their rows and start not private.
+	it('adds artists.ledger_private as 0 on rows that existed before it', () => {
+		const sqlite = new Database(':memory:');
+		sqlite.pragma('foreign_keys = ON');
+		const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+		for (const name of files.filter((f) => f < '0031')) sqlite.exec(readFileSync(new URL(name, dir), 'utf8'));
+		sqlite.exec("INSERT INTO artists (id, name, created_at) VALUES (1, 'Artist A', '2026-10-01')");
+		for (const name of files.filter((f) => f >= '0031')) sqlite.exec(readFileSync(new URL(name, dir), 'utf8'));
+		expect(sqlite.prepare('SELECT id, ledger_private FROM artists').all()).toEqual([{ id: 1, ledger_private: 0 }]);
+	});
+
 	it('starts a new entry as applied and unpaid', () => {
 		const sqlite = migrated();
 		entry(sqlite, 1, null);

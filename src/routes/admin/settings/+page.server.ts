@@ -952,7 +952,8 @@ export const actions = {
 		const backup = {
 			// v2 added conventions, fursuit photos, and the stickers tables (packs,
 			// stickers, emojis) — v1 silently omitted them. v3 added the commission
-			// ledger (SONA-236), which is private but still the owner's data.
+			// ledger (SONA-236), which is private but still the owner's data, and
+			// each artist's ledgerPrivate flag.
 			version: 3,
 			exportedAt: new Date().toISOString(),
 			settings,
