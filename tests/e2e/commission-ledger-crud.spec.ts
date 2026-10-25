@@ -34,8 +34,8 @@ test('creates an entry that lists under Active', async ({ page }, testInfo) => {
 	await page.getByLabel('Title').fill(TITLE);
 	await page.locator('label.char-chip', { hasText: 'Taro' }).click();
 	await page.locator('label.char-chip', { hasText: 'Thistle' }).click();
-	await page.getByLabel('Price').fill('120.00');
-	await page.getByLabel('Currency').fill('USD');
+	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
+	await page.getByLabel('Amount').fill('120.00');
 	await page.getByLabel('Requested').fill('2026-10-02');
 
 	// Hold the save so a second click and an Enter land while it's in flight.
@@ -92,7 +92,7 @@ test('moving the entry to Delivered lists it under Finished', async ({ page }, t
 	await waitForHydration(page);
 
 	// The saved price comes back in its typed form.
-	await expect(page.getByLabel('Price')).toHaveValue('120.00');
+	await expect(page.getByLabel('Amount')).toHaveValue('120.00');
 	await page.getByLabel('Status').selectOption('delivered');
 	await expect(page.getByLabel('Delivered', { exact: true })).not.toHaveValue('');
 	await settledShot(page, testInfo.outputPath('commission-entry-edit.png'));
@@ -237,4 +237,79 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
 	await settledShot(page, testInfo.outputPath('commission-ledger-emptied.png'));
+});
+
+test('Other currency finds a currency, and Add New Artist makes a private artist for the entry', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+
+	// No saved entry has a price now, so the row leads with the browser's region.
+	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
+	await expect(page.locator('#ce-currency-hint')).toHaveText('Pick the currency the artist charges in.');
+
+	// Other currency: search by code, Escape closes back to the button, Enter picks.
+	const other = page.getByRole('button', { name: 'Other currency' });
+	await other.click();
+	const find = page.getByRole('combobox', { name: 'Find a currency' });
+	const results = page.getByRole('listbox', { name: 'Find a currency' });
+	await expect(find).toBeFocused();
+	await page.keyboard.press('Escape');
+	await expect(find).toBeHidden();
+	await expect(other).toBeFocused();
+	await other.click();
+	await find.fill('krw');
+	await expect(results.getByRole('option')).toHaveCount(1);
+	await page.keyboard.press('Enter');
+	const krw = page.getByRole('radio', { name: /KRW/ });
+	await expect(krw).toBeChecked();
+	await expect(krw).toBeFocused();
+	await expect(page.locator('#ce-price-hint')).toHaveText(/^KRW amounts are whole numbers\./);
+	// A name in the admin language matches too.
+	await other.click();
+	await find.fill('swiss');
+	await expect(results.getByRole('option', { name: /CHF/ })).toBeVisible();
+	await page.keyboard.press('Escape');
+	await settledShot(page, testInfo.outputPath('commission-entry-currency-picked.png'));
+
+	// Add New Artist: focus lands in the dialog, so Escape closes it.
+	const addArtist = page.getByRole('button', { name: 'Add New Artist' });
+	await addArtist.click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByLabel('Artist Name')).toBeFocused();
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeHidden();
+	await expect(addArtist).toBeFocused();
+
+	await addArtist.click();
+	// An entry's artist starts private, so a sync can't share them before Save.
+	await expect(dialog.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+	await dialog.getByLabel('Artist Name').fill('E2E Private Artist');
+	await settledShot(page, testInfo.outputPath('commission-entry-new-artist.png'));
+	await dialog.getByRole('button', { name: 'Create Artist' }).click();
+	await expect(dialog).toBeHidden();
+	const artist = page.getByLabel('Artist', { exact: true });
+	await expect(artist.locator('option:checked')).toHaveText('E2E Private Artist');
+	await expect(artist).toBeFocused();
+
+	await page.getByLabel('Title').fill('E2E won entry');
+	await page.getByLabel('Amount').fill('50000');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const row = section(page, 'Active').getByRole('row', { name: /E2E won entry/ });
+	await expect(row).toContainText('E2E Private Artist');
+
+	// The artist was stored private.
+	await open(page, '/admin/artists');
+	await page
+		.getByRole('row', { name: /E2E Private Artist/ })
+		.getByRole('button', { name: 'Edit artist' })
+		.click();
+	// The Edit Artist modal has no dialog role, so the label alone finds it.
+	await expect(page.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+
+	// Back on a new entry, the row leads with the newest saved currency.
+	await open(page, '/admin/commissions/new');
+	await expect(page.getByRole('radio').first()).toHaveAccessibleName(/KRW/);
+	await expect(page.getByRole('radio', { name: /KRW/ })).toBeChecked();
+	await expect(page.locator('#ce-currency-hint')).toHaveText('The currencies you used most recently show first.');
 });

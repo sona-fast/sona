@@ -55,6 +55,8 @@
 		 * The artists page sets it; pickers that create an artist for a piece
 		 * don't need it. */
 		allowLedgerPrivate?: boolean;
+		/** Start with Keep private ticked: a commission entry's artist (SONA-236). */
+		startPrivate?: boolean;
 	}
 	let {
 		oncreated,
@@ -66,7 +68,8 @@
 		initialSocials,
 		prefillSource,
 		prefillSite = '',
-		allowLedgerPrivate = false
+		allowLedgerPrivate = false,
+		startPrivate = false
 	}: Props = $props();
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
@@ -83,7 +86,8 @@
 	let deviantart = $state('');
 	let patreon = $state('');
 	let instagram = $state('');
-	let ledgerPrivate = $state(false);
+	let ledgerPrivate = $state(untrack(() => allowLedgerPrivate && startPrivate));
+	let nameInput = $state<HTMLInputElement>();
 	let saving = $state(false);
 	let errorMsg = $state('');
 
@@ -181,6 +185,9 @@
 	});
 
 	onMount(async () => {
+		// autofocus does nothing on an input mounted after page load, so focus
+		// stayed on the opener, outside the modal, and Escape never reached it.
+		nameInput?.focus();
 		// A lookup-seeded name has never been through oninput, so nothing has
 		// searched the registry for it. Go through onNameInput rather than
 		// searchRegistry directly, so the handle-vs-name classification and the
@@ -474,6 +481,7 @@
 						type="text"
 						class="input"
 						bind:value={name}
+						bind:this={nameInput}
 						required
 						autofocus
 						placeholder={m.admin_upload_artist_name_placeholder()}

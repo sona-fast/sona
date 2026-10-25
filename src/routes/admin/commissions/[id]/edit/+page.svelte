@@ -55,6 +55,9 @@
 		{entry}
 		{form}
 		gaDate={data.gate.gaDate}
+		recentCurrencies={data.recentCurrencies}
+		localeCurrency={data.localeCurrency}
+		registryEnabled={data.registryEnabled}
 		extraActions={deleteButton}
 	/>
 {:else}
