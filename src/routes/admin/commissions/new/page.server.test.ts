@@ -90,7 +90,7 @@ describe('create action: early-access gate', () => {
 	it('loads the form either way, with the gate state for the page', async () => {
 		setLedgerGa('future');
 		const { platform } = ledgerDb();
-		const data = (await load({ platform } as never)) as {
+		const data = (await load({ platform, request: new Request('http://x/') } as never)) as {
 			gate: { open: boolean; gaDate: string };
 			artists: unknown[];
 			characters: unknown[];
@@ -101,6 +101,29 @@ describe('create action: early-access gate', () => {
 			{ id: 1, name: 'Kit', ownerName: null },
 			{ id: 2, name: 'Pip', ownerName: null }
 		]);
+	});
+});
+
+describe('load: the currency picker', () => {
+	beforeEach(() => setLedgerGa('past'));
+
+	it("offers saved currencies by last save and the region the browser's languages name", async () => {
+		const { platform } = ledgerDb();
+		await create(platform, entryForm({ title: 'Old', price: '10', currency: 'EUR' }));
+		await new Promise((r) => setTimeout(r, 5));
+		await create(platform, entryForm({ title: 'Newer', price: '1000', currency: 'KRW' }));
+		await create(platform, entryForm({ title: 'No price', price: '', currency: '' }));
+		const request = new Request('http://x/', { headers: { 'accept-language': 'en-GB,en;q=0.9' } });
+		const data = (await load({ platform, request } as never)) as { recentCurrencies: string[]; localeCurrency: string | null };
+		expect(data.recentCurrencies).toEqual(['KRW', 'EUR']);
+		expect(data.localeCurrency).toBe('GBP');
+	});
+
+	it('names no region when the browser sends only a language', async () => {
+		const { platform } = ledgerDb();
+		const request = new Request('http://x/', { headers: { 'accept-language': 'en' } });
+		const data = (await load({ platform, request } as never)) as { recentCurrencies: string[]; localeCurrency: string | null };
+		expect(data).toMatchObject({ recentCurrencies: [], localeCurrency: null });
 	});
 });
 
@@ -160,6 +183,21 @@ describe('create action: what it stores', () => {
 		expect(ledgerSnapshot(sqlite).links).toEqual([]);
 	});
 
+	it('stores no price and no currency when the amount is empty but a currency is picked', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const result = await create(platform, entryForm({ price: '', currency: 'EUR' }));
+		expect(result.status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT price_minor, currency FROM commissions')).toEqual([{ price_minor: null, currency: null }]);
+	});
+
+	it('takes the Other currency select over the row when the page ran without JavaScript', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const form = entryForm({ price: '1200', currency: 'USD' });
+		form.set('currencyOther', 'krw');
+		expect((await create(platform, form)).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT price_minor, currency FROM commissions')).toEqual([{ price_minor: 1200, currency: 'KRW' }]);
+	});
+
 	it('links the new entry, not an older one, when entries already exist', async () => {
 		const { sqlite, platform } = ledgerDb();
 		await create(platform, entryForm({ title: 'First', characterId: ['1'] }));
@@ -193,7 +231,6 @@ describe('create action: bad input', () => {
 		['unknown status', { status: 'finished' }, 'status'],
 		['unknown payment', { payment: 'half' }, 'payment'],
 		['price without currency', { price: '60', currency: '' }, 'currency'],
-		['currency without price', { price: '', currency: 'EUR' }, 'price'],
 		['malformed currency XYZ1', { price: '30', currency: 'XYZ1' }, 'currency'],
 		['decimals in JPY', { price: '45.5', currency: 'JPY' }, 'price'],
 		['three decimals in USD', { price: '45.505', currency: 'USD' }, 'price'],

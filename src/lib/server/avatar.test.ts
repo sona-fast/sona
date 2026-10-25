@@ -26,13 +26,14 @@ CREATE TABLE artists (
 	id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
 	bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT,
 	patreon_url TEXT, instagram_url TEXT, global_id TEXT, registry_version INTEGER,
-	registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
+	registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, ledger_private INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 );
 CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
-CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER);
-CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER);
+CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL, published INTEGER NOT NULL DEFAULT 1, parent_image_id INTEGER);
+CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER, pack_id INTEGER);
+CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, manager_artist_id INTEGER, published INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE avatar_credits (avatar_id INTEGER NOT NULL, artist_id INTEGER NOT NULL);
+CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
 `;
 
@@ -609,6 +610,34 @@ describe('refreshArtistAvatars', () => {
 		const ledger = await db.select().from(artists).where(eq(artists.id, 1)).get();
 		expect(ledger!.avatarUrl).toBeNull();
 		expect(ledger!.avatarResolvedAt).toBeNull();
+	});
+
+	// Q26: the owner's "keep private" flag skips the lookup with no entries at
+	// all, and a draft piece doesn't end it. Publishing a piece does.
+	it('skips a flagged artist with no entries or only a draft, and refreshes one with a published piece', async () => {
+		const fetchMock = stubFetch();
+		const { db } = makeDb();
+		await db.insert(artists).values([
+			{ id: 1, name: 'Flagged', blueskyUrl: 'flagged.bsky.social', ledgerPrivate: true, createdAt: 'x' },
+			{ id: 2, name: 'Flagged draft', blueskyUrl: 'flaggeddraft.bsky.social', ledgerPrivate: true, createdAt: 'x' },
+			{ id: 3, name: 'Flagged published', blueskyUrl: 'flaggedpub.bsky.social', ledgerPrivate: true, createdAt: 'x' }
+		]);
+		await db.run(sql`INSERT INTO images (artist_id, published) VALUES (2, 0), (3, 1)`);
+
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: fakeBucket() } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+			origin: 'https://site.test',
+			limit: 10,
+			mode: 'oldest'
+		});
+
+		expect(r).toEqual({ processed: 1, refreshed: 1, remaining: 0 });
+		const urls = fetchMock.mock.calls.map(([u]) => String(u));
+		expect(urls.some((u) => u.includes('flagged.bsky'))).toBe(false);
+		expect(urls.some((u) => u.includes('flaggeddraft'))).toBe(false);
+		expect(urls.some((u) => u.includes('flaggedpub'))).toBe(true);
+		expect((await db.select().from(artists).where(eq(artists.id, 3)).get())!.avatarResolvedAt).not.toBeNull();
 	});
 });
 

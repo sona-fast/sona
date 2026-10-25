@@ -14,7 +14,15 @@
 <!-- While the gate is closed the notice above says why there's no form. The
      create action refuses on the server either way. -->
 {#if data.gate.open}
-	<CommissionForm artists={data.artists} characters={data.characters} {form} gaDate={data.gate.gaDate} />
+	<CommissionForm
+		artists={data.artists}
+		characters={data.characters}
+		{form}
+		gaDate={data.gate.gaDate}
+		recentCurrencies={data.recentCurrencies}
+		localeCurrency={data.localeCurrency}
+		registryEnabled={data.registryEnabled}
+	/>
 {/if}
 
 <style>

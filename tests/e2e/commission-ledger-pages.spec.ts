@@ -112,13 +112,18 @@ test('a refused price shows its error on the field, and nothing is saved', async
 
 	await page.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
 	await page.getByLabel('Title').fill('E2E refused price');
-	await page.getByLabel('Price').fill('45.5');
-	await page.getByLabel('Currency').fill('JPY');
+	// The browser asks for en-US, so the row opens on USD before anything's saved.
+	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
+	await page.getByRole('radio', { name: /JPY/ }).check();
+	// The hint gives the picked currency's rule before Save.
+	await expect(page.locator('#ce-price-hint')).toHaveText(/^JPY amounts are whole numbers\./);
+	await expect(page.getByLabel('Amount')).toHaveAttribute('inputmode', 'numeric');
+	await page.getByLabel('Amount').fill('45.5');
 	await page.getByRole('button', { name: 'Save entry' }).click();
 
-	const price = page.getByLabel('Price');
+	const price = page.getByLabel('Amount');
 	await expect(price).toHaveAttribute('aria-invalid', 'true');
-	await expect(page.getByText("JPY prices don't use decimals. Enter a whole number.")).toBeVisible();
+	await expect(page.getByText("JPY amounts don't use decimals. Enter a whole number.")).toBeVisible();
 	await expect(price).toHaveAttribute('aria-describedby', /ce-price-err/);
 	// Focus moves to the first field with an error.
 	await expect(price).toBeFocused();
@@ -156,17 +161,20 @@ test('without JavaScript, a refused save keeps what was typed and shows the erro
 		await noJs.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
 		await noJs.getByLabel('Title').fill('E2E no-JS title');
 		await noJs.getByLabel('Notes').fill('E2E no-JS note');
-		await noJs.getByLabel('Price').fill('45.5');
-		await noJs.getByLabel('Currency').fill('JPY');
+		// Without a script, Other currency is a plain select, and its pick wins.
+		await noJs.getByLabel('Other currency').selectOption('KRW');
+		await noJs.getByLabel('Amount').fill('45.5');
 		await noJs.getByRole('button', { name: 'Save entry' }).click();
 		await noJs.waitForLoadState();
 
 		await expect(noJs.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
 		await expect(noJs.getByLabel('Title')).toHaveValue('E2E no-JS title');
 		await expect(noJs.getByLabel('Notes')).toHaveValue('E2E no-JS note');
-		await expect(noJs.getByLabel('Price')).toHaveValue('45.5');
-		await expect(noJs.getByLabel('Price')).toHaveAttribute('aria-invalid', 'true');
-		await expect(noJs.getByText("JPY prices don't use decimals. Enter a whole number.")).toBeVisible();
+		await expect(noJs.getByLabel('Amount')).toHaveValue('45.5');
+		await expect(noJs.getByLabel('Amount')).toHaveAttribute('aria-invalid', 'true');
+		await expect(noJs.getByText("KRW amounts don't use decimals. Enter a whole number.")).toBeVisible();
+		// The refused page keeps the Other pick, as a picked option in the row.
+		await expect(noJs.getByRole('radio', { name: /KRW/ })).toBeChecked();
 		await settledShot(noJs, testInfo.outputPath('commission-entry-nojs-error.png'));
 	} finally {
 		await context.close();

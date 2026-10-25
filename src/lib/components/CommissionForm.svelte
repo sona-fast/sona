@@ -1,8 +1,10 @@
 <script lang="ts">
-	import { tick, type Snippet } from 'svelte';
+	import { onMount, tick, type Snippet } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
 	import { Check, CircleAlert, ImagePlus, Loader2, Plus, RefreshCw } from 'lucide-svelte';
+	import CurrencyPicker from '$lib/components/CurrencyPicker.svelte';
+	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
@@ -17,6 +19,7 @@
 		TITLE_MAX,
 		canAddToGallery,
 		changedFields,
+		currencyFractionDigits,
 		datesAfterStatusChange,
 		FIELD_ORDER,
 		formValuesOf,
@@ -28,6 +31,7 @@
 		type CommissionFormEntry,
 		type CommissionFormValues
 	} from '$lib/commissions';
+	import { currencyRow, initialCurrency } from '$lib/currencies';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
 
@@ -58,11 +62,49 @@
 		form?: FailureData | null;
 		/** The GA date the gate refusal names. */
 		gaDate: string | null;
+		/** Currencies saved entries use, most recently saved first. */
+		recentCurrencies?: string[];
+		/** The currency of the region the browser's languages name, if any. */
+		localeCurrency?: string | null;
+		/** Whether the shared registry is connected, for the New Artist dialog. */
+		registryEnabled?: boolean;
 		/** Rendered last in the button row, such as Delete entry on the edit page. */
 		extraActions?: Snippet;
 	}
 
-	let { artists, characters, entry = null, form = null, gaDate, extraActions }: Props = $props();
+	let {
+		artists,
+		characters,
+		entry = null,
+		form = null,
+		gaDate,
+		extraActions,
+		recentCurrencies = [],
+		localeCurrency = null,
+		registryEnabled = false
+	}: Props = $props();
+
+	// Artists made from this form join its list without a reload. Add New
+	// Artist needs the page's script, so it only renders once that has run.
+	let addedArtists = $state<{ id: number; name: string }[]>([]);
+	const artistOptions = $derived(
+		[...artists, ...addedArtists.filter((a) => !artists.some((b) => b.id === a.id))].sort((a, b) =>
+			a.name.localeCompare(b.name, getLocale())
+		)
+	);
+	let showNewArtist = $state(false);
+	let artistSelect = $state<HTMLSelectElement>();
+	let hydrated = $state(false);
+	onMount(() => (hydrated = true));
+
+	async function onArtistCreated(artist: { id: number; name: string }) {
+		if (!artistOptions.some((a) => a.id === artist.id)) addedArtists = [...addedArtists, artist];
+		values.artistId = String(artist.id);
+		showNewArtist = false;
+		announcer.say(m.admin_commissions_artist_added_announce({ name: artist.name }));
+		await tick();
+		artistSelect?.focus();
+	}
 
 	// The page never swaps a create form into an edit form, so the first value holds.
 	// svelte-ignore state_referenced_locally
@@ -78,6 +120,41 @@
 	let version = $state(form?.version ?? entry?.version ?? '');
 	// svelte-ignore state_referenced_locally
 	let values = $state(form?.values ?? formValuesOf(entry));
+	// With no currency yet, the picker opens on the most recent one, else the
+	// browser's regional one. Read into `loaded` too, so an out-of-date refusal
+	// doesn't name a currency the owner never touched. A currency with no amount
+	// saves as no price, so this pick alone stores nothing.
+	// svelte-ignore state_referenced_locally
+	if (!form && !values.currency) {
+		// svelte-ignore state_referenced_locally
+		const opening = initialCurrency({ recent: recentCurrencies, localeCurrency });
+		values.currency = opening;
+		loaded.currency = opening;
+	}
+	// The row is fixed when the form opens: the entry's own currency, then recent
+	// ones. A pick from Other currency joins it inside the picker.
+	// svelte-ignore state_referenced_locally
+	const currencyChoices = currencyRow({ entryCurrency: entry?.currency || form?.values?.currency, recent: recentCurrencies, localeCurrency });
+	const amountDigits = $derived(values.currency ? currencyFractionDigits(values.currency) : null);
+	const currencySymbol = $derived.by(() => {
+		if (!values.currency) return '';
+		try {
+			return (
+				new Intl.NumberFormat(getLocale(), { style: 'currency', currency: values.currency, currencyDisplay: 'narrowSymbol' })
+					.formatToParts(0)
+					.find((p) => p.type === 'currency')?.value ?? ''
+			);
+		} catch {
+			return '';
+		}
+	});
+	const amountHint = $derived(
+		amountDigits === null
+			? m.admin_commissions_hint_amount_none()
+			: amountDigits === 0
+				? m.admin_commissions_hint_amount_whole({ currency: values.currency })
+				: m.admin_commissions_hint_amount_decimals({ currency: values.currency, digits: amountDigits })
+	);
 
 	let saving = $state(false);
 	// The refusal on screen. Cleared when a new save starts or the entry reloads,
@@ -350,18 +427,24 @@
 				name="artistId"
 				required
 				bind:value={values.artistId}
+				bind:this={artistSelect}
 				aria-invalid={errors.artistId ? 'true' : undefined}
-				aria-describedby={describedBy('artistId', artists.length === 0 ? 'ce-no-artists' : '')}
+				aria-describedby={describedBy('artistId', artistOptions.length === 0 ? 'ce-no-artists' : '')}
 			>
 				<option value="">{m.admin_commissions_select_artist()}</option>
-				{#each artists as artist (artist.id)}
+				{#each artistOptions as artist (artist.id)}
 					<option value={String(artist.id)}>{artist.name}</option>
 				{/each}
 			</select>
 			{@render fieldError('artistId')}
-			{#if artists.length === 0}
-				<!-- The entry form doesn't create artists yet (the paste-a-link flow
-				     does, in a later change), so point at the page that does. -->
+			{#if hydrated}
+				<button type="button" class="add-artist-btn" onclick={() => (showNewArtist = true)}>
+					<Plus size={14} aria-hidden="true" /> {m.admin_upload_add_new_artist()}
+				</button>
+			{/if}
+			{#if artistOptions.length === 0}
+				<!-- Without the page's script there's no Add New Artist, so this
+				     points at the page that makes artists either way. -->
 				<small class="hint" id="ce-no-artists"
 					>{m.admin_commissions_no_artists_pre()}<a href="/admin/artists">{m.admin_commissions_no_artists_link()}</a
 					>{m.admin_commissions_no_artists_post()}</small
@@ -503,46 +586,48 @@
 				{@render fieldError('payment')}
 			</div>
 		</div>
-		<div class="field">
-			<div class="price-row">
-				<div class="field">
-					<div class="label-row">
-						<label class="field-label" for="ce-price">{m.admin_commissions_field_price()}</label>{@render optional()}
-					</div>
+		<!-- Currency first, so the amount box can show which currency it's in
+		     and the hint can give that currency's decimal rule before Save. -->
+		<fieldset class="subgroup">
+			<legend>{m.admin_commissions_field_price()} {@render optional()}</legend>
+			<div class="field">
+				<span class="field-label" id="ce-currency-label">{m.admin_commissions_field_currency()}</span>
+				<CurrencyPicker
+					row={currencyChoices}
+					bind:value={values.currency}
+					invalid={!!errors.currency}
+					describedBy={describedBy('currency', 'ce-currency-hint')}
+					announce={(text) => announcer.say(text)}
+				/>
+				{@render fieldError('currency')}
+				<small class="hint" id="ce-currency-hint"
+					>{recentCurrencies.length > 0 ? m.admin_commissions_hint_currency_recent() : m.admin_commissions_hint_currency_pick()}</small
+				>
+			</div>
+			<div class="field">
+				<label class="field-label" for="ce-price">{m.admin_commissions_field_amount()}</label>
+				<div class="amount">
+					{#if values.currency}
+						<span class="amount-prefix" aria-hidden="true">{currencySymbol}&nbsp;{values.currency}</span>
+					{/if}
+					<div class="amount-box">
 					<input
 						id="ce-price"
 						class="input"
 						type="text"
 						name="price"
-						inputmode="decimal"
+						inputmode={amountDigits === 0 ? 'numeric' : 'decimal'}
 						autocomplete="off"
 						bind:value={values.price}
 						aria-invalid={errors.price ? 'true' : undefined}
 						aria-describedby={describedBy('price', 'ce-price-hint')}
 					/>
-				</div>
-				<div class="field">
-					<div class="label-row">
-						<label class="field-label" for="ce-currency">{m.admin_commissions_field_currency()}</label>{@render optional()}
 					</div>
-					<input
-						id="ce-currency"
-						class="input currency"
-						type="text"
-						name="currency"
-						maxlength="3"
-						autocomplete="off"
-						autocapitalize="characters"
-						bind:value={values.currency}
-						aria-invalid={errors.currency ? 'true' : undefined}
-						aria-describedby={describedBy('currency', 'ce-price-hint')}
-					/>
 				</div>
+				{@render fieldError('price')}
+				<small class="hint" id="ce-price-hint">{amountHint}</small>
 			</div>
-			{@render fieldError('price')}
-			{@render fieldError('currency')}
-			<small class="hint" id="ce-price-hint">{m.admin_commissions_hint_price()}</small>
-		</div>
+		</fieldset>
 		<!-- The hint is tied to each date input, so the fieldset doesn't repeat it. -->
 		<fieldset class="subgroup">
 			<legend>{m.admin_commissions_legend_dates()} {@render optional()}</legend>
@@ -577,6 +662,18 @@
 		{@render extraActions?.()}
 	</div>
 </form>
+
+{#if showNewArtist}
+	<!-- An artist made for a ledger entry starts private, so the nightly sync
+	     and avatar refresh leave them alone even if the entry is never saved. -->
+	<NewArtistDialog
+		{registryEnabled}
+		allowLedgerPrivate
+		startPrivate
+		oncreated={onArtistCreated}
+		oncancel={() => (showNewArtist = false)}
+	/>
+{/if}
 
 <style>
 	.form { display: flex; flex-direction: column; gap: 20px; max-width: 800px; }
@@ -624,8 +721,16 @@
 	@container (max-width: 520px) {
 		.row-2, .row-3 { grid-template-columns: minmax(0, 1fr); }
 	}
-	.price-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(5rem, 7.5rem); gap: 12px; align-items: end; }
-	.currency { text-transform: uppercase; }
+	.add-artist-btn {
+		display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 36px;
+		padding: 6px 12px; border: 1px solid var(--input); border-radius: var(--radius-pill);
+		background: transparent; color: var(--foreground); font: inherit; font-size: 13px; cursor: pointer;
+	}
+	.add-artist-btn:hover { border-color: var(--primary-text); color: var(--primary-text); }
+	.add-artist-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+	.amount { display: flex; align-items: center; gap: 8px; max-width: 20rem; }
+	.amount-prefix { font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--muted-foreground); }
+	.amount-box { flex: 1; min-width: 0; }
 
 	.char-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 	/* A 1px edge on every chip and a check on the selected one, as on the tag
