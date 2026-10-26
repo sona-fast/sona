@@ -36,6 +36,7 @@
 	 * the save sends it back so the server can refuse an out-of-date form. It is
 	 * never shown. */
 	interface EntryInit extends CommissionFormEntry {
+		id: number;
 		version: string;
 	}
 	interface FailureData {
@@ -278,10 +279,19 @@
 			<p>{m.admin_commissions_why_body()}</p>
 		</details>
 		<div class="form-actions why-actions">
-			<button type="button" class="btn btn-primary" onclick={reloadEntry}>
-				<RefreshCw size={16} aria-hidden="true" />
-				{m.admin_commissions_reload()}
-			</button>
+			{#if hydrated}
+				<button type="button" class="btn btn-primary" onclick={reloadEntry}>
+					<RefreshCw size={16} aria-hidden="true" />
+					{m.admin_commissions_reload()}
+				</button>
+			{:else}
+				<!-- Without the page's script, Reload entry loads the edit page again:
+				     the current entry, without the typed note. -->
+				<a class="btn btn-primary" href="/admin/commissions/{entry?.id}/edit">
+					<RefreshCw size={16} aria-hidden="true" />
+					{m.admin_commissions_reload()}
+				</a>
+			{/if}
 		</div>
 	</div>
 {/if}

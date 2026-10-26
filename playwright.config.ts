@@ -232,10 +232,10 @@ const conventionsEventServerEnv = {
 	SONA_E2E_SEED_OVERLAY: E2E_CONVENTIONS_EVENT_OVERLAY
 };
 
-// The commission ledger CRUD spec creates, edits, and deletes entries, so it
-// gets its own seeded DB + server; one worker, because its tests share that
-// DB's ledger (SONA-236). The shared wrangler config opens the gate.
-const COMMISSIONS_SPEC = '**/commission-ledger-crud.spec.ts';
+// The commission ledger CRUD and saves specs create, edit, and delete entries,
+// so they get their own seeded DB + server; one worker, because their tests
+// share that DB's ledger (SONA-236). The shared wrangler config opens the gate.
+const COMMISSIONS_SPECS = ['**/commission-ledger-crud.spec.ts', '**/commission-ledger-saves.spec.ts'];
 
 const commissionsServerEnv = {
 	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG,
@@ -343,7 +343,7 @@ export default defineConfig({
 				...REGISTRY_SPECS,
 				PASSPORT_SPEC,
 				CONVENTIONS_EVENT_SPEC,
-				COMMISSIONS_SPEC,
+				...COMMISSIONS_SPECS,
 				COMMISSIONS_GATED_SPEC
 			],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
@@ -385,7 +385,7 @@ export default defineConfig({
 		},
 		{
 			name: 'commissions',
-			testMatch: COMMISSIONS_SPEC,
+			testMatch: COMMISSIONS_SPECS,
 			workers: 1,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${COMMISSIONS_PORT}` }
 		},
