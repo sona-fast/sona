@@ -18,6 +18,8 @@ describe('localeCurrency', () => {
 	it("never takes a region from a lower-priority language's tag", () => {
 		expect(localeCurrency('ja,en-US;q=0.9,en;q=0.8')).toBeNull();
 		expect(localeCurrency('de,en-US;q=0.7')).toBeNull();
+		expect(localeCurrency('*,en-US')).toBeNull();
+		expect(localeCurrency('en_US,en-GB')).toBeNull();
 	});
 
 	it('gives nothing when no tag says where the owner is', () => {

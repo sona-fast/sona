@@ -123,6 +123,27 @@ describe('POST /api/artists — explicit registry import overrides the local cop
 		expect(row!.registryVersion).toBe(5);
 	});
 
+	it('linked: linking a flagged local artist clears its keep-private flag', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({
+			name: 'furfoggy',
+			twitterUrl: 'https://x.com/furfoggy',
+			ledgerPrivate: true,
+			createdAt: '2026-07-01'
+		});
+
+		const res = await post(platform, {
+			name: 'FurFoggy',
+			globalId: GID,
+			registryVersion: 5,
+			twitter: 'https://x.com/furfoggy'
+		});
+		expect(((await res.json()) as { status: string }).status).toBe('linked');
+
+		const row = await db.select().from(artists).where(eq(artists.globalId, GID)).get();
+		expect(row!.ledgerPrivate).toBe(false);
+	});
+
 	it('created: no local match still creates a fresh artist', async () => {
 		const { db, platform } = makeDb();
 		const res = await post(platform, {
