@@ -169,3 +169,17 @@ test.describe('/connect/qr', () => {
 	// the load touches no database, and that the route sits outside every group
 	// whose layout does.
 });
+
+test.describe('admin settings con card, on a clock before its old GA date', () => {
+	// The con-card early-access gate went GA on 2026-08-27 and was retired with
+	// it (SONA-236). A clock before that date would put a keyless admin on the
+	// locked side if the gate ever came back, so the generator showing here is
+	// the regression check for the retirement.
+	test('shows the generator without a supporter key', async ({ page }) => {
+		await page.clock.setFixedTime(new Date('2026-01-05T12:00:00.000Z'));
+		await adminLogin(page, PASSWORD);
+		await openSettings(page);
+		await expect(conCard(page)).toBeVisible({ timeout: 30_000 });
+		await expect(conCard(page).getByRole('group', { name: 'Handles' })).toBeVisible();
+	});
+});
