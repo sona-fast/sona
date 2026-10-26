@@ -74,3 +74,47 @@ test('a private artist asks before sharing, and only Share anyway resubmits', as
 	await expect(share).toBeFocused();
 	await page.screenshot({ path: testInfo.outputPath('shared-anyway.png') });
 });
+
+// The Edit Artist modal offers "Keep private" only where it can mean something:
+// a shared (registry-linked) artist can't be made private, so the box is absent
+// for one that isn't private already. A local private artist keeps the box. The
+// unit suite covers the update action; only the browser shows what renders.
+test('the edit modal hides Keep private for a shared artist, not a local private one', async ({
+	page
+}, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await page.waitForLoadState('load');
+
+	// Unique names and globalId, so a rerun against a reused DB finds one row
+	// each. No socials, so nothing is looked up.
+	const stamp = Date.now();
+	const linkedName = `Linked Edit ${stamp}`;
+	const privateName = `Private Edit ${stamp}`;
+	const linked = await page.request.post('/api/artists', {
+		data: { name: linkedName, globalId: `e2e-linked-${stamp}`, registryVersion: 1 }
+	});
+	expect(linked.ok()).toBe(true);
+	const local = await page.request.post('/api/artists', { data: { name: privateName, ledgerPrivate: true } });
+	expect(local.ok()).toBe(true);
+
+	const keepPrivate = page.getByRole('checkbox', { name: 'Keep private (commission ledger only)' });
+	const nameField = page.getByRole('textbox', { name: 'Artist Name' });
+
+	const openEdit = async (name: string) => {
+		await gotoAfterLogin(page, `/admin/artists?q=${encodeURIComponent(name)}`);
+		const row = page.getByRole('row').filter({ hasText: name });
+		await expect(row).toBeVisible();
+		await waitForHydration(page);
+		await row.getByRole('button', { name: 'Edit artist' }).click();
+		await expect(nameField).toHaveValue(name);
+	};
+
+	await openEdit(linkedName);
+	await expect(keepPrivate).toHaveCount(0);
+	await page.screenshot({ path: testInfo.outputPath('linked-edit.png') });
+
+	await openEdit(privateName);
+	await expect(keepPrivate).toBeVisible();
+	await expect(keepPrivate).toBeChecked();
+	await page.screenshot({ path: testInfo.outputPath('private-edit.png') });
+});

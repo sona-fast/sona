@@ -415,8 +415,8 @@
 					</div>
 				</div>
 
-				<!-- A shared (registry-linked) artist can't be made private; the update action keeps their stored flag. -->
-				{#if !editingArtist.globalId}
+				<!-- A shared (registry-linked) artist can't be made private; the box shows only so one linked while flagged can clear it. -->
+				{#if !editingArtist.globalId || editingArtist.ledgerPrivate}
 					<div class="private-field">
 						<label class="private-check">
 							<input type="checkbox" name="ledgerPrivate" checked={editingArtist.ledgerPrivate} disabled={saving} aria-describedby="edit-artist-private-hint" />

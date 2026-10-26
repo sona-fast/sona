@@ -875,8 +875,8 @@ describe('update action — the keep-private flag', () => {
 		expect((await read(db, row.id))!.avatarUrl).toBeNull();
 	});
 
-	// A shared (registry-linked) artist can't be made private: the form hides the
-	// box, and the action keeps the stored flag whatever is posted.
+	// A shared (registry-linked) artist can't be made private: the action stores
+	// the stored flag AND the posted one, so a linked artist can only clear it.
 	it('ignores a posted flag for a registry-linked artist and still looks up the avatar', async () => {
 		const { db, platform } = makeDb();
 		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });
@@ -888,7 +888,7 @@ describe('update action — the keep-private flag', () => {
 		expect(after!.avatarUrl).toBe(resolvedAvatar);
 	});
 
-	it('keeps a registry-linked artist\'s stored flag when the box is absent', async () => {
+	it('clears a flagged registry-linked artist\'s flag and looks up the avatar when the box is unticked', async () => {
 		const { db, platform } = makeDb();
 		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });
 		const row = await db
@@ -898,7 +898,24 @@ describe('update action — the keep-private flag', () => {
 			.get();
 
 		await save(platform, row.id);
-		expect((await read(db, row.id))!.ledgerPrivate).toBe(true);
+		const after = await read(db, row.id);
+		expect(after!.ledgerPrivate).toBe(false);
+		expect(after!.avatarUrl).toBe(resolvedAvatar);
+	});
+
+	it('keeps a flagged registry-linked artist private and skips the lookup when the box stays ticked', async () => {
+		const { db, platform } = makeDb();
+		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });
+		const row = await db
+			.insert(schema.artists)
+			.values({ name: 'Quill', globalId: 'g-quill', ledgerPrivate: true })
+			.returning()
+			.get();
+
+		await save(platform, row.id, { ledgerPrivate: 'on' });
+		const after = await read(db, row.id);
+		expect(after!.ledgerPrivate).toBe(true);
+		expect(after!.avatarUrl).toBeNull();
 	});
 
 	it('saves nothing, flag included, when the save fails partway', async () => {
