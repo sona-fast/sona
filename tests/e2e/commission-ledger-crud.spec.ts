@@ -118,6 +118,9 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 	const other = await context.newPage();
 	await open(other, editUrl!);
 	await other.getByLabel('Title').fill(`${TITLE} (renamed)`);
+	// Clearing the amount leaves the entry with no currency, so Reload entry
+	// has to pick the opening currency the way a fresh form does.
+	await other.getByLabel('Amount').fill('');
 	await other.getByRole('button', { name: 'Save changes' }).click();
 	await expect(other).toHaveURL(/\/admin\/commissions$/);
 	await other.close();
@@ -167,6 +170,9 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 	await expect(notes).toBeFocused();
 	await expect(page.getByLabel('Title')).toHaveValue(`${TITLE} (renamed)`);
 	await expect(page.getByLabel('Payment')).toHaveValue('unpaid');
+	// No saved entry has a price now, so the browser's region (en-US) is picked.
+	await expect(page.getByLabel('Amount')).toHaveValue('');
+	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
 	await expect(page.getByText("Your note from before the reload isn't saved yet. Save changes to keep it.")).toBeVisible();
 	await settledShot(page, testInfo.outputPath('commission-entry-reloaded.png'));
 

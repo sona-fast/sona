@@ -61,10 +61,11 @@
 		void matches;
 		active = 0;
 	});
-	// 'symbol', not 'narrowSymbol': the list tells A$ from CA$.
-	const listSymbols = $derived(new Map(matches.map((code) => [code, currencySymbol(code, locale, 'symbol')])));
+	// 'symbol', not 'narrowSymbol': the list tells A$ from CA$. Built once, the
+	// first time the search opens: the locale is fixed, so typing only looks up.
+	const listSymbols = $derived(new Map(all.map((code) => [code, currencySymbol(code, locale, 'symbol')])));
 	// Names line up in one column: a symbol column only when a match has a symbol.
-	const anySymbol = $derived([...listSymbols.values()].some(Boolean));
+	const anySymbol = $derived(matches.some((code) => listSymbols.get(code)));
 
 	async function openSearch() {
 		open = true;
