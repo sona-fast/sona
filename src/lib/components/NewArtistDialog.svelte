@@ -84,6 +84,10 @@
 	let patreon = $state('');
 	let instagram = $state('');
 	let ledgerPrivate = $state(false);
+	// Keep private promises the artist stays out of the shared registry, so the
+	// name isn't sent there as a search either while it's ticked (SONA-236).
+	// Unticking searches for the name as typed.
+	let registrySearch = $derived(registryEnabled && !(allowLedgerPrivate && ledgerPrivate));
 	let saving = $state(false);
 	let errorMsg = $state('');
 
@@ -122,7 +126,7 @@
 	// matches nothing must NOT silently become the artist's name — so while the
 	// input still looks like a handle and nothing is linked, plain-create is
 	// blocked and the field nudges the operator to pick a match or type a name.
-	let query = $derived(registryEnabled ? classifyQuery(name) : { kind: 'name' as const, handleParam: '', handle: '' });
+	let query = $derived(registrySearch ? classifyQuery(name) : { kind: 'name' as const, handleParam: '', handle: '' });
 	let isHandleQuery = $derived(query.kind === 'handle');
 	// Don't block when the registry is unreachable — fall back to manual entry.
 	let blockHandleCreate = $derived(isHandleQuery && !pulled && !searchError);
@@ -140,7 +144,7 @@
 	// pick, else result counts / no-match once a search settles (silent mid-type).
 	let resultsAnnouncement = $derived.by(() => {
 		if (pickAnnouncement) return pickAnnouncement;
-		if (!registryEnabled || !shouldSearch(searchTermValue) || registrySearching) return '';
+		if (!registrySearch || !shouldSearch(searchTermValue) || registrySearching) return '';
 		if (searchError) return m.admin_new_artist_registry_unreachable();
 		if (registryResults.length) return m.admin_new_artist_registry_results_count({ count: registryResults.length });
 		if (hasSearched) return isHandleQuery ? m.admin_new_artist_registry_handle_no_match() : m.admin_new_artist_registry_no_matches();
@@ -276,8 +280,16 @@
 	// Typing in the name field (registry on) re-searches. Editing after a pick
 	// unlinks — the identity no longer matches what's typed, so we drop back to
 	// plain-create (dropping the unedited pulled socials) until they pick again.
+	function onPrivateChange(e: Event & { currentTarget: HTMLInputElement }) {
+		ledgerPrivate = e.currentTarget.checked;
+		if (registrySearch) onNameInput();
+		else {
+			resetSearch();
+			pickAnnouncement = '';
+		}
+	}
 	function onNameInput() {
-		if (!registryEnabled) return;
+		if (!registrySearch) return;
 		if (pulled) {
 			pulled = null;
 			restoreUneditedPrefill();
@@ -347,7 +359,7 @@
 	// Full keyboard support for the combobox; falls through to create() on Enter
 	// when there's nothing to pick (and behaves as a plain field when registry off).
 	function onNameKeydown(e: KeyboardEvent) {
-		if (!registryEnabled) {
+		if (!registrySearch) {
 			if (e.key === 'Enter') create();
 			return;
 		}
@@ -456,7 +468,7 @@
 						? m.admin_lookup_guess_line_site({ site: prefillSite })
 						: m.admin_lookup_guess_line_name()}
 				</p>
-				{#if registryEnabled}
+				{#if registrySearch}
 					<p class="guess-line">{m.admin_lookup_guess_line_registry()}</p>
 				{/if}
 			</div>
@@ -479,16 +491,16 @@
 						placeholder={m.admin_upload_artist_name_placeholder()}
 						oninput={onNameInput}
 						onkeydown={onNameKeydown}
-						onblur={() => { if (registryEnabled) { resultsOpen = false; activeIndex = -1; } }}
-						role={registryEnabled ? 'combobox' : undefined}
-						aria-autocomplete={registryEnabled ? 'list' : undefined}
-						aria-expanded={registryEnabled ? resultsOpen : undefined}
-						aria-controls={registryEnabled ? listboxId : undefined}
-						aria-describedby={registryEnabled ? 'new-artist-name-hint' : undefined}
-						aria-activedescendant={registryEnabled && resultsOpen && activeIndex >= 0 ? `new-artist-opt-${activeIndex}` : undefined}
+						onblur={() => { if (registrySearch) { resultsOpen = false; activeIndex = -1; } }}
+						role={registrySearch ? 'combobox' : undefined}
+						aria-autocomplete={registrySearch ? 'list' : undefined}
+						aria-expanded={registrySearch ? resultsOpen : undefined}
+						aria-controls={registrySearch ? listboxId : undefined}
+						aria-describedby={registrySearch ? 'new-artist-name-hint' : undefined}
+						aria-activedescendant={registrySearch && resultsOpen && activeIndex >= 0 ? `new-artist-opt-${activeIndex}` : undefined}
 					/>
 					{#if registrySearching}<span class="name-spin"><Loader2 size={14} class="spin" /></span>{/if}
-					{#if registryEnabled && resultsOpen && registryResults.length}
+					{#if registrySearch && resultsOpen && registryResults.length}
 						<!-- preventDefault keeps input focus when the user grabs the scrollbar (or the
 							     gaps between rows) — else the blur would close the dropdown mid-drag. -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -519,7 +531,7 @@
 						</ul>
 					{/if}
 				</div>
-				{#if registryEnabled}
+				{#if registrySearch}
 					{#if searchError}
 						<p class="reg-hint reg-hint-warn" id="new-artist-name-hint">{m.admin_new_artist_registry_unreachable()}</p>
 					{:else if blockHandleCreate && handleTermTooShort}
@@ -572,7 +584,7 @@
 			{#if allowLedgerPrivate && !pulled}
 				<div class="private-field">
 					<label class="private-check">
-						<input type="checkbox" bind:checked={ledgerPrivate} aria-describedby="new-artist-private-hint" />
+						<input type="checkbox" checked={ledgerPrivate} onchange={onPrivateChange} aria-describedby="new-artist-private-hint" />
 						<span>{m.admin_artists_ledger_private()}</span>
 					</label>
 					<p class="private-hint" id="new-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
@@ -581,7 +593,7 @@
 
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
-				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate} aria-describedby={registryEnabled ? 'new-artist-name-hint' : undefined}>
+				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate} aria-describedby={registrySearch ? 'new-artist-name-hint' : undefined}>
 					{#if saving}
 						<Loader2 size={16} class="spin" /> {pulled ? m.admin_registry_importing() : m.admin_new_artist_creating()}
 					{:else}
