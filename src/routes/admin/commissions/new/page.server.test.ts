@@ -218,7 +218,7 @@ describe('create action: what it stores', () => {
 		const result = await create(platform, form);
 		expect(result.status).toBe(400);
 		expect(result.data.errors).toEqual({
-			currency: 'You picked USD and also chose JPY under Other currency. To use JPY, pick Other currency as well. To use USD, save again.'
+			currency: 'You picked USD and also chose JPY under Other currency. To use JPY, pick Other currency and choose JPY again. To use USD, save again.'
 		});
 		expect(result.data.values).toMatchObject({ price: '12', currency: 'USD' });
 		expect(ledgerSnapshot(sqlite)).toEqual({ commissions: [], links: [] });
