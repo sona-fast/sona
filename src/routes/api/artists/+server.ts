@@ -78,7 +78,8 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 		}
 
 		// 2. An UNLINKED local artist that matches by handle → link it (no duplicate)
-		//    and refresh it the same way.
+		//    and refresh it the same way. Clear "keep private": the artist is in the
+		//    shared registry now, and the edit form can't set it on a linked artist.
 		const incoming = socialsToHandles(socials);
 		if (incoming.length > 0) {
 			const want = new Set(incoming.map((h) => `${h.platform} ${h.handleNorm}`));
@@ -88,7 +89,7 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 				if (socialsToHandles(a).some((h) => want.has(`${h.platform} ${h.handleNorm}`))) {
 					await db
 						.update(artists)
-						.set({ ...registryFields, globalId })
+						.set({ ...registryFields, globalId, ledgerPrivate: false })
 						.where(eq(artists.id, a.id));
 					return json({ id: a.id, name, status: 'linked' });
 				}
