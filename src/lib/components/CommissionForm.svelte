@@ -1020,11 +1020,16 @@
 	@container (max-width: 520px) {
 		.row-2, .row-3 { grid-template-columns: minmax(0, 1fr); }
 	}
+	/* A long "Add {handle} as a new artist" wraps: the label stays left-aligned
+	   and the icon stays on its first line. 8px padding keeps a one-line button
+	   at the 36px minimum, so it reads the same as before. */
 	.add-artist-btn {
-		display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 36px;
-		padding: 6px 12px; border: 1px solid var(--input); border-radius: var(--radius-pill);
-		background: transparent; color: var(--foreground); font: inherit; font-size: 13px; cursor: pointer;
+		display: inline-flex; align-items: flex-start; gap: 6px; align-self: flex-start; min-height: 36px;
+		padding: 8px 12px; border: 1px solid var(--input); border-radius: var(--radius-pill);
+		background: transparent; color: var(--foreground); font: inherit; font-size: 13px; text-align: left;
+		cursor: pointer;
 	}
+	.add-artist-btn :global(svg) { flex: none; margin-top: calc((1lh - 14px) / 2); }
 	.add-artist-btn:hover { border-color: var(--primary-text); color: var(--primary-text); }
 	.add-artist-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 	.amount { max-width: 20rem; }
