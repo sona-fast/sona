@@ -160,3 +160,40 @@ test('the edit modal keeps Keep private for a shared artist that is already priv
 	await expect(nameField).toBeVisible();
 	await page.screenshot({ path: testInfo.outputPath('linked-cleared-edit.png') });
 });
+
+// Keep private promises the artist stays out of the shared registry, so the New
+// Artist dialog must not send the typed name there as a search while the box is
+// ticked. Unticking searches for the name as typed.
+test('the New Artist dialog sends no registry search while Keep private is ticked', async ({
+	page
+}, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/artists');
+
+	const searches: string[] = [];
+	page.on('request', (req) => {
+		const url = new URL(req.url());
+		if (url.pathname === '/api/registry/search') searches.push(url.searchParams.get('q') ?? '');
+	});
+
+	const dialog = page.getByRole('dialog', { name: 'New Artist' });
+	// The Add button is client-side; a click that lands before hydration does
+	// nothing, so retry until the dialog opens.
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Add Artist' }).first().click();
+		await expect(dialog).toBeVisible({ timeout: 1_500 });
+	}).toPass({ timeout: 30_000 });
+
+	const keepPrivate = dialog.getByLabel('Keep private (commission ledger only)');
+	await keepPrivate.check();
+	await dialog.getByLabel('Artist Name').fill('Quiet Quill');
+	// Longer than the dialog's 250 ms search debounce, so a search that was going
+	// to fire has fired.
+	await page.waitForTimeout(1_000);
+	expect(searches).toEqual([]);
+	await expect(dialog.getByRole('combobox')).toHaveCount(0);
+	await page.screenshot({ path: testInfo.outputPath('private-no-search.png') });
+
+	await keepPrivate.uncheck();
+	await expect.poll(() => searches).toEqual(['Quiet Quill']);
+});
