@@ -1774,7 +1774,7 @@
 	"admin_currency_matches_none": "「{query}」に一致する通貨はありません。",
 	"admin_currency_picked_announce": "{code}（{name}）を使用します。",
 	"admin_currency_current": "（選択中）",
-	"admin_commissions_artist_added_announce": "{name}をアーティストとして使用します。",
+	"admin_commissions_artist_added_announce": "「{name}」をアーティストに設定しました。",
 	"admin_currency_matches": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count}件の通貨が一致しました。", "countPlural=other": "{count}件の通貨が一致しました。"}}],
 	"admin_commissions_legend_dates": "日付",
 	"admin_commissions_field_requested": "依頼日",
