@@ -272,8 +272,13 @@ const UPLOAD_SPECS = [
 // server (read-only by convention) nor the upload one (SONA-220).
 const SUGGEST_TAGS_SPEC = '**/suggest-tags.spec.ts';
 // registry-sync needs the registry turned on, which no other server has; so does
-// new-artist-handle, whose dialog only classifies handles with the registry on.
-const REGISTRY_SPECS = ['**/registry-sync.spec.ts', '**/new-artist-handle.spec.ts'];
+// new-artist-handle, whose dialog only classifies handles with the registry on,
+// and share-private-artist, whose Share button only renders with it on.
+const REGISTRY_SPECS = [
+	'**/registry-sync.spec.ts',
+	'**/new-artist-handle.spec.ts',
+	'**/share-private-artist.spec.ts'
+];
 // tag-suggestions reads the two admin forms with the lookup endpoint
 // intercepted and writes no rows, but it cannot take the parallel project: its
 // tests log in and then navigate, and a SvelteKit client navigation landing
