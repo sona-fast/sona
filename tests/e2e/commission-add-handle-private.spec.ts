@@ -16,6 +16,10 @@ import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-registry.toml (throwaway value).
 const PASSWORD = 'e2e-admin-password';
+// English text of admin_lookup_guess_line_registry (messages/en.json). It
+// promises a registry match can replace the guess, so it must not show while
+// Keep private has the registry search off.
+const REGISTRY_GUESS_LINE = 'Picking a registry match replaces what Sona filled.';
 // Longer than the dialog's 250 ms search debounce, so a search that was going to
 // fire has fired.
 const PAST_DEBOUNCE_MS = 1_000;
@@ -55,11 +59,17 @@ test('Add {handle} searches the registry only after Keep private is unticked', a
 	await expect(dialog.getByLabel('Artist Name')).toHaveValue(handle);
 	const keepPrivate = dialog.getByLabel('Keep private (commission ledger only)');
 	await expect(keepPrivate).toBeChecked();
+	// The guess lines render for a pasted link, so a missing registry line below
+	// is the gate, not the whole block being absent.
+	const guessLines = dialog.locator('#lookup-guess-lines');
+	await expect(guessLines).toContainText('from the link you pasted');
+	await expect(guessLines.getByText(REGISTRY_GUESS_LINE)).toHaveCount(0);
 	await page.waitForTimeout(PAST_DEBOUNCE_MS);
 	expect(searches.map((r) => r.url())).toEqual([]);
 	await page.screenshot({ path: testInfo.outputPath('add-handle-private-no-search.png') });
 
 	await keepPrivate.uncheck();
+	await expect(guessLines.getByText(REGISTRY_GUESS_LINE)).toBeVisible();
 	await expect.poll(() => searches.map((r) => new URL(r.url()).searchParams.get('q'))).toEqual([handle]);
 	// Exactly one: the untick doesn't search twice, nor again after the debounce.
 	await page.waitForTimeout(PAST_DEBOUNCE_MS);
