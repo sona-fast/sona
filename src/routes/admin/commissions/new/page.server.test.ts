@@ -119,6 +119,17 @@ describe('load: the currency picker', () => {
 		expect(data.localeCurrency).toBe('GBP');
 	});
 
+	it('offers only the four most recently saved of five currencies', async () => {
+		const { platform } = ledgerDb();
+		for (const currency of ['EUR', 'GBP', 'JPY', 'KRW', 'CAD']) {
+			await create(platform, entryForm({ title: currency, price: '1000', currency }));
+			await new Promise((r) => setTimeout(r, 5));
+		}
+		const request = new Request('http://x/');
+		const data = (await load({ platform, request } as never)) as { recentCurrencies: string[] };
+		expect(data.recentCurrencies).toEqual(['CAD', 'KRW', 'JPY', 'GBP']);
+	});
+
 	it('names no region when the browser sends only a language', async () => {
 		const { platform } = ledgerDb();
 		const request = new Request('http://x/', { headers: { 'accept-language': 'en' } });
@@ -190,12 +201,20 @@ describe('create action: what it stores', () => {
 		expect(rows(sqlite, 'SELECT price_minor, currency FROM commissions')).toEqual([{ price_minor: null, currency: null }]);
 	});
 
-	it('takes the Other currency select over the row when the page ran without JavaScript', async () => {
+	it('takes the Other currency select when the row has Other currency picked, as it does without JavaScript', async () => {
 		const { sqlite, platform } = ledgerDb();
-		const form = entryForm({ price: '1200', currency: 'USD' });
+		const form = entryForm({ price: '1200', currency: '__other' });
 		form.set('currencyOther', 'krw');
 		expect((await create(platform, form)).status).toBe('redirected');
 		expect(rows(sqlite, 'SELECT price_minor, currency FROM commissions')).toEqual([{ price_minor: 1200, currency: 'KRW' }]);
+	});
+
+	it('keeps a row pick made after an Other currency pick', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const form = entryForm({ price: '12', currency: 'USD' });
+		form.set('currencyOther', 'JPY');
+		expect((await create(platform, form)).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT price_minor, currency FROM commissions')).toEqual([{ price_minor: 1200, currency: 'USD' }]);
 	});
 
 	it('links the new entry, not an older one, when entries already exist', async () => {

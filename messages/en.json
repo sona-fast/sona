@@ -677,6 +677,7 @@
 	"admin_artists_col_social": "Social Links",
 	"admin_artists_shared_title": "Linked to the shared registry",
 	"admin_artists_badge_shared": "shared",
+	"admin_artists_badge_private": "private",
 	"admin_artists_pending_title": "Submitted to the shared registry — awaiting review",
 	"admin_artists_badge_pending": "pending",
 	"admin_artists_formerly": "formerly {names}",
@@ -2333,6 +2334,7 @@
 	"admin_currency_find": "Find a currency",
 	"admin_currency_matches_none": "No currency matches “{query}”.",
 	"admin_currency_picked_announce": "Using {code}, {name}.",
+	"admin_currency_current": "(current)",
 	"admin_commissions_artist_added_announce": "Using {name} as the artist.",
 	"admin_currency_matches": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} currency matches.", "countPlural=other": "{count} currencies match."}}],
 	"admin_commissions_legend_dates": "Dates",
@@ -2430,7 +2432,6 @@
 	"admin_commissions_link_no_handle": "This link doesn't include the artist's handle. Pick the artist from the list instead.",
 	"admin_commissions_link_unsupported": "Sona can't find artists from this kind of link. Pick the artist from the list instead.",
 	"admin_commissions_link_failed": "Sona couldn't look up this link. Pick the artist from the list instead.",
-	"admin_commissions_link_using_announce": "Using {name} as the artist.",
 	"admin_commissions_link_invalid": "Sona couldn't read this link. Fix it or clear it, then pick the artist from the list.",
 	"admin_commissions_draft_restored": "Your draft is back."
 }

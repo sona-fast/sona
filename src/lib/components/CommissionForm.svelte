@@ -5,7 +5,8 @@
 	import { Check, CircleAlert, ImagePlus, Loader2, Plus, RefreshCw, TriangleAlert } from 'lucide-svelte';
 	import CurrencyPicker from '$lib/components/CurrencyPicker.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
-	import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from '$lib/social-label';
+	import { SOCIAL_PLATFORM_NAMES } from '$lib/social-label';
+	import type { Platform } from '$lib/social-platforms';
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
@@ -32,7 +33,7 @@
 		type CommissionFormEntry,
 		type CommissionFormValues
 	} from '$lib/commissions';
-	import { currencyRow, initialCurrency } from '$lib/currencies';
+	import { currencyRow, currencySymbol, initialCurrency } from '$lib/currencies';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
 
@@ -96,27 +97,20 @@
 	let showNewArtist = $state(false);
 	// Set when the dialog opens from a link's "Add {handle}": it seeds the name
 	// and that platform's field, and the made artist becomes the link's match.
-	let artistSeed = $state<{ platform: SocialPlatform; handle: string } | null>(null);
-	// The dialog's social fields; FurTrack has no artist column.
-	const SEED_COLUMNS = ['twitter', 'bluesky', 'telegram', 'furaffinity', 'deviantart', 'patreon', 'instagram'] as const;
-	type SeedColumn = (typeof SEED_COLUMNS)[number];
-	const seedColumn = (platform: SocialPlatform): SeedColumn | null =>
-		(SEED_COLUMNS as readonly string[]).includes(platform) ? (platform as SeedColumn) : null;
+	let artistSeed = $state<{ platform: Platform; handle: string } | null>(null);
 	let artistSelect = $state<HTMLSelectElement>();
 	let hydrated = $state(false);
 	onMount(() => (hydrated = true));
 
 	async function onArtistCreated(artist: { id: number; name: string }) {
 		if (!artistOptions.some((a) => a.id === artist.id)) addedArtists = [...addedArtists, artist];
-		values.artistId = String(artist.id);
-		// The owner's own pick: a later link lookup mustn't replace it.
-		ownerPicked();
 		if (artistSeed && lookup.kind === 'found' && lookup.handle === artistSeed.handle) {
 			lookup = { ...lookup, matches: [artist], nameMatches: [], added: true };
 		}
 		artistSeed = null;
 		showNewArtist = false;
-		announcer.say(m.admin_commissions_artist_added_announce({ name: artist.name }));
+		// The owner's own pick: a later link lookup mustn't replace it.
+		useArtist(artist);
 		await tick();
 		artistSelect?.focus();
 	}
@@ -151,18 +145,8 @@
 	// svelte-ignore state_referenced_locally
 	const currencyChoices = currencyRow({ entryCurrency: entry?.currency || form?.values?.currency, recent: recentCurrencies, localeCurrency });
 	const amountDigits = $derived(values.currency ? currencyFractionDigits(values.currency) : null);
-	const currencySymbol = $derived.by(() => {
-		if (!values.currency) return '';
-		try {
-			return (
-				new Intl.NumberFormat(getLocale(), { style: 'currency', currency: values.currency, currencyDisplay: 'narrowSymbol' })
-					.formatToParts(0)
-					.find((p) => p.type === 'currency')?.value ?? ''
-			);
-		} catch {
-			return '';
-		}
-	});
+	// Null when the currency prints as its code (CHF), so the code shows once.
+	const amountSymbol = $derived(values.currency ? currencySymbol(values.currency, getLocale()) : null);
 	const amountHint = $derived(
 		amountDigits === null
 			? m.admin_commissions_hint_amount_none()
@@ -257,7 +241,7 @@
 		| { kind: 'refused'; reason: 'invalid' | 'unsupported' | 'no_handle' | 'failed' }
 		| {
 				kind: 'found';
-				platform: SocialPlatform;
+				platform: Platform;
 				handle: string;
 				matches: ArtistChoice[];
 				nameMatches: ArtistChoice[];
@@ -283,7 +267,7 @@
 	function useArtist(artist: ArtistChoice) {
 		values.artistId = String(artist.id);
 		ownerPicked();
-		announcer.say(m.admin_commissions_link_using_announce({ name: artist.name }));
+		announcer.say(m.admin_commissions_artist_added_announce({ name: artist.name }));
 	}
 
 	async function lookUpLink(raw: string) {
@@ -330,7 +314,7 @@
 		const outcome = lookupOutcome(next);
 		if (single && (!values.artistId || values.artistId === autoPicked)) {
 			values.artistId = autoPicked = String(single.id);
-			const using = m.admin_commissions_link_using_announce({ name: single.name });
+			const using = m.admin_commissions_artist_added_announce({ name: single.name });
 			announcer.say(`${outcome}${getLocale() === 'ja' ? '' : ' '}${using}`);
 			return;
 		}
@@ -459,11 +443,11 @@
 <!-- No artist holds the handle: make one from it, private to the ledger until
      there's public work by them (SONA-236 Q26). Without the page's script there
      is no dialog, so the Artists page stands in. -->
-{#snippet addArtistHint(found: { platform: SocialPlatform; handle: string })}
+{#snippet addArtistHint(found: { platform: Platform; handle: string })}
 	{#if hydrated}
 		<button
 			type="button"
-			class="btn-compact btn-tap-mobile add-handle"
+			class="add-artist-btn"
 			onclick={() => {
 				artistSeed = { platform: found.platform, handle: found.handle };
 				showNewArtist = true;
@@ -876,22 +860,26 @@
 					invalid={!!errors.currency}
 					describedBy={describedBy('currency', 'ce-currency-hint')}
 					announce={(text) => announcer.say(text)}
-				/>
-				{@render fieldError('currency')}
-				<small class="hint" id="ce-currency-hint"
-					>{recentCurrencies.length > 0 ? m.admin_commissions_hint_currency_recent() : m.admin_commissions_hint_currency_pick()}</small
 				>
+					<!-- Under the row, above an open search, so the hint stays by the row it describes. -->
+					{#snippet below()}
+						{@render fieldError('currency')}
+						<small class="hint" id="ce-currency-hint"
+							>{recentCurrencies.length > 0 ? m.admin_commissions_hint_currency_recent() : m.admin_commissions_hint_currency_pick()}</small
+						>
+					{/snippet}
+				</CurrencyPicker>
 			</div>
 			<div class="field">
 				<label class="field-label" for="ce-price">{m.admin_commissions_field_amount()}</label>
-				<div class="amount">
-					{#if values.currency}
-						<span class="amount-prefix" aria-hidden="true">{currencySymbol}&nbsp;{values.currency}</span>
-					{/if}
-					<div class="amount-box">
+				<!-- One field: the symbol inside on the left, the code inside on the
+				     right, so the box's left edge stays on the column line. The hint
+				     names the currency for a screen reader. -->
+				<div class="field-pill amount">
+					{#if amountSymbol}<span class="affix" aria-hidden="true">{amountSymbol}</span>{/if}
 					<input
 						id="ce-price"
-						class="input"
+						class="input input-plain"
 						type="text"
 						name="price"
 						inputmode={amountDigits === 0 ? 'numeric' : 'decimal'}
@@ -900,7 +888,7 @@
 						aria-invalid={errors.price ? 'true' : undefined}
 						aria-describedby={describedBy('price', 'ce-price-hint')}
 					/>
-					</div>
+					{#if values.currency}<span class="affix" aria-hidden="true">{values.currency}</span>{/if}
 				</div>
 				{@render fieldError('price')}
 				<small class="hint" id="ce-price-hint">{amountHint}</small>
@@ -944,16 +932,20 @@
 {#if showNewArtist}
 	<!-- An artist made for a ledger entry starts private, so the nightly sync
 	     and avatar refresh leave them alone even if the entry is never saved. -->
-	{@const column = artistSeed ? seedColumn(artistSeed.platform) : null}
 	<NewArtistDialog
 		{registryEnabled}
 		allowLedgerPrivate
 		startPrivate
 		initialName={artistSeed?.handle ?? ''}
-		initialSocials={artistSeed && column ? { [column]: artistSeed.handle } : undefined}
+		initialSocials={artistSeed ? { [artistSeed.platform]: artistSeed.handle } : undefined}
 		prefillSource={artistSeed ? 'link' : undefined}
-		prefillSite={artistSeed && column ? SOCIAL_PLATFORM_NAMES[artistSeed.platform] : ''}
+		prefillSite={artistSeed ? SOCIAL_PLATFORM_NAMES[artistSeed.platform] : ''}
 		oncreated={onArtistCreated}
+		onimportedall={async () => {
+			showNewArtist = false;
+			artistSeed = null;
+			await invalidateAll();
+		}}
 		oncancel={() => {
 			showNewArtist = false;
 			artistSeed = null;
@@ -994,8 +986,6 @@
 		padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere;
 	}
 	.lookup p { margin: 0; }
-	/* Its own width, not the card's, like the Use buttons beside a match. */
-	.add-handle { align-self: flex-start; }
 	.lookup-line { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
 	.lookup-line .platform { color: var(--muted-foreground); font-size: 12px; }
 	.lookup-line .handle { font-weight: 500; }
@@ -1037,9 +1027,11 @@
 	}
 	.add-artist-btn:hover { border-color: var(--primary-text); color: var(--primary-text); }
 	.add-artist-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-	.amount { display: flex; align-items: center; gap: 8px; max-width: 20rem; }
-	.amount-prefix { font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--muted-foreground); }
-	.amount-box { flex: 1; min-width: 0; }
+	.amount { max-width: 20rem; }
+	.affix { font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--muted-foreground); }
+	/* The pill draws the field's edge and ring, so the error goes on the pill. */
+	.amount:has([aria-invalid='true']) { border-color: var(--destructive); }
+	.amount:has([aria-invalid='true']):focus-within { outline-color: var(--destructive); }
 
 	.char-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 	/* A 1px edge on every chip and a check on the selected one, as on the tag

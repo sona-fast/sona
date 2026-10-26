@@ -99,11 +99,14 @@ async function paste(input: ReturnType<Page['getByLabel']>, value: string) {
 	}, value);
 }
 
-/** Counts the lookup requests the page sends. */
+/** Counts the lookup requests the page sends, and keeps what each sent so a
+ * failure says which link went out. */
 function countLookups(page: Page) {
-	const seen = { count: 0 };
+	const seen = { count: 0, sent: [] as string[] };
 	page.on('request', (r) => {
-		if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/admin/artist-from-link') seen.count += 1;
+		if (r.method() !== 'POST' || new URL(r.url()).pathname !== '/api/admin/artist-from-link') return;
+		seen.count += 1;
+		seen.sent.push(r.postData() ?? '');
 	});
 	return seen;
 }
@@ -202,6 +205,11 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	// starts private. Cancel makes nothing.
 	await paste(link, 'https://x.com/new_from_link/status/9');
 	const addHandle = card.getByRole('button', { name: 'Add new_from_link as a new artist' });
+	// Drawn as the same pill as Add New Artist below it, not a rectangle.
+	const addNewArtist = page.getByRole('button', { name: 'Add New Artist' });
+	const pillRadius = await addNewArtist.evaluate((el) => getComputedStyle(el).borderRadius);
+	expect(pillRadius).not.toBe('0px');
+	await expect(addHandle).toHaveCSS('border-radius', pillRadius);
 	await addHandle.click();
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByLabel('Artist Name')).toHaveValue('new_from_link');
@@ -227,6 +235,25 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	await paste(link, 'https://x.com/nobody_here/status/1');
 	await paste(link, 'https://x.com/new_from_link/status/9');
 	await expect(card.getByText('new_from_link is already in your artist list as new_from_link.')).toBeVisible();
+
+	// Another platform's link fills that platform's field, and the line names it.
+	await paste(link, 'https://www.furaffinity.net/user/fa_from_link/');
+	await card.getByRole('button', { name: 'Add fa_from_link as a new artist' }).click();
+	await expect(dialog.getByLabel('Artist Name')).toHaveValue('fa_from_link');
+	await expect(dialog.getByLabel('FurAffinity')).toHaveValue('fa_from_link');
+	await expect(dialog.getByLabel('Twitter')).toHaveValue('');
+	await expect(
+		dialog.getByText('Sona filled the name and FurAffinity link from the link you pasted. They\'re a guess until you check them.')
+	).toBeVisible();
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(dialog).toHaveCount(0);
+	// FurTrack has no artist column to match against, so its links are refused
+	// and offer no Add.
+	await paste(link, 'https://www.furtrack.com/user/ft_from_link');
+	await expect(
+		page.locator('#ce-link-msg').getByText("Sona can't find artists from this kind of link. Pick the artist from the list instead.")
+	).toBeVisible();
+	await expect(card).toHaveCount(0);
 
 	// The endpoint takes POST only, so a link never rides in a query string.
 	const get = await page.request.get('/api/admin/artist-from-link?url=https%3A%2F%2Fx.com%2Fa');
@@ -280,7 +307,7 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 	// Typing sends nothing until the owner leaves the field, then sends once.
 	await link.pressSequentially('https://x.com/nobody_here/status/7');
 	await page.waitForTimeout(500);
-	expect(lookups.count).toBe(0);
+	expect(lookups.sent).toEqual([]);
 	await link.press('Tab');
 	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
 	expect(lookups.count).toBe(1);
@@ -1104,7 +1131,28 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await page.keyboard.press('Escape');
 	await expect(find).toBeHidden();
 	await expect(other).toBeFocused();
+	// Down and Up move through the list and wrap at both ends; Enter picks the
+	// active option.
 	await other.click();
+	const options = results.getByRole('option');
+	const firstId = (await options.first().getAttribute('id'))!;
+	const secondId = (await options.nth(1).getAttribute('id'))!;
+	const lastId = (await options.last().getAttribute('id'))!;
+	await expect(find).toHaveAttribute('aria-activedescendant', firstId);
+	await page.keyboard.press('ArrowUp');
+	await expect(find).toHaveAttribute('aria-activedescendant', lastId);
+	await page.keyboard.press('ArrowDown');
+	await expect(find).toHaveAttribute('aria-activedescendant', firstId);
+	await page.keyboard.press('ArrowDown');
+	await expect(find).toHaveAttribute('aria-activedescendant', secondId);
+	await page.keyboard.press('Enter');
+	const secondCode = secondId.replace('ce-currency-opt-', '');
+	await expect(page.getByRole('radio', { name: new RegExp(secondCode) })).toBeChecked();
+	// With nothing matching, there's no list, only the count saying so.
+	await other.click();
+	await find.fill('zzzz');
+	await expect(results).toBeHidden();
+	await expect(page.getByRole('status').filter({ hasText: 'No currency matches “zzzz”.' })).toBeVisible();
 	await find.fill('krw');
 	await expect(results.getByRole('option')).toHaveCount(1);
 	await page.keyboard.press('Enter');
@@ -1112,8 +1160,11 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await expect(krw).toBeChecked();
 	await expect(krw).toBeFocused();
 	await expect(page.locator('#ce-price-hint')).toHaveText(/^KRW amounts are whole numbers\./);
-	// A name in the admin language matches too.
+	// The list marks the current currency in words, not only with a check.
 	await other.click();
+	await find.fill('krw');
+	await expect(results.getByRole('option', { name: /KRW.*\(current\)/ })).toBeVisible();
+	// A name in the admin language matches too.
 	await find.fill('swiss');
 	await expect(results.getByRole('option', { name: /CHF/ })).toBeVisible();
 	await page.keyboard.press('Escape');
@@ -1124,6 +1175,10 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await addArtist.click();
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByLabel('Artist Name')).toBeFocused();
+	// Tab stays inside the dialog: back past its first control wraps to its last.
+	await page.keyboard.press('Shift+Tab');
+	await page.keyboard.press('Shift+Tab');
+	await expect(dialog.locator(':focus')).toHaveCount(1);
 	await page.keyboard.press('Escape');
 	await expect(dialog).toBeHidden();
 	await expect(addArtist).toBeFocused();
@@ -1160,4 +1215,15 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await expect(page.getByRole('radio').first()).toHaveAccessibleName(/KRW/);
 	await expect(page.getByRole('radio', { name: /KRW/ })).toBeChecked();
 	await expect(page.locator('#ce-currency-hint')).toHaveText('The currencies you used most recently show first.');
+
+	// A Japanese owner finds the yen by its Japanese name.
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+	try {
+		await open(page, '/admin/commissions/new');
+		await page.getByRole('button', { name: 'その他の通貨' }).click();
+		await page.getByRole('combobox', { name: '通貨を検索' }).fill('円');
+		await expect(page.getByRole('listbox', { name: '通貨を検索' }).getByRole('option', { name: /JPY/ })).toBeVisible();
+	} finally {
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+	}
 });

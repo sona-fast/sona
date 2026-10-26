@@ -17,7 +17,7 @@ import {
 	type CommissionPayment,
 	type CommissionStatus
 } from '$lib/commissions';
-import { CURRENCY_ROW_MAX } from '$lib/currencies';
+import { CURRENCY_OTHER, CURRENCY_ROW_MAX } from '$lib/currencies';
 import * as m from '$lib/paraglide/messages';
 
 // Commission ledger (SONA-236): form parsing, the reference checks, the writes,
@@ -67,10 +67,12 @@ function text(data: FormData, name: string): string {
 	return typeof value === 'string' ? value.trim() : '';
 }
 
-/** The picked currency. Without JavaScript, Other currency is a plain select
- * (`currencyOther`), and a code picked there wins over the row's radios. */
+/** The picked currency. Without JavaScript, Other currency is a radio in the
+ * row plus a plain select (`currencyOther`); the select counts only when that
+ * radio, or no radio, is picked, so a row pick after it still wins. */
 function submittedCurrency(data: FormData): string {
-	return text(data, 'currencyOther') || text(data, 'currency');
+	const picked = text(data, 'currency');
+	return picked === CURRENCY_OTHER || !picked ? text(data, 'currencyOther') : picked;
 }
 
 /**
