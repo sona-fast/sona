@@ -165,7 +165,7 @@
 					<td class="artist-name">
 						{artist.name}
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
-						{#if artist.ledgerPrivate}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
+						{#if artist.isPrivate}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'pending'}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'rejected'}<span class="reg-badge rejected" title={data.registryStatus[artist.id].note ? m.admin_artists_rejected_note({ note: data.registryStatus[artist.id].note ?? '' }) : m.admin_artists_rejected_title()}>{m.admin_artists_badge_rejected()}</span><form method="POST" action="?/dismissRejection" style="display:inline" use:enhance={() => {
 							return async ({ result, update }) => {
@@ -246,10 +246,10 @@
 			<div class="mobile-artist-info">
 				<p class="mobile-artist-name">{artist.name}</p>
 				{#if artist.formerly.length}<p class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</p>{/if}
-				{#if artist.globalId || artist.ledgerPrivate || data.registryStatus?.[artist.id]}
+				{#if artist.globalId || artist.isPrivate || data.registryStatus?.[artist.id]}
 					<div class="mobile-artist-badges">
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
-						{#if artist.ledgerPrivate}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
+						{#if artist.isPrivate}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'pending'}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'rejected'}<span class="reg-badge rejected" title={data.registryStatus[artist.id].note ? m.admin_artists_rejected_note({ note: data.registryStatus[artist.id].note ?? '' }) : m.admin_artists_rejected_title()}>{m.admin_artists_badge_rejected()}</span><form method="POST" action="?/dismissRejection" style="display:inline" use:enhance={() => {
 							return async ({ result, update }) => {

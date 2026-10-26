@@ -124,6 +124,30 @@ describe('admin artists load — former names (aliases)', () => {
 	});
 });
 
+describe('admin artists load — the private tag (SONA-236)', () => {
+	async function privateByName(platform: App.Platform) {
+		const result = (await load(loadEvent(platform))) as { artists: Array<{ name: string; isPrivate: number }> };
+		return Object.fromEntries(result.artists.map((a) => [a.name, Boolean(a.isPrivate)]));
+	}
+
+	it('tags a flagged artist until work by them is published', async () => {
+		const { db, platform } = makeDb();
+		const flagged = await db.insert(schema.artists).values({ name: 'Quill', ledgerPrivate: true }).returning().get();
+		await db.insert(schema.artists).values({ name: 'Open' });
+		expect(await privateByName(platform)).toEqual({ Open: false, Quill: true });
+
+		await db.run(sql`INSERT INTO images (artist_id, published) VALUES (${flagged.id}, 1)`);
+		expect((await privateByName(platform)).Quill).toBe(false);
+	});
+
+	it('tags an artist who exists only for ledger entries', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'EntryOnly');
+		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (${id})`);
+		expect((await privateByName(platform)).EntryOnly).toBe(true);
+	});
+});
+
 describe('admin artists load — server-side search matches AKA names', () => {
 	// Zaps was formerly "Boltie"; the alias JSON also carries a social URL we must
 	// NOT match on. Nova is an unrelated artist used to prove the search narrows.
