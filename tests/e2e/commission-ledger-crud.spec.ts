@@ -1051,7 +1051,28 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await page.keyboard.press('Escape');
 	await expect(find).toBeHidden();
 	await expect(other).toBeFocused();
+	// Down and Up move through the list and wrap at both ends; Enter picks the
+	// active option.
 	await other.click();
+	const options = results.getByRole('option');
+	const firstId = (await options.first().getAttribute('id'))!;
+	const secondId = (await options.nth(1).getAttribute('id'))!;
+	const lastId = (await options.last().getAttribute('id'))!;
+	await expect(find).toHaveAttribute('aria-activedescendant', firstId);
+	await page.keyboard.press('ArrowUp');
+	await expect(find).toHaveAttribute('aria-activedescendant', lastId);
+	await page.keyboard.press('ArrowDown');
+	await expect(find).toHaveAttribute('aria-activedescendant', firstId);
+	await page.keyboard.press('ArrowDown');
+	await expect(find).toHaveAttribute('aria-activedescendant', secondId);
+	await page.keyboard.press('Enter');
+	const secondCode = secondId.replace('ce-currency-opt-', '');
+	await expect(page.getByRole('radio', { name: new RegExp(secondCode) })).toBeChecked();
+	// With nothing matching, there's no list, only the count saying so.
+	await other.click();
+	await find.fill('zzzz');
+	await expect(results).toBeHidden();
+	await expect(page.getByRole('status').filter({ hasText: 'No currency matches “zzzz”.' })).toBeVisible();
 	await find.fill('krw');
 	await expect(results.getByRole('option')).toHaveCount(1);
 	await page.keyboard.press('Enter');
@@ -1059,8 +1080,11 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await expect(krw).toBeChecked();
 	await expect(krw).toBeFocused();
 	await expect(page.locator('#ce-price-hint')).toHaveText(/^KRW amounts are whole numbers\./);
-	// A name in the admin language matches too.
+	// The list marks the current currency in words, not only with a check.
 	await other.click();
+	await find.fill('krw');
+	await expect(results.getByRole('option', { name: /KRW.*\(current\)/ })).toBeVisible();
+	// A name in the admin language matches too.
 	await find.fill('swiss');
 	await expect(results.getByRole('option', { name: /CHF/ })).toBeVisible();
 	await page.keyboard.press('Escape');
@@ -1071,6 +1095,10 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await addArtist.click();
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByLabel('Artist Name')).toBeFocused();
+	// Tab stays inside the dialog: back past its first control wraps to its last.
+	await page.keyboard.press('Shift+Tab');
+	await page.keyboard.press('Shift+Tab');
+	await expect(dialog.locator(':focus')).toHaveCount(1);
 	await page.keyboard.press('Escape');
 	await expect(dialog).toBeHidden();
 	await expect(addArtist).toBeFocused();
@@ -1107,4 +1135,15 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await expect(page.getByRole('radio').first()).toHaveAccessibleName(/KRW/);
 	await expect(page.getByRole('radio', { name: /KRW/ })).toBeChecked();
 	await expect(page.locator('#ce-currency-hint')).toHaveText('The currencies you used most recently show first.');
+
+	// A Japanese owner finds the yen by its Japanese name.
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+	try {
+		await open(page, '/admin/commissions/new');
+		await page.getByRole('button', { name: 'その他の通貨' }).click();
+		await page.getByRole('combobox', { name: '通貨を検索' }).fill('円');
+		await expect(page.getByRole('listbox', { name: '通貨を検索' }).getByRole('option', { name: /JPY/ })).toBeVisible();
+	} finally {
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+	}
 });

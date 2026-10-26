@@ -128,11 +128,12 @@ test('a refused price shows its error on the field, and nothing is saved', async
 	// Focus moves to the first field with an error.
 	await expect(price).toBeFocused();
 	// The field's edge, and its focus ring, are drawn in the theme's --destructive.
+	// The amount sits in a pill with its currency, and the pill draws both.
 	const [edge, ring, destructive] = await price.evaluate((el) => {
 		const probe = document.createElement('span');
 		probe.style.color = 'var(--destructive)';
 		document.body.append(probe);
-		const style = getComputedStyle(el);
+		const style = getComputedStyle(el.parentElement!);
 		const found = [style.borderTopColor, style.outlineColor, getComputedStyle(probe).color];
 		probe.remove();
 		return found;
@@ -161,8 +162,10 @@ test('without JavaScript, a refused save keeps what was typed and shows the erro
 		await noJs.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
 		await noJs.getByLabel('Title').fill('E2E no-JS title');
 		await noJs.getByLabel('Notes').fill('E2E no-JS note');
-		// Without a script, Other currency is a plain select, and its pick wins.
-		await noJs.getByLabel('Other currency').selectOption('KRW');
+		// Without a script, Other currency is a radio in the row plus a plain
+		// select, and the select counts when that radio is picked.
+		await noJs.getByRole('combobox', { name: 'Other currency' }).selectOption('KRW');
+		await noJs.getByRole('radio', { name: 'Other currency' }).check();
 		await noJs.getByLabel('Amount').fill('45.5');
 		await noJs.getByRole('button', { name: 'Save entry' }).click();
 		await noJs.waitForLoadState();

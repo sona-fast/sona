@@ -24,6 +24,28 @@ export function knownCurrencies(): string[] {
 	}
 }
 
+/** The no-JS row's Other currency radio: with it picked, the server reads the
+ * code from the Other currency select (`currencyOther`) instead. */
+export const CURRENCY_OTHER = '__other';
+
+/** The symbol a currency prints with in `locale`, or null when it has none of
+ * its own: the locale prints the code (CHF), or the code isn't a currency.
+ * Callers show the code beside it, so a null keeps them from saying it twice. */
+export function currencySymbol(
+	code: string,
+	locale: string,
+	display: 'narrowSymbol' | 'symbol' = 'narrowSymbol'
+): string | null {
+	try {
+		const symbol = new Intl.NumberFormat(locale, { style: 'currency', currency: code, currencyDisplay: display })
+			.formatToParts(0)
+			.find((p) => p.type === 'currency')?.value;
+		return symbol && symbol !== code.toUpperCase() ? symbol : null;
+	} catch {
+		return null;
+	}
+}
+
 let known: Set<string> | null = null;
 function isKnownCurrency(code: string): boolean {
 	known ??= new Set(knownCurrencies());

@@ -2,6 +2,7 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { X, Loader2 } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
+	import { focusTrap } from '$lib/focus-trap';
 	import * as m from '$lib/paraglide/messages';
 	import { shouldSearch, resultToPrefill, resultHandle, type RegResult } from '$lib/registry-search';
 	import { classifyQuery } from '$lib/handle-classify';
@@ -93,6 +94,10 @@
 	/** The prefill mark describes each field Sona filled. */
 	const markFor = (col: SocialColumn) => (guessed && prefillSite && initialSocials?.[col] ? 'lookup-prefill-mark' : undefined);
 	let ledgerPrivate = $state(untrack(() => allowLedgerPrivate && startPrivate));
+	// Keep private promises the artist stays out of the shared registry, so the
+	// name isn't sent there as a search either while it's ticked (SONA-236).
+	// Unticking searches for the name as typed.
+	let registrySearch = $derived(registryEnabled && !(allowLedgerPrivate && ledgerPrivate));
 	let nameInput = $state<HTMLInputElement>();
 	let saving = $state(false);
 	let errorMsg = $state('');
@@ -132,7 +137,7 @@
 	// matches nothing must NOT silently become the artist's name — so while the
 	// input still looks like a handle and nothing is linked, plain-create is
 	// blocked and the field nudges the operator to pick a match or type a name.
-	let query = $derived(registryEnabled ? classifyQuery(name) : { kind: 'name' as const, handleParam: '', handle: '' });
+	let query = $derived(registrySearch ? classifyQuery(name) : { kind: 'name' as const, handleParam: '', handle: '' });
 	let isHandleQuery = $derived(query.kind === 'handle');
 	// Don't block when the registry is unreachable — fall back to manual entry.
 	let blockHandleCreate = $derived(isHandleQuery && !pulled && !searchError);
@@ -150,7 +155,7 @@
 	// pick, else result counts / no-match once a search settles (silent mid-type).
 	let resultsAnnouncement = $derived.by(() => {
 		if (pickAnnouncement) return pickAnnouncement;
-		if (!registryEnabled || !shouldSearch(searchTermValue) || registrySearching) return '';
+		if (!registrySearch || !shouldSearch(searchTermValue) || registrySearching) return '';
 		if (searchError) return m.admin_new_artist_registry_unreachable();
 		if (registryResults.length) return m.admin_new_artist_registry_results_count({ count: registryResults.length });
 		if (hasSearched) return isHandleQuery ? m.admin_new_artist_registry_handle_no_match() : m.admin_new_artist_registry_no_matches();
@@ -178,17 +183,33 @@
 	// registryEnabled arrives as a prop (resolved in the admin layout load), so the
 	// search box's presence is decided before render. When on, fetch the catalog
 	// import plan for the footer + "Import all" flow.
-	// The control that opened the modal. Cancelling or creating unmounts the
-	// dialog, and without this focus falls to <body> and the next Tab restarts
-	// at the top of the page (2.4.3).
-	const opener = typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null);
+	// Cancelling or creating unmounts the dialog; focusTrap then hands focus back
+	// to the control that opened it, so it doesn't fall to <body> (2.4.3).
 	onDestroy(() => {
 		// A lookup seed arms the debounce on mount, so closing the dialog inside
 		// those 250 ms would otherwise fire a registry search for a dialog that is
 		// gone and land its result in the state of a destroyed component.
 		clearTimeout(searchTimer);
-		if (opener?.isConnected) opener.focus();
 	});
+
+	// Escape, from anywhere while the dialog is open: closes Import all's
+	// confirmation if it's up, else the dialog.
+	function onEscape() {
+		if (showImportAll) {
+			if (!importingAll) showImportAll = false;
+		} else oncancel();
+	}
+
+	// Takes the box's state first, so it doesn't depend on whether bind:checked
+	// has run yet.
+	function onPrivateChange(e: Event & { currentTarget: HTMLInputElement }) {
+		ledgerPrivate = e.currentTarget.checked;
+		if (registrySearch) onNameInput();
+		else {
+			resetSearch();
+			pickAnnouncement = '';
+		}
+	}
 
 	onMount(async () => {
 		// autofocus does nothing on an input mounted after page load, so focus
@@ -290,7 +311,7 @@
 	// unlinks — the identity no longer matches what's typed, so we drop back to
 	// plain-create (dropping the unedited pulled socials) until they pick again.
 	function onNameInput() {
-		if (!registryEnabled) return;
+		if (!registrySearch) return;
 		if (pulled) {
 			pulled = null;
 			restoreUneditedPrefill();
@@ -360,7 +381,7 @@
 	// Full keyboard support for the combobox; falls through to create() on Enter
 	// when there's nothing to pick (and behaves as a plain field when registry off).
 	function onNameKeydown(e: KeyboardEvent) {
-		if (!registryEnabled) {
+		if (!registrySearch) {
 			if (e.key === 'Enter') create();
 			return;
 		}
@@ -441,8 +462,8 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="modal-backdrop" onclick={oncancel} onkeydown={(e) => { if (e.key === 'Escape') oncancel(); }}>
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -- backdrop click-to-dismiss duplicates the Escape/Cancel paths -->
+<div class="modal-backdrop" onclick={oncancel}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- The guess lines describe the whole dialog, so they are read on entry:
 	     the name field autofocuses already full, and nothing else says where
@@ -451,6 +472,8 @@
 		class="modal"
 		role="dialog"
 		aria-modal="true"
+		tabindex="-1"
+		use:focusTrap={onEscape}
 		aria-label={title}
 		aria-describedby={guessed ? 'lookup-guess-lines' : undefined}
 		onclick={(e) => e.stopPropagation()}
@@ -496,16 +519,16 @@
 						placeholder={m.admin_upload_artist_name_placeholder()}
 						oninput={onNameInput}
 						onkeydown={onNameKeydown}
-						onblur={() => { if (registryEnabled) { resultsOpen = false; activeIndex = -1; } }}
-						role={registryEnabled ? 'combobox' : undefined}
-						aria-autocomplete={registryEnabled ? 'list' : undefined}
-						aria-expanded={registryEnabled ? resultsOpen : undefined}
-						aria-controls={registryEnabled ? listboxId : undefined}
-						aria-describedby={registryEnabled ? 'new-artist-name-hint' : undefined}
-						aria-activedescendant={registryEnabled && resultsOpen && activeIndex >= 0 ? `new-artist-opt-${activeIndex}` : undefined}
+						onblur={() => { if (registrySearch) { resultsOpen = false; activeIndex = -1; } }}
+						role={registrySearch ? 'combobox' : undefined}
+						aria-autocomplete={registrySearch ? 'list' : undefined}
+						aria-expanded={registrySearch ? resultsOpen : undefined}
+						aria-controls={registrySearch ? listboxId : undefined}
+						aria-describedby={registrySearch ? 'new-artist-name-hint' : undefined}
+						aria-activedescendant={registrySearch && resultsOpen && activeIndex >= 0 ? `new-artist-opt-${activeIndex}` : undefined}
 					/>
 					{#if registrySearching}<span class="name-spin"><Loader2 size={14} class="spin" /></span>{/if}
-					{#if registryEnabled && resultsOpen && registryResults.length}
+					{#if registrySearch && resultsOpen && registryResults.length}
 						<!-- preventDefault keeps input focus when the user grabs the scrollbar (or the
 							     gaps between rows) — else the blur would close the dropdown mid-drag. -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -536,7 +559,7 @@
 						</ul>
 					{/if}
 				</div>
-				{#if registryEnabled}
+				{#if registrySearch}
 					{#if searchError}
 						<p class="reg-hint reg-hint-warn" id="new-artist-name-hint">{m.admin_new_artist_registry_unreachable()}</p>
 					{:else if blockHandleCreate && handleTermTooShort}
@@ -589,7 +612,7 @@
 			{#if allowLedgerPrivate && !pulled}
 				<div class="private-field">
 					<label class="private-check">
-						<input type="checkbox" bind:checked={ledgerPrivate} aria-describedby="new-artist-private-hint" />
+						<input type="checkbox" bind:checked={ledgerPrivate} onchange={onPrivateChange} aria-describedby="new-artist-private-hint" />
 						<span>{m.admin_artists_ledger_private()}</span>
 					</label>
 					<p class="private-hint" id="new-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
@@ -598,7 +621,7 @@
 
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
-				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate} aria-describedby={registryEnabled ? 'new-artist-name-hint' : undefined}>
+				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate} aria-describedby={registrySearch ? 'new-artist-name-hint' : undefined}>
 					{#if saving}
 						<Loader2 size={16} class="spin" /> {pulled ? m.admin_registry_importing() : m.admin_new_artist_creating()}
 					{:else}
@@ -611,8 +634,9 @@
 </div>
 
 {#if showImportAll && importPlan}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-backdrop confirm-layer" onclick={() => { if (!importingAll) showImportAll = false; }} onkeydown={(e) => { if (e.key === 'Escape' && !importingAll) showImportAll = false; }}>
+	<!-- Escape here reaches the dialog's focusTrap, which closes this layer first. -->
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -- backdrop click-to-dismiss duplicates the Escape/Cancel paths -->
+	<div class="modal-backdrop confirm-layer" onclick={() => { if (!importingAll) showImportAll = false; }}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal confirm-modal" role="dialog" aria-modal="true" aria-label={m.admin_registry_import_all_title()} onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
