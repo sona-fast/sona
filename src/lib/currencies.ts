@@ -80,8 +80,10 @@ const REGION_CURRENCY: Record<string, string> = Object.fromEntries(
 		.map((pair) => pair.split(':') as [string, string])
 );
 
-/** The currency of the first language tag that names a region, or null when
- * none does ("en" alone says nothing about where the owner is). Takes an
+/** The currency of the first tag in the owner's first language that names a
+ * region, or null when none does ("en" alone says nothing about where the
+ * owner is). A later tag in another language is a fallback the owner reads,
+ * not where they are: "ja,en-US" gives null, not USD. Takes an
  * Accept-Language header; quality values keep their order. */
 export function localeCurrency(languages: string | null | undefined): string | null {
 	if (!languages) return null;
@@ -89,13 +91,18 @@ export function localeCurrency(languages: string | null | undefined): string | n
 		.split(',')
 		.map((part) => part.split(';')[0].trim())
 		.filter(Boolean);
+	let language: string | undefined;
 	for (const tag of tags) {
-		let region: string | undefined;
+		let locale: Intl.Locale;
 		try {
-			region = new Intl.Locale(tag).region;
+			locale = new Intl.Locale(tag);
 		} catch {
+			if (language === undefined) return null;
 			continue;
 		}
+		language ??= locale.language;
+		if (locale.language !== language) continue;
+		const region = locale.region;
 		if (!region) continue;
 		const currency = REGION_CURRENCY[region.toUpperCase()];
 		if (currency && isKnownCurrency(currency)) return currency;

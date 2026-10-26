@@ -210,6 +210,8 @@
 		await invalidateAll();
 		// The page passes the reloaded entry back in through `entry`.
 		const fresh = formValuesOf(entry);
+		// The same opening currency as a form that opens with no currency.
+		if (!fresh.currency) fresh.currency = initialCurrency({ recent: recentCurrencies, localeCurrency });
 		const merged = mergeReloaded(fresh, loadedNote, typedNote);
 		loaded = fresh;
 		version = entry?.version ?? '';

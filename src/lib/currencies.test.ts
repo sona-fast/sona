@@ -9,9 +9,15 @@ describe('localeCurrency', () => {
 		expect(localeCurrency('en-US')).toBe('USD');
 	});
 
-	it('skips tags without a region and takes the first that has one', () => {
-		expect(localeCurrency('en,fr-CA;q=0.8,en-GB;q=0.5')).toBe('CAD');
+	it("takes the first region among tags in the first tag's language", () => {
+		expect(localeCurrency('en,fr-CA;q=0.8,en-GB;q=0.5')).toBe('GBP');
+		expect(localeCurrency('en,en-GB')).toBe('GBP');
 		expect(localeCurrency('zh-Hant,zh-Hant-TW')).toBe('TWD');
+	});
+
+	it("never takes a region from a lower-priority language's tag", () => {
+		expect(localeCurrency('ja,en-US;q=0.9,en;q=0.8')).toBeNull();
+		expect(localeCurrency('de,en-US;q=0.7')).toBeNull();
 	});
 
 	it('gives nothing when no tag says where the owner is', () => {
