@@ -267,16 +267,17 @@ export const actions = {
 				patreonUrl: artists.patreonUrl,
 				globalId: artists.globalId,
 				storedPrivate: artists.ledgerPrivate,
-				// Check against the posted "keep private" flag, so ticking it in this
+				// Check against the flag this save will store, so ticking it in this
 				// same save already skips the avatar lookup. A registry-linked artist
-				// keeps the stored flag: the form hides the box for them, and a shared
-				// artist can't be made private (POST /api/artists refuses it too).
-				ledgerOnly: sql<number>`CASE WHEN ${artists.globalId} IS NOT NULL THEN ${artistIsLedgerOnly(artists.id)} ELSE ${artistIsLedgerOnly(artists.id, postedPrivate)} END`
+				// can only have the flag cleared, never set (stored AND posted): a
+				// shared artist can't be made private (POST /api/artists refuses it
+				// too), but one linked while flagged must still be able to clear it.
+				ledgerOnly: sql<number>`CASE WHEN ${artists.globalId} IS NOT NULL THEN ${artistIsLedgerOnly(artists.id, postedPrivate ? undefined : false)} ELSE ${artistIsLedgerOnly(artists.id, postedPrivate)} END`
 			})
 			.from(artists)
 			.where(eq(artists.id, id))
 			.get();
-		const ledgerPrivate = existing?.globalId ? existing.storedPrivate : postedPrivate;
+		const ledgerPrivate = existing?.globalId ? existing.storedPrivate && postedPrivate : postedPrivate;
 
 		// Resolve + re-host the avatar from social links (stored on our own CDN so it
 		// can't rot to a 404). Rules, in order:
