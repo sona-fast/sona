@@ -59,7 +59,8 @@ function text(data: FormData, name: string): string {
 
 /** The picked currency. Without JavaScript, Other currency is a radio in the
  * row plus a plain select (`currencyOther`); the select counts only when that
- * radio, or no radio, is picked, so a row pick after it still wins. */
+ * radio, or no radio, is picked. A row pick beside a different select pick is
+ * refused by parseCommissionForm. */
 function submittedCurrency(data: FormData): string {
 	const picked = text(data, 'currency');
 	return picked === CURRENCY_OTHER || !picked ? text(data, 'currencyOther') : picked;
@@ -114,9 +115,15 @@ export function parseCommissionForm(
 	// currency the picker still has selected is dropped, not refused.
 	const price = text(data, 'price');
 	const currency = submittedCurrency(data).toUpperCase();
+	// Without JavaScript a row radio can stay picked while the owner chooses a
+	// different code in the Other currency select. Which one they meant can't
+	// be told from the form, so ask rather than save either one.
+	const other = text(data, 'currencyOther').toUpperCase();
 	let priceMinor: number | null = null;
 	if (price && !currency) errors.currency = m.admin_commissions_error_currency_missing();
-	else if (price && currency) {
+	else if (price && other && other !== currency) {
+		errors.currency = m.admin_commissions_error_currency_both({ picked: currency, other });
+	} else if (price && currency) {
 		if (currencyFractionDigits(currency) === null) {
 			errors.currency = m.admin_commissions_error_currency_code();
 		} else {

@@ -159,6 +159,17 @@ test('without JavaScript, a refused save keeps what was typed and shows the erro
 		await noJs.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
 		await noJs.getByLabel('Title').fill('E2E no-JS title');
 		await noJs.getByLabel('Notes').fill('E2E no-JS note');
+		// A row radio (the regional one) is already picked. Choosing in the
+		// select without picking Other currency is refused, not saved as either.
+		await expect(noJs.getByRole('radio', { name: /USD/ })).toBeChecked();
+		await noJs.getByRole('combobox', { name: 'Other currency' }).selectOption('KRW');
+		await noJs.getByLabel('Amount').fill('45.5');
+		await noJs.getByRole('button', { name: 'Save entry' }).click();
+		await noJs.waitForLoadState();
+		await expect(
+			noJs.getByText('You picked USD and also chose KRW under Other currency. To use KRW, pick Other currency as well. To use USD, save again.')
+		).toBeVisible();
+		await expect(noJs.getByLabel('Title')).toHaveValue('E2E no-JS title');
 		// Without a script, Other currency is a radio in the row plus a plain
 		// select, and the select counts when that radio is picked.
 		await noJs.getByRole('combobox', { name: 'Other currency' }).selectOption('KRW');
