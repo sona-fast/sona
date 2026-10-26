@@ -143,7 +143,9 @@
 	use:enhance={() => {
 		deleting = true;
 		return async ({ update, result }) => {
-			await update({ reset: false });
+			// An error result would replace the page with the error page and drop
+			// unsaved typing, so it stays here with a toast, as a failed save does.
+			if (result.type !== 'error') await update({ reset: false });
 			deleting = false;
 			// Already deleted somewhere else: the delete is done either way.
 			if (result.type === 'failure' && (result.data as { missing?: boolean } | undefined)?.missing) {
