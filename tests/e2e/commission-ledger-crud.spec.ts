@@ -210,6 +210,31 @@ test('an entry deleted elsewhere: save says so, and delete counts as done', asyn
 	await expect(page.getByRole('status').filter({ hasText: "Couldn't delete the entry" })).toHaveCount(0);
 });
 
+// A delete that fails with a server error keeps the form and what was typed in
+// it; only the toast says it went wrong.
+test('a delete that errors keeps the entry form and unsaved typing', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	await page.getByRole('link', { name: new RegExp(`^Edit ${TITLE}`) }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
+	await waitForHydration(page);
+
+	// The stub never reaches the server, so the entry is still there afterwards.
+	await page.route(
+		(url) => url.pathname.endsWith('/edit') && url.search === '?/delete',
+		(route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ type: 'error', error: { message: 'boom' } }) })
+	);
+	const notes = page.getByLabel('Notes');
+	await notes.fill('typed before a failed delete');
+	await page.getByRole('button', { name: 'Delete entry' }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+
+	await expect(page.getByRole('status').filter({ hasText: 'Something went wrong' })).toBeVisible();
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
+	await expect(notes).toHaveValue('typed before a failed delete');
+	await settledShot(page, testInfo.outputPath('commission-entry-delete-error.png'));
+});
+
 test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions');
@@ -422,4 +447,18 @@ test('without JavaScript, saving again after a two-currency refusal saves the ro
 	} finally {
 		await context.close();
 	}
+});
+
+// Without JavaScript the Other currency select is a plain field, so a crafted or
+// stale post can carry a malformed code. The refusal has to come back as the
+// form with its currency error, not an error page from the picker rendering it.
+test('a malformed currency code comes back as a field error, not an error page', async ({ page, baseURL }) => {
+	await loginRetrying(page, PASSWORD);
+	const res = await page.request.post('/admin/commissions/new', {
+		form: { title: 'E2E bad currency', price: '10', currency: '__other', currencyOther: 'XYZ1' },
+		headers: { origin: baseURL!, accept: 'text/html' },
+		maxRedirects: 0
+	});
+	expect(res.status()).toBe(400);
+	expect(await res.text()).toContain('Use a three-letter currency code, like USD or EUR.');
 });
