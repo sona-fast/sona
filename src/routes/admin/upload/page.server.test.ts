@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, imageTags, images, siteSettings, tags } from '$lib/server/db/schema';
+import { artists, characters, imageTags, images, siteSettings, tags } from '$lib/server/db/schema';
 import { load, actions } from './+page.server';
 
 import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
@@ -219,6 +219,59 @@ describe('admin upload — use as reference sheet', () => {
 
 		const owner = await db.select({ ref: characters.referenceImageId }).from(characters).where(eq(characters.id, c.id)).get();
 		expect(owner?.ref ?? null).toBe(null);
+	});
+});
+
+// SONA-236: a new published piece by a Keep private artist asks first.
+describe('admin upload — Keep private artist', () => {
+	const isPrivate = async (db: ReturnType<typeof makeDb>['db']) =>
+		(await db.select({ p: artists.ledgerPrivate }).from(artists).where(eq(artists.id, 1)).get())?.p;
+	const upload = (platform: App.Platform, fields: Record<string, string>) =>
+		callDefault({
+			request: form({ count: '1', imageUrl_0: 'https://cdn.example.com/new.png', title: 'New Art', artistId: '1', ...fields }),
+			platform
+		});
+
+	it('refuses a published upload without confirmUnhide and inserts nothing', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+
+		const result = await upload(platform, {});
+		expect(result).toMatchObject({ status: 409, data: { confirmUnhide: ['Quill'] } });
+		expect(await db.select({ id: images.id }).from(images).get()).toBeUndefined();
+		expect(await isPrivate(db)).toBe(true);
+	});
+
+	it('uploads with confirmUnhide=1 and clears Keep private', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+
+		const result = await upload(platform, { confirmUnhide: '1' });
+		expect((result as { status: number }).status).toBe(302);
+		expect(await db.select({ published: images.published }).from(images).all()).toEqual([{ published: true }]);
+		expect(await isPrivate(db)).toBe(false);
+	});
+
+	it('uploads a private (unpublished) piece without asking', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+
+		// The form's "published" box is the Private checkbox.
+		const result = await upload(platform, { published: 'on' });
+		expect((result as { status: number }).status).toBe(302);
+		expect(await db.select({ published: images.published }).from(images).all()).toEqual([{ published: false }]);
+		expect(await isPrivate(db)).toBe(true);
+	});
+
+	it('adds variants to an existing piece without asking', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+		await db.insert(images).values({ id: 9, title: 'Parent', slug: 'parent-9', imageUrl: 'https://cdn.example.com/9.png', artistId: 1, published: false });
+
+		const result = await upload(platform, { existingParentId: '9' });
+		expect((result as { status: number }).status).toBe(302);
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.parentImageId, 9)).all()).length).toBe(1);
+		expect(await isPrivate(db)).toBe(true);
 	});
 });
 

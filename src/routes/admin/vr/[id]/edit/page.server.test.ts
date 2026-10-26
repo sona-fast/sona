@@ -49,6 +49,7 @@ function makeDb() {
 			width INTEGER, height INTEGER, position INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ledger_private INTEGER NOT NULL DEFAULT 0);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT,
 			title TEXT, file_size INTEGER, nsfw INTEGER NOT NULL DEFAULT 0, created_at TEXT
@@ -245,5 +246,56 @@ describe('model file disposal', () => {
 		expect(await run('delete', platform, id)).toBe('redirected');
 		const disposed = deleteFileSpy.mock.calls.map((c) => c[2]);
 		expect(disposed.sort()).toEqual([MODEL_URL, 'https://cdn.example.com/media/shot.png'].sort());
+	});
+});
+
+// SONA-236: crediting a Keep private artist on a published avatar asks first.
+describe('save action with a Keep private artist', () => {
+	function seedPrivate(sqlite: ReturnType<typeof makeDb>['sqlite']) {
+		sqlite.prepare('INSERT INTO artists (id, name, ledger_private) VALUES (2, ?, 1)').run('Quill');
+	}
+	const credited = { 'credit[0][artistId]': '2', 'credit[0][role]': 'base' };
+	const stored = (sqlite: ReturnType<typeof makeDb>['sqlite'], id: number) => ({
+		published: (sqlite.prepare('SELECT published FROM vr_avatars WHERE id = ?').get(id) as { published: number }).published,
+		credits: (sqlite.prepare('SELECT COUNT(*) AS n FROM avatar_credits WHERE avatar_id = ?').get(id) as { n: number }).n
+	});
+	const isPrivate = (sqlite: ReturnType<typeof makeDb>['sqlite']) =>
+		(sqlite.prepare('SELECT ledger_private AS p FROM artists WHERE id = 2').get() as { p: number }).p;
+
+	it('refuses publishing without confirmUnhide and writes nothing', async () => {
+		const { sqlite, platform } = makeDb();
+		seedPrivate(sqlite);
+		const id = addAvatar(sqlite, { published: 0 });
+
+		const request = new Request(`http://localhost/admin/vr/${id}/edit?/save`, {
+			method: 'POST',
+			body: saveForm({ ...credited, published: '1' })
+		});
+		const url = new URL(`http://localhost/admin/vr/${id}/edit`);
+		const result = await actions.save({ request, platform, params: { id: String(id) }, url } as never);
+		expect(result).toMatchObject({ status: 409, data: { confirmUnhide: ['Quill'] } });
+		expect(stored(sqlite, id)).toEqual({ published: 0, credits: 0 });
+		expect(isPrivate(sqlite)).toBe(1);
+	});
+
+	it('publishes with confirmUnhide=1 and clears Keep private', async () => {
+		const { sqlite, platform } = makeDb();
+		seedPrivate(sqlite);
+		const id = addAvatar(sqlite, { published: 0 });
+
+		expect(await run('save', platform, id, saveForm({ ...credited, published: '1', confirmUnhide: '1' }))).toBe('redirected');
+		expect(stored(sqlite, id)).toEqual({ published: 1, credits: 1 });
+		expect(isPrivate(sqlite)).toBe(0);
+	});
+
+	it('saves the credit on a draft without asking', async () => {
+		const { sqlite, platform } = makeDb();
+		seedPrivate(sqlite);
+		const id = addAvatar(sqlite, { published: 1 });
+
+		// Unpublishing while adding the credit: the avatar stops being public work.
+		expect(await run('save', platform, id, saveForm(credited))).toBe('redirected');
+		expect(stored(sqlite, id)).toEqual({ published: 0, credits: 1 });
+		expect(isPrivate(sqlite)).toBe(1);
 	});
 });

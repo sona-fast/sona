@@ -877,6 +877,53 @@ describe('update action — the keep-private flag', () => {
 		expect((await read(db, row.id))!.avatarUrl).toBe(resolvedAvatar);
 	});
 
+	// SONA-236: an artist with public work is already public, so the box can't
+	// be set for them.
+	type Db = ReturnType<typeof makeDb>['db'];
+	it.each([
+		['a published piece', (db: Db, id: number) => db.run(sql`INSERT INTO images (artist_id, published) VALUES (${id}, 1)`)],
+		[
+			'a sticker in a published pack',
+			async (db: Db, id: number) => {
+				await db.run(sql`INSERT INTO sticker_packs (id, published) VALUES (1, 1)`);
+				await db.run(sql`INSERT INTO stickers (artist_id, pack_id) VALUES (${id}, 1)`);
+			}
+		],
+		['a published pack they manage', (db: Db, id: number) => db.run(sql`INSERT INTO sticker_packs (manager_artist_id, published) VALUES (${id}, 1)`)],
+		[
+			'a credit on a published avatar',
+			async (db: Db, id: number) => {
+				await db.run(sql`INSERT INTO vr_avatars (id, published) VALUES (1, 1)`);
+				await db.run(sql`INSERT INTO avatar_credits (avatar_id, artist_id, role) VALUES (1, ${id}, 'base')`);
+			}
+		]
+	])('saves Keep private as false for an artist with %s', async (_label, seedWork) => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Quill');
+		await seedWork(db, id);
+
+		expect(await save(platform, id, { ledgerPrivate: 'on' })).toEqual({ success: true });
+		expect((await read(db, id))!.ledgerPrivate).toBe(false);
+	});
+
+	it('clears a stored flag for an artist with a published piece even when the box stays ticked', async () => {
+		const { db, platform } = makeDb();
+		const row = await db.insert(schema.artists).values({ name: 'Quill', ledgerPrivate: true }).returning().get();
+		await db.run(sql`INSERT INTO images (artist_id, published) VALUES (${row.id}, 1)`);
+
+		await save(platform, row.id, { ledgerPrivate: 'on' });
+		expect((await read(db, row.id))!.ledgerPrivate).toBe(false);
+	});
+
+	it('saves Keep private for an artist whose only piece is a variant', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Quill');
+		await db.run(sql`INSERT INTO images (artist_id, published, parent_image_id) VALUES (${id}, 1, 99)`);
+
+		await save(platform, id, { ledgerPrivate: 'on' });
+		expect((await read(db, id))!.ledgerPrivate).toBe(true);
+	});
+
 	it('still keeps a flagged artist private when their only piece is a draft', async () => {
 		const { db, platform } = makeDb();
 		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });

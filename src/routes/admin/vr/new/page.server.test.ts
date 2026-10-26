@@ -31,7 +31,7 @@ function makeDb() {
 		);
 		CREATE TABLE avatar_platforms (avatar_id INTEGER NOT NULL, platform TEXT NOT NULL);
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
-		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ledger_private INTEGER NOT NULL DEFAULT 0);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT,
 			title TEXT, file_size INTEGER, nsfw INTEGER NOT NULL DEFAULT 0, created_at TEXT
@@ -242,5 +242,45 @@ describe('create action validation', () => {
 				})
 			)
 		).toBe('created');
+	});
+});
+
+// SONA-236: crediting a Keep private artist on a published avatar asks first.
+describe('create action with a Keep private artist', () => {
+	function seedPrivate(sqlite: ReturnType<typeof makeDb>['sqlite']) {
+		sqlite.prepare('INSERT INTO artists (id, name, ledger_private) VALUES (2, ?, 1)').run('Quill');
+	}
+	const credited = { 'credit[0][artistId]': '2', 'credit[0][role]': 'base' };
+	const avatarCount = (sqlite: ReturnType<typeof makeDb>['sqlite']) =>
+		(sqlite.prepare('SELECT COUNT(*) AS n FROM vr_avatars').get() as { n: number }).n;
+	const isPrivate = (sqlite: ReturnType<typeof makeDb>['sqlite']) =>
+		(sqlite.prepare('SELECT ledger_private AS p FROM artists WHERE id = 2').get() as { p: number }).p;
+
+	it('refuses a published avatar without confirmUnhide and inserts nothing', async () => {
+		const { sqlite, platform } = makeDb();
+		seedPrivate(sqlite);
+
+		const result = await create(platform, baseForm({ ...credited, published: '1' }));
+		expect(result).toMatchObject({ status: 409, data: { confirmUnhide: ['Quill'] } });
+		expect(avatarCount(sqlite)).toBe(0);
+		expect(isPrivate(sqlite)).toBe(1);
+	});
+
+	it('creates with confirmUnhide=1 and clears Keep private', async () => {
+		const { sqlite, platform } = makeDb();
+		seedPrivate(sqlite);
+
+		expect(await outcomeOf(platform, baseForm({ ...credited, published: '1', confirmUnhide: '1' }))).toBe('created');
+		expect(avatarCount(sqlite)).toBe(1);
+		expect(isPrivate(sqlite)).toBe(0);
+	});
+
+	it('creates a draft avatar without asking', async () => {
+		const { sqlite, platform } = makeDb();
+		seedPrivate(sqlite);
+
+		expect(await outcomeOf(platform, baseForm(credited))).toBe('created');
+		expect(avatarCount(sqlite)).toBe(1);
+		expect(isPrivate(sqlite)).toBe(1);
 	});
 });

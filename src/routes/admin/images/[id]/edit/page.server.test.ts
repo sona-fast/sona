@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, sql } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, imageTags, images, siteSettings, tags, commissions } from '$lib/server/db/schema';
+import { artists, characters, imageTags, images, siteSettings, tags, commissions } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
 import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
 import { load, actions } from './+page.server';
@@ -383,6 +383,62 @@ describe('admin image edit — save action', () => {
 		const row = await db.select({ featured: images.featured, featuredOrder: images.featuredOrder }).from(images).where(eq(images.id, 5)).get();
 		expect(row?.featured).toBe(false);
 		expect(row?.featuredOrder).toBe(null);
+	});
+});
+
+// SONA-236: saving a published piece by a Keep private artist asks first.
+describe('admin image edit — save with a Keep private artist', () => {
+	const isPrivate = async (db: ReturnType<typeof makeDb>['db']) =>
+		(await db.select({ p: artists.ledgerPrivate }).from(artists).where(eq(artists.id, 1)).get())?.p;
+	const imageRow = async (db: ReturnType<typeof makeDb>['db']) =>
+		db.select({ title: images.title, published: images.published }).from(images).where(eq(images.id, 5)).get();
+	const save = (platform: App.Platform, fields: Record<string, string>) =>
+		callAction(() => actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', ...fields }), platform } as never));
+
+	it('refuses publishing without confirmUnhide and writes nothing', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+		await seedImage(db, 5, false);
+
+		const result = await save(platform, {});
+		expect(result).toMatchObject({ status: 409, data: { confirmUnhide: ['Quill'] } });
+		expect(await imageRow(db)).toEqual({ title: 'Art', published: false });
+		expect(await isPrivate(db)).toBe(true);
+	});
+
+	it('publishes with confirmUnhide=1 and clears Keep private', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+		await seedImage(db, 5, false);
+
+		const result = await save(platform, { confirmUnhide: '1' });
+		expect((result as { status: number }).status).toBe(302);
+		expect(await imageRow(db)).toEqual({ title: 'Renamed', published: true });
+		expect(await isPrivate(db)).toBe(false);
+	});
+
+	it('saves a private (unpublished) piece without asking', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+		await seedImage(db, 5, false);
+
+		// The form's "published" box is the Private checkbox.
+		const result = await save(platform, { published: 'on' });
+		expect((result as { status: number }).status).toBe(302);
+		expect(await imageRow(db)).toEqual({ title: 'Renamed', published: false });
+		expect(await isPrivate(db)).toBe(true);
+	});
+
+	it('saves a published variant without asking', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
+		await seedImage(db, 9, false);
+		await seedImage(db, 5, false);
+
+		const result = await save(platform, { parentImageId: '9' });
+		expect((result as { status: number }).status).toBe(302);
+		expect(await imageRow(db)).toEqual({ title: 'Renamed', published: true });
+		expect(await isPrivate(db)).toBe(true);
 	});
 });
 
