@@ -258,10 +258,6 @@ export const actions = {
 		if (!id) return fail(400, { error: 'Artist ID is required' });
 		if (!name) return fail(400, { error: 'Artist name is required' });
 
-		// Store the "keep private" flag before the ledger-only check below reads it,
-		// so ticking it in this same save already skips the avatar lookup.
-		await db.update(artists).set({ ledgerPrivate }).where(eq(artists.id, id));
-
 		const existing = await db
 			.select({
 				avatarUrl: artists.avatarUrl,
@@ -269,7 +265,9 @@ export const actions = {
 				blueskyUrl: artists.blueskyUrl,
 				furAffinityUrl: artists.furAffinityUrl,
 				patreonUrl: artists.patreonUrl,
-				ledgerOnly: sql<number>`${artistIsLedgerOnly(artists.id)}`
+				// Check against the posted "keep private" flag, so ticking it in this
+				// same save already skips the avatar lookup.
+				ledgerOnly: sql<number>`${artistIsLedgerOnly(artists.id, ledgerPrivate)}`
 			})
 			.from(artists)
 			.where(eq(artists.id, id))
@@ -281,9 +279,11 @@ export const actions = {
 		//    write null: with nothing left to resolve from, this is a deliberate
 		//    removal and must actually clear a wrong avatar.
 		//  - a ledger-only artist (SONA-236), by entries or by the "keep private"
-		//    flag → keep the stored avatar: resolving sends their handle to X or
-		//    Bluesky, which a save doesn't ask for. The avatar refresh fills a
-		//    missing one once they have work on the site.
+		//    flag → never resolve: resolving sends their handle to X or Bluesky,
+		//    which a save doesn't ask for. Keep the stored avatar only while the
+		//    avatar socials are unchanged; a changed handle writes null, since the
+		//    OLD account's face must never persist under the new one. The avatar
+		//    refresh fills a missing one once they have work on the site.
 		//  - avatar socials unchanged AND the stored avatar is already ours → skip
 		//    re-resolution entirely; re-hosting the same source again can't change
 		//    anything.
@@ -299,7 +299,7 @@ export const actions = {
 			patreonUrl === (existing?.patreonUrl ?? null);
 		let avatarUrl = existing?.avatarUrl ?? null;
 		let writeResolved = false;
-		if (!avatarSocialsPosted) {
+		if (!avatarSocialsPosted || (existing?.ledgerOnly && !avatarSocialsUnchanged)) {
 			avatarUrl = null;
 		} else if (
 			!existing?.ledgerOnly &&
@@ -326,7 +326,7 @@ export const actions = {
 		await db
 			.update(artists)
 			.set({
-				name, twitterUrl, blueskyUrl, telegramUrl, furAffinityUrl, deviantArtUrl, patreonUrl, instagramUrl, avatarUrl,
+				name, twitterUrl, blueskyUrl, telegramUrl, furAffinityUrl, deviantArtUrl, patreonUrl, instagramUrl, avatarUrl, ledgerPrivate,
 				// Stamp only on an actually-written resolve so the refresh cron can still
 				// pick up a row we failed (or refused) to refresh here.
 				...(writeResolved ? { avatarResolvedAt: new Date().toISOString() } : {})

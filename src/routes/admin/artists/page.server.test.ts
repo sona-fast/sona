@@ -875,6 +875,56 @@ describe('update action — the keep-private flag', () => {
 		expect((await read(db, row.id))!.avatarUrl).toBeNull();
 	});
 
+	it('saves nothing, flag included, when the save fails partway', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Quill');
+		// Make the main write (the one that saves the name) fail.
+		await db.run(
+			sql.raw(`CREATE TRIGGER fail_save BEFORE UPDATE OF name ON artists BEGIN SELECT RAISE(ABORT, 'disk full'); END`)
+		);
+
+		await expect(save(platform, id, { ledgerPrivate: 'on' })).rejects.toThrow();
+		expect((await read(db, id))!.ledgerPrivate).toBe(false);
+	});
+
+	// The old account's face must never persist under a new handle, and a
+	// private artist's new handle must not be looked up either: clear it instead.
+	describe('a flagged artist with a stored avatar', () => {
+		const storedAvatar = '/img/avatars/quill/alice.jpg';
+		async function seedFlagged(db: ReturnType<typeof makeDb>['db']) {
+			const row = await db
+				.insert(schema.artists)
+				.values({ name: 'Quill', ledgerPrivate: true, avatarUrl: storedAvatar, twitterUrl: 'https://twitter.com/alice' })
+				.returning()
+				.get();
+			return row.id;
+		}
+
+		it('clears the avatar without a lookup when the handle changes', async () => {
+			const { db, platform } = makeDb();
+			const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
+			vi.stubGlobal('fetch', fetchSpy);
+			const id = await seedFlagged(db);
+
+			await actions.update(updateEvent(platform, { id: String(id), name: 'Quill', twitter: 'bob', ledgerPrivate: 'on' }));
+			const after = await read(db, id);
+			expect(after!.twitterUrl).toBe('https://twitter.com/bob');
+			expect(after!.avatarUrl).toBeNull();
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+
+		it('keeps the avatar without a lookup when the handle is unchanged', async () => {
+			const { db, platform } = makeDb();
+			const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
+			vi.stubGlobal('fetch', fetchSpy);
+			const id = await seedFlagged(db);
+
+			await actions.update(updateEvent(platform, { id: String(id), name: 'Quill', twitter: 'alice', ledgerPrivate: 'on' }));
+			expect((await read(db, id))!.avatarUrl).toBe(storedAvatar);
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+	});
+
 	it('shows the stored flag to the edit form', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(schema.artists).values([{ name: 'Open' }, { name: 'Quiet', ledgerPrivate: true }]);
