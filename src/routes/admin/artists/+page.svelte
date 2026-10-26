@@ -415,13 +415,16 @@
 					</div>
 				</div>
 
-				<div class="private-field">
-					<label class="private-check">
-						<input type="checkbox" name="ledgerPrivate" checked={editingArtist.ledgerPrivate} disabled={saving} aria-describedby="edit-artist-private-hint" />
-						<span>{m.admin_artists_ledger_private()}</span>
-					</label>
-					<p class="private-hint" id="edit-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
-				</div>
+				<!-- A shared (registry-linked) artist can't be made private; the update action keeps their stored flag. -->
+				{#if !editingArtist.globalId}
+					<div class="private-field">
+						<label class="private-check">
+							<input type="checkbox" name="ledgerPrivate" checked={editingArtist.ledgerPrivate} disabled={saving} aria-describedby="edit-artist-private-hint" />
+							<span>{m.admin_artists_ledger_private()}</span>
+						</label>
+						<p class="private-hint" id="edit-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
+					</div>
+				{/if}
 
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingArtist = null)}>{m.admin_cancel()}</button>

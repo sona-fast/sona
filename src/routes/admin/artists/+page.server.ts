@@ -253,7 +253,7 @@ export const actions = {
 		const deviantArtUrl = normalizeSocialUrl('deviantart', data.get('deviantart') as string) || null;
 		const patreonUrl = normalizeSocialUrl('patreon', data.get('patreon') as string) || null;
 		const instagramUrl = normalizeSocialUrl('instagram', data.get('instagram') as string) || null;
-		const ledgerPrivate = data.get('ledgerPrivate') === 'on';
+		const postedPrivate = data.get('ledgerPrivate') === 'on';
 
 		if (!id) return fail(400, { error: 'Artist ID is required' });
 		if (!name) return fail(400, { error: 'Artist name is required' });
@@ -265,13 +265,18 @@ export const actions = {
 				blueskyUrl: artists.blueskyUrl,
 				furAffinityUrl: artists.furAffinityUrl,
 				patreonUrl: artists.patreonUrl,
+				globalId: artists.globalId,
+				storedPrivate: artists.ledgerPrivate,
 				// Check against the posted "keep private" flag, so ticking it in this
-				// same save already skips the avatar lookup.
-				ledgerOnly: sql<number>`${artistIsLedgerOnly(artists.id, ledgerPrivate)}`
+				// same save already skips the avatar lookup. A registry-linked artist
+				// keeps the stored flag: the form hides the box for them, and a shared
+				// artist can't be made private (POST /api/artists refuses it too).
+				ledgerOnly: sql<number>`CASE WHEN ${artists.globalId} IS NOT NULL THEN ${artistIsLedgerOnly(artists.id)} ELSE ${artistIsLedgerOnly(artists.id, postedPrivate)} END`
 			})
 			.from(artists)
 			.where(eq(artists.id, id))
 			.get();
+		const ledgerPrivate = existing?.globalId ? existing.storedPrivate : postedPrivate;
 
 		// Resolve + re-host the avatar from social links (stored on our own CDN so it
 		// can't rot to a 404). Rules, in order:
