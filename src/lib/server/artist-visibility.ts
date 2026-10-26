@@ -35,14 +35,17 @@ export function artistHasPublicWork(artistId: SQLiteColumn): SQL {
  * it asks first instead.
  *
  * Takes the artists.id column and reads ledger_private from the same row, so
- * call it with `artists.id` from a query over the artists table.
+ * call it with `artists.id` from a query over the artists table. Pass
+ * `ledgerPrivate` to test a flag value that isn't stored yet, like the one an
+ * edit form is about to save.
  */
-export function artistIsLedgerOnly(artistId: SQLiteColumn): SQL {
+export function artistIsLedgerOnly(artistId: SQLiteColumn, ledgerPrivate?: boolean): SQL {
+	const flagged = ledgerPrivate === undefined ? sql`artists.ledger_private = 1` : sql`${ledgerPrivate ? 1 : 0} = 1`;
 	return sql`((
 		EXISTS (SELECT 1 FROM commissions WHERE commissions.artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM images WHERE images.artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM stickers WHERE stickers.artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM sticker_packs WHERE sticker_packs.manager_artist_id = ${artistId})
 		AND NOT EXISTS (SELECT 1 FROM avatar_credits WHERE avatar_credits.artist_id = ${artistId})
-	) OR (artists.ledger_private = 1 AND NOT ${artistHasPublicWork(artistId)}))`;
+	) OR (${flagged} AND NOT ${artistHasPublicWork(artistId)}))`;
 }
