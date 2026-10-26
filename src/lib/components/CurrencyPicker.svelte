@@ -26,7 +26,15 @@
 
 	const locale = getLocale();
 	const names = new Intl.DisplayNames([locale], { type: 'currency' });
-	const nameOf = (code: string) => names.of(code) ?? code;
+	// A refused save without JavaScript can bring back a malformed code (XYZ1),
+	// which Intl.DisplayNames throws on; show the code so the error renders.
+	const nameOf = (code: string) => {
+		try {
+			return names.of(code) ?? code;
+		} catch {
+			return code;
+		}
+	};
 
 	// Currencies picked from Other currency join the row at the front. The row
 	// prop holds what the page loaded with; a pick never removes one of those.
