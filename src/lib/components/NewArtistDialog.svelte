@@ -173,6 +173,7 @@
 	// Default checked per the approved design.
 	let keepUpdated = $state(true);
 	let importingAll = $state(false);
+	let importNButton = $state<HTMLButtonElement>();
 
 	// registryEnabled arrives as a prop (resolved in the admin layout load), so the
 	// search box's presence is decided before render. When on, fetch the catalog
@@ -227,6 +228,7 @@
 	async function runImportAll() {
 		if (importingAll || !importPlan) return;
 		importingAll = true;
+		let imported = false;
 		try {
 			const res = await fetch('/api/registry/import', {
 				method: 'POST',
@@ -251,6 +253,7 @@
 				return;
 			}
 			toast.success(m.admin_registry_imported_toast({ count: data.created ?? 0 }));
+			imported = true;
 			showImportAll = false;
 			// Let the confirmation unmount first, so its trap hands focus back to
 			// Import all before a caller that closes the dialog moves it on to
@@ -267,6 +270,12 @@
 			toast.error(m.admin_new_artist_network_error());
 		} finally {
 			importingAll = false;
+			if (!imported) {
+				// Every control in the confirmation was disabled while importing, so
+				// focus fell out of it; put it back on Import N for a retry.
+				await tick();
+				importNButton?.focus();
+			}
 		}
 	}
 
@@ -659,7 +668,7 @@
 			</div>
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={() => (showImportAll = false)} disabled={importingAll}>{m.admin_cancel()}</button>
-				<button type="button" class="btn btn-primary" onclick={runImportAll} disabled={importingAll || importPlan.toCreate === 0}>
+				<button type="button" class="btn btn-primary" bind:this={importNButton} onclick={runImportAll} disabled={importingAll || importPlan.toCreate === 0}>
 					{#if importingAll}
 						<Loader2 size={16} class="spin" /> {m.admin_registry_importing()}
 					{:else}

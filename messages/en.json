@@ -2373,7 +2373,7 @@
 	"admin_commissions_error_price_decimals": "{currency} amounts can't have more than {digits} decimal places.",
 	"admin_commissions_error_currency_missing": "Pick a currency for this amount, or clear the amount.",
 	"admin_commissions_error_currency_code": "Use a three-letter currency code, like USD or EUR.",
-	"admin_commissions_error_currency_both": "You picked {picked} and also chose {other} under Other currency. To use {other}, pick Other currency as well. To use {picked}, save again.",
+	"admin_commissions_error_currency_both": "You picked {picked} and also chose {other} under Other currency. To use {other}, pick Other currency and choose {other} again. To use {picked}, save again.",
 	"admin_commissions_error_date": "Enter a real date, or leave this empty.",
 	"admin_commissions_field_link_short": "Link",
 	"admin_commissions_no_artists_pre": "You haven't added any artists yet. Add one on the ",

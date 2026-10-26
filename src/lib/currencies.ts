@@ -9,7 +9,7 @@
  */
 
 /** The row with no saved prices and no region to go on. */
-export const FALLBACK_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY'] as const;
+const FALLBACK_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY'] as const;
 
 /** How many currencies the row shows before Other currency. */
 export const CURRENCY_ROW_MAX = 4;

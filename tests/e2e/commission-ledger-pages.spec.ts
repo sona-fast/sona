@@ -170,9 +170,18 @@ test('without JavaScript, a refused save keeps what was typed and shows the erro
 		await noJs.getByRole('button', { name: 'Save entry' }).click();
 		await noJs.waitForLoadState();
 		await expect(
-			noJs.getByText('You picked USD and also chose KRW under Other currency. To use KRW, pick Other currency as well. To use USD, save again.')
+			noJs.getByText('You picked USD and also chose KRW under Other currency. To use KRW, pick Other currency and choose KRW again. To use USD, save again.')
 		).toBeVisible();
 		await expect(noJs.getByLabel('Title')).toHaveValue('E2E no-JS title');
+		// The refused page keeps the row pick and clears the select, so saving
+		// again saves USD (the commission-ledger-crud spec saves it), and the
+		// copy asks for the select again to use KRW.
+		await expect(noJs.getByRole('radio', { name: /USD/ })).toBeChecked();
+		const otherSelect = noJs.getByRole('combobox', { name: 'Other currency' });
+		await expect(otherSelect).toHaveValue('');
+		// The select is part of the refused field, so it carries the error too.
+		await expect(otherSelect).toHaveAttribute('aria-invalid', 'true');
+		await expect(otherSelect).toHaveAttribute('aria-describedby', /\bce-currency-err\b/);
 		// Without a script, Other currency is a radio in the row plus a plain
 		// select, and the select counts when that radio is picked.
 		await noJs.getByRole('combobox', { name: 'Other currency' }).selectOption('KRW');
