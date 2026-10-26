@@ -221,6 +221,9 @@ test('publishing a piece by a Keep private artist asks first', async ({ page, ba
 	expect(upload.status()).toBeLessThan(400);
 
 	await gotoAfterLogin(page, '/admin/images?sort=uploaded&dir=desc');
+	// Before hydration the toggle posts without JS, and only the enhanced form
+	// turns the 409 into the dialog.
+	await waitForHydration(page);
 	const row = page.getByRole('row').filter({ hasText: title });
 	const dialog = page.getByRole('dialog', { name: 'Make a private artist public?' });
 

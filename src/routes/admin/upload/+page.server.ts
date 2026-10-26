@@ -251,7 +251,8 @@ export const actions = {
 		// A new published piece by a Keep private artist makes them public, so ask
 		// first (SONA-236). Variants added to an existing piece aren't public work
 		// on their own.
-		const { refusal, unhide } = await checkUnhide(db, data, published && !existingParent ? [resolvedArtistId] : []);
+		const willPublish = entry ? data.get('commissionVisibility') === 'public' : published;
+		const { refusal, unhide } = await checkUnhide(db, data, willPublish && !existingParent ? [resolvedArtistId] : []);
 		if (refusal) return refusal;
 
 		const shared = {
@@ -260,7 +261,7 @@ export const actions = {
 			// From an entry the piece stays private unless the form says public in so
 			// many words: artists often ask clients to wait until they post first, and
 			// a form that lost its checkbox shouldn't publish.
-			published: entry ? data.get('commissionVisibility') === 'public' : published,
+			published: willPublish,
 			sourcePostUrl: sourcePostUrl || null,
 			commissionedAt: commissionedAt || null
 		};
