@@ -296,8 +296,17 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await other.click();
 	await find.fill('krw');
 	await expect(results.getByRole('option', { name: /KRW.*\(current\)/ })).toBeVisible();
+	// Names start in one column: A$ has a symbol and BBD has none, yet their
+	// names line up. With no symbol among the matches, the name moves up
+	// beside the code instead of leaving a gap.
+	await find.fill('dollar');
+	const nameX = (code: string) =>
+		results.locator(`[id="ce-currency-opt-${code}"] .name`).evaluate((el) => el.getBoundingClientRect().left);
+	const withSymbols = await nameX('AUD');
+	expect(await nameX('BBD')).toBe(withSymbols);
 	// A name in the admin language matches too.
 	await find.fill('swiss');
+	expect(await nameX('CHF')).toBeLessThan(withSymbols);
 	await results.getByRole('option', { name: /CHF/ }).click();
 	// CHF prints as its own code, so the pill and the amount field each say
 	// it once, not "CHF CHF".
@@ -365,5 +374,46 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 		await expect(page.getByRole('listbox', { name: '通貨を検索' }).getByRole('option', { name: /JPY/ })).toBeVisible();
 	} finally {
 		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+	}
+});
+
+// Without JavaScript, a row pick and a different Other currency pick are
+// refused together. The refused page keeps the row pick and clears the select,
+// so the refusal's "To use KRW, save again" has to save the row's currency.
+test('without JavaScript, saving again after a two-currency refusal saves the row pick', async ({ page, browser }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	const context = await browser.newContext({
+		baseURL: testInfo.project.use.baseURL,
+		storageState: await page.context().storageState(),
+		javaScriptEnabled: false
+	});
+	try {
+		const noJs = await context.newPage();
+		await noJs.goto('/admin/commissions/new');
+		await noJs.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+		await noJs.getByLabel('Title').fill('E2E no-JS save again');
+		// The won entry above leads the row and opens picked.
+		const krw = noJs.getByRole('radio', { name: /KRW/ });
+		await expect(krw).toBeChecked();
+		const otherSelect = noJs.getByRole('combobox', { name: 'Other currency' });
+		await otherSelect.selectOption('JPY');
+		await noJs.getByLabel('Amount').fill('7000');
+		await noJs.getByRole('button', { name: 'Save entry' }).click();
+		await noJs.waitForLoadState();
+		await expect(
+			noJs.getByText('You picked KRW and also chose JPY under Other currency. To use JPY, pick Other currency and choose JPY again. To use KRW, save again.')
+		).toBeVisible();
+		await expect(krw).toBeChecked();
+		await expect(otherSelect).toHaveValue('');
+
+		await noJs.getByRole('button', { name: 'Save entry' }).click();
+		await expect(noJs).toHaveURL(/\/admin\/commissions$/);
+		await noJs.getByRole('link', { name: /^Edit E2E no-JS save again/ }).click();
+		await expect(noJs.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
+		await expect(noJs.getByRole('radio', { name: /KRW/ })).toBeChecked();
+		await expect(noJs.getByLabel('Amount')).toHaveValue('7000');
+		await settledShot(noJs, testInfo.outputPath('commission-entry-nojs-saved-again.png'));
+	} finally {
+		await context.close();
 	}
 });
