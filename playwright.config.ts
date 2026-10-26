@@ -27,6 +27,7 @@ import {
 	E2E_REGISTRY_MOCK,
 	E2E_REGISTRY_SCENARIO,
 	E2E_REGISTRY_URL,
+	E2E_REGISTRY_OVERLAY,
 	E2E_PASSPORT_OVERLAY,
 	E2E_WRANGLER_CONFIG_PASSPORT,
 	E2E_PERSIST_TO_PASSPORT,
@@ -175,11 +176,14 @@ const stickersServerEnv = {
 // The registry-sync spec turns the shared registry ON for its server (key + URL
 // in wrangler.e2e-registry.toml) and steers the preloaded registry interceptor
 // per test through a scenario file. Its own seeded DB + server, serial: the
-// tests share one scenario file and one "Sync now" button.
+// tests share one scenario file and one "Sync now" button. Its overlay
+// (fixtures/registry.sql) adds a linked artist that is already private, which
+// no API can create.
 const registryServerEnv = {
 	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG_REGISTRY,
 	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_REGISTRY,
 	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_REGISTRY,
+	SONA_E2E_SEED_OVERLAY: E2E_REGISTRY_OVERLAY,
 	SONA_E2E_REGISTRY_SCENARIO: E2E_REGISTRY_SCENARIO,
 	SONA_E2E_REGISTRY_URL: E2E_REGISTRY_URL,
 	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_REGISTRY_MOCK}`.trim()
