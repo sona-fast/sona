@@ -118,3 +118,45 @@ test('the edit modal hides Keep private for a shared artist, not a local private
 	await expect(keepPrivate).toBeChecked();
 	await page.screenshot({ path: testInfo.outputPath('private-edit.png') });
 });
+
+// A shared artist that is already private (the sync backfill or an approved
+// share can leave one so) keeps the box, so its owner can clear the flag. Were
+// the box hidden here, saving would post no ledgerPrivate and silently clear it.
+// No API creates this state, so the row comes from the registry server's seed
+// overlay (fixtures/registry.sql). The test clears the flag, so it runs once
+// per seeded DB.
+test('the edit modal keeps Keep private for a shared artist that is already private', async ({
+	page
+}, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await page.waitForLoadState('load');
+
+	const name = 'Linked Private Seeded';
+	const keepPrivate = page.getByRole('checkbox', { name: 'Keep private (commission ledger only)' });
+	const nameField = page.getByRole('textbox', { name: 'Artist Name' });
+	const row = page.getByRole('row').filter({ hasText: name });
+
+	const openEdit = async () => {
+		await gotoAfterLogin(page, `/admin/artists?q=${encodeURIComponent(name)}`);
+		await expect(row).toBeVisible();
+		await waitForHydration(page);
+		await row.getByRole('button', { name: 'Edit artist' }).click();
+		await expect(nameField).toHaveValue(name);
+	};
+
+	await openEdit();
+	await expect(keepPrivate).toBeVisible();
+	await expect(keepPrivate).toBeChecked();
+	await page.screenshot({ path: testInfo.outputPath('linked-private-edit.png') });
+
+	await keepPrivate.uncheck();
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	await expect(nameField).toHaveCount(0);
+	await expect(row.getByText('private', { exact: true })).toHaveCount(0);
+	await page.screenshot({ path: testInfo.outputPath('linked-private-saved.png') });
+
+	await openEdit();
+	await expect(keepPrivate).toHaveCount(0);
+	await expect(nameField).toBeVisible();
+	await page.screenshot({ path: testInfo.outputPath('linked-cleared-edit.png') });
+});
