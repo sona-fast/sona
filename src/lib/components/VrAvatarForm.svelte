@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
+	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
+	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { flip } from 'svelte/animate';
 	import { ArrowLeft, BookOpen, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -114,6 +116,8 @@
 	let nsfw = $state(avatar?.nsfw ?? false);
 	let published = $state(avatar?.published ?? false);
 	let saving = $state(false);
+	// Publishing an avatar that credits a Keep private artist asks first (SONA-236).
+	const unhide = createUnhideConfirm();
 
 	// --- Platforms: checkbox chips over the schema enum.
 	const PLATFORMS = ['vrchat', 'resonite', 'chilloutvr', 'neosvr', 'vseeface', 'warudo', 'other'];
@@ -488,9 +492,13 @@
 	method="POST"
 	action={isEdit ? '?/save' : undefined}
 	class="form"
-	use:enhance={() => {
+	use:enhance={({ formElement, submitter }) => {
 		saving = true;
 		return async ({ update, result }) => {
+			if (unhide.take(result, formElement, submitter)) {
+				saving = false;
+				return;
+			}
 			// On success the action redirects, which enhance follows; only failures stay here.
 			await update({ reset: false });
 			saving = false;
@@ -1008,6 +1016,10 @@
 		oncreated={onArtistCreated}
 		oncancel={() => (showNewArtist = false)}
 	/>
+{/if}
+
+{#if unhide.names}
+	<UnhideArtistDialog names={unhide.names} onconfirm={unhide.confirm} oncancel={unhide.cancel} />
 {/if}
 
 <style>

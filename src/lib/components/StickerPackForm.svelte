@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
+	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { flip } from 'svelte/animate';
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
@@ -131,6 +133,8 @@
 	>([]);
 	let published = $state(pack?.published ?? false);
 	let saving = $state(false);
+	// Publishing a pack that credits a Keep private artist asks first (SONA-236).
+	const unhide = createUnhideConfirm();
 
 	// Returns the stored URL, or the response status so the caller can name the
 	// reason in the error banner instead of a bare "failed".
@@ -333,9 +337,13 @@
 <form
 	method="POST"
 	class="form"
-	use:enhance={() => {
+	use:enhance={({ formElement, submitter }) => {
 		saving = true;
 		return async ({ update, result }) => {
+			if (unhide.take(result, formElement, submitter)) {
+				saving = false;
+				return;
+			}
 			// On success the action redirects, which enhance follows; only failures stay here.
 			await update({ reset: false });
 			saving = false;
@@ -588,6 +596,10 @@
 		oncreated={onArtistCreated}
 		oncancel={() => (showNewArtist = false)}
 	/>
+{/if}
+
+{#if unhide.names}
+	<UnhideArtistDialog names={unhide.names} onconfirm={unhide.confirm} oncancel={unhide.cancel} />
 {/if}
 
 <style>

@@ -197,3 +197,47 @@ test('the New Artist dialog sends no registry search while Keep private is ticke
 	await keepPrivate.uncheck();
 	await expect.poll(() => searches).toEqual(['Quiet Quill']);
 });
+
+// Publishing a piece by a Keep private artist makes them public, so the images
+// list asks first: Cancel leaves the piece hidden and the artist private, and
+// only Make public publishes it and unticks Keep private (SONA-236).
+test('publishing a piece by a Keep private artist asks first', async ({ page, baseURL }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await page.waitForLoadState('load');
+
+	const name = `Private Piece Artist ${Date.now()}`;
+	const created = await page.request.post('/api/artists', { data: { name, ledgerPrivate: true } });
+	expect(created.ok()).toBe(true);
+	const { id: artistId } = (await created.json()) as { id: number };
+
+	// An unpublished piece by them, through the upload action ("published" is
+	// the form's "keep unpublished" box).
+	const title = `Unhide Piece ${Date.now()}`;
+	const upload = await page.request.post('/admin/upload', {
+		form: { title, artistId: String(artistId), count: '1', imageUrl_0: '/x1.png', published: 'on' },
+		headers: { origin: baseURL! },
+		maxRedirects: 0
+	});
+	expect(upload.status()).toBeLessThan(400);
+
+	await gotoAfterLogin(page, '/admin/images?sort=uploaded&dir=desc');
+	const row = page.getByRole('row').filter({ hasText: title });
+	const dialog = page.getByRole('dialog', { name: 'Make a private artist public?' });
+
+	await row.getByRole('button', { name: 'Make public' }).click();
+	await expect(dialog).toBeVisible();
+	await expect(dialog).toContainText(name);
+	await page.screenshot({ path: testInfo.outputPath('unhide-dialog.png') });
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(dialog).toBeHidden();
+	await expect(row.getByRole('button', { name: 'Make public' })).toBeVisible();
+
+	await row.getByRole('button', { name: 'Make public' }).click();
+	await dialog.getByRole('button', { name: 'Make public' }).click();
+	await expect(row.getByRole('button', { name: 'Make private' })).toBeVisible();
+
+	await gotoAfterLogin(page, `/admin/artists?q=${encodeURIComponent(name)}`);
+	const artistRow = page.getByRole('row').filter({ hasText: name });
+	await expect(artistRow).toBeVisible();
+	await expect(artistRow.getByText('private', { exact: true })).toHaveCount(0);
+});

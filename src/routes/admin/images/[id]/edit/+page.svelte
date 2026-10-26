@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
+	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { tick, untrack } from 'svelte';
 	import { Loader2, Search } from 'lucide-svelte';
 	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
@@ -31,6 +33,8 @@
 
 	let artistMode = $state<'existing' | 'new'>('existing');
 	let saving = $state(false);
+	// Publishing a piece by a Keep private artist asks first (SONA-236).
+	const unhide = createUnhideConfirm();
 	let selectedParentId = $state(String(data.image.parentImageId ?? ''));
 	// The reference button swaps between set/clear on toggle; move focus back to it
 	// so keyboard/screen-reader users hear the new state instead of losing focus.
@@ -561,10 +565,10 @@
 	     expression's value changes, so without this an operator's edit to one of
 	     them carries over to the next image whenever the two share a value. -->
 	{#key data.image.id}
-		<form method="POST" action="?/save" use:enhance={() => {
+		<form method="POST" action="?/save" use:enhance={({ formElement, submitter }) => {
 			saving = true;
-			return async ({ update }) => {
-				await update();
+			return async ({ result, update }) => {
+				if (!unhide.take(result, formElement, submitter)) await update();
 				saving = false;
 			};
 		}} class="edit-form">
@@ -963,6 +967,10 @@
 		</form>
 	{/key}
 </div>
+
+{#if unhide.names}
+	<UnhideArtistDialog names={unhide.names} onconfirm={unhide.confirm} oncancel={unhide.cancel} />
+{/if}
 
 <style>
 	:global(.spin) {

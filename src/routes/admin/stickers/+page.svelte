@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
+	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { goto } from '$app/navigation';
 	import { Smile, Plus, ExternalLink, Pencil, Trash2, Send, Search, Loader2, RefreshCw, AlertTriangle } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -20,6 +22,8 @@
 	let deleteForm: HTMLFormElement;
 	// Per-row pending state, keyed by pack id, so one row's spinner doesn't block others.
 	let togglingIds = $state<Set<number>>(new Set());
+	// Publishing a pack that credits a Keep private artist asks first (SONA-236).
+	const unhide = createUnhideConfirm();
 	let deletingId = $state<number | null>(null);
 	let resyncingId = $state<number | null>(null);
 
@@ -173,10 +177,14 @@
 								method="POST"
 								action="?/togglePublished"
 								class="inline-form"
-								use:enhance={() => {
+								use:enhance={({ formElement, submitter }) => {
 									const id = pack.id;
 									togglingIds = new Set(togglingIds).add(id);
 									return async ({ update, result }) => {
+										if (unhide.take(result, formElement, submitter)) {
+											togglingIds = new Set([...togglingIds].filter((x) => x !== id));
+											return;
+										}
 										await update({ reset: false });
 										togglingIds = new Set([...togglingIds].filter((x) => x !== id));
 										if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? m.admin_stickers_update_failed());
@@ -277,6 +285,10 @@
 		onconfirm={() => { deletingId = deleteTarget?.id ?? null; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
+{/if}
+
+{#if unhide.names}
+	<UnhideArtistDialog names={unhide.names} onconfirm={unhide.confirm} oncancel={unhide.cancel} />
 {/if}
 
 <style>
