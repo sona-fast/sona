@@ -275,11 +275,13 @@ const UPLOAD_SPECS = [
 const SUGGEST_TAGS_SPEC = '**/suggest-tags.spec.ts';
 // registry-sync needs the registry turned on, which no other server has; so does
 // new-artist-handle, whose dialog only classifies handles with the registry on,
-// and share-private-artist, whose Share button only renders with it on.
+// and share-private-artist, whose Share button only renders with it on, and
+// new-artist-import-all, whose Import all footer only renders with it on.
 const REGISTRY_SPECS = [
 	'**/registry-sync.spec.ts',
 	'**/new-artist-handle.spec.ts',
-	'**/share-private-artist.spec.ts'
+	'**/share-private-artist.spec.ts',
+	'**/new-artist-import-all.spec.ts'
 ];
 // tag-suggestions reads the two admin forms with the lookup endpoint
 // intercepted and writes no rows, but it cannot take the parallel project: its

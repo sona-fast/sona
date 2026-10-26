@@ -37,6 +37,11 @@ TURNSTILE_SECRET = "1x0000000000000000000000000000000AA"
 # request to this host, so the key never reaches a real registry.
 REGISTRY_API_KEY = "e2e-registry-key"
 REGISTRY_URL = "https://registry.e2e.invalid"
+# TEST-ONLY early-access bypass, as in wrangler.e2e.toml: new-artist-import-all
+# drives the commission entry form's New Artist dialog, which needs both the
+# registry and the ungated ledger. Honored only when exactly 'open' and only in
+# dev builds; never set this in a production wrangler.toml.
+E2E_COMMISSION_GATE = "open"
 
 [[d1_databases]]
 binding = "DB"

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { X, Loader2 } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { focusTrap } from '$lib/focus-trap';
@@ -200,8 +200,6 @@
 		} else oncancel();
 	}
 
-	// Takes the box's state first, so it doesn't depend on whether bind:checked
-	// has run yet.
 	function onPrivateChange(e: Event & { currentTarget: HTMLInputElement }) {
 		ledgerPrivate = e.currentTarget.checked;
 		if (registrySearch) onNameInput();
@@ -260,6 +258,10 @@
 			}
 			toast.success(m.admin_registry_imported_toast({ count: data.created ?? 0 }));
 			showImportAll = false;
+			// Let the confirmation unmount first, so its trap hands focus back to
+			// Import all before a caller that closes the dialog moves it on to
+			// the dialog's opener.
+			await tick();
 			// Not awaited into the catch below, for the same reason oncreated is not:
 			// the import already succeeded, and a throw out of the caller's refresh
 			// is not a network failure to report as one. Resolved and logged instead,
@@ -612,7 +614,7 @@
 			{#if allowLedgerPrivate && !pulled}
 				<div class="private-field">
 					<label class="private-check">
-						<input type="checkbox" bind:checked={ledgerPrivate} onchange={onPrivateChange} aria-describedby="new-artist-private-hint" />
+						<input type="checkbox" checked={ledgerPrivate} onchange={onPrivateChange} aria-describedby="new-artist-private-hint" />
 						<span>{m.admin_artists_ledger_private()}</span>
 					</label>
 					<p class="private-hint" id="new-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
@@ -634,11 +636,24 @@
 </div>
 
 {#if showImportAll && importPlan}
-	<!-- Escape here reaches the dialog's focusTrap, which closes this layer first. -->
+	<!-- This layer renders outside the dialog's panel, so it takes focus and
+	     traps Tab with its own focusTrap, and hands focus back to Import all
+	     when it closes. Escape is left to the dialog's trap, whose onEscape
+	     closes this layer first: both traps listen on window, so closing here
+	     too would let the dialog's trap see the layer already gone and close
+	     the whole dialog on the same keypress. -->
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -- backdrop click-to-dismiss duplicates the Escape/Cancel paths -->
 	<div class="modal-backdrop confirm-layer" onclick={() => { if (!importingAll) showImportAll = false; }}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal confirm-modal" role="dialog" aria-modal="true" aria-label={m.admin_registry_import_all_title()} onclick={(e) => e.stopPropagation()}>
+		<div
+			class="modal confirm-modal"
+			role="dialog"
+			aria-modal="true"
+			tabindex="-1"
+			use:focusTrap={() => {}}
+			aria-label={m.admin_registry_import_all_title()}
+			onclick={(e) => e.stopPropagation()}
+		>
 			<div class="modal-header">
 				<h2>{m.admin_registry_import_all_title()}</h2>
 				<button class="icon-btn" onclick={() => (showImportAll = false)} disabled={importingAll} aria-label={m.admin_close()}><X size={18} /></button>

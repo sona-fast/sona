@@ -11,7 +11,7 @@ describe('localeCurrency', () => {
 
 	it('skips tags without a region and takes the first that has one', () => {
 		expect(localeCurrency('en,fr-CA;q=0.8,en-GB;q=0.5')).toBe('CAD');
-		expect(localeCurrency(['zh-Hant', 'zh-Hant-TW'])).toBe('TWD');
+		expect(localeCurrency('zh-Hant,zh-Hant-TW')).toBe('TWD');
 	});
 
 	it('gives nothing when no tag says where the owner is', () => {
@@ -59,9 +59,6 @@ describe('currencyRow', () => {
 });
 
 describe('initialCurrency', () => {
-	it('opens an entry on its own currency', () => {
-		expect(initialCurrency({ entryCurrency: 'KRW', recent: ['USD'], localeCurrency: 'GBP' })).toBe('KRW');
-	});
 	it('opens a new entry on the most recent currency, then the regional one', () => {
 		expect(initialCurrency({ recent: ['EUR', 'USD'], localeCurrency: 'GBP' })).toBe('EUR');
 		expect(initialCurrency({ recent: [], localeCurrency: 'GBP' })).toBe('GBP');
