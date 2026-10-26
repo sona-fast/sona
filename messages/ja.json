@@ -1820,7 +1820,7 @@
 	"admin_commissions_error_price_decimals": "{currency}の金額は小数点以下{digits}桁までです。",
 	"admin_commissions_error_currency_missing": "この金額の通貨を選ぶか、金額を空欄にしてください。",
 	"admin_commissions_error_currency_code": "USDやEURのような3文字の通貨コードを入力してください。",
-	"admin_commissions_error_currency_both": "{picked}を選んだうえで、「その他の通貨」で{other}も選んでいます。{other}を使うには「その他の通貨」も選んでください。{picked}を使う場合は、そのままもう一度保存してください。",
+	"admin_commissions_error_currency_both": "{picked}を選んだうえで、「その他の通貨」で{other}も選んでいます。{other}を使うには、「その他の通貨」を選んでから、もう一度{other}を選んでください。{picked}を使う場合は、そのままもう一度保存してください。",
 	"admin_commissions_error_date": "正しい日付を入力するか、空欄にしてください。",
 	"admin_commissions_field_link_short": "リンク",
 	"admin_commissions_no_artists_pre": "まだアーティストが登録されていません。",

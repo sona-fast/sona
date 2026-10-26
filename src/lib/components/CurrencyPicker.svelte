@@ -14,7 +14,7 @@
 	interface Props {
 		row: string[];
 		value: string;
-		/** Ids for the radiogroup's aria-describedby (hint and error). */
+		/** Ids for the radiogroup's (and the no-JS select's) aria-describedby (hint and error). */
 		describedBy?: string;
 		invalid?: boolean;
 		/** Says a pick out loud through the form's live region. */
@@ -61,6 +61,10 @@
 		void matches;
 		active = 0;
 	});
+	// 'symbol', not 'narrowSymbol': the list tells A$ from CA$.
+	const listSymbols = $derived(new Map(matches.map((code) => [code, currencySymbol(code, locale, 'symbol')])));
+	// Names line up in one column: a symbol column only when a match has a symbol.
+	const anySymbol = $derived([...listSymbols.values()].some(Boolean));
 
 	async function openSearch() {
 		open = true;
@@ -152,7 +156,13 @@
 			<ChevronDown size={14} class="chevron" aria-hidden="true" />
 		</button>
 	{:else}
-		<select name="currencyOther" class="other-select" aria-label={m.admin_currency_other()}>
+		<select
+			name="currencyOther"
+			class="other-select"
+			aria-label={m.admin_currency_other()}
+			aria-describedby={describedBy}
+			aria-invalid={invalid ? 'true' : undefined}
+		>
 			<option value="">{m.admin_currency_other_none()}</option>
 			{#each all as code (code)}
 				<option value={code}>{code} {nameOf(code)}</option>
@@ -182,10 +192,16 @@
 		/>
 		<!-- No list at all with no matches: an empty bordered box reads as a stray line. -->
 		{#if matches.length > 0}
-			<ul class="list" id="ce-currency-list" role="listbox" aria-label={m.admin_currency_find()} bind:this={list}>
+			<ul
+				class="list"
+				class:symbols={anySymbol}
+				id="ce-currency-list"
+				role="listbox"
+				aria-label={m.admin_currency_find()}
+				bind:this={list}
+			>
 				{#each matches as code, i (code)}
-					{@const listSymbol = currencySymbol(code, locale, 'symbol')}
-					<!-- 'symbol', not 'narrowSymbol': the list tells A$ from CA$. -->
+					{@const listSymbol = listSymbols.get(code)}
 					<!-- Options are picked with a click or from the search box's keys
 					     (aria-activedescendant); they never take focus themselves. -->
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -260,8 +276,10 @@
 		min-height: 36px; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--radius-xs);
 		font-size: 13px; cursor: pointer;
 	}
-	/* No symbol of its own: the name moves up beside the code. */
-	.list li .code + .name { grid-column: span 2; }
+	/* No symbol of its own: the name stays in the names' column when another
+	   match has a symbol, and moves up beside the code when none does. */
+	.list.symbols li .code + .name { grid-column: 3; }
+	.list:not(.symbols) li .code + .name { grid-column: span 2; }
 	/* --muted alone can match the list's background (light mode), so the edge
 	   carries the active option, in --primary-text as on the New Artist results
 	   list (SONA-126). The crud e2e checks it against the list at 3:1. */

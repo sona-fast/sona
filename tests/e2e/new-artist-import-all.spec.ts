@@ -107,3 +107,39 @@ test('Import all from the entry form closes the dialog and lists the imported ar
 	await expect(addArtist).toBeFocused();
 	await page.screenshot({ path: testInfo.outputPath('entry-form-imported-all.png') });
 });
+
+test('a failed Import all keeps the confirmation open with focus back on Import N', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	// Hold the import so the confirmation's controls are disabled while it runs,
+	// as a slow registry would, then refuse it.
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(
+		(url) => url.pathname === '/api/registry/import',
+		async (route) => {
+			if (route.request().method() === 'POST') {
+				await held;
+				return route.fulfill({ status: 502, json: { enabled: true, error: 'key refused' } });
+			}
+			return route.fulfill({ json: PLAN });
+		}
+	);
+	await gotoAfterLogin(page, '/admin/artists');
+	await waitForHydration(page);
+
+	await page.getByRole('button', { name: 'Add Artist' }).first().click();
+	const dialog = page.getByRole('dialog', { name: 'New Artist' });
+	await dialog.getByRole('button', { name: 'Import all…' }).click();
+	const confirm = page.getByRole('dialog', { name: 'Import all registry artists' });
+	const importN = confirm.getByRole('button', { name: 'Import 3 artists' });
+	await importN.focus();
+	await page.keyboard.press('Enter');
+	await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+	release();
+
+	await expect(page.getByText('Registry said: key refused')).toBeVisible();
+	await expect(confirm).toBeVisible();
+	await expect(importN).toBeEnabled();
+	await expect(importN).toBeFocused();
+	await page.screenshot({ path: testInfo.outputPath('import-all-failed-focus.png') });
+});
