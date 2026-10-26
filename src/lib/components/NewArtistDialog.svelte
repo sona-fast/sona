@@ -490,7 +490,7 @@
 			<div class="guess-lines" id="lookup-guess-lines">
 				<p class="guess-line">
 					{#if prefillSource === 'link'}
-						{prefillSite ? m.admin_lookup_guess_line_link_site({ site: prefillSite }) : m.admin_lookup_guess_line_link_name()}
+						{m.admin_lookup_guess_line_link_site({ site: prefillSite })}
 					{:else}
 						{prefillSite ? m.admin_lookup_guess_line_site({ site: prefillSite }) : m.admin_lookup_guess_line_name()}
 					{/if}

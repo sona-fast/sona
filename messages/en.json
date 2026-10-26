@@ -2101,7 +2101,6 @@
 	"admin_lookup_guess_line_name": "Sona filled the name from an image match. It's a guess until you check it, and you're the one publishing it.",
 	"admin_lookup_guess_line_registry": "Picking a registry match replaces what Sona filled.",
 	"admin_lookup_guess_line_link_site": "Sona filled the name and {site} link from the link you pasted. They're a guess until you check them.",
-	"admin_lookup_guess_line_link_name": "Sona filled the name from the link you pasted. It's a guess until you check it.",
 	"admin_lookup_from_link": "From your link",
 	"admin_lookup_announce_tile_match": "{fileName}: {result}.",
 	"admin_lookup_announce_tile_no_match": "{fileName}: no match.",
