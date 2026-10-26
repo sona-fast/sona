@@ -875,6 +875,32 @@ describe('update action — the keep-private flag', () => {
 		expect((await read(db, row.id))!.avatarUrl).toBeNull();
 	});
 
+	// A shared (registry-linked) artist can't be made private: the form hides the
+	// box, and the action keeps the stored flag whatever is posted.
+	it('ignores a posted flag for a registry-linked artist and still looks up the avatar', async () => {
+		const { db, platform } = makeDb();
+		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });
+		const row = await db.insert(schema.artists).values({ name: 'Quill', globalId: 'g-quill' }).returning().get();
+
+		await save(platform, row.id, { ledgerPrivate: 'on' });
+		const after = await read(db, row.id);
+		expect(after!.ledgerPrivate).toBe(false);
+		expect(after!.avatarUrl).toBe(resolvedAvatar);
+	});
+
+	it('keeps a registry-linked artist\'s stored flag when the box is absent', async () => {
+		const { db, platform } = makeDb();
+		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });
+		const row = await db
+			.insert(schema.artists)
+			.values({ name: 'Quill', globalId: 'g-quill', ledgerPrivate: true })
+			.returning()
+			.get();
+
+		await save(platform, row.id);
+		expect((await read(db, row.id))!.ledgerPrivate).toBe(true);
+	});
+
 	it('saves nothing, flag included, when the save fails partway', async () => {
 		const { db, platform } = makeDb();
 		const id = await seedArtist(db, 'Quill');
