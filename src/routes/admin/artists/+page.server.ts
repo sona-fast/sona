@@ -80,6 +80,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			globalId: artists.globalId,
 			aliases: artists.aliases,
 			ledgerPrivate: artists.ledgerPrivate,
+			// The "private" tag shows what is hidden now, not the stored flag:
+			// publishing work by a flagged artist ends their privacy (SONA-236).
+			isPrivate: sql<number>`${artistIsLedgerOnly(artists.id)}`,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
 			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`,
