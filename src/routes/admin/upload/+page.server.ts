@@ -323,22 +323,6 @@ export const actions = {
 				const parentRow = await db.insert(images).values(parentValues).returning({ id: images.id }).get();
 				parentDbId = parentRow.id;
 			}
-
-			const parentRow = await db
-				.insert(images)
-				.values({
-					title,
-					slug: await freeSlug(db, slugify(title), usedSlugs),
-					imageUrl: parentTile.imageUrl,
-					width: parentTile.width,
-					height: parentTile.height,
-					fileSize: parentTile.fileSize,
-					nsfw: parentTile.nsfw,
-					...shared
-				})
-				.returning({ id: images.id })
-				.get();
-			parentDbId = parentRow.id;
 			await clearKeepPrivate(db, unhide);
 			await attachTagsAndCharacters(db, parentDbId, tagNames, characterIds);
 			variantTiles = tiles.filter((_, i) => i !== parentIndex).map((tile, i) => ({ tile, n: i + 1 }));
