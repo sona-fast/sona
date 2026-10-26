@@ -149,7 +149,7 @@
 			onclick={() => (open ? closeSearch() : openSearch())}
 		>
 			{m.admin_currency_other()}
-			<ChevronDown size={14} aria-hidden="true" />
+			<ChevronDown size={14} class="chevron" aria-hidden="true" />
 		</button>
 	{:else}
 		<select name="currencyOther" class="other-select" aria-label={m.admin_currency_other()}>
@@ -184,6 +184,8 @@
 		{#if matches.length > 0}
 			<ul class="list" id="ce-currency-list" role="listbox" aria-label={m.admin_currency_find()} bind:this={list}>
 				{#each matches as code, i (code)}
+					{@const listSymbol = currencySymbol(code, locale, 'symbol')}
+					<!-- 'symbol', not 'narrowSymbol': the list tells A$ from CA$. -->
 					<!-- Options are picked with a click or from the search box's keys
 					     (aria-activedescendant); they never take focus themselves. -->
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -196,8 +198,7 @@
 						onmousemove={() => (active = i)}
 					>
 						<span class="code">{code}</span>
-						<!-- 'symbol', not 'narrowSymbol': the list tells A$ from CA$. -->
-						<span class="symbol" aria-hidden="true">{currencySymbol(code, locale, 'symbol') ?? ''}</span>
+						{#if listSymbol}<span class="symbol" aria-hidden="true">{listSymbol}</span>{/if}
 						<span class="name">{nameOf(code)}</span>
 						{#if code === value}
 							<span class="current"
@@ -228,9 +229,10 @@
 		padding: 6px 12px; border: 1px solid var(--input); border-radius: var(--radius-pill); background: var(--background);
 		color: var(--foreground); font: inherit; font-size: 13px; cursor: pointer; min-width: 0;
 	}
-	/* Hover only nudges the edge. Checked changes the edge and the fill and adds
-	   a check, so a hovered pill never looks picked. */
-	.option:not(:has(input:checked)):hover { border-color: var(--muted-foreground); }
+	/* Hover only darkens the edge to the text color, never a primary tint.
+	   Checked changes the edge and the fill and adds a check, so a hovered pill
+	   never looks picked. */
+	.option:not(:has(input:checked)):hover { border-color: var(--foreground); }
 	.option:has(input:checked) {
 		border-color: var(--primary-text);
 		background: color-mix(in srgb, var(--primary) 14%, transparent);
@@ -239,6 +241,7 @@
 	.option:has(input:checked) .tick { display: inline-flex; }
 	/* Dashed: Other currency opens a search; it isn't a currency. */
 	.other { border-style: dashed; }
+	.other[aria-expanded='true'] :global(.chevron) { transform: rotate(180deg); }
 	.option input[type='radio'] { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
 	.option:has(input:focus-visible), .other:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 	.currency-row[aria-invalid='true'] .option { border-color: var(--destructive); }
@@ -254,9 +257,15 @@
 	}
 	.list li {
 		display: grid; grid-template-columns: 3.5rem 3rem minmax(0, 1fr) auto; align-items: center; gap: 8px;
-		min-height: 36px; padding: 4px 8px; border-radius: var(--radius-xs); font-size: 13px; cursor: pointer;
+		min-height: 36px; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--radius-xs);
+		font-size: 13px; cursor: pointer;
 	}
-	.list li.active { background: var(--muted); }
+	/* No symbol of its own: the name moves up beside the code. */
+	.list li .code + .name { grid-column: span 2; }
+	/* --muted alone can match the list's background (light mode), so the edge
+	   carries the active option, in --primary-text as on the New Artist results
+	   list (SONA-126). The crud e2e checks it against the list at 3:1. */
+	.list li.active { border-color: var(--primary-text); background: var(--muted); }
 	.current { display: inline-flex; }
 	.count { margin: 0; font-size: 12px; color: var(--muted-foreground); }
 	@media (forced-colors: active) {

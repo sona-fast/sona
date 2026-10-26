@@ -1145,6 +1145,13 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await expect(find).toHaveAttribute('aria-activedescendant', firstId);
 	await page.keyboard.press('ArrowDown');
 	await expect(find).toHaveAttribute('aria-activedescendant', secondId);
+	// The active option is visible: its edge stands out from the list at 3:1,
+	// where an inactive option's edge doesn't show at all.
+	const edgeOf = (id: string) =>
+		page.locator(`[id="${id}"]`).evaluate((el) => getComputedStyle(el).borderTopColor);
+	const listBackground = await results.evaluate((el) => getComputedStyle(el).backgroundColor);
+	expect(contrastRatio(await edgeOf(secondId), listBackground)).toBeGreaterThanOrEqual(3);
+	expect(await edgeOf(firstId)).not.toBe(await edgeOf(secondId));
 	await page.keyboard.press('Enter');
 	const secondCode = secondId.replace('ce-currency-opt-', '');
 	await expect(page.getByRole('radio', { name: new RegExp(secondCode) })).toBeChecked();
@@ -1166,9 +1173,17 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await expect(results.getByRole('option', { name: /KRW.*\(current\)/ })).toBeVisible();
 	// A name in the admin language matches too.
 	await find.fill('swiss');
-	await expect(results.getByRole('option', { name: /CHF/ })).toBeVisible();
-	await page.keyboard.press('Escape');
+	await results.getByRole('option', { name: /CHF/ }).click();
+	// CHF prints as its own code, so the pill and the amount field each say
+	// it once, not "CHF CHF".
+	const chfPill = page.locator('label.option', { has: page.getByRole('radio', { name: /CHF/ }) });
+	await expect(chfPill.getByRole('radio')).toBeChecked();
+	const countChf = (text: string) => text.split('CHF').length - 1;
+	expect(countChf(await chfPill.innerText())).toBe(1);
+	expect(countChf(await page.locator('.field-pill.amount').innerText())).toBe(1);
 	await settledShot(page, testInfo.outputPath('commission-entry-currency-picked.png'));
+	// Back to the won, which the entry below is priced in.
+	await krw.check();
 
 	// Add New Artist: focus lands in the dialog, so Escape closes it.
 	const addArtist = page.getByRole('button', { name: 'Add New Artist' });
