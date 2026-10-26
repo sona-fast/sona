@@ -677,6 +677,7 @@
 	"admin_artists_col_social": "Social Links",
 	"admin_artists_shared_title": "Linked to the shared registry",
 	"admin_artists_badge_shared": "shared",
+	"admin_artists_badge_private": "private",
 	"admin_artists_pending_title": "Submitted to the shared registry — awaiting review",
 	"admin_artists_badge_pending": "pending",
 	"admin_artists_formerly": "formerly {names}",

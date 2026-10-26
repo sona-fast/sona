@@ -244,6 +244,56 @@ describe('gallery load — former-name (alias) resolution', () => {
 		expect(data.images).toHaveLength(1);
 	});
 
+	it('treats a "keep private" artist with no entries like a ledger-only one until a piece by them is published', async () => {
+		// Q26: the flag alone makes "Draft" private, so its name doesn't block
+		// Phoenix's former name. Once a piece by Draft is published, Draft is a
+		// real current name again and is never hijacked into Phoenix.
+		const { db, platform } = makeDb();
+		const [{ id: draftId }] = await db
+			.insert(artists)
+			.values({ name: 'Draft', ledgerPrivate: true })
+			.returning({ id: artists.id });
+		const [{ id: phoenixId }] = await addArtist(
+			db,
+			'Phoenix',
+			JSON.stringify([{ displayName: 'Draft', socials: {} }])
+		);
+		await addImage(db, { artistId: phoenixId, published: true });
+
+		const before = await loadData(platform, '?artist=Draft');
+		expect(before.formerName).toEqual({ searched: 'Draft', current: 'Phoenix' });
+
+		await addImage(db, { artistId: draftId, published: true });
+		const after = await loadData(platform, '?artist=Draft');
+		expect(after.formerName).toBeNull();
+		expect(after.filters.artist).toBe('Draft');
+		expect(after.images).toHaveLength(1);
+	});
+
+	it('resolves a "keep private" artist\'s own former name only once a piece by them is published', async () => {
+		// The flagged artist owns the alias here: with no public work they aren't
+		// a candidate, so their old name points nowhere; a published piece makes
+		// them one.
+		const { db, platform } = makeDb();
+		const [{ id }] = await db
+			.insert(artists)
+			.values({
+				name: 'Quiet',
+				aliases: JSON.stringify([{ displayName: 'OldQuiet', socials: {} }]),
+				ledgerPrivate: true
+			})
+			.returning({ id: artists.id });
+
+		const before = await loadData(platform, '?artist=OldQuiet');
+		expect(before.formerName).toBeNull();
+		expect(before.images).toHaveLength(0);
+
+		await addImage(db, { artistId: id, published: true });
+		const after = await loadData(platform, '?artist=OldQuiet');
+		expect(after.formerName).toEqual({ searched: 'OldQuiet', current: 'Quiet' });
+		expect(after.images).toHaveLength(1);
+	});
+
 	it('does not resolve a former name claimed only by a non-live artist', async () => {
 		// "OldGhost" is an alias of "Ghost", who has no live work — so Ghost is absent
 		// from the live-only alias-candidate set and the former name stays unresolved.
