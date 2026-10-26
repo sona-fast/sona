@@ -80,9 +80,6 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			globalId: artists.globalId,
 			aliases: artists.aliases,
 			ledgerPrivate: artists.ledgerPrivate,
-			// The "private" tag shows what is hidden now, not the stored flag:
-			// publishing work by a flagged artist ends their privacy (SONA-236).
-			isPrivate: sql<number>`${artistIsLedgerOnly(artists.id)}`,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
 			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`,
@@ -287,8 +284,8 @@ export const actions = {
 		//  - EVERY avatar-capable social (bluesky/twitter/FA/patreon) posted empty →
 		//    write null: with nothing left to resolve from, this is a deliberate
 		//    removal and must actually clear a wrong avatar.
-		//  - a ledger-only artist (SONA-236), by entries or by the "keep private"
-		//    flag → never resolve: resolving sends their handle to X or Bluesky,
+		//  - a "keep private" artist with no public work (SONA-236) → never
+		//    resolve: resolving sends their handle to X or Bluesky,
 		//    which a save doesn't ask for. Keep the stored avatar only while the
 		//    avatar socials are unchanged; a changed handle writes null, since the
 		//    OLD account's face must never persist under the new one. The avatar
@@ -379,7 +376,7 @@ export const actions = {
 		if (!row) return fail(404, { error: 'Artist not found' });
 		const a = row.artist;
 
-		// A ledger-only artist (SONA-236) is private until the owner says otherwise:
+		// A Keep private artist (SONA-236) is private until the owner says otherwise:
 		// the page asks first and resubmits with confirmPrivate. No error text, so
 		// the page shows its confirm step instead of an error.
 		if (row.ledgerOnly && data.get('confirmPrivate') !== '1') {
@@ -445,6 +442,9 @@ export const actions = {
 		// (409 conflict vs 429 rate-limit vs 400 validation), truncated so a long
 		// registry message can't blow out the form error.
 		if ('httpStatus' in result) return fail(result.httpStatus, { error: result.error.slice(0, 300) });
+		// Share anyway sent a private artist to the registry, so they aren't
+		// private any more: untick Keep private to match (SONA-236).
+		if (row.ledgerOnly) await db.update(artists).set({ ledgerPrivate: false }).where(eq(artists.id, id));
 		return { success: true, submitted: true };
 	},
 

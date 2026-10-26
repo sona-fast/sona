@@ -416,7 +416,7 @@ describe('syncArtists backfill — identity verification', () => {
 
 	// SONA-236: the search sends the artist's handle to the shared registry, so
 	// an artist who exists only for a private commission entry is never searched.
-	it('skips an artist who exists only for commission entries, and searches one with other work', async () => {
+	it('searches an artist who has only commission entries when Keep private is unticked', async () => {
 		const db = makeDb();
 		await db.insert(artists).values([
 			{ id: 1, name: 'ledger only', twitterUrl: 'https://twitter.com/ledgeronly', createdAt: now },
@@ -435,8 +435,8 @@ describe('syncArtists backfill — identity verification', () => {
 
 		await syncArtists(db, ENV, SETTINGS);
 		const searched = searchCalls().map(([url]) => decodeURIComponent(String(url)));
-		expect(searched.some((u) => u.includes('ledgeronly'))).toBe(false);
-		for (const handle of ['hasapiece', 'hasasticker', 'managesapack', 'hasacredit']) {
+		// Keep private is the only rule (SONA-236): entries alone don't hide them.
+		for (const handle of ['ledgeronly', 'hasapiece', 'hasasticker', 'managesapack', 'hasacredit']) {
 			expect(searched.some((u) => u.includes(handle)), handle).toBe(true);
 		}
 	});

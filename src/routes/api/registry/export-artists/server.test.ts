@@ -39,7 +39,7 @@ async function exportedNames(platform: App.Platform): Promise<string[]> {
 // SONA-236: the export seeds a registry, so it follows the daily sync's rule and
 // leaves out artists who are private to the owner's commission ledger.
 describe('GET /api/registry/export-artists', () => {
-	it('leaves out ledger-only artists and keeps everyone else', async () => {
+	it('leaves out Keep private artists with no public work and keeps everyone else', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(artists).values([
 			{ id: 1, name: 'entries only', createdAt: now },
@@ -52,6 +52,7 @@ describe('GET /api/registry/export-artists', () => {
 		await db.run(sql`INSERT INTO images (artist_id, published) VALUES (3, 1), (4, 0)`);
 
 		const names = await exportedNames(platform);
-		expect(names.sort()).toEqual(['entries and a draft piece', 'flagged, published piece', 'plain']);
+		// Entries alone don't hide an artist; only the Keep private box does (SONA-236).
+		expect(names.sort()).toEqual(['entries and a draft piece', 'entries only', 'flagged, published piece', 'plain']);
 	});
 });

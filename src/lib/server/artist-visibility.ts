@@ -23,16 +23,16 @@ export function artistHasPublicWork(artistId: SQLiteColumn): SQL {
 }
 
 /**
- * True for an artist who exists only for the owner's private commission ledger.
- * Either rule makes them private:
- *  - they have entries, and no piece (published or not), sticker, managed pack,
- *    or avatar credit;
- *  - the owner ticked "keep private" (artists.ledger_private) and they have no
- *    public work, so publishing work by them ends it on its own.
+ * True for an artist the owner marked "keep private" (artists.ledger_private)
+ * who has no public work. The box is the only rule: an artist who exists only
+ * for ledger entries but was left unticked counts as public (SONA-236).
+ * Actions that would give a private artist public work, or share them, ask
+ * first and clear the box, so the box and this check agree; the public-work
+ * clause is the backstop for a path that doesn't.
  * Code that sends artist data off the site on its own, like the daily registry
  * sync, the avatar refresh, and the avatar lookup when an artist is saved,
- * skips them (SONA-236). Submit to registry is the owner's explicit share, so
- * it asks first instead.
+ * skips them. Submit to registry is the owner's explicit share, so it asks
+ * first instead.
  *
  * Takes the artists.id column and reads ledger_private from the same row, so
  * call it with `artists.id` from a query over the artists table. Pass
@@ -41,11 +41,5 @@ export function artistHasPublicWork(artistId: SQLiteColumn): SQL {
  */
 export function artistIsLedgerOnly(artistId: SQLiteColumn, ledgerPrivate?: boolean): SQL {
 	const flagged = ledgerPrivate === undefined ? sql`artists.ledger_private = 1` : sql`${ledgerPrivate ? 1 : 0} = 1`;
-	return sql`((
-		EXISTS (SELECT 1 FROM commissions WHERE commissions.artist_id = ${artistId})
-		AND NOT EXISTS (SELECT 1 FROM images WHERE images.artist_id = ${artistId})
-		AND NOT EXISTS (SELECT 1 FROM stickers WHERE stickers.artist_id = ${artistId})
-		AND NOT EXISTS (SELECT 1 FROM sticker_packs WHERE sticker_packs.manager_artist_id = ${artistId})
-		AND NOT EXISTS (SELECT 1 FROM avatar_credits WHERE avatar_credits.artist_id = ${artistId})
-	) OR (${flagged} AND NOT ${artistHasPublicWork(artistId)}))`;
+	return sql`(${flagged} AND NOT ${artistHasPublicWork(artistId)})`;
 }
