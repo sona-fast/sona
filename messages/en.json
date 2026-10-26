@@ -2430,7 +2430,6 @@
 	"admin_commissions_link_no_handle": "This link doesn't include the artist's handle. Pick the artist from the list instead.",
 	"admin_commissions_link_unsupported": "Sona can't find artists from this kind of link. Pick the artist from the list instead.",
 	"admin_commissions_link_failed": "Sona couldn't look up this link. Pick the artist from the list instead.",
-	"admin_commissions_link_using_announce": "Using {name} as the artist.",
 	"admin_commissions_link_invalid": "Sona couldn't read this link. Fix it or clear it, then pick the artist from the list.",
 	"admin_commissions_draft_restored": "Your draft is back."
 }

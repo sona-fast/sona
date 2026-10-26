@@ -1658,7 +1658,7 @@
 	"admin_lookup_guess_line_name": "名前は画像の一致から自動入力したものです。確認するまでは推測にすぎず、公開するのはあなたです。",
 	"admin_lookup_guess_line_registry": "レジストリの候補を選ぶと、自動入力された内容は置き換わります。",
 	"admin_lookup_guess_line_link_site": "名前と{site}のリンクは、貼り付けたリンクから自動入力したものです。確認するまでは推測です。",
-	"admin_lookup_guess_line_link_name": "名前は、貼り付けたリンクから自動入力したものです。確認するまでは推測です。",
+	"admin_lookup_guess_line_link_name": "名前は貼り付けたリンクから自動入力したものです。確認するまでは推測です。",
 	"admin_lookup_from_link": "リンクから入力",
 	"admin_lookup_announce_tile_match": "{fileName}：{result}。",
 	"admin_lookup_announce_tile_no_match": "{fileName}：一致なし。",
@@ -1875,7 +1875,6 @@
 	"admin_commissions_link_no_handle": "このリンクにはアーティストのハンドルが含まれていません。一覧からアーティストを選んでください。",
 	"admin_commissions_link_unsupported": "この種類のリンクからはアーティストを探せません。一覧からアーティストを選んでください。",
 	"admin_commissions_link_failed": "このリンクを調べられませんでした。一覧からアーティストを選んでください。",
-	"admin_commissions_link_using_announce": "「{name}」をアーティストに設定しました。",
 	"admin_commissions_link_invalid": "このリンクを読み取れませんでした。修正するか空欄にしてから、一覧からアーティストを選んでください。",
 	"admin_commissions_draft_restored": "下書きを戻しました。"
 }

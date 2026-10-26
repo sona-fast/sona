@@ -6,6 +6,7 @@
 	import * as m from '$lib/paraglide/messages';
 	import { shouldSearch, resultToPrefill, resultHandle, type RegResult } from '$lib/registry-search';
 	import { classifyQuery } from '$lib/handle-classify';
+	import type { Platform } from '$lib/social-platforms';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -25,7 +26,6 @@
 	 * an async handler, so a rejected invalidateAll has to land somewhere. */
 	const IMPORTED_ALL_HANDLER_THREW = 'new artist dialog: the onimportedall handler threw';
 
-	type SocialColumn = 'twitter' | 'bluesky' | 'telegram' | 'furaffinity' | 'deviantart' | 'patreon' | 'instagram';
 	interface Props {
 		/** May be async: the upload page awaits a tick to move focus after the
 		 * dialog closes. The dialog resolves whatever comes back and logs a
@@ -47,7 +47,7 @@
 		initialName?: string;
 		/** Seed social fields with profile URLs or bare handles, keyed by the
 		 * column name. The server builds the profile URL from a bare handle. */
-		initialSocials?: Partial<Record<SocialColumn, string>>;
+		initialSocials?: Partial<Record<Platform, string>>;
 		/** Where the seed came from: an image match ('lookup') or the link pasted
 		 * into a commission entry ('link'). Either adds the disclosure that Sona
 		 * guessed these values, and runs the registry search once on open. */
@@ -92,7 +92,7 @@
 	let instagram = $state(untrack(() => initialSocials?.instagram ?? ''));
 	const guessed = untrack(() => prefillSource !== undefined);
 	/** The prefill mark describes each field Sona filled. */
-	const markFor = (col: SocialColumn) => (guessed && prefillSite && initialSocials?.[col] ? 'lookup-prefill-mark' : undefined);
+	const markFor = (col: Platform) => (guessed && prefillSite && initialSocials?.[col] ? 'lookup-prefill-mark' : undefined);
 	let ledgerPrivate = $state(untrack(() => allowLedgerPrivate && startPrivate));
 	// Keep private promises the artist stays out of the shared registry, so the
 	// name isn't sent there as a search either while it's ticked (SONA-236).
