@@ -209,10 +209,25 @@ describe('create action: what it stores', () => {
 		expect(rows(sqlite, 'SELECT price_minor, currency FROM commissions')).toEqual([{ price_minor: 1200, currency: 'KRW' }]);
 	});
 
-	it('keeps a row pick made after an Other currency pick', async () => {
+	it('asks which currency was meant when a row pick and a different Other currency pick arrive together', async () => {
+		// Without JavaScript, a row radio stays picked while the owner chooses
+		// in the select; the form can't say which one they meant.
 		const { sqlite, platform } = ledgerDb();
 		const form = entryForm({ price: '12', currency: 'USD' });
-		form.set('currencyOther', 'JPY');
+		form.set('currencyOther', 'jpy');
+		const result = await create(platform, form);
+		expect(result.status).toBe(400);
+		expect(result.data.errors).toEqual({
+			currency: 'You picked USD and also chose JPY under Other currency. To use JPY, pick Other currency as well. To use USD, save again.'
+		});
+		expect(result.data.values).toMatchObject({ price: '12', currency: 'USD' });
+		expect(ledgerSnapshot(sqlite)).toEqual({ commissions: [], links: [] });
+	});
+
+	it('saves a row pick when the Other currency select names the same code', async () => {
+		const { sqlite, platform } = ledgerDb();
+		const form = entryForm({ price: '12', currency: 'USD' });
+		form.set('currencyOther', 'usd');
 		expect((await create(platform, form)).status).toBe('redirected');
 		expect(rows(sqlite, 'SELECT price_minor, currency FROM commissions')).toEqual([{ price_minor: 1200, currency: 'USD' }]);
 	});

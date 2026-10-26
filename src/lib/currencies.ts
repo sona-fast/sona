@@ -82,16 +82,13 @@ const REGION_CURRENCY: Record<string, string> = Object.fromEntries(
 
 /** The currency of the first language tag that names a region, or null when
  * none does ("en" alone says nothing about where the owner is). Takes an
- * Accept-Language header or a list of tags; quality values keep their order. */
-export function localeCurrency(languages: string | readonly string[] | null | undefined): string | null {
+ * Accept-Language header; quality values keep their order. */
+export function localeCurrency(languages: string | null | undefined): string | null {
 	if (!languages) return null;
-	const tags =
-		typeof languages === 'string'
-			? languages
-					.split(',')
-					.map((part) => part.split(';')[0].trim())
-					.filter(Boolean)
-			: languages;
+	const tags = languages
+		.split(',')
+		.map((part) => part.split(';')[0].trim())
+		.filter(Boolean);
 	for (const tag of tags) {
 		let region: string | undefined;
 		try {
@@ -132,13 +129,9 @@ export function currencyRow(opts: {
 	return row.slice(0, CURRENCY_ROW_MAX);
 }
 
-/** The currency a form opens on: the entry's own, else the most recently used,
- * else the regional one. Empty when there's nothing to go on, so nothing is
- * picked until the owner picks. */
-export function initialCurrency(opts: {
-	entryCurrency?: string | null;
-	recent: readonly string[];
-	localeCurrency: string | null;
-}): string {
-	return opts.entryCurrency || opts.recent[0] || opts.localeCurrency || '';
+/** The currency a new form opens on: the most recently used, else the
+ * regional one. Empty when there's nothing to go on, so nothing is picked
+ * until the owner picks. */
+export function initialCurrency(opts: { recent: readonly string[]; localeCurrency: string | null }): string {
+	return opts.recent[0] || opts.localeCurrency || '';
 }
