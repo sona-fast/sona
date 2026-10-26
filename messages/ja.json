@@ -515,7 +515,7 @@
 	"admin_artists_ledger_private": "非公開にする（依頼台帳のみ）",
 	"admin_artists_ledger_private_hint": "このアーティストの作品を公開するまで、Sonaが自動でアバターを取得したり、レジストリに共有したりすることはありません。",
 	"admin_artists_share_private_title": "レジストリに共有しますか？",
-	"admin_artists_share_private_message": "このアーティストは依頼台帳用の非公開アーティストです。それでもレジストリに共有しますか？",
+	"admin_artists_share_private_message": "このアーティストは「非公開にする」に設定されています。レジストリに共有すると、この設定は解除されます。それでも共有しますか？",
 	"admin_artists_share_private_confirm": "それでも共有する",
 	"admin_artists_edit_aria": "アーティストを編集",
 	"admin_artists_delete_aria": "アーティストを削除",

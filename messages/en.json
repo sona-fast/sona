@@ -697,7 +697,7 @@
 	"admin_artists_ledger_private": "Keep private (commission ledger only)",
 	"admin_artists_ledger_private_hint": "Until you publish work by them, Sona won't look up this artist's avatar or share them with the registry on its own.",
 	"admin_artists_share_private_title": "Share with the registry?",
-	"admin_artists_share_private_message": "This artist is private to your commission ledger. Share them with the registry anyway?",
+	"admin_artists_share_private_message": "This artist is marked Keep private. Sharing them with the registry unticks Keep private. Share anyway?",
 	"admin_artists_share_private_confirm": "Share anyway",
 	"admin_artists_edit_aria": "Edit artist",
 	"admin_artists_delete_aria": "Delete artist",

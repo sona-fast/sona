@@ -17,7 +17,7 @@ import { getStorage, isAllowedStickerType, extFromContentType, deleteFile, isOwn
 import { isUnscrubbable, UNSCRUBBABLE_STICKER_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { getStickerSet, downloadFile, stickerSetUrl, parseStickerSetName, stickerMediaType } from '$lib/server/telegram';
 import type { TelegramSticker } from '$lib/server/telegram';
-import { resolveStickerArtistIds, inferAppendedArtistId, clearStickerTabCache } from '$lib/server/stickers';
+import { resolveStickerArtistIds, inferAppendedArtistId, clearStickerTabCache, packCreditedArtistIds } from '$lib/server/stickers';
 import type { AvatarRehostContext } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { isAnimatedRaster, sniffAnimatedFromUrl } from '$lib/server/animated-raster';
@@ -512,6 +512,8 @@ export async function importTelegramPack(opts: {
 	perSticker?: Record<number, PerStickerInput>;
 	/** Make a provider's relative URL (R2 dev '/img/...') absolute for storage. */
 	absolutize?: (url: string) => string;
+	/** As importStickerBatch's: may throw before appending to a published pack. */
+	beforePublishedAppend?: (artistIds: (number | null)[]) => Promise<void>;
 }): Promise<ImportResult> {
 	const {
 		env,
@@ -521,7 +523,8 @@ export async function importTelegramPack(opts: {
 		managerArtistId,
 		defaultArtistId,
 		perSticker = {},
-		absolutize = (u) => u
+		absolutize = (u) => u,
+		beforePublishedAppend
 	} = opts;
 
 	const set = await getStickerSet(env, nameOrUrl);
@@ -570,6 +573,13 @@ export async function importTelegramPack(opts: {
 		characterId,
 		managerArtistId
 	});
+
+	if (!created && beforePublishedAppend) {
+		const pack = await db.select({ published: stickerPacks.published }).from(stickerPacks).where(eq(stickerPacks.id, packId)).get();
+		if (pack?.published) {
+			await beforePublishedAppend(packCreditedArtistIds(managerArtistId, toImport.map(({ index }) => resolvedArtistIds[index])));
+		}
+	}
 
 	// Continue positions after the current max when appending (an existing pack, or one
 	// a concurrent import created — created=false covers both).
@@ -692,8 +702,14 @@ export async function importStickerBatch(opts: {
 	items: StickerBatchItem[];
 	/** Make a provider's relative URL (R2 dev '/img/...') absolute for storage. */
 	absolutize?: (url: string) => string;
+	/**
+	 * Called with the artists this batch credits when it appends to a pack that
+	 * is already published, before anything is written: it may throw to stop a
+	 * batch that would make a Keep private artist public (SONA-236).
+	 */
+	beforePublishedAppend?: (artistIds: (number | null)[]) => Promise<void>;
 }): Promise<StickerBatchResult> {
-	const { env, settings, db, nameOrUrl, managerArtistId, items, absolutize = (u) => u } = opts;
+	const { env, settings, db, nameOrUrl, managerArtistId, items, absolutize = (u) => u, beforePublishedAppend } = opts;
 
 	const result: StickerBatchResult = { created: false, imported: 0, updated: 0, skipped: 0, failed: [] };
 	if (items.length === 0) return result;
@@ -724,6 +740,10 @@ export async function importStickerBatch(opts: {
 		managerArtistId
 	});
 	result.created = created;
+	if (!created && beforePublishedAppend) {
+		const pack = await db.select({ published: stickerPacks.published }).from(stickerPacks).where(eq(stickerPacks.id, packId)).get();
+		if (pack?.published) await beforePublishedAppend(packCreditedArtistIds(managerArtistId, resolvedArtistIds));
+	}
 
 	let position = 0;
 	// Metadata of stickers already in THIS pack, keyed by fileUniqueId — the update

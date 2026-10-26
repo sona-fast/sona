@@ -1,5 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
+import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
 import { images, artists, collections, tags, imageTags, characters, imageCharacters, commissions } from '$lib/server/db/schema';
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
@@ -249,6 +250,11 @@ export const actions = {
 			return fail(400, { error: 'Artist is required' });
 		}
 
+		// A published piece by a Keep private artist makes them public, so ask
+		// first (SONA-236). A variant isn't public work on its own.
+		const { refusal, unhide } = await checkUnhide(db, data, published && !parentImageId ? [resolvedArtistId] : []);
+		if (refusal) return refusal;
+
 		// Update image
 		await db
 			.update(images)
@@ -267,6 +273,7 @@ export const actions = {
 				variantLabel: parentImageId ? variantLabel || null : null
 			})
 			.where(eq(images.id, id));
+		await clearKeepPrivate(db, unhide);
 
 		// Update tags: remove old, add new. Shared with the Suggest tags page so
 		// both write tags through one sanitizer and one table (SONA-220).

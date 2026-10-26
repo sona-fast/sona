@@ -1,5 +1,8 @@
-import { sql, type SQL } from 'drizzle-orm';
+import { fail, type ActionFailure } from '@sveltejs/kit';
+import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
+import type { Database } from './db';
+import { artists } from './db/schema';
 
 /**
  * True for an artist with public work: a published gallery piece (the gallery
@@ -42,4 +45,36 @@ export function artistHasPublicWork(artistId: SQLiteColumn): SQL {
 export function artistIsLedgerOnly(artistId: SQLiteColumn, ledgerPrivate?: boolean): SQL {
 	const flagged = ledgerPrivate === undefined ? sql`artists.ledger_private = 1` : sql`${ledgerPrivate ? 1 : 0} = 1`;
 	return sql`(${flagged} AND NOT ${artistHasPublicWork(artistId)})`;
+}
+
+/**
+ * The Keep private artists among `artistIds` that an action is about to give
+ * public work (SONA-236). Without `confirmUnhide=1` in the form, `refusal` is a
+ * 409 the page turns into a "make public?" dialog that resubmits with it. Once
+ * confirmed, the action does its write and then calls clearKeepPrivate(unhide),
+ * so the box keeps matching what the site shows. Pass only the artists the
+ * write leaves credited on published work.
+ */
+export async function checkUnhide(
+	db: Database,
+	data: FormData,
+	artistIds: Array<number | null | undefined>
+): Promise<{ refusal: ActionFailure<{ confirmUnhide: string[] }> | null; unhide: number[] }> {
+	const ids = [...new Set(artistIds.filter((id): id is number => Number.isInteger(id) && (id as number) > 0))];
+	if (!ids.length) return { refusal: null, unhide: [] };
+	const rows = await db
+		.select({ id: artists.id, name: artists.name })
+		.from(artists)
+		.where(and(inArray(artists.id, ids), eq(artists.ledgerPrivate, true)))
+		.all();
+	if (!rows.length) return { refusal: null, unhide: [] };
+	if (data.get('confirmUnhide') !== '1') {
+		return { refusal: fail(409, { confirmUnhide: rows.map((r) => r.name) }), unhide: [] };
+	}
+	return { refusal: null, unhide: rows.map((r) => r.id) };
+}
+
+export async function clearKeepPrivate(db: Database, artistIds: number[]): Promise<void> {
+	if (!artistIds.length) return;
+	await db.update(artists).set({ ledgerPrivate: false }).where(inArray(artists.id, artistIds));
 }

@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { desc } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
+import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
 import { getSettings } from '$lib/server/settings';
 import { artists, characters, images } from '$lib/server/db/schema';
 import { parseAvatarForm, validateAvatarRefs, validateAvatarMedia, insertAvatar } from '$lib/server/vr-avatars';
@@ -38,7 +39,13 @@ export const actions = {
 		const mediaError = validateAvatarMedia(platform?.env, settings, url.origin, parsed.input);
 		if (mediaError) return fail(400, { error: mediaError });
 
+		// Credits on a published avatar make a Keep private artist public, so ask
+		// first (SONA-236).
+		const { refusal, unhide } = await checkUnhide(db, data, parsed.input.published ? parsed.input.credits.map((c) => c.artistId) : []);
+		if (refusal) return refusal;
+
 		await insertAvatar(db, parsed.input);
+		await clearKeepPrivate(db, unhide);
 		redirect(302, '/admin/vr');
 	}
 } satisfies Actions;

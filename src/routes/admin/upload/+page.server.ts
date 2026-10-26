@@ -5,6 +5,7 @@ import { eq, isNull, sql, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
+import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
 import {
 	MAX_IMAGE_TAGS,
 	MAX_TAGS_INPUT_LENGTH,
@@ -247,6 +248,12 @@ export const actions = {
 			entry = check.entry;
 		}
 
+		// A new published piece by a Keep private artist makes them public, so ask
+		// first (SONA-236). Variants added to an existing piece aren't public work
+		// on their own.
+		const { refusal, unhide } = await checkUnhide(db, data, published && !existingParent ? [resolvedArtistId] : []);
+		if (refusal) return refusal;
+
 		const shared = {
 			artistId: resolvedArtistId,
 			collectionId: collectionId ? Number(collectionId) : null,
@@ -315,6 +322,23 @@ export const actions = {
 				const parentRow = await db.insert(images).values(parentValues).returning({ id: images.id }).get();
 				parentDbId = parentRow.id;
 			}
+
+			const parentRow = await db
+				.insert(images)
+				.values({
+					title,
+					slug: await freeSlug(db, slugify(title), usedSlugs),
+					imageUrl: parentTile.imageUrl,
+					width: parentTile.width,
+					height: parentTile.height,
+					fileSize: parentTile.fileSize,
+					nsfw: parentTile.nsfw,
+					...shared
+				})
+				.returning({ id: images.id })
+				.get();
+			parentDbId = parentRow.id;
+			await clearKeepPrivate(db, unhide);
 			await attachTagsAndCharacters(db, parentDbId, tagNames, characterIds);
 			variantTiles = tiles.filter((_, i) => i !== parentIndex).map((tile, i) => ({ tile, n: i + 1 }));
 		}

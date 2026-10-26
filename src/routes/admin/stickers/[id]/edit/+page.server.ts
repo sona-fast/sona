@@ -1,5 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
+import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
+import { packCreditedArtistIds } from '$lib/server/stickers';
 import { getSettings } from '$lib/server/settings';
 import { artists, stickerPacks, stickers, stickerEmojis } from '$lib/server/db/schema';
 import { eq, inArray } from 'drizzle-orm';
@@ -69,6 +71,20 @@ export const actions = {
 
 		if (!name) return fail(400, { error: 'Pack name is required.' });
 
+		// A published pack crediting a Keep private artist makes them public, so
+		// ask first (SONA-236). Asked before resolveOrCreateArtist so a refused
+		// save doesn't add the new default artist twice; a new artist is never
+		// private, so the existing default id is all the check needs.
+		const existingDefaultId = defaultArtistIdRaw && defaultArtistIdRaw !== 'new' ? Number(defaultArtistIdRaw) : null;
+		const { refusal, unhide } = await checkUnhide(
+			db,
+			data,
+			published
+				? packCreditedArtistIds(managerArtistId, parseStickerFormInputs(data, existingDefaultId).map((s) => s.artistId))
+				: []
+		);
+		if (refusal) return refusal;
+
 		const defaultArtistId = await resolveOrCreateArtist(db, {
 			artistId: defaultArtistIdRaw && defaultArtistIdRaw !== 'new' ? defaultArtistIdRaw : null,
 			artistName: newArtistName,
@@ -101,6 +117,7 @@ export const actions = {
 		} catch (e) {
 			return fail(400, { error: e instanceof Error ? e.message : 'Could not save pack.' });
 		}
+		await clearKeepPrivate(db, unhide);
 
 		redirect(302, '/admin/stickers');
 	}

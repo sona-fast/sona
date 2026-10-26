@@ -133,6 +133,17 @@ export function resolveStickerArtistIds(
 	return perStickerArtistIds;
 }
 
+/**
+ * The artists a published pack makes public (SONA-236): its manager if it has
+ * one, which every sticker then credits, else each sticker's own artist.
+ */
+export function packCreditedArtistIds(
+	managerArtistId: number | null,
+	perStickerArtistIds: (number | null)[]
+): (number | null)[] {
+	return managerArtistId != null ? [managerArtistId] : perStickerArtistIds;
+}
+
 // D1 caps bound parameters at ~100 per query, so any IN-list built from a
 // per-sticker set (a pack can hold 100+ stickers/artists) must be chunked.
 const D1_MAX_PARAMS = 90;

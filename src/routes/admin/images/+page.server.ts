@@ -7,6 +7,7 @@ import { eq, desc, asc, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { variantAssignmentError, REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
 import * as m from '$lib/paraglide/messages';
+import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
@@ -189,10 +190,20 @@ export const actions = {
 		const id = Number(data.get('id'));
 		if (!id) return fail(400, { error: 'Image ID is required' });
 
-		const row = await db.select({ published: images.published }).from(images).where(eq(images.id, id)).get();
+		const row = await db
+			.select({ published: images.published, artistId: images.artistId, parentImageId: images.parentImageId })
+			.from(images)
+			.where(eq(images.id, id))
+			.get();
 		if (!row) return fail(404, { error: 'Image not found' });
 
+		// Publishing a piece by a Keep private artist makes them public, so ask
+		// first (SONA-236). A variant isn't public work on its own.
+		const { refusal, unhide } = await checkUnhide(db, data, !row.published && !row.parentImageId ? [row.artistId] : []);
+		if (refusal) return refusal;
+
 		await db.update(images).set({ published: !row.published }).where(eq(images.id, id));
+		await clearKeepPrivate(db, unhide);
 		return { success: true };
 	}
 } satisfies Actions;
