@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { currencyRow, initialCurrency, localeCurrency } from './currencies';
+import { currencyRow, currencySymbol, initialCurrency, localeCurrency } from './currencies';
 
 describe('localeCurrency', () => {
 	it('reads the region of an Accept-Language header', () => {
@@ -68,5 +68,23 @@ describe('initialCurrency', () => {
 	});
 	it('picks nothing with nothing to go on', () => {
 		expect(initialCurrency({ recent: [], localeCurrency: null })).toBe('');
+	});
+});
+
+describe('currencySymbol', () => {
+	it("gives a currency's own symbol", () => {
+		expect(currencySymbol('USD', 'en')).toBe('$');
+		expect(currencySymbol('JPY', 'en')).toBe('¥');
+	});
+	it('gives nothing when the locale prints the code, so the code shows once', () => {
+		expect(currencySymbol('CHF', 'en')).toBeNull();
+		expect(currencySymbol('CHF', 'en', 'symbol')).toBeNull();
+	});
+	it('tells dollars apart in the search list', () => {
+		expect(currencySymbol('AUD', 'en', 'symbol')).toBe('A$');
+		expect(currencySymbol('AUD', 'en')).toBe('$');
+	});
+	it('gives nothing for a code that is not a currency', () => {
+		expect(currencySymbol('not', 'en')).toBeNull();
 	});
 });

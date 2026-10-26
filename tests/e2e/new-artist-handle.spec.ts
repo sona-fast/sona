@@ -106,3 +106,33 @@ test('a pasted patreon.com/cw/ link searches the registry by handle', async ({ p
 	await expect(dialog.getByRole('button', { name: 'Create Artist' })).toBeDisabled();
 	await page.screenshot({ path: testInfo.outputPath('cw-short-handle-blocked.png') });
 });
+
+// Keep private promises the artist stays out of the shared registry, so the
+// typed name isn't sent there as a search either (SONA-236). Unticking the box
+// searches for the name as it stands.
+test('Keep private sends no registry search until it is unticked', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/artists');
+
+	const searches: Request[] = [];
+	page.on('request', (req) => {
+		if (new URL(req.url()).pathname === '/api/registry/search') searches.push(req);
+	});
+
+	const dialog = page.getByRole('dialog', { name: 'New Artist' });
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Add Artist' }).first().click();
+		await expect(dialog).toBeVisible({ timeout: 1_500 });
+	}).toPass({ timeout: 30_000 });
+
+	const keepPrivate = dialog.getByLabel('Keep private (commission ledger only)');
+	await keepPrivate.check();
+	await dialog.getByLabel('Artist Name').fill('Private Marrow');
+	await page.waitForTimeout(PAST_DEBOUNCE_MS);
+	expect(searches).toEqual([]);
+	await expect(dialog.getByRole('button', { name: 'Create Artist' })).toBeEnabled();
+	await page.screenshot({ path: testInfo.outputPath('keep-private-no-search.png') });
+
+	await keepPrivate.uncheck();
+	await expect.poll(() => searches.map((r) => new URL(r.url()).search)).toEqual(['?q=Private%20Marrow']);
+});

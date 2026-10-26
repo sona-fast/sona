@@ -28,7 +28,7 @@
 		type CommissionFormEntry,
 		type CommissionFormValues
 	} from '$lib/commissions';
-	import { currencyRow, initialCurrency } from '$lib/currencies';
+	import { currencyRow, currencySymbol, initialCurrency } from '$lib/currencies';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
 
@@ -130,18 +130,8 @@
 	// svelte-ignore state_referenced_locally
 	const currencyChoices = currencyRow({ entryCurrency: entry?.currency || form?.values?.currency, recent: recentCurrencies, localeCurrency });
 	const amountDigits = $derived(values.currency ? currencyFractionDigits(values.currency) : null);
-	const currencySymbol = $derived.by(() => {
-		if (!values.currency) return '';
-		try {
-			return (
-				new Intl.NumberFormat(getLocale(), { style: 'currency', currency: values.currency, currencyDisplay: 'narrowSymbol' })
-					.formatToParts(0)
-					.find((p) => p.type === 'currency')?.value ?? ''
-			);
-		} catch {
-			return '';
-		}
-	});
+	// Null when the currency prints as its code (CHF), so the code shows once.
+	const amountSymbol = $derived(values.currency ? currencySymbol(values.currency, getLocale()) : null);
 	const amountHint = $derived(
 		amountDigits === null
 			? m.admin_commissions_hint_amount_none()
@@ -534,22 +524,26 @@
 					invalid={!!errors.currency}
 					describedBy={describedBy('currency', 'ce-currency-hint')}
 					announce={(text) => announcer.say(text)}
-				/>
-				{@render fieldError('currency')}
-				<small class="hint" id="ce-currency-hint"
-					>{recentCurrencies.length > 0 ? m.admin_commissions_hint_currency_recent() : m.admin_commissions_hint_currency_pick()}</small
 				>
+					<!-- Under the row, above an open search, so the hint stays by the row it describes. -->
+					{#snippet below()}
+						{@render fieldError('currency')}
+						<small class="hint" id="ce-currency-hint"
+							>{recentCurrencies.length > 0 ? m.admin_commissions_hint_currency_recent() : m.admin_commissions_hint_currency_pick()}</small
+						>
+					{/snippet}
+				</CurrencyPicker>
 			</div>
 			<div class="field">
 				<label class="field-label" for="ce-price">{m.admin_commissions_field_amount()}</label>
-				<div class="amount">
-					{#if values.currency}
-						<span class="amount-prefix" aria-hidden="true">{currencySymbol}&nbsp;{values.currency}</span>
-					{/if}
-					<div class="amount-box">
+				<!-- One field: the symbol inside on the left, the code inside on the
+				     right, so the box's left edge stays on the column line. The hint
+				     names the currency for a screen reader. -->
+				<div class="field-pill amount">
+					{#if amountSymbol}<span class="affix" aria-hidden="true">{amountSymbol}</span>{/if}
 					<input
 						id="ce-price"
-						class="input"
+						class="input input-plain"
 						type="text"
 						name="price"
 						inputmode={amountDigits === 0 ? 'numeric' : 'decimal'}
@@ -558,7 +552,7 @@
 						aria-invalid={errors.price ? 'true' : undefined}
 						aria-describedby={describedBy('price', 'ce-price-hint')}
 					/>
-					</div>
+					{#if values.currency}<span class="affix" aria-hidden="true">{values.currency}</span>{/if}
 				</div>
 				{@render fieldError('price')}
 				<small class="hint" id="ce-price-hint">{amountHint}</small>
@@ -607,6 +601,10 @@
 		allowLedgerPrivate
 		startPrivate
 		oncreated={onArtistCreated}
+		onimportedall={async () => {
+			showNewArtist = false;
+			await invalidateAll();
+		}}
 		oncancel={() => (showNewArtist = false)}
 	/>
 {/if}
@@ -654,9 +652,11 @@
 	}
 	.add-artist-btn:hover { border-color: var(--primary-text); color: var(--primary-text); }
 	.add-artist-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-	.amount { display: flex; align-items: center; gap: 8px; max-width: 20rem; }
-	.amount-prefix { font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--muted-foreground); }
-	.amount-box { flex: 1; min-width: 0; }
+	.amount { max-width: 20rem; }
+	.affix { font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--muted-foreground); }
+	/* The pill draws the field's edge and ring, so the error goes on the pill. */
+	.amount:has([aria-invalid='true']) { border-color: var(--destructive); }
+	.amount:has([aria-invalid='true']):focus-within { outline-color: var(--destructive); }
 
 	.char-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 	/* A 1px edge on every chip and a check on the selected one, as on the tag

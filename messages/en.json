@@ -2328,6 +2328,7 @@
 	"admin_currency_find": "Find a currency",
 	"admin_currency_matches_none": "No currency matches “{query}”.",
 	"admin_currency_picked_announce": "Using {code}, {name}.",
+	"admin_currency_current": "(current)",
 	"admin_commissions_artist_added_announce": "Using {name} as the artist.",
 	"admin_currency_matches": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} currency matches.", "countPlural=other": "{count} currencies match."}}],
 	"admin_commissions_legend_dates": "Dates",
