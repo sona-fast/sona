@@ -506,7 +506,7 @@
 						{prefillSite ? m.admin_lookup_guess_line_site({ site: prefillSite }) : m.admin_lookup_guess_line_name()}
 					{/if}
 				</p>
-				{#if registryEnabled}
+				{#if registrySearch}
 					<p class="guess-line">{m.admin_lookup_guess_line_registry()}</p>
 				{/if}
 			</div>

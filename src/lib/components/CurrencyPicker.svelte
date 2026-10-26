@@ -135,7 +135,8 @@
 		{/each}
 		{#if !hydrated}
 			<!-- Picking this radio is what makes the server read the select beside
-			     the row, so a row pick made after a select pick still wins. -->
+			     the row. A row pick beside a different select pick is refused
+			     (currency_both), so the owner is asked which one they meant. -->
 			<label class="option">
 				<input type="radio" name="currency" value={CURRENCY_OTHER} />
 				<span class="tick" aria-hidden="true"><Check size={14} /></span>
