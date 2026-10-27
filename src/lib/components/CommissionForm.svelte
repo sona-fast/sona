@@ -640,7 +640,13 @@
 				// A Back that lands while the ledger is still loading shows the page
 				// SvelteKit already holds instead of loading it again, and that copy
 				// must not be the one from before the save.
-				if (isEdit) await invalidateAll();
+				if (isEdit) {
+					await invalidateAll();
+					// The same form can stay up through that Back, so it saves next
+					// from the refreshed entry, not the version it opened with.
+					loaded = formValuesOf(entry);
+					version = entry?.version ?? '';
+				}
 			}
 			if (result.type !== 'error') await update({ reset: false });
 			saving = false;

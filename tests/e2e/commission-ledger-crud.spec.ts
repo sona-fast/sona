@@ -1099,10 +1099,24 @@ test('saving an edit refreshes the entry before leaving, so Back shows what was 
 	await page.goBack();
 	await expect(kind).toHaveValue('E2E saved before Back');
 
-	// Put the kind back for the steps after this one.
-	await kind.fill(keptKind);
+	// The form saves from there as the current version, not a stale one.
+	await kind.fill('E2E saved again');
 	await page.getByRole('button', { name: 'Save changes' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
+
+	// When the refresh itself fails, SvelteKit loads the edit page in full: it
+	// shows the saved entry, and nothing is left saving.
+	await open(page, editUrl!);
+	await kind.fill(keptKind);
+	await page.route(`**${editUrl}/__data.json*`, (route) => route.abort());
+	const reload = page.waitForRequest((r) => r.resourceType() === 'document');
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await reload;
+	await page.unroute(`**${editUrl}/__data.json*`);
+	await waitForHydration(page);
+	await expect(page).toHaveURL(new RegExp(`${editUrl}$`));
+	await expect(kind).toHaveValue(keptKind);
+	await expect(page.getByRole('button', { name: 'Save changes' })).toBeEnabled();
 });
 
 test('Reload entry takes away the draft-is-back line', async ({ page, context }) => {
