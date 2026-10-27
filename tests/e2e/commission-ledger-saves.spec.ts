@@ -121,6 +121,26 @@ test('an amount refused for its currency saves once the currency takes decimals'
 	await expect(page.getByLabel('Amount')).toHaveValue('10.50');
 });
 
+test('a grouped amount and a full-width one save as plain numbers', async ({ page, baseURL }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	for (const [title, currency, typed, stored] of [
+		['E2E grouped amount', 'USD', '1,234.50', '1234.50'],
+		['E2E full-width amount', 'JPY', '４５', '45']
+	] as const) {
+		const id = await createEntry(page, baseURL!, title);
+		await open(page, `/admin/commissions/${id}/edit`);
+		await pickCurrency(page, currency);
+		await page.getByLabel('Amount').fill(typed);
+		await page.getByRole('button', { name: 'Save changes' }).click();
+		await expect(page).toHaveURL(/\/admin\/commissions$/);
+
+		await open(page, `/admin/commissions/${id}/edit`);
+		await expect(page.getByRole('radio', { name: new RegExp(currency) })).toBeChecked();
+		await expect(page.getByLabel('Amount')).toHaveValue(stored);
+	}
+	await settledShot(page, testInfo.outputPath('commission-edit-normalized-amount.png'));
+});
+
 test('clearing the amount saves the entry with no price', async ({ page, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E cleared price', { price: '45.50', currency: 'EUR' });
