@@ -403,7 +403,7 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 		(r) => r.url().endsWith('/api/admin/artist-from-link') && !!r.request().postData()?.includes('e2e_artist/status/5')
 	);
 	releaseEdited();
-	await droppedAnswer;
+	await settledAfter(page, await droppedAnswer);
 	await link.press('Backspace');
 	await link.press('Tab');
 	await expect(card.getByText('e2e_artist is already in your artist list as Test Artist.')).toBeVisible();
