@@ -666,7 +666,11 @@
 					</div>
 				{/each}
 			</div>
-			<small class="hint" id="ce-dates-hint">{m.admin_commissions_hint_dates()}</small>
+			<!-- The date fill is the page's script (onStatusChange), so without it
+			     the hint doesn't promise one. -->
+			<small class="hint" id="ce-dates-hint"
+				>{hydrated ? `${m.admin_commissions_hint_dates_fill()}${getLocale() === 'ja' ? '' : ' '}` : ''}{m.admin_commissions_hint_dates_private()}</small
+			>
 		</fieldset>
 	</fieldset>
 
