@@ -642,10 +642,20 @@
 				// must not be the one from before the save.
 				if (isEdit) {
 					await invalidateAll();
-					// The same form can stay up through that Back, so it saves next
-					// from the refreshed entry, not the version it opened with.
-					loaded = formValuesOf(entry);
+					// The same form can stay up through that Back. It then holds the
+					// entry as saved, values and version together, so a save from it
+					// can't send older values under a newer version, and a change
+					// typed there is kept as a draft again. Nothing differs from the
+					// entry now, so leaving keeps no draft.
+					const asSaved = () => {
+						const v = formValuesOf(entry);
+						if (!v.currency) v.currency = initialCurrency({ recent: recentCurrencies, localeCurrency });
+						return v;
+					};
+					loaded = asSaved();
+					values = asSaved();
 					version = entry?.version ?? '';
+					saved = false;
 				}
 			}
 			if (result.type !== 'error') await update({ reset: false });
