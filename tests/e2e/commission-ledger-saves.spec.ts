@@ -298,9 +298,9 @@ test('without JavaScript, a refused edit saves once fixed', async ({ page, brows
 	}
 });
 
-// Delete entry is a button that opens a confirm dialog from the page's script,
-// and the form it submits is hidden, so without JavaScript it does nothing.
-test.fixme('without JavaScript, Delete entry deletes the entry after a confirmation', async ({ page, browser, baseURL }, testInfo) => {
+// Without the page's script, Delete entry is a link to the same page, which
+// draws the dialog's confirmation in the page with a form that posts.
+test('without JavaScript, Delete entry deletes the entry after a confirmation', async ({ page, browser, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E no-JS delete');
 	const context = await browser.newContext({
@@ -311,8 +311,20 @@ test.fixme('without JavaScript, Delete entry deletes the entry after a confirmat
 	try {
 		const noJs = await context.newPage();
 		await noJs.goto(`/admin/commissions/${id}/edit`);
-		await noJs.getByRole('button', { name: 'Delete entry' }).click();
-		await noJs.getByRole('button', { name: 'Delete', exact: true }).click();
+		const deleteEntry = noJs.getByRole('link', { name: 'Delete entry' });
+
+		// Cancel leaves the entry as it was.
+		await deleteEntry.click();
+		const confirm = noJs.getByRole('region', { name: 'Delete this entry?' });
+		await expect(confirm).toContainText('This permanently removes “E2E no-JS delete” from your ledger');
+		await confirm.getByRole('link', { name: 'Cancel' }).click();
+		await expect(noJs).toHaveURL(new RegExp(`/admin/commissions/${id}/edit$`));
+		await expect(confirm).toHaveCount(0);
+
+		await deleteEntry.click();
+		await expect(confirm).toBeVisible();
+		await settledShot(noJs, testInfo.outputPath('commission-edit-nojs-delete-confirm.png'));
+		await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
 		await expect(noJs).toHaveURL(/\/admin\/commissions$/);
 		await expect(noJs.getByRole('link', { name: 'Edit E2E no-JS delete' })).toHaveCount(0);
 		made = [];
