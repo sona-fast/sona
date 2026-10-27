@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { getRawSetting, setRawSetting } from '$lib/server/settings';
-import { PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
+import { PASSWORD_RESET_SETTING, hashResetAddress, hashResetPassword, validateResetToken } from '$lib/server/password-reset';
 import { actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -73,6 +73,51 @@ describe('forgot action', () => {
 		// An HTML body ships alongside the text, carrying the fork identity + reset link.
 		expect(email.html).toContain('Taro Surf');
 		expect(email.html).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
+	});
+
+	it('mails a link that validates while recovery stays on the address it was sent to', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'Admin@Taro.Surf' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const token = new URL(sentEmail().text.match(/https:\/\/\S+/)![0]).searchParams.get('token')!;
+		expect(await validateResetToken(db, token)).toBe(true);
+	});
+
+	// saveSecurityEmail deletes the reset row, but a send already in flight
+	// writes its row once Resend answers, after that delete.
+	it('mails a dead link when recovery moves to another address while the send is in flight', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		fetchMock.mockImplementation(async () => {
+			await setRawSetting(db, 'adminEmail', 'new@taro.surf');
+			return new Response(JSON.stringify({ id: 'email-1' }), { status: 200 });
+		});
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeTruthy();
+		const token = new URL(sentEmail().text.match(/https:\/\/\S+/)![0]).searchParams.get('token')!;
+		expect(await validateResetToken(db, token)).toBe(false);
+	});
+
+	// changePassword deletes the reset row too, and a send in flight writes its
+	// row after that delete in the same way.
+	it('mails a dead link when the password changes while the send is in flight', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'adminPasswordHash', value: 'old-hash' });
+		fetchMock.mockImplementation(async () => {
+			await setRawSetting(db, 'adminPasswordHash', 'new-hash');
+			return new Response(JSON.stringify({ id: 'email-1' }), { status: 200 });
+		});
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeTruthy();
+		const token = new URL(sentEmail().text.match(/https:\/\/\S+/)![0]).searchParams.get('token')!;
+		expect(await validateResetToken(db, token)).toBe(false);
 	});
 
 	it('quotes and escapes a siteName with a comma and double-quote in the From display name', async () => {
@@ -150,11 +195,13 @@ describe('forgot action', () => {
 	it('skips the send within the 2-minute cooldown, keeping the existing token', async () => {
 		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
 		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
-		// A fresh existing request (30s ago) should suppress a resend.
+		// A fresh existing request (30s ago) for the current address should suppress a resend.
 		const existing = JSON.stringify({
 			tokenHash: 'a'.repeat(64),
 			expiresAt: new Date(Date.now() + 60_000).toISOString(),
-			requestedAt: new Date(Date.now() - 30_000).toISOString()
+			requestedAt: new Date(Date.now() - 30_000).toISOString(),
+			emailHash: await hashResetAddress('admin@taro.surf'),
+			pwHash: await hashResetPassword(null)
 		});
 		await setRawSetting(db, PASSWORD_RESET_SETTING, existing);
 
@@ -164,6 +211,41 @@ describe('forgot action', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 		// The existing token row is left intact (link the operator may be following).
 		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBe(existing);
+	});
+
+	// A recent row that can never validate (bound to a previous address or
+	// password, or written before binding) must not hold off a send to the current one.
+	it.each([
+		[
+			'bound to a previous address',
+			async () => ({ emailHash: await hashResetAddress('old@taro.surf'), pwHash: await hashResetPassword(null) })
+		],
+		[
+			'bound to a previous password',
+			async () => ({ emailHash: await hashResetAddress('admin@taro.surf'), pwHash: await hashResetPassword('old-hash') })
+		],
+		['unbound (written before address binding)', async () => ({})]
+	])('sends within the cooldown when the recent row is %s', async (_label, binding) => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await setRawSetting(
+			db,
+			PASSWORD_RESET_SETTING,
+			JSON.stringify({
+				tokenHash: 'a'.repeat(64),
+				expiresAt: new Date(Date.now() + 60_000).toISOString(),
+				requestedAt: new Date(Date.now() - 30_000).toISOString(),
+				...(await binding())
+			})
+		);
+
+		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(result).toEqual({ sent: true });
+		const email = sentEmail();
+		expect(email.to).toBe('admin@taro.surf');
+		const token = new URL(email.text.match(/https:\/\/\S+/)![0]).searchParams.get('token')!;
+		expect(await validateResetToken(db, token)).toBe(true);
 	});
 
 	it('does not overwrite an existing valid token when the Resend send fails', async () => {

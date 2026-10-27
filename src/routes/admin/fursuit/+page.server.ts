@@ -12,6 +12,7 @@ import {
 } from '$lib/server/fursuit-import';
 import type { ImportCandidate } from '$lib/server/fursuit-import';
 import { deleteFile } from '$lib/server/storage';
+import { sanitizeText } from '$lib/server/validate';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url, fetch }) => {
@@ -68,7 +69,7 @@ export const actions = {
 		const db = getDb(platform!.env.DB);
 		const settings = await getSettings(db);
 		const data = await request.formData();
-		const character = (data.get('character') as string) || settings.primaryCharacter;
+		const character = sanitizeText(data.get('character') as string, 200) || settings.primaryCharacter;
 		const postIds = (data.getAll('postId') as string[]).map(Number).filter((n) => Number.isInteger(n) && n > 0);
 
 		if (postIds.length === 0) return fail(400, { error: 'No photos selected.' });
@@ -83,7 +84,7 @@ export const actions = {
 			const match = /^permission\[(\d+)\]$/.exec(k);
 			if (!match) continue;
 			const id = Number(match[1]);
-			const source = (v as string).trim();
+			const source = sanitizeText(v as string, 200);
 			if (selectedSet.has(id) && source) manualPermissions.set(id, source);
 		}
 

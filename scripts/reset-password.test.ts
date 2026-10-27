@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyPasswordHash } from '../src/lib/server/admin-auth';
-import { hashPasswordPbkdf2, readDbName, askHidden } from './reset-password';
+import { hashPasswordPbkdf2, readDbName, askHidden, buildResetSql } from './reset-password';
 
 describe('reset-password CLI — hash parity with admin-auth', () => {
 	it('produces a hash the app verifies as correct', async () => {
@@ -15,6 +18,28 @@ describe('reset-password CLI — hash parity with admin-auth', () => {
 	it('produces a hash the app rejects for the wrong password', async () => {
 		const hash = await hashPasswordPbkdf2('s3cret-pw');
 		expect(await verifyPasswordHash('s3cret-pX', hash)).toBe(false);
+	});
+});
+
+// The break-glass reset must void a pending "Forgot password" link too, or
+// whoever holds that email can set a password over the one just chosen.
+describe('reset-password CLI — the SQL it applies', () => {
+	it('sets the new hash, clears sessions, and deletes the pending reset row, leaving other settings alone', async () => {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL);
+		INSERT INTO site_settings VALUES ('adminPasswordHash', 'old-hash'), ('adminEmail', 'old@x.y'), ('passwordResetToken', '{"tokenHash":"x"}');
+		INSERT INTO sessions (token, expires_at) VALUES ('sess-a', '2099-01-01'), ('sess-b', '2099-01-01');`);
+		const hash = await hashPasswordPbkdf2('new-password-123');
+
+		sqlite.exec(buildResetSql(hash));
+
+		const setting = (key: string) =>
+			(sqlite.prepare('SELECT value FROM site_settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
+		expect(await verifyPasswordHash('new-password-123', setting('adminPasswordHash')!)).toBe(true);
+		expect(setting('passwordResetToken')).toBeUndefined();
+		expect(setting('adminEmail')).toBe('old@x.y');
+		expect(sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get()).toEqual({ n: 0 });
 	});
 });
 

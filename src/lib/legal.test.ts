@@ -299,8 +299,8 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = 'cdfdecab4469f68d4e085812041fb1c652232f3f9d63db9a54aacd854faed30a';
-	const RECORDED_UPDATED = '2026-09-15';
+	const RECORDED_TEXT_HASH = '49bdb4a12e8dd6f00aede315b5891dd8e81f681240195e7ab8c6d9faa67baef7';
+	const RECORDED_UPDATED = '2026-10-17';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

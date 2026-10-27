@@ -7,6 +7,7 @@ import { REGISTRY_DEFAULT_URL } from '$lib/config';
 import { withTimeout } from './timeout';
 import { getRawSetting } from './settings';
 import type { Database } from './db';
+import { INVITE_REFUSALS, type InviteRefusal } from '$lib/registry-invite';
 
 type Env = App.Platform['env'];
 
@@ -104,7 +105,7 @@ export async function registryRegisterFork(opts: {
 	url?: string;
 	signupToken?: string;
 	label?: string;
-}): Promise<{ forkId: string; key: string } | { error: string }> {
+}): Promise<{ forkId: string; key: string } | { error: string; code?: InviteRefusal }> {
 	const base = (opts.url || REGISTRY_DEFAULT_URL).replace(/\/+$/, '');
 	try {
 		const res = await withTimeout(
@@ -118,10 +119,14 @@ export async function registryRegisterFork(opts: {
 		);
 		if (!res) return { error: 'the registry did not respond — check the URL and try again' };
 		const data = (await res.json().catch(() => null)) as
-			| { forkId?: string; key?: string; error?: string }
+			| { forkId?: string; key?: string; error?: string; code?: unknown }
 			| null;
 		if (!res.ok || !data?.key || !data?.forkId) {
-			return { error: data?.error || `registry returned HTTP ${res.status}` };
+			const error = data?.error || `registry returned HTTP ${res.status}`;
+			// Only a client error is a refusal of the token; a 5xx carrying a code isn't.
+			const refused = res.status >= 400 && res.status < 500;
+			const code = refused ? INVITE_REFUSALS.find((c) => c === data?.code) : undefined;
+			return code ? { error, code } : { error };
 		}
 		return { forkId: data.forkId, key: data.key };
 	} catch {
