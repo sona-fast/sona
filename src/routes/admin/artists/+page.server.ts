@@ -447,9 +447,10 @@ export const actions = {
 		// (409 conflict vs 429 rate-limit vs 400 validation), truncated so a long
 		// registry message can't blow out the form error.
 		if ('httpStatus' in result) return fail(result.httpStatus, { error: result.error.slice(0, 300) });
-		// Share anyway sent a private artist to the registry, so they aren't
-		// private any more: untick Keep private to match (SONA-236).
-		if (row.ledgerOnly) await db.update(artists).set({ ledgerPrivate: false }).where(eq(artists.id, id));
+		// A shared artist isn't private any more: untick Keep private to match
+		// (SONA-236). The stored flag, not the confirm rule, so a box left ticked
+		// on an artist with public work clears too.
+		if (a.ledgerPrivate) await db.update(artists).set({ ledgerPrivate: false }).where(eq(artists.id, id));
 		return { success: true, submitted: true };
 	},
 

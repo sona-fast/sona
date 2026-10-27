@@ -745,6 +745,18 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 			expect(after!.ledgerPrivate).toBe(false);
 		});
 
+		it('unticks a leftover Keep private on an artist with public work, without asking', async () => {
+			const { db, platform } = makeDb();
+			const id = await seedEnabledArtist(db, { ledgerPrivate: true });
+			await db.run(sql`INSERT INTO images (artist_id, published) VALUES (${id}, 1)`);
+			mockRegistrySubmit.mockResolvedValue(pending);
+
+			const result = await actions.submitToRegistry(submitEvent(platform, id));
+			expect(result).toEqual({ success: true, submitted: true });
+			const after = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
+			expect(after!.ledgerPrivate).toBe(false);
+		});
+
 		it('keeps Keep private ticked when the registry refuses the share', async () => {
 			const { db, platform } = makeDb();
 			const id = await seedEnabledArtist(db, { ledgerPrivate: true });
