@@ -282,12 +282,15 @@ const SUGGEST_TAGS_SPEC = '**/suggest-tags.spec.ts';
 // and share-private-artist, whose Share button only renders with it on, and
 // new-artist-import-all, whose Import all footer only renders with it on, and
 // commission-add-handle-private, whose dialog only searches with it on.
+// unhide-private-artist doesn't need the registry; it rides along because it
+// writes the same kind of rows as share-private-artist's publish test.
 const REGISTRY_SPECS = [
 	'**/registry-sync.spec.ts',
 	'**/new-artist-handle.spec.ts',
 	'**/share-private-artist.spec.ts',
 	'**/new-artist-import-all.spec.ts',
-	'**/commission-add-handle-private.spec.ts'
+	'**/commission-add-handle-private.spec.ts',
+	'**/unhide-private-artist.spec.ts'
 ];
 // tag-suggestions reads the two admin forms with the lookup endpoint
 // intercepted and writes no rows, but it cannot take the parallel project: its
