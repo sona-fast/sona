@@ -4,6 +4,7 @@ import type { Database } from '$lib/server/db';
 import { extFromContentType, isAllowedImageType } from './index';
 import { isUnscrubbable, SNIFF_BYTES, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
 import { sniffImageType } from './sniff';
+import { bufferStream, idleTimeout, MAX_BUFFER_BYTES } from './buffer';
 import type { StorageProvider } from './types';
 
 export interface MigrationItemResult {
@@ -188,26 +189,71 @@ export async function migrateNextBatch(opts: {
 	};
 }
 
+/** How long a source may send nothing, headers or body, before its row fails. */
+const MIGRATE_IDLE_TIMEOUT_MS = 15_000;
+
 async function copyOne(
 	fetchFn: typeof fetch,
 	target: StorageProvider,
 	url: string,
 	baseKey: string
 ): Promise<string> {
-	const res = await fetchFn(url);
+	// Bound how long the source may go quiet, so one host that stops answering
+	// can't hold the whole batch. Idle, not total: the timer covers the wait for
+	// headers and re-arms on every chunk, so a large image that keeps streaming
+	// finishes however long it takes.
+	const idle = idleTimeout(
+		MIGRATE_IDLE_TIMEOUT_MS,
+		() => new Error(`source timed out (no data for ${MIGRATE_IDLE_TIMEOUT_MS / 1000}s) for ${url}`)
+	);
+	try {
+		return await copyFromSource(fetchFn, target, url, baseKey, idle);
+	} catch (e) {
+		// A fetch or target can wrap the abort in its own wording; the operator
+		// reading the failure list needs the timeout and the URL instead. Only an
+		// abort is relabeled: a target that fails on its own after the timer has
+		// fired keeps its own message. A target can also wrap the error the
+		// watched body failed with, e.g. TypeError('fetch failed', { cause }).
+		const isAbort =
+			e === idle.signal.reason ||
+			(e instanceof Error && e.cause === idle.signal.reason) ||
+			(e instanceof DOMException && (e.name === 'AbortError' || e.name === 'TimeoutError'));
+		throw idle.signal.aborted && isAbort ? idle.signal.reason : e;
+	} finally {
+		idle.clear();
+	}
+}
+
+async function copyFromSource(
+	fetchFn: typeof fetch,
+	target: StorageProvider,
+	url: string,
+	baseKey: string,
+	idle: ReturnType<typeof idleTimeout>
+): Promise<string> {
+	const res = await fetchFn(url, { signal: idle.signal });
 	if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
 	// Stream when the source declares its usable length (both providers upload
 	// without materializing given a size). Content-Encoding responses can't
 	// stream: their Content-Length counts compressed bytes while res.body
 	// yields decoded ones, so the declared size would be wrong. A response
-	// without a usable length falls back to buffering the whole body — uncapped,
-	// the pre-existing behavior of this path.
+	// without a usable length falls back to buffering the whole body, under the
+	// same cap as an upload so an endless body fails the row instead of the
+	// isolate.
 	const declaredSize = Number(res.headers.get('content-length'));
 	const streamable =
 		res.body &&
 		Number.isFinite(declaredSize) &&
 		declaredSize > 0 &&
 		!res.headers.get('content-encoding');
+	// The streaming path never buffers, so it holds a source to the same cap by
+	// its declared length: nothing stored through an upload is larger.
+	if (streamable && declaredSize > MAX_BUFFER_BYTES) {
+		await res.body!.cancel().catch(() => {});
+		throw new Error(
+			`source declares ${declaredSize} bytes, over the ${MAX_BUFFER_BYTES}-byte buffer cap, for ${url}`
+		);
+	}
 
 	// Verify the LEADING BYTES are an allowed raster image (M7, the same defense
 	// as /api/upload) rather than trusting the source's Content-Type header:
@@ -221,13 +267,13 @@ async function copyOne(
 	let head: Uint8Array;
 	let sourceReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	if (streamable) {
-		const reader = res.body!.getReader();
+		const reader = idle.watch(res.body!).getReader();
 		sourceReader = reader;
 		const { chunks, bytes } = await readAtLeast(reader, SNIFF_BYTES);
 		head = bytes;
 		body = prependChunks(chunks, reader);
 	} else {
-		const buffered = new Uint8Array(await res.arrayBuffer());
+		const buffered = res.body ? await bufferStream(idle.watch(res.body), MAX_BUFFER_BYTES) : new Uint8Array();
 		head = buffered;
 		body = buffered;
 	}
@@ -242,14 +288,21 @@ async function copyOne(
 	}
 	const contentType = sniffed!;
 	const ext = extFromContentType(contentType);
-	const { url: newUrl } = await target.put({
-		suggestedKey: `${baseKey}.${ext}`,
-		body,
-		size: streamable ? declaredSize : undefined,
-		contentType,
-		filename: `${baseKey.split('/').pop()}.${ext}`
-	});
-	return newUrl;
+	try {
+		const { url: newUrl } = await target.put({
+			suggestedKey: `${baseKey}.${ext}`,
+			body,
+			size: streamable ? declaredSize : undefined,
+			contentType,
+			filename: `${baseKey.split('/').pop()}.${ext}`
+		});
+		return newUrl;
+	} catch (e) {
+		// A target that fails mid-stream may leave the source half-read; release
+		// it, as on the sniff failure above, so the connection doesn't stay open.
+		await sourceReader?.cancel(e).catch(() => {});
+		throw e;
+	}
 }
 
 /** Read chunks off `reader` until at least `n` bytes have arrived (or EOF). */
@@ -296,5 +349,7 @@ function prependChunks(
 		cancel(reason) {
 			return reader.cancel(reason);
 		}
-	});
+		// No read-ahead: pull only when the provider asks, so a pause in the
+		// provider never turns into a wait on the idle-watched source.
+	}, { highWaterMark: 0 });
 }

@@ -8,6 +8,7 @@ import {
 	getRawSetting,
 	getRawSettings,
 	setRawSetting,
+	upsertSetting,
 	clearSettingsCache,
 	clearSupporterKeyStatusCache,
 	parseSonaColors
@@ -41,7 +42,7 @@ import {
 	sessions,
 	siteSettings
 } from '$lib/server/db/schema';
-import { sql, inArray } from 'drizzle-orm';
+import { sql, inArray, eq } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
@@ -49,6 +50,7 @@ import { socialAtHandle } from '$lib/social-label';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl, isOurAvatarUrl, shouldWriteAvatar } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
+import { PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
 import {
 	isRegistryEnabled,
 	resolveRegistryEnv,
@@ -589,14 +591,15 @@ export const actions = {
 			sonaBuild: text('sonaBuild', 200),
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),
 			// Re-parse + re-serialize the swatch JSON so only well-formed { name, hex }
-			// survive, deduped by hex, then clamped to the palette cap (the UI
-			// enforces both too).
+			// survive, names capped like every other text field, deduped by hex,
+			// then clamped to the palette cap (the UI enforces the dedupe and the
+			// palette cap too, but not the name cap).
 			sonaColors: data.has('sonaColors')
 				? JSON.stringify(
 						dedupePalette(
-							parseSonaColors((data.get('sonaColors') as string) || '[]').filter((c) =>
-								/^#[0-9a-fA-F]{3,8}$/.test(c.hex)
-							)
+							parseSonaColors((data.get('sonaColors') as string) || '[]')
+								.filter((c) => /^#[0-9a-fA-F]{3,8}$/.test(c.hex))
+								.map((c) => ({ ...c, name: sanitizeText(c.name, 60) }))
 						).slice(0, MAX_SONA_COLORS)
 					)
 				: undefined,
@@ -750,7 +753,11 @@ export const actions = {
 			signupToken,
 			label
 		});
-		if ('error' in result) return fail(400, { error: `Could not connect: ${result.error}.` });
+		if ('error' in result) {
+			// A refused invite token is shown on the token field, not as a toast.
+			if (result.code) return fail(400, { inviteError: result.code });
+			return fail(400, { error: `Could not connect: ${result.error}.` });
+		}
 
 		// Store the one-time fork key (and any custom URL) in D1 so the connection
 		// survives without a deploy. The key never goes back to the client.
@@ -809,7 +816,13 @@ export const actions = {
 		if (adminEmail && !isValidEmail(adminEmail)) {
 			return fail(400, { error: 'Enter a valid email address, like you@example.com.' });
 		}
-		await setRawSetting(db, 'adminEmail', adminEmail);
+		// A reset link already mailed to the previous address must stop working
+		// once the operator moves recovery elsewhere, so drop any pending token in
+		// the same batch that writes the new address.
+		await db.batch([
+			upsertSetting(db, 'adminEmail', adminEmail),
+			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
+		]);
 		return { recoveryEmailSaved: true };
 	},
 
@@ -888,7 +901,10 @@ export const actions = {
 				.values({ key: 'adminPasswordHash', value: passwordHash })
 				.onConflictDoUpdate({ target: siteSettings.key, set: { value: passwordHash } }),
 			db.delete(sessions),
-			db.insert(sessions).values({ token: tokenHash, expiresAt })
+			db.insert(sessions).values({ token: tokenHash, expiresAt }),
+			// A pending reset link would otherwise still set a password over the one
+			// just chosen, and the reset then signs this session out.
+			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
 		]);
 		cookies.set(SESSION_COOKIE, token, {
 			path: '/',
