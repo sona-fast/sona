@@ -42,6 +42,9 @@ test('creates an entry that lists under Active', async ({ page }, testInfo) => {
 	await page.locator('label.char-chip', { hasText: 'Thistle' }).click();
 	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
 	await page.getByLabel('Amount').fill('120.00');
+	await expect(page.locator('#ce-dates-hint')).toHaveText(
+		"When you set the status to Accepted or Delivered and that date is empty, Sona fills in today's date. You can change or clear it. Visitors never see these dates."
+	);
 	await page.getByLabel('Requested').fill('2026-10-02');
 
 	// Hold the save so a second click and an Enter land while it's in flight.
