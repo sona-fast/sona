@@ -272,6 +272,16 @@
 		announcer.say(m.admin_commissions_artist_added_announce({ name: artist.name }));
 	}
 
+	// Clicking Save (or anything else) with a typed link still in the field
+	// fires change on the mouse-down. Starting the lookup then draws its
+	// "searching" line and moves Save before the mouse-up, so the click never
+	// lands. While a pointer is down, the lookup waits for it to come up.
+	let pointerDown = false;
+	function lookUpAfterPointer(raw: string) {
+		if (!pointerDown) return lookUpLink(raw);
+		window.addEventListener('pointerup', () => setTimeout(() => lookUpLink(raw)), { once: true });
+	}
+
 	async function lookUpLink(raw: string) {
 		const link = raw.trim();
 		if (!link) {
@@ -419,6 +429,12 @@
 		return ids.length > 0 ? ids.join(' ') : undefined;
 	}
 </script>
+
+<svelte:window
+	onpointerdown={() => (pointerDown = true)}
+	onpointerup={() => (pointerDown = false)}
+	onpointercancel={() => (pointerDown = false)}
+/>
 
 {#snippet fieldError(field: CommissionField)}
 	{#if errors[field]}
@@ -638,7 +654,7 @@
 					if (e instanceof InputEvent && e.inputType === 'insertFromPaste') lookUpLink(e.currentTarget.value);
 					else if (!e.currentTarget.value.trim()) lookUpLink('');
 				}}
-				onchange={(e) => lookUpLink(e.currentTarget.value)}
+				onchange={(e) => lookUpAfterPointer(e.currentTarget.value)}
 				aria-invalid={errors.sourceUrl ? 'true' : undefined}
 				aria-describedby={describedBy('sourceUrl', 'ce-link-hint', lookup.kind === 'refused' ? 'ce-link-msg' : '')}
 			/>
