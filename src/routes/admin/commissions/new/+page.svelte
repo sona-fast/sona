@@ -1,11 +1,17 @@
 <script lang="ts">
+	import type { PageData } from './$types';
+	import { page } from '$app/state';
 	import { ArrowLeft } from 'lucide-svelte';
 	import CommissionForm from '$lib/components/CommissionForm.svelte';
 	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { draftSnapshot } from '$lib/drafts';
 
-	let { data, form } = $props();
+	let { form } = $props();
+	// Read from `page`, not the `data` prop: a Back press that interrupts a
+	// navigation between two ledger pages can leave the prop holding the other
+	// page's data for good (sveltejs/kit#13276), while `page.data` is this page's.
+	const data = $derived(page.data as PageData);
 
 	// The draft survives following a link off the page (the lookup's "Artists
 	// page") and coming back with the browser's Back button. The form decides
