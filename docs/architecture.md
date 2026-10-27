@@ -179,7 +179,11 @@ graph TB
   the other cron workflows do. That daily fork-wide run is also why the diagram
   now carries a profile-picture edge to Bluesky and X: re-hosting has always
   contacted them from an operator's save, but this makes it a scheduled
-  dependency rather than an occasional one. Every push to `main` runs `ci.yml` and
+  dependency rather than an occasional one. `cleanup-orphans` also deletes
+  visitor counters (page views, referrers, countries, devices) older than 35
+  days, but that retention doesn't depend on it: `hooks.server` adds the same
+  delete to the write for a counted public page view, once per isolate per UTC
+  day, so a fork with no `CRON_SECRET` still deletes them. Every push to `main` runs `ci.yml` and
   `deploy.yml`, which redeploys the Pages project; `deploy.yml` also has a
   manual dispatch for forks synced through GitHub's Sync fork button, which
   emits no push event.

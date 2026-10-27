@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { characters, images } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
-import { actions } from './+page.server';
+import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -19,6 +19,8 @@ function makeDb() {
 	sqlite.exec(`
 		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+		CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, image_url TEXT NOT NULL,
 			thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER, md5hash TEXT,
@@ -44,6 +46,19 @@ function form(fields: Record<string, string>): Request {
 	for (const [k, v] of Object.entries(fields)) fd.set(k, v);
 	return new Request('http://localhost/admin/images', { method: 'POST', body: fd });
 }
+
+describe('admin images load — a junk ?page= serves page 1', () => {
+	// Number('abc') is NaN, which reached the OFFSET and the pager.
+	it('serves page 1 for ?page=abc', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(images).values({ id: 5, title: 'Art', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1 });
+
+		const url = new URL('http://localhost/admin/images?page=abc');
+		const data = (await load({ platform, url } as never)) as unknown as { page: number; images: { id: number }[] };
+		expect(data.page).toBe(1);
+		expect(data.images.map((i) => i.id)).toEqual([5]);
+	});
+});
 
 describe('admin images — delete action with a referenced image', () => {
 	it('deletes the image and nulls the owner character reference (no FK error)', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeHttpsUrl, sanitizeText, sanitizeUrl } from './validate';
+import { normalizeHttpsUrl, sanitizeText, sanitizeUrl, parsePageParam } from './validate';
 
 describe('sanitizeText', () => {
 	it('trims and enforces the cap', () => {
@@ -144,5 +144,25 @@ describe('normalizeHttpsUrl', () => {
 		expect(normalizeHttpsUrl('   ')).toBeNull();
 		expect(normalizeHttpsUrl(null)).toBeNull();
 		expect(normalizeHttpsUrl(undefined)).toBeNull();
+	});
+});
+
+describe('parsePageParam', () => {
+	it('reads a page number', () => {
+		expect(parsePageParam('3')).toBe(3);
+		expect(parsePageParam('2.7')).toBe(2);
+	});
+
+	it('serves page 1 for anything that is not a usable page', () => {
+		// Past Number.MAX_SAFE_INTEGER the value has already lost precision, so it
+		// is junk like Infinity, not a page; served raw its OFFSET overflows int64.
+		for (const raw of [null, '', 'abc', '0', '-4', 'Infinity', '1e999', 'NaN', '1e308', '1e20']) {
+			expect(parsePageParam(raw), String(raw)).toBe(1);
+		}
+	});
+
+	it('clamps a safe but absurd page to the ceiling', () => {
+		expect(parsePageParam('1000000')).toBe(1_000_000);
+		expect(parsePageParam('9007199254740991')).toBe(1_000_000);
 	});
 });

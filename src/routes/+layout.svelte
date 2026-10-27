@@ -3,6 +3,7 @@
 	import { onNavigate } from '$app/navigation';
 	import { createThemeState } from '$lib/theme.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
+	import { startNavigationTransition } from '$lib/view-transition';
 	import * as m from '$lib/paraglide/messages';
 
 	let { children, data } = $props();
@@ -14,16 +15,7 @@
 
 	// Smooth cross-page transitions via the View Transitions API.
 	// Browsers without the API just navigate instantly (graceful fallback).
-	onNavigate((navigation) => {
-		if (!document.startViewTransition) return;
-
-		return new Promise((resolve) => {
-			document.startViewTransition(async () => {
-				resolve();
-				await navigation.complete;
-			});
-		});
-	});
+	onNavigate((navigation) => startNavigationTransition(document, navigation.complete));
 </script>
 
 <svelte:head>

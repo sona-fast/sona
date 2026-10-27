@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { applyAction, enhance } from '$app/forms';
 	import { afterNavigate, invalidateAll, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -8,6 +8,7 @@
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import CloudflareSetupDialog from '$lib/components/CloudflareSetupDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
+	import type { InviteRefusal } from '$lib/registry-invite';
 	import { BACKUP_FILENAME_BASE, R2_FREE_TIER_BYTES } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
 	import { MAX_SONA_COLORS, mergeSuggestions, paletteHas } from '$lib/palette-merge';
@@ -46,6 +47,11 @@
 	let registryOverridesLocal = $state(data.settings.registryOverridesLocal);
 	let syncing = $state(false);
 	let connectingRegistry = $state(false);
+	// A refused invite token (registry code invite_used or invite_invalid), shown on the field.
+	// Without JavaScript the form posts normally and the refusal arrives as `form` on a fresh
+	// load; the enhanced callback never updates `form`, so only its first value matters.
+	let inviteError = $state<InviteRefusal | null>(untrack(() => form?.inviteError ?? null));
+	let inviteTokenInput = $state<HTMLInputElement | null>(null);
 	let primaryCharacter = $state(data.settings.primaryCharacter);
 	let twitterUrl = $state(data.settings.twitterUrl);
 	let blueskyUrl = $state(data.settings.blueskyUrl);
@@ -1369,11 +1375,20 @@
 		</section>
 	</form>
 {:else}
-	<form method="POST" action="?/connectRegistry" class="contents" use:enhance={() => {
+	<form method="POST" action="?tab=connections&/connectRegistry#invite-token" class="contents" use:enhance={({ formData }) => {
 		connectingRegistry = true;
+		inviteError = null;
+		const sentToken = formData.get('signupToken');
 		return async ({ result }) => {
 			connectingRegistry = false;
 			if (result.type === 'success') { toast.success(m.admin_settings_registry_connected_toast()); await invalidateAll(); }
+			else if (result.type === 'failure' && result.data?.inviteError) {
+				// The owner changed the token while this request ran; the refusal was for the old one.
+				if (inviteTokenInput?.value !== sentToken) return;
+				inviteError = result.data.inviteError as InviteRefusal;
+				await tick();
+				inviteTokenInput?.focus();
+			}
 			else if (result.type === 'failure') toast.error(result.data?.alreadyConnected ? m.admin_settings_registry_already_connected() : ((result.data?.error as string) ?? m.admin_settings_registry_connect_failed()));
 		};
 	}}>
@@ -1384,8 +1399,24 @@
 			</p>
 			<label>
 				<span>{m.admin_settings_invite_token()}</span>
-				<input type="text" name="signupToken" class="input" placeholder={m.admin_settings_invite_token_placeholder()} required />
+				<input
+					type="text"
+					id="invite-token"
+					name="signupToken"
+					class="input"
+					placeholder={m.admin_settings_invite_token_placeholder()}
+					required
+					bind:this={inviteTokenInput}
+					oninput={() => (inviteError = null)}
+					aria-invalid={inviteError ? 'true' : undefined}
+					aria-describedby={inviteError ? 'invite-token-error' : undefined}
+				/>
 			</label>
+			{#if inviteError}
+				<p class="field-error" id="invite-token-error" role="alert">
+					{inviteError === 'invite_used' ? m.admin_settings_invite_error_used() : m.admin_settings_invite_error_invalid()}
+				</p>
+			{/if}
 			<details class="reg-advanced">
 				<summary>{m.admin_settings_registry_advanced()}</summary>
 				<label>
@@ -2141,8 +2172,14 @@
 	   shade of artwork (light #0F766E: 4.45:1 on #E7E8E5, 5.47:1 on #FFFFFF;
 	   dark #2DD4BF: 7.30:1 on #2E2E2E). Fursuit violet: dark #C4B5FD 7.36:1
 	   on #2E2E2E, light #6D28D9 5.78:1 on #E7E8E5, 7.10:1 on #FFFFFF. Dark
-	   other #9AA5B1: 5.43:1 on #2E2E2E, clearly apart from the empty track. */
+	   other #9AA5B1: 5.43:1 on #2E2E2E, clearly apart from the empty track.
+	   Widths are shares of the plan limit, so a few-MB type is under a pixel.
+	   content-box keeps the separator outside the width (under the global
+	   border-box it ate the whole segment), and min-width keeps every
+	   non-zero type a visible sliver of color; the table has the exact sizes. */
 	.storage-seg {
+		box-sizing: content-box;
+		min-width: 4px;
 		height: 100%;
 	}
 
@@ -3081,5 +3118,9 @@
 		.item { grid-template-columns: 22px 1fr; }
 		.item .body { grid-column: 2; }
 		.item .chip { grid-column: 2; justify-self: start; align-self: start; margin-top: 8px; }
+	}
+	/* A full-page connect post lands on #invite-token; keep its label in view. */
+	#invite-token {
+		scroll-margin-top: 4rem;
 	}
 </style>

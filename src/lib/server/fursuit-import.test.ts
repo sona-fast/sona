@@ -76,6 +76,143 @@ describe('importFursuitPhotos', () => {
 		expect(await fursuitPhotosExist(db)).toBe(true);
 	});
 
+	// AbortSignal.timeout runs on a timer fake timers can't reach, so it stands
+	// in as a controller on a plain setTimeout (the fuzzysearch.test.ts pattern).
+	it('fails a photo whose download stalls instead of holding the import open', async () => {
+		vi.useFakeTimers();
+		const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+			const controller = new AbortController();
+			setTimeout(() => controller.abort(new DOMException('timed out', 'TimeoutError')), ms);
+			return controller.signal;
+		});
+		try {
+			const { db } = makeDb();
+			// Headers arrive, then the body never sends another byte. Only an
+			// abort ends it, erroring with the signal's reason as a real fetch does.
+			const stalledFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+				const body = new ReadableStream<Uint8Array>({
+					start(c) {
+						c.enqueue(staticWebp().slice(0, 16));
+						init?.signal?.addEventListener('abort', () => c.error(init.signal!.reason));
+					}
+				});
+				return new Response(body, { headers: { 'content-type': 'image/webp' } });
+			}) as unknown as typeof fetch;
+
+			let settled = false;
+			const pending = importFursuitPhotos({
+				env: testEnv,
+				settings: testSettings,
+				db,
+				fetchFn: stalledFetch,
+				character: 'Sparky',
+				postIds: [1918883]
+			}).finally(() => (settled = true));
+			await vi.advanceTimersByTimeAsync(29_000);
+			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(2_000);
+			const result = await pending;
+
+			expect(timeout).toHaveBeenCalledWith(30_000);
+			expect(result.imported).toBe(0);
+			expect(result.items[0]).toMatchObject({
+				postId: 1918883,
+				status: 'failed',
+				error: 'download timed out after 30s'
+			});
+		} finally {
+			timeout.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	/** Stand-in for AbortSignal.timeout on a fake-timer setTimeout (see above). */
+	function fakeDownloadTimeout() {
+		return vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+			const controller = new AbortController();
+			setTimeout(() => controller.abort(new DOMException('timed out', 'TimeoutError')), ms);
+			return controller.signal;
+		});
+	}
+
+	it('names the download timeout when the runtime errors with its own AbortError', async () => {
+		vi.useFakeTimers();
+		const timeout = fakeDownloadTimeout();
+		try {
+			const { db } = makeDb();
+			// workerd can error a body read with a fresh AbortError rather than the
+			// signal's reason; the row must still say the download timed out.
+			const stalledFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+				const body = new ReadableStream<Uint8Array>({
+					start(c) {
+						c.enqueue(staticWebp().slice(0, 16));
+						init?.signal?.addEventListener('abort', () =>
+							c.error(new DOMException('The operation was aborted', 'AbortError'))
+						);
+					}
+				});
+				return new Response(body, { headers: { 'content-type': 'image/webp' } });
+			}) as unknown as typeof fetch;
+
+			const pending = importFursuitPhotos({
+				env: testEnv,
+				settings: testSettings,
+				db,
+				fetchFn: stalledFetch,
+				character: 'Sparky',
+				postIds: [1918883]
+			});
+			await vi.advanceTimersByTimeAsync(31_000);
+			const result = await pending;
+
+			expect(result.items[0]).toMatchObject({
+				status: 'failed',
+				error: 'download timed out after 30s'
+			});
+		} finally {
+			timeout.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it('does not call a storage timeout a download timeout', async () => {
+		vi.useFakeTimers();
+		const timeout = fakeDownloadTimeout();
+		try {
+			const { db } = makeDb();
+			// The download finishes at once; the store then outlives the download
+			// timer and fails with its own TimeoutError.
+			const slowBucket = {
+				put: vi.fn(async () => {
+					await new Promise((r) => setTimeout(r, 31_000));
+					throw new DOMException('storage put timed out', 'TimeoutError');
+				}),
+				delete: vi.fn(async () => {})
+			};
+			const env = { ...testEnv, IMAGES: slowBucket as unknown as R2Bucket } as ImportOpts['env'];
+
+			const pending = importFursuitPhotos({
+				env,
+				settings: testSettings,
+				db,
+				fetchFn,
+				character: 'Sparky',
+				postIds: [1918883]
+			});
+			await vi.advanceTimersByTimeAsync(32_000);
+			const result = await pending;
+
+			expect(slowBucket.put).toHaveBeenCalled();
+			expect(result.items[0]).toMatchObject({
+				status: 'failed',
+				error: 'storage put timed out'
+			});
+		} finally {
+			timeout.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
 	it('fails a photo whose remote body exceeds the 10 MiB import cap', async () => {
 		const { db } = makeDb();
 		// Remote import bodies keep the old 10 MiB bound, decoupled from the raised
