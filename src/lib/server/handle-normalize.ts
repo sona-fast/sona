@@ -8,6 +8,7 @@
 // importers keep their `handle-normalize` import path.
 
 import { sanitizeUrl, stripControlChars } from './validate';
+import { socialHandle } from '../social-label';
 import { SOCIAL_KEY_TO_PLATFORM, normalizeHandle } from '../handle-classify';
 import {
 	RESERVED_SEGMENTS,
@@ -69,8 +70,27 @@ export function findLocalArtistsByHandle<T extends Record<string, unknown>>(
 	return rows.filter(
 		(row) =>
 			socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm)) ||
+			storedProfileHandles(row, platform).some((h) => wanted.has(h)) ||
 			(platform === 'deviantart' && wanted.has(legacyDeviantArtHandle(row.deviantArtUrl) ?? ''))
 	);
+}
+
+/**
+ * The handles in a row's stored `platform` links, read the way the pasted link
+ * is (socialHandle), so a profile on the platform's own subdomain matches:
+ * normalizeHandle reads https://sfw.furaffinity.net/user/taro as
+ * "sfw.furaffinity.net", and changing that would change registry matching on
+ * every fork. Only this lookup reads it as "taro".
+ */
+function storedProfileHandles(row: Record<string, unknown>, platform: Platform): string[] {
+	const out: string[] = [];
+	for (const [key, p] of Object.entries(SOCIAL_KEY_TO_PLATFORM)) {
+		const stored = row[key];
+		if (p !== platform || typeof stored !== 'string') continue;
+		const handle = normalizeHandle(platform, socialHandle(platform, stored) ?? '');
+		if (handle) out.push(handle);
+	}
+	return out;
 }
 
 /**

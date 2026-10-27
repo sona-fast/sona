@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { handlesOverlap, normalizeHandle, normalizeSocialUrl, findLocalArtistsByHandle } from './handle-normalize';
+import { parseArtistLink } from './artist-from-link';
 
 describe('normalizeSocialUrl', () => {
 	it('builds the canonical profile URL from a bare handle per platform', () => {
@@ -307,5 +308,31 @@ describe('findLocalArtistsByHandle: a stored legacy DeviantArt link (SONA-236)',
 
 	it('leaves the shared normalizer as registry matching knows it', () => {
 		expect(normalizeHandle('deviantart', 'https://someuser.deviantart.com/')).toBe('someuser.deviantart.com');
+	});
+});
+
+describe('findLocalArtistsByHandle: a stored link on the platform\'s own subdomain (SONA-236)', () => {
+	const rows = [
+		{ id: 1, name: 'Sfw link', furAffinityUrl: 'https://sfw.furaffinity.net/user/Taro/' },
+		{ id: 2, name: 'Mobile link', twitterUrl: 'https://mobile.twitter.com/hana' },
+		{ id: 3, name: 'Not FurAffinity', furAffinityUrl: 'https://fa.example.com/user/taro' }
+	];
+	const lookUp = (link: string) => {
+		const parsed = parseArtistLink(link);
+		if (!parsed.ok) throw new Error(`unparsed: ${link}`);
+		return findLocalArtistsByHandle(rows, parsed.platform, [parsed.handle]).map((r) => r.id);
+	};
+
+	it('finds the artist from a pasted link in either host spelling', () => {
+		expect(lookUp('https://www.furaffinity.net/user/taro/')).toEqual([1]);
+		expect(lookUp('https://x.com/Hana/status/1')).toEqual([2]);
+	});
+
+	it("doesn't read a host the platform doesn't serve", () => {
+		expect(lookUp('https://www.furaffinity.net/user/taro/')).not.toContain(3);
+	});
+
+	it('leaves the shared normalizer as registry matching knows it', () => {
+		expect(normalizeHandle('furaffinity', 'https://sfw.furaffinity.net/user/taro')).toBe('sfw.furaffinity.net');
 	});
 });

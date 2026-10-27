@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages';
+	import { forgetDrafts } from '$lib/drafts';
 
 	let { form, data } = $props();
 
@@ -19,6 +20,15 @@
 	let turnstileToken = $state('');
 
 	onMount(() => {
+		// However the last session ended (the sidebar's Logout, a typed
+		// /admin/logout, a form post without the page's script), unsaved entry
+		// drafts don't outlive it: they can hold private ledger notes.
+		// forgetDrafts keeps clearing them as this page unloads, so signing in
+		// loads the admin fresh rather than carrying this page's memory along.
+		// It waits a task: onMount runs while SvelteKit is still hydrating, before
+		// it adds its own unload listeners, and a clear that ran ahead of them
+		// would be written over.
+		setTimeout(forgetDrafts);
 		const sitekey = data.turnstileSitekey;
 		if (!sitekey) return;
 		const render = () => {
@@ -77,7 +87,11 @@
 
 		<form method="POST" use:enhance={() => {
 			signingIn = true;
-			return async ({ update }) => {
+			return async ({ result, update }) => {
+				if (result.type === 'redirect') {
+					location.assign(result.location);
+					return;
+				}
 				await update();
 				signingIn = false;
 				// The submitted token was redeemed by siteverify (single-use); clear the
