@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ArrowLeft, Loader2, Trash2 } from 'lucide-svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionForm from '$lib/components/CommissionForm.svelte';
@@ -12,21 +13,42 @@
 
 	let { data, form } = $props();
 
+	// Null only after a save without JavaScript found the entry deleted elsewhere.
 	const entry = $derived(data.entry);
-	const dateRows = $derived(commissionDateRows(entry));
+	const dateRows = $derived(entry ? commissionDateRows(entry) : []);
+	// The form stands on what that refused save sent, which `form` carries.
+	const goneEntry = $derived({
+		id: Number(page.params.id),
+		version: form?.version ?? '',
+		artistId: 0,
+		title: '',
+		kind: null,
+		sourceUrl: null,
+		characters: [],
+		status: 'applied' as const,
+		payment: 'unpaid' as const,
+		price: '',
+		currency: null,
+		notes: null,
+		requestedOn: null,
+		acceptedOn: null,
+		deliveredOn: null
+	});
 
 	let confirmingDelete = $state(false);
 	let deleting = $state(false);
 	let deleteForm = $state<HTMLFormElement>();
 
 	const deleteMessage = $derived(
-		entry.piece
-			? m.admin_commissions_delete_message_linked({
-					title: entry.title,
-					piece: entry.piece.title,
-					artist: entry.artistName
-				})
-			: m.admin_commissions_delete_message({ title: entry.title, artist: entry.artistName })
+		!entry
+			? ''
+			: entry.piece
+				? m.admin_commissions_delete_message_linked({
+						title: entry.title,
+						piece: entry.piece.title,
+						artist: entry.artistName
+					})
+				: m.admin_commissions_delete_message({ title: entry.title, artist: entry.artistName })
 	);
 </script>
 
@@ -44,11 +66,24 @@
 
 <a class="back-link" href="/admin/commissions"><ArrowLeft size={16} aria-hidden="true" /> {m.admin_commissions_back()}</a>
 <div class="page-header">
-	<h1>{data.gate.open ? m.admin_commissions_edit_title() : entry.title}</h1>
+	<h1>{data.gate.open || !entry ? m.admin_commissions_edit_title() : entry.title}</h1>
 </div>
 <CommissionIntro gate={data.gate} />
 
-{#if data.gate.open}
+{#if !entry}
+	<!-- Saved without JavaScript after the entry was deleted elsewhere: the
+	     form keeps what was sent, under the alert that says so. -->
+	<CommissionForm
+		artists={data.artists}
+		characters={data.characters}
+		entry={goneEntry}
+		{form}
+		gaDate={data.gate.gaDate}
+		recentCurrencies={data.recentCurrencies}
+		localeCurrency={data.localeCurrency}
+		registryEnabled={data.registryEnabled}
+	/>
+{:else if data.gate.open}
 	<CommissionForm
 		artists={data.artists}
 		characters={data.characters}

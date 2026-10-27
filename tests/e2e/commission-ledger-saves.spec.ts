@@ -322,9 +322,9 @@ test.fixme('without JavaScript, Delete entry deletes the entry after a confirmat
 	}
 });
 
-// The save's 404 renders the page again, whose load 404s on the missing entry,
-// so the owner gets the public "Couldn't find that artwork" page instead.
-test.fixme('without JavaScript, saving an entry deleted elsewhere says so', async ({ page, browser, baseURL }, testInfo) => {
+// The save's 404 renders the page again, and the load hands it a gone entry
+// rather than 404ing, so the form stays with what was typed.
+test('without JavaScript, saving an entry deleted elsewhere says so', async ({ page, browser, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E no-JS gone');
 	const context = await browser.newContext({
@@ -353,7 +353,9 @@ test.fixme('without JavaScript, saving an entry deleted elsewhere says so', asyn
 		const alert = noJs.getByRole('alert').filter({ hasText: 'This entry was deleted somewhere else' });
 		await expect(alert).toBeVisible();
 		await expect(alert.getByRole('link', { name: 'Go back to your ledger' })).toHaveAttribute('href', '/admin/commissions');
+		await expect(noJs.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
 		await expect(noJs.getByLabel('Notes')).toHaveValue('typed on a deleted entry');
+		await expect(noJs.getByLabel('Title')).toHaveValue('E2E no-JS gone');
 		await settledShot(noJs, testInfo.outputPath('commission-edit-nojs-gone.png'));
 	} finally {
 		await context.close();
