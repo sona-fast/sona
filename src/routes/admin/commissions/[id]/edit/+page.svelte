@@ -1,6 +1,9 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ArrowLeft, Loader2, Trash2 } from 'lucide-svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionForm from '$lib/components/CommissionForm.svelte';
@@ -12,26 +15,67 @@
 
 	let { data, form } = $props();
 
+	// Null only after a save without JavaScript found the entry deleted elsewhere.
 	const entry = $derived(data.entry);
-	const dateRows = $derived(commissionDateRows(entry));
+	const dateRows = $derived(entry ? commissionDateRows(entry) : []);
+	// The form stands on what that refused save sent, which `form` carries.
+	const goneEntry = $derived({
+		id: Number(page.params.id),
+		version: form?.version ?? '',
+		artistId: 0,
+		title: '',
+		kind: null,
+		sourceUrl: null,
+		characters: [],
+		status: 'applied' as const,
+		payment: 'unpaid' as const,
+		price: '',
+		currency: null,
+		notes: null,
+		requestedOn: null,
+		acceptedOn: null,
+		deliveredOn: null
+	});
 
 	let confirmingDelete = $state(false);
 	let deleting = $state(false);
 	let deleteForm = $state<HTMLFormElement>();
+	let hydrated = $state(false);
+	onMount(() => (hydrated = true));
+	// Without the page's script, Delete entry opens this page with
+	// ?delete=confirm, which draws the confirmation in the page.
+	const confirmingInPage = $derived(page.url.searchParams.get('delete') === 'confirm');
 
 	const deleteMessage = $derived(
-		entry.piece
-			? m.admin_commissions_delete_message_linked({
-					title: entry.title,
-					piece: entry.piece.title,
-					artist: entry.artistName
-				})
-			: m.admin_commissions_delete_message({ title: entry.title, artist: entry.artistName })
+		!entry
+			? ''
+			: entry.piece
+				? m.admin_commissions_delete_message_linked({
+						title: entry.title,
+						piece: entry.piece.title,
+						artist: entry.artistName
+					})
+				: m.admin_commissions_delete_message({ title: entry.title, artist: entry.artistName })
 	);
+
+	const enhanceDelete: SubmitFunction = () => {
+		deleting = true;
+		return async ({ update, result }) => {
+			// An error result would replace the page with the error page and drop
+			// unsaved typing, so it stays here with a toast, as a failed save does.
+			if (result.type !== 'error') await update({ reset: false });
+			deleting = false;
+			// Already deleted somewhere else: the delete is done either way.
+			if (result.type === 'failure' && (result.data as { missing?: boolean } | undefined)?.missing) {
+				await goto('/admin/commissions');
+			} else if (result.type === 'failure') toast.error(m.admin_commissions_delete_failed());
+			else if (result.type === 'error') toast.error(m.admin_something_wrong());
+		};
+	};
 </script>
 
 {#snippet deleteButton()}
-	<span class="delete-slot"><button
+	<span class="delete-slot">{#if hydrated}<button
 		type="button"
 		class="btn btn-outline danger"
 		disabled={deleting}
@@ -39,16 +83,45 @@
 	>
 		{#if deleting}<Loader2 size={16} class="spin" aria-hidden="true" />{:else}<Trash2 size={16} aria-hidden="true" />{/if}
 		{m.admin_commissions_delete_entry()}
-	</button></span>
+	</button>{:else}<a class="btn btn-outline danger" href="/admin/commissions/{page.params.id}/edit?delete=confirm#delete-confirm">
+		<Trash2 size={16} aria-hidden="true" />
+		{m.admin_commissions_delete_entry()}
+	</a>{/if}</span>
 {/snippet}
 
 <a class="back-link" href="/admin/commissions"><ArrowLeft size={16} aria-hidden="true" /> {m.admin_commissions_back()}</a>
 <div class="page-header">
-	<h1>{data.gate.open ? m.admin_commissions_edit_title() : entry.title}</h1>
+	<h1>{data.gate.open || !entry ? m.admin_commissions_edit_title() : entry.title}</h1>
 </div>
+{#if entry && confirmingInPage}
+	<!-- The dialog's confirmation as part of the page, for a browser without
+	     the page's script. The link here names it as the fragment, so the
+	     browser scrolls to it, and it's a labelled region for a screen reader. -->
+	<section class="delete-confirm" id="delete-confirm" tabindex="-1" aria-labelledby="delete-confirm-title">
+		<h2 id="delete-confirm-title">{m.admin_commissions_delete_title()}</h2>
+		<p>{deleteMessage}</p>
+		<form method="POST" action="?/delete" class="delete-confirm-actions" use:enhance={enhanceDelete}>
+			<a class="btn btn-secondary" href="/admin/commissions/{entry.id}/edit">{m.admin_cancel()}</a>
+			<button type="submit" class="btn btn-destructive" disabled={deleting}>{m.admin_delete()}</button>
+		</form>
+	</section>
+{/if}
 <CommissionIntro gate={data.gate} />
 
-{#if data.gate.open}
+{#if !entry}
+	<!-- Saved without JavaScript after the entry was deleted elsewhere: the
+	     form keeps what was sent, under the alert that says so. -->
+	<CommissionForm
+		artists={data.artists}
+		characters={data.characters}
+		entry={goneEntry}
+		{form}
+		gaDate={data.gate.gaDate}
+		recentCurrencies={data.recentCurrencies}
+		localeCurrency={data.localeCurrency}
+		registryEnabled={data.registryEnabled}
+	/>
+{:else if data.gate.open}
 	<CommissionForm
 		artists={data.artists}
 		characters={data.characters}
@@ -140,20 +213,7 @@
 	action="?/delete"
 	bind:this={deleteForm}
 	hidden
-	use:enhance={() => {
-		deleting = true;
-		return async ({ update, result }) => {
-			// An error result would replace the page with the error page and drop
-			// unsaved typing, so it stays here with a toast, as a failed save does.
-			if (result.type !== 'error') await update({ reset: false });
-			deleting = false;
-			// Already deleted somewhere else: the delete is done either way.
-			if (result.type === 'failure' && (result.data as { missing?: boolean } | undefined)?.missing) {
-				await goto('/admin/commissions');
-			} else if (result.type === 'failure') toast.error(m.admin_commissions_delete_failed());
-			else if (result.type === 'error') toast.error(m.admin_something_wrong());
-		};
-	}}
+	use:enhance={enhanceDelete}
 ></form>
 
 {#if confirmingDelete}
@@ -206,6 +266,15 @@
 	.chip.done { background: color-mix(in srgb, var(--status-ok) 15%, transparent); }
 	.chip.closed { background: transparent; border-color: var(--input); }
 	.readonly-actions { max-width: 800px; display: flex; margin-top: 20px; }
+
+	.delete-confirm {
+		max-width: 800px; margin-bottom: 20px; padding: 16px;
+		border: 1px solid var(--destructive); border-radius: var(--radius-s);
+		display: flex; flex-direction: column; gap: 8px;
+	}
+	.delete-confirm h2 { font-size: 16px; margin: 0; }
+	.delete-confirm p { font-size: 14px; margin: 0; line-height: 1.5; max-width: 60ch; }
+	.delete-confirm-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
 
 	/* The outline variant in the destructive color, as the shipped Delete
 	   avatar button draws it. The fill stays --background on hover: the

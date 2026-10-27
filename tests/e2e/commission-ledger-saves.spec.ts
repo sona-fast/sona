@@ -109,9 +109,13 @@ test('an amount refused for its currency saves once the currency takes decimals'
 	await expect(amount).toBeFocused();
 	await expect(amount).toHaveValue('10.5');
 
-	// The hint follows the currency at once; the server checks again on Save.
+	// The hint follows the currency at once, and the JPY refusal goes with the
+	// JPY pick; the server checks again on Save.
 	await pickCurrency(page, 'USD');
 	await expect(page.locator('#ce-price-hint')).toHaveText(/^USD amounts can have up to 2 decimal places/);
+	await expect(page.getByText("JPY amounts don't use decimals")).toHaveCount(0);
+	await expect(amount).not.toHaveAttribute('aria-invalid', 'true');
+	await expect(amount).toHaveAccessibleDescription(/^USD amounts can have up to 2 decimal places/);
 	await settledShot(page, testInfo.outputPath('commission-edit-currency-changed.png'));
 	await page.getByRole('button', { name: 'Save changes' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
@@ -119,6 +123,44 @@ test('an amount refused for its currency saves once the currency takes decimals'
 	await open(page, `/admin/commissions/${id}/edit`);
 	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
 	await expect(page.getByLabel('Amount')).toHaveValue('10.50');
+});
+
+test('an amount that is not a number stays refused when the currency changes', async ({ page, baseURL }) => {
+	await loginRetrying(page, PASSWORD);
+	const id = await createEntry(page, baseURL!, 'E2E unreadable amount');
+	await open(page, `/admin/commissions/${id}/edit`);
+
+	await pickCurrency(page, 'JPY');
+	const amount = page.getByLabel('Amount');
+	await amount.fill('about 10');
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	const error = page.locator('#ce-price-err');
+	await expect(error).toHaveText(/^Enter the amount as a number/);
+
+	// Wrong in any currency, so it stays until the next save.
+	await pickCurrency(page, 'USD');
+	await expect(error).toHaveText(/^Enter the amount as a number/);
+	await expect(amount).toHaveAttribute('aria-invalid', 'true');
+});
+
+test('a grouped amount and a full-width one save as plain numbers', async ({ page, baseURL }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	for (const [title, currency, typed, stored] of [
+		['E2E grouped amount', 'USD', '1,234.50', '1234.50'],
+		['E2E full-width amount', 'JPY', '４５', '45']
+	] as const) {
+		const id = await createEntry(page, baseURL!, title);
+		await open(page, `/admin/commissions/${id}/edit`);
+		await pickCurrency(page, currency);
+		await page.getByLabel('Amount').fill(typed);
+		await page.getByRole('button', { name: 'Save changes' }).click();
+		await expect(page).toHaveURL(/\/admin\/commissions$/);
+
+		await open(page, `/admin/commissions/${id}/edit`);
+		await expect(page.getByRole('radio', { name: new RegExp(currency) })).toBeChecked();
+		await expect(page.getByLabel('Amount')).toHaveValue(stored);
+	}
+	await settledShot(page, testInfo.outputPath('commission-edit-normalized-amount.png'));
 });
 
 test('clearing the amount saves the entry with no price', async ({ page, baseURL }, testInfo) => {
@@ -256,9 +298,9 @@ test('without JavaScript, a refused edit saves once fixed', async ({ page, brows
 	}
 });
 
-// Delete entry is a button that opens a confirm dialog from the page's script,
-// and the form it submits is hidden, so without JavaScript it does nothing.
-test.fixme('without JavaScript, Delete entry deletes the entry after a confirmation', async ({ page, browser, baseURL }, testInfo) => {
+// Without the page's script, Delete entry is a link to the same page, which
+// draws the dialog's confirmation in the page with a form that posts.
+test('without JavaScript, Delete entry deletes the entry after a confirmation', async ({ page, browser, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E no-JS delete');
 	const context = await browser.newContext({
@@ -269,8 +311,20 @@ test.fixme('without JavaScript, Delete entry deletes the entry after a confirmat
 	try {
 		const noJs = await context.newPage();
 		await noJs.goto(`/admin/commissions/${id}/edit`);
-		await noJs.getByRole('button', { name: 'Delete entry' }).click();
-		await noJs.getByRole('button', { name: 'Delete', exact: true }).click();
+		const deleteEntry = noJs.getByRole('link', { name: 'Delete entry' });
+
+		// Cancel leaves the entry as it was.
+		await deleteEntry.click();
+		const confirm = noJs.getByRole('region', { name: 'Delete this entry?' });
+		await expect(confirm).toContainText('This permanently removes “E2E no-JS delete” from your ledger');
+		await confirm.getByRole('link', { name: 'Cancel' }).click();
+		await expect(noJs).toHaveURL(new RegExp(`/admin/commissions/${id}/edit$`));
+		await expect(confirm).toHaveCount(0);
+
+		await deleteEntry.click();
+		await expect(confirm).toBeVisible();
+		await settledShot(noJs, testInfo.outputPath('commission-edit-nojs-delete-confirm.png'));
+		await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
 		await expect(noJs).toHaveURL(/\/admin\/commissions$/);
 		await expect(noJs.getByRole('link', { name: 'Edit E2E no-JS delete' })).toHaveCount(0);
 		made = [];
@@ -280,9 +334,9 @@ test.fixme('without JavaScript, Delete entry deletes the entry after a confirmat
 	}
 });
 
-// The save's 404 renders the page again, whose load 404s on the missing entry,
-// so the owner gets the public "Couldn't find that artwork" page instead.
-test.fixme('without JavaScript, saving an entry deleted elsewhere says so', async ({ page, browser, baseURL }, testInfo) => {
+// The save's 404 renders the page again, and the load hands it a gone entry
+// rather than 404ing, so the form stays with what was typed.
+test('without JavaScript, saving an entry deleted elsewhere says so', async ({ page, browser, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E no-JS gone');
 	const context = await browser.newContext({
@@ -311,7 +365,9 @@ test.fixme('without JavaScript, saving an entry deleted elsewhere says so', asyn
 		const alert = noJs.getByRole('alert').filter({ hasText: 'This entry was deleted somewhere else' });
 		await expect(alert).toBeVisible();
 		await expect(alert.getByRole('link', { name: 'Go back to your ledger' })).toHaveAttribute('href', '/admin/commissions');
+		await expect(noJs.getByRole('heading', { level: 1, name: 'Edit entry' })).toBeVisible();
 		await expect(noJs.getByLabel('Notes')).toHaveValue('typed on a deleted entry');
+		await expect(noJs.getByLabel('Title')).toHaveValue('E2E no-JS gone');
 		await settledShot(noJs, testInfo.outputPath('commission-edit-nojs-gone.png'));
 	} finally {
 		await context.close();
