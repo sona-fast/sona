@@ -102,8 +102,14 @@
 	let hydrated = $state(false);
 	onMount(() => (hydrated = true));
 
+	/** A lookup can name an artist added since this page loaded (in another tab,
+	 * say). Picking one the select has no option for would leave it blank and
+	 * block Save, so the artist joins the list first. */
+	function includeArtist(artist: { id: number; name: string }) {
+		if (!artistOptions.some((a) => a.id === artist.id)) addedArtists = [...addedArtists, { id: artist.id, name: artist.name }];
+	}
+
 	async function onArtistCreated(artist: { id: number; name: string }) {
-		if (!artistOptions.some((a) => a.id === artist.id)) addedArtists = [...addedArtists, artist];
 		if (artistSeed && lookup.kind === 'found' && lookup.handle === artistSeed.handle) {
 			lookup = { ...lookup, matches: [artist], nameMatches: [], added: true };
 		}
@@ -280,6 +286,7 @@
 	}
 
 	function useArtist(artist: ArtistChoice) {
+		includeArtist(artist);
 		values.artistId = String(artist.id);
 		ownerPicked();
 		announcer.say(m.admin_commissions_artist_added_announce({ name: artist.name }));
@@ -338,6 +345,7 @@
 		const single = next.kind === 'found' && next.matches.length === 1 ? next.matches[0] : null;
 		const outcome = lookupOutcome(next);
 		if (single && (!values.artistId || values.artistId === autoPicked)) {
+			includeArtist(single);
 			values.artistId = autoPicked = String(single.id);
 			const using = m.admin_commissions_artist_added_announce({ name: single.name });
 			announcer.say(`${outcome}${getLocale() === 'ja' ? '' : ' '}${using}`);
