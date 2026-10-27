@@ -619,6 +619,17 @@ test("leaving an entry's upload for a plain one drops everything the entry fille
 	await open(page, '/admin/commissions');
 	await section(page, 'Finished').getByRole('link', { name: `Add to gallery: ${TITLE}` }).click();
 	await expect(page.getByRole('note')).toContainText(`From your commission: ${TITLE}.`);
+	// In Japanese the note is built around the title link the other way round:
+	// the title sits inside 「」 in one sentence, not alone after a colon.
+	const uploadUrl = page.url();
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+	try {
+		await page.goto(uploadUrl);
+		await expect(page.getByRole('note')).toContainText(`制作依頼「${TITLE}」から新しい作品を追加します。`);
+	} finally {
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+	}
+	await page.goto(uploadUrl);
 	await waitForHydration(page);
 	await expect(page.locator('input[name="commissionId"]')).toHaveCount(1);
 
