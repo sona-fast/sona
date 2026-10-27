@@ -156,6 +156,9 @@ test('without JavaScript, a refused save keeps what was typed and shows the erro
 	try {
 		const noJs = await context.newPage();
 		await noJs.goto('/admin/commissions/new');
+		// Nothing fills a date without the page's script, so the hint doesn't
+		// promise it.
+		await expect(noJs.locator('#ce-dates-hint')).toHaveText('Visitors never see these dates.');
 		await noJs.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
 		await noJs.getByLabel('Title').fill('E2E no-JS title');
 		await noJs.getByLabel('Notes').fill('E2E no-JS note');
