@@ -80,7 +80,7 @@ export async function checkUnhide(
 		await Promise.all(
 			chunk(ids).map((c) =>
 				db
-					.select({ id: artists.id, name: artists.name })
+					.select({ id: artists.id, name: artists.name, shown: sql<number>`${artistShownPublicly(artists.id)}` })
 					.from(artists)
 					.where(and(inArray(artists.id, c), eq(artists.ledgerPrivate, true)))
 					.all()
@@ -88,8 +88,11 @@ export async function checkUnhide(
 		)
 	).flat();
 	if (!rows.length) return { refusal: null, unhide: [] };
-	if (data.get('confirmUnhide') !== '1') {
-		return { refusal: fail(409, { confirmUnhide: rows.map((r) => r.name) }), unhide: [] };
+	// A box left ticked on an artist the site already shows hides nothing, so
+	// there's nothing to ask: it's just cleared with the others.
+	const hidden = rows.filter((r) => !r.shown);
+	if (hidden.length && data.get('confirmUnhide') !== '1') {
+		return { refusal: fail(409, { confirmUnhide: hidden.map((r) => r.name) }), unhide: [] };
 	}
 	return { refusal: null, unhide: rows.map((r) => r.id) };
 }

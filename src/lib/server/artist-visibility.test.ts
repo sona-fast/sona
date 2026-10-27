@@ -59,6 +59,24 @@ describe('checkUnhide', () => {
 		expect(await checkUnhide(db, formData(), [null, undefined, 0, -2])).toEqual({ refusal: null, unhide: [] });
 	});
 
+	it("doesn't ask about a flagged artist the site already shows, but clears them", async () => {
+		const db = makeDb();
+		await seed(db);
+		// Quill's box was left ticked after they had public work.
+		await shownWork(db, [2]);
+		expect(await checkUnhide(db, formData(), [2])).toEqual({ refusal: null, unhide: [2] });
+	});
+
+	it('names only the artists the site hides, and clears every flagged one once confirmed', async () => {
+		const db = makeDb();
+		await seed(db);
+		await shownWork(db, [2]);
+		const { refusal } = await checkUnhide(db, formData(), [2, 3]);
+		expect(refusal).toMatchObject({ status: 409, data: { confirmUnhide: ['Moth'] } });
+		const confirmed = await checkUnhide(db, formData({ confirmUnhide: '1' }), [2, 3]);
+		expect([...confirmed.unhide].sort()).toEqual([2, 3]);
+	});
+
 	it('checks a pack-sized list of artists, past what D1 binds in one query', async () => {
 		const db = makeDb();
 		await seed(db);
