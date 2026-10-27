@@ -1,6 +1,8 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
+	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
+	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { flip } from 'svelte/animate';
 	import { ArrowLeft, BookOpen, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -114,6 +116,14 @@
 	let nsfw = $state(avatar?.nsfw ?? false);
 	let published = $state(avatar?.published ?? false);
 	let saving = $state(false);
+	// Publishing an avatar that credits a Keep private artist asks first (SONA-236).
+	const unhide = createUnhideConfirm();
+	// Bound, not value={avatar...}: Svelte rewrites a plain value from the avatar
+	// whenever the form's other attributes update, so `saving` flipping put the
+	// saved values back, and the make-public dialog lost the edits on Cancel and
+	// resubmitted the old values on Make public.
+	let externalUrl = $state(untrack(() => avatar?.externalUrl ?? ''));
+	let permissionSource = $state(untrack(() => avatar?.permissionSource ?? ''));
 
 	// --- Platforms: checkbox chips over the schema enum.
 	const PLATFORMS = ['vrchat', 'resonite', 'chilloutvr', 'neosvr', 'vseeface', 'warudo', 'other'];
@@ -488,9 +498,13 @@
 	method="POST"
 	action={isEdit ? '?/save' : undefined}
 	class="form"
-	use:enhance={() => {
+	use:enhance={({ formElement, submitter }) => {
 		saving = true;
 		return async ({ update, result }) => {
+			if (unhide.take(result, formElement, submitter)) {
+				saving = false;
+				return;
+			}
 			// On success the action redirects, which enhance follows; only failures stay here.
 			await update({ reset: false });
 			saving = false;
@@ -710,7 +724,7 @@
 		<div class="fields">
 			<label>
 				<span>{m.admin_vr_field_external_url()}</span>
-				<input type="text" class="input" name="externalUrl" value={avatar?.externalUrl ?? ''} placeholder="https://hub.vroid.com/…" />
+				<input type="text" class="input" name="externalUrl" bind:value={externalUrl} placeholder="https://hub.vroid.com/…" />
 			</label>
 			<label>
 				<span>{m.vr_license()}</span>
@@ -724,7 +738,7 @@
 			</label>
 			<label>
 				<span>{m.admin_vr_field_permission_source()}</span>
-				<input type="text" class="input" name="permissionSource" value={avatar?.permissionSource ?? ''} placeholder={m.admin_vr_permission_placeholder()} />
+				<input type="text" class="input" name="permissionSource" bind:value={permissionSource} placeholder={m.admin_vr_permission_placeholder()} />
 			</label>
 		</div>
 	</section>
@@ -1008,6 +1022,10 @@
 		oncreated={onArtistCreated}
 		oncancel={() => (showNewArtist = false)}
 	/>
+{/if}
+
+{#if unhide.names}
+	<UnhideArtistDialog names={unhide.names} onconfirm={unhide.confirm} oncancel={unhide.cancel} />
 {/if}
 
 <style>

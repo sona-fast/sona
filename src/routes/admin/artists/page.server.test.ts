@@ -20,6 +20,7 @@ vi.mock('$lib/server/registry', async (importActual) => ({
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { PUBLIC_WORK_TABLES } from '$lib/server/test/public-work-tables';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -40,6 +41,7 @@ function makeDb() {
 	);
 	CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
+	sqlite.exec(PUBLIC_WORK_TABLES);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
@@ -122,30 +124,6 @@ describe('admin artists load — former names (aliases)', () => {
 
 		const result = (await load(loadEvent(platform))) as { artists: Array<{ formerly: string[] }> };
 		expect(result.artists.map((a) => a.formerly)).toEqual([[], []]);
-	});
-});
-
-describe('admin artists load — the private tag (SONA-236)', () => {
-	async function privateByName(platform: App.Platform) {
-		const result = (await load(loadEvent(platform))) as { artists: Array<{ name: string; isPrivate: number }> };
-		return Object.fromEntries(result.artists.map((a) => [a.name, Boolean(a.isPrivate)]));
-	}
-
-	it('tags a flagged artist until work by them is published', async () => {
-		const { db, platform } = makeDb();
-		const flagged = await db.insert(schema.artists).values({ name: 'Quill', ledgerPrivate: true }).returning().get();
-		await db.insert(schema.artists).values({ name: 'Open' });
-		expect(await privateByName(platform)).toEqual({ Open: false, Quill: true });
-
-		await db.run(sql`INSERT INTO images (artist_id, published) VALUES (${flagged.id}, 1)`);
-		expect((await privateByName(platform)).Quill).toBe(false);
-	});
-
-	it('tags an artist who exists only for ledger entries', async () => {
-		const { db, platform } = makeDb();
-		const id = await seedArtist(db, 'EntryOnly');
-		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (${id})`);
-		expect((await privateByName(platform)).EntryOnly).toBe(true);
 	});
 });
 
@@ -729,7 +707,7 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 	// AS8: a ledger-only artist (SONA-236) can still be shared, but only after the
 	// page asks. Without confirmPrivate the action refuses and says why, so the
 	// page can show its confirm step; nothing goes to the registry.
-	describe('ledger-only artists ask first', () => {
+	describe('Keep private artists ask first', () => {
 		const pending = { id: 1, status: 'pending', matchedGlobalId: null };
 
 		it('refuses a flagged artist without the confirm field, and sends nothing', async () => {
@@ -742,15 +720,14 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 			expect(mockRegistrySubmit).not.toHaveBeenCalled();
 		});
 
-		it('refuses an artist who has only commission entries without the confirm field', async () => {
+		it('shares an artist with only commission entries without asking when Keep private is unticked', async () => {
 			const { db, platform } = makeDb();
 			const id = await seedEnabledArtist(db);
 			await db.run(sql`INSERT INTO commissions (artist_id) VALUES (${id})`);
 			mockRegistrySubmit.mockResolvedValue(pending);
 
 			const result = await actions.submitToRegistry(submitEvent(platform, id));
-			expect(result).toMatchObject({ status: 409, data: { confirmPrivate: true } });
-			expect(mockRegistrySubmit).not.toHaveBeenCalled();
+			expect(result).toEqual({ success: true, submitted: true });
 		});
 
 		it('submits a flagged artist when the confirm field is present', async () => {
@@ -764,6 +741,32 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 				expect.anything(),
 				expect.objectContaining({ kind: 'create', payload: expect.objectContaining({ displayName: 'Nyx' }) })
 			);
+			// Shared now, so Keep private is unticked to match.
+			const after = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
+			expect(after!.ledgerPrivate).toBe(false);
+		});
+
+		it('unticks a leftover Keep private on an artist with public work, without asking', async () => {
+			const { db, platform } = makeDb();
+			const id = await seedEnabledArtist(db, { ledgerPrivate: true });
+			await db.run(sql`INSERT INTO images (artist_id, published) VALUES (${id}, 1)`);
+			mockRegistrySubmit.mockResolvedValue(pending);
+
+			const result = await actions.submitToRegistry(submitEvent(platform, id));
+			expect(result).toEqual({ success: true, submitted: true });
+			const after = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
+			expect(after!.ledgerPrivate).toBe(false);
+		});
+
+		it('keeps Keep private ticked when the registry refuses the share', async () => {
+			const { db, platform } = makeDb();
+			const id = await seedEnabledArtist(db, { ledgerPrivate: true });
+			mockRegistrySubmit.mockResolvedValue({ httpStatus: 400, error: 'bad' });
+
+			const result = await actions.submitToRegistry(submitEvent(platform, id, { confirmPrivate: '1' }));
+			expect(result).toMatchObject({ status: 400 });
+			const after = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
+			expect(after!.ledgerPrivate).toBe(true);
 		});
 
 		it('submits a non-private artist with no confirm field', async () => {
@@ -799,12 +802,11 @@ function updateEvent(platform: App.Platform, fields: Record<string, string>) {
 	} as never;
 }
 
-describe('update action — ledger-only artists stay on the site (SONA-236)', () => {
-	async function seedWithEntry(db: ReturnType<typeof makeDb>['db'], withPiece: boolean) {
-		const row = await db.insert(schema.artists).values({ name: 'Quill' }).returning({ id: schema.artists.id }).get();
+describe('update action — Keep private artists stay on the site (SONA-236)', () => {
+	async function seedWithEntry(db: ReturnType<typeof makeDb>['db'], ledgerPrivate: boolean) {
+		const row = await db.insert(schema.artists).values({ name: 'Quill', ledgerPrivate }).returning({ id: schema.artists.id }).get();
 		// This file's tables carry only the columns the ledger-only check reads.
 		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (${row.id})`);
-		if (withPiece) await db.run(sql`INSERT INTO images (artist_id) VALUES (${row.id})`);
 		return row.id;
 	}
 
@@ -812,10 +814,10 @@ describe('update action — ledger-only artists stay on the site (SONA-236)', ()
 		const { db, platform } = makeDb();
 		const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
 		vi.stubGlobal('fetch', fetchSpy);
-		const id = await seedWithEntry(db, false);
+		const id = await seedWithEntry(db, true);
 
 		const result = await actions.update(
-			updateEvent(platform, { id: String(id), name: 'Quill', bluesky: 'quill.bsky.social', twitter: 'quill_art' })
+			updateEvent(platform, { id: String(id), name: 'Quill', bluesky: 'quill.bsky.social', twitter: 'quill_art', ledgerPrivate: 'on' })
 		);
 		expect(result).toEqual({ success: true });
 		expect(fetchSpy).not.toHaveBeenCalled();
@@ -826,12 +828,12 @@ describe('update action — ledger-only artists stay on the site (SONA-236)', ()
 		expect(after!.avatarUrl).toBeNull();
 	});
 
-	it('still looks up the avatar once the artist has a piece on the site', async () => {
+	it('looks up the avatar for an artist with only entries when Keep private is unticked', async () => {
 		const { db, platform } = makeDb();
 		// The profile answers; the CDN copy stays offline, so the source link is kept.
 		const resolvedAvatar = 'https://cdn.bsky.app/img/avatar/plain/quill.jpg';
 		stubRegistryFetch({ 'public.api.bsky.app': { avatar: resolvedAvatar } });
-		const id = await seedWithEntry(db, true);
+		const id = await seedWithEntry(db, false);
 
 		await actions.update(updateEvent(platform, { id: String(id), name: 'Quill', bluesky: 'quill.bsky.social' }));
 		const after = await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get();
@@ -888,6 +890,54 @@ describe('update action — the keep-private flag', () => {
 
 		await save(platform, row.id, { ledgerPrivate: 'on' });
 		expect((await read(db, row.id))!.avatarUrl).toBe(resolvedAvatar);
+	});
+
+	// SONA-236: an artist with public work is already public, so the box can't
+	// be set for them.
+	type Db = ReturnType<typeof makeDb>['db'];
+	it.each([
+		['a published piece', (db: Db, id: number) => db.run(sql`INSERT INTO images (artist_id, published) VALUES (${id}, 1)`)],
+		[
+			'a sticker in a published pack',
+			async (db: Db, id: number) => {
+				await db.run(sql`INSERT INTO sticker_packs (id, published) VALUES (1, 1)`);
+				await db.run(sql`INSERT INTO stickers (artist_id, pack_id) VALUES (${id}, 1)`);
+			}
+		],
+		['a published pack they manage', (db: Db, id: number) => db.run(sql`INSERT INTO sticker_packs (manager_artist_id, published) VALUES (${id}, 1)`)],
+		[
+			'a credit on a published avatar',
+			async (db: Db, id: number) => {
+				await db.run(sql`INSERT INTO vr_avatars (id, published) VALUES (1, 1)`);
+				await db.run(sql`INSERT INTO avatar_credits (avatar_id, artist_id, role) VALUES (1, ${id}, 'base')`);
+			}
+		]
+	])('saves Keep private as false for an artist with %s', async (_label, seedWork) => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Quill');
+		await seedWork(db, id);
+
+		expect(await save(platform, id, { ledgerPrivate: 'on' })).toEqual({ success: true });
+		expect((await read(db, id))!.ledgerPrivate).toBe(false);
+	});
+
+	it('clears a stored flag for an artist with a published piece even when the box stays ticked', async () => {
+		const { db, platform } = makeDb();
+		const row = await db.insert(schema.artists).values({ name: 'Quill', ledgerPrivate: true }).returning().get();
+		await db.run(sql`INSERT INTO images (artist_id, published) VALUES (${row.id}, 1)`);
+
+		await save(platform, row.id, { ledgerPrivate: 'on' });
+		expect((await read(db, row.id))!.ledgerPrivate).toBe(false);
+	});
+
+	it('saves the box unticked for an artist whose only piece is a published variant', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Quill');
+		// A variant's own page is served and credits its artist.
+		await db.run(sql`INSERT INTO images (artist_id, published, parent_image_id) VALUES (${id}, 1, 99)`);
+
+		await save(platform, id, { ledgerPrivate: 'on' });
+		expect((await read(db, id))!.ledgerPrivate).toBe(false);
 	});
 
 	it('still keeps a flagged artist private when their only piece is a draft', async () => {

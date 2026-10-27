@@ -4,6 +4,8 @@
 	import { page } from '$app/stores';
 	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2, Layers, Tag } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
+	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { formatDate, cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 
@@ -15,6 +17,8 @@
 	// Publish toggles in flight — a Set so rapid clicks on different rows each show
 	// their own spinner (same pattern as the sticker pack list).
 	let togglingIds = $state<Set<number>>(new Set());
+	// Publishing a piece by a Keep private artist asks first (SONA-236).
+	const unhide = createUnhideConfirm();
 
 	function setToggling(id: number, on: boolean) {
 		const next = new Set(togglingIds);
@@ -152,10 +156,10 @@
 					<td class="date">{image.commissionedAt ? formatDate(image.commissionedAt) : '—'}</td>
 					<td class="date">{formatDate(image.createdAt)}</td>
 					<td class="col-status">
-						<form method="POST" action="?/togglePublished" use:enhance={() => {
+						<form method="POST" action="?/togglePublished" use:enhance={({ formElement, submitter }) => {
 							setToggling(image.id, true);
-							return async ({ update }) => {
-								await update();
+							return async ({ result, update }) => {
+								if (!unhide.take(result, formElement, submitter)) await update();
 								setToggling(image.id, false);
 							};
 						}} class="inline-form">
@@ -235,10 +239,10 @@
 				{/if}
 			</div>
 			<div class="mobile-actions">
-				<form method="POST" action="?/togglePublished" use:enhance={() => {
+				<form method="POST" action="?/togglePublished" use:enhance={({ formElement, submitter }) => {
 					setToggling(image.id, true);
-					return async ({ update }) => {
-						await update();
+					return async ({ result, update }) => {
+						if (!unhide.take(result, formElement, submitter)) await update();
 						setToggling(image.id, false);
 					};
 				}} class="inline-form">
@@ -343,6 +347,10 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if unhide.names}
+	<UnhideArtistDialog names={unhide.names} onconfirm={unhide.confirm} oncancel={unhide.cancel} />
 {/if}
 
 <style>

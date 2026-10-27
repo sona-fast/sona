@@ -26,7 +26,7 @@ import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
 import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registry-submissions';
 import { getRawSetting, setRawSetting, getSettings } from '$lib/server/settings';
 import { cleanMessage } from '$lib/server/metrics';
-import { artistIsLedgerOnly } from '$lib/server/artist-visibility';
+import { artistIsLedgerOnly, artistShownPublicly } from '$lib/server/artist-visibility';
 import { parseDismissed, addDismissed } from '$lib/server/registry-dismissals';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -80,9 +80,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			globalId: artists.globalId,
 			aliases: artists.aliases,
 			ledgerPrivate: artists.ledgerPrivate,
-			// The "private" tag shows what is hidden now, not the stored flag:
-			// publishing work by a flagged artist ends their privacy (SONA-236).
-			isPrivate: sql<number>`${artistIsLedgerOnly(artists.id)}`,
+			hasPublicWork: sql<number>`${artistShownPublicly(artists.id)}`,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
 			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`,
@@ -270,6 +268,7 @@ export const actions = {
 				patreonUrl: artists.patreonUrl,
 				globalId: artists.globalId,
 				storedPrivate: artists.ledgerPrivate,
+				hasPublicWork: sql<number>`${artistShownPublicly(artists.id)}`,
 				// Check against the flag this save will store, so ticking it in this
 				// same save already skips the avatar lookup. A registry-linked artist
 				// can only have the flag cleared, never set (stored AND posted): a
@@ -280,15 +279,18 @@ export const actions = {
 			.from(artists)
 			.where(eq(artists.id, id))
 			.get();
-		const ledgerPrivate = existing?.globalId ? existing.storedPrivate && postedPrivate : postedPrivate;
+		// An artist with public work is already public, so the box can't be set
+		// for them: it would claim a privacy the site can't give (SONA-236).
+		const ledgerPrivate =
+			(existing?.globalId ? existing.storedPrivate && postedPrivate : postedPrivate) && !existing?.hasPublicWork;
 
 		// Resolve + re-host the avatar from social links (stored on our own CDN so it
 		// can't rot to a 404). Rules, in order:
 		//  - EVERY avatar-capable social (bluesky/twitter/FA/patreon) posted empty →
 		//    write null: with nothing left to resolve from, this is a deliberate
 		//    removal and must actually clear a wrong avatar.
-		//  - a ledger-only artist (SONA-236), by entries or by the "keep private"
-		//    flag → never resolve: resolving sends their handle to X or Bluesky,
+		//  - a "keep private" artist with no public work (SONA-236) → never
+		//    resolve: resolving sends their handle to X or Bluesky,
 		//    which a save doesn't ask for. Keep the stored avatar only while the
 		//    avatar socials are unchanged; a changed handle writes null, since the
 		//    OLD account's face must never persist under the new one. The avatar
@@ -379,7 +381,7 @@ export const actions = {
 		if (!row) return fail(404, { error: 'Artist not found' });
 		const a = row.artist;
 
-		// A ledger-only artist (SONA-236) is private until the owner says otherwise:
+		// A Keep private artist (SONA-236) is private until the owner says otherwise:
 		// the page asks first and resubmits with confirmPrivate. No error text, so
 		// the page shows its confirm step instead of an error.
 		if (row.ledgerOnly && data.get('confirmPrivate') !== '1') {
@@ -445,6 +447,10 @@ export const actions = {
 		// (409 conflict vs 429 rate-limit vs 400 validation), truncated so a long
 		// registry message can't blow out the form error.
 		if ('httpStatus' in result) return fail(result.httpStatus, { error: result.error.slice(0, 300) });
+		// A shared artist isn't private any more: untick Keep private to match
+		// (SONA-236). The stored flag, not the confirm rule, so a box left ticked
+		// on an artist with public work clears too.
+		if (a.ledgerPrivate) await db.update(artists).set({ ledgerPrivate: false }).where(eq(artists.id, id));
 		return { success: true, submitted: true };
 	},
 

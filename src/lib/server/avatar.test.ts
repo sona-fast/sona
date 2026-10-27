@@ -585,7 +585,7 @@ describe('refreshArtistAvatars', () => {
 
 	// SONA-236: the lookup sends the handle to Bluesky, so an artist who exists
 	// only for a private commission entry is never looked up.
-	it('skips an artist who exists only for commission entries, and refreshes one with a piece', async () => {
+	it('refreshes an artist who has only commission entries when Keep private is unticked', async () => {
 		const fetchMock = stubFetch();
 		const { db } = makeDb();
 		await db.insert(artists).values([
@@ -603,13 +603,11 @@ describe('refreshArtistAvatars', () => {
 			mode: 'oldest'
 		});
 
-		expect(r).toEqual({ processed: 1, refreshed: 1, remaining: 0 });
+		// Keep private is the only rule (SONA-236): entries alone don't hide them.
+		expect(r).toEqual({ processed: 2, refreshed: 2, remaining: 0 });
 		const urls = fetchMock.mock.calls.map(([u]) => String(u));
-		expect(urls.some((u) => u.includes('ledgeronly'))).toBe(false);
+		expect(urls.some((u) => u.includes('ledgeronly'))).toBe(true);
 		expect(urls.some((u) => u.includes('hasapiece'))).toBe(true);
-		const ledger = await db.select().from(artists).where(eq(artists.id, 1)).get();
-		expect(ledger!.avatarUrl).toBeNull();
-		expect(ledger!.avatarResolvedAt).toBeNull();
 	});
 
 	// Q26: the owner's "keep private" flag skips the lookup with no entries at

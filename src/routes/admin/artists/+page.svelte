@@ -30,7 +30,7 @@
 	let deletingId = $state<number | null>(null);
 	let submittingId = $state<number | null>(null);
 	let refreshingAvatars = $state(false);
-	// Submit to registry for a ledger-only artist (SONA-236): the server refuses
+	// Submit to registry for a Keep private artist (SONA-236): the server refuses
 	// without confirmPrivate, and the page asks before resubmitting with it.
 	type ShareTarget = { id: number; globalId: string | null; trigger?: HTMLElement | null };
 	let confirmShare = $state<ShareTarget | null>(null);
@@ -165,7 +165,7 @@
 					<td class="artist-name">
 						{artist.name}
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
-						{#if artist.isPrivate}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
+						{#if artist.ledgerPrivate && !artist.hasPublicWork}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'pending'}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'rejected'}<span class="reg-badge rejected" title={data.registryStatus[artist.id].note ? m.admin_artists_rejected_note({ note: data.registryStatus[artist.id].note ?? '' }) : m.admin_artists_rejected_title()}>{m.admin_artists_badge_rejected()}</span><form method="POST" action="?/dismissRejection" style="display:inline" use:enhance={() => {
 							return async ({ result, update }) => {
@@ -246,10 +246,10 @@
 			<div class="mobile-artist-info">
 				<p class="mobile-artist-name">{artist.name}</p>
 				{#if artist.formerly.length}<p class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</p>{/if}
-				{#if artist.globalId || artist.isPrivate || data.registryStatus?.[artist.id]}
+				{#if artist.globalId || (artist.ledgerPrivate && !artist.hasPublicWork) || data.registryStatus?.[artist.id]}
 					<div class="mobile-artist-badges">
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
-						{#if artist.isPrivate}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
+						{#if artist.ledgerPrivate && !artist.hasPublicWork}<span class="reg-badge private">{m.admin_artists_badge_private()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'pending'}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
 						{#if data.registryStatus?.[artist.id]?.status === 'rejected'}<span class="reg-badge rejected" title={data.registryStatus[artist.id].note ? m.admin_artists_rejected_note({ note: data.registryStatus[artist.id].note ?? '' }) : m.admin_artists_rejected_title()}>{m.admin_artists_badge_rejected()}</span><form method="POST" action="?/dismissRejection" style="display:inline" use:enhance={() => {
 							return async ({ result, update }) => {
@@ -415,8 +415,8 @@
 					</div>
 				</div>
 
-				<!-- A shared (registry-linked) artist can't be made private; the box shows only so one linked while flagged can clear it. -->
-				{#if !editingArtist.globalId || editingArtist.ledgerPrivate}
+				<!-- A shared (registry-linked) artist can't be made private; the box shows only so one linked while flagged can clear it. An artist with public work is already public, so it can't be set for them either. -->
+				{#if (!editingArtist.globalId || editingArtist.ledgerPrivate) && !editingArtist.hasPublicWork}
 					<div class="private-field">
 						<label class="private-check">
 							<input type="checkbox" name="ledgerPrivate" checked={editingArtist.ledgerPrivate} disabled={saving} aria-describedby="edit-artist-private-hint" />

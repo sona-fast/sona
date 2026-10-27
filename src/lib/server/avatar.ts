@@ -366,8 +366,7 @@ export async function refreshArtistAvatars(
 	// Only Twitter and Bluesky resolve today (FA/Patreon are TODO), so an artist
 	// with neither can never be refreshed — leave them out of the queue entirely.
 	// NULLs-first ordering: `avatar_resolved_at IS NOT NULL` is 0 for nulls.
-	// An artist who exists only for the owner's private commission ledger is
-	// skipped: the lookup sends their handle to X or Bluesky (SONA-236). The
+	// An artist marked "keep private" with no public work is skipped: the lookup sends their handle to X or Bluesky (SONA-236). The
 	// admin's manual refresh shares this, so it skips them too.
 	const rows = await db
 		.select({

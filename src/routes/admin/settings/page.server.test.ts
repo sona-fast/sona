@@ -1714,7 +1714,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 			// inside that window, so this stays true after the date passes in the
 			// real world.
 			expect(result.earlyAccess).toEqual([
-				{ flag: 'commission-ledger', gaDate: '2026.10.28' },
+				{ flag: 'commission-ledger', gaDate: '2026.11.04' },
 				{ flag: 'probe', gaDate: '2999.01.01' }
 			]);
 			// The token must never leak into the client-exposed SiteSettings.

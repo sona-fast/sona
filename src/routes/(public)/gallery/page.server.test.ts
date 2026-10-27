@@ -243,9 +243,10 @@ describe('gallery load — former-name (alias) resolution', () => {
 		expect(data.degraded).toBe(false);
 	});
 
-	it('resolves an alias that matches only a ledger-only artist, so the private name stays hidden', async () => {
-		// "Draft" exists only for a private commission entry (SONA-236). If it
-		// counted as a current name, the missing banner would reveal it exists.
+	it('treats an artist with only commission entries as a current name when Keep private is unticked', async () => {
+		// Keep private is the only rule (SONA-236): "Draft" has only a commission
+		// entry and no box, so it's an ordinary current name and no former-name
+		// banner points at Phoenix. The ticked case is the next test.
 		const { db, platform } = makeDb();
 		const [{ id: draftId }] = await addArtist(db, 'Draft');
 		await db.run(sqlq`INSERT INTO commissions (artist_id) VALUES (${draftId})`);
@@ -257,8 +258,7 @@ describe('gallery load — former-name (alias) resolution', () => {
 		await addImage(db, { artistId: phoenixId, published: true });
 
 		const data = await loadData(platform, '?artist=Draft');
-		expect(data.formerName).toEqual({ searched: 'Draft', current: 'Phoenix' });
-		expect(data.images).toHaveLength(1);
+		expect(data.formerName).toBeNull();
 	});
 
 	it('treats a "keep private" artist with no entries like a ledger-only one until a piece by them is published', async () => {

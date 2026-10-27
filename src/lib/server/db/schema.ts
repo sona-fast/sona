@@ -29,8 +29,9 @@ export const artists = sqliteTable('artists', {
 	// current as artists change their pictures. See avatar.ts / api/cron/refresh-avatars.
 	avatarResolvedAt: text('avatar_resolved_at'),
 	// The owner's "keep private (commission ledger only)" flag (SONA-236). While
-	// set and the artist has no public work, they count as ledger-only: see
-	// artistIsLedgerOnly. Publishing work by them ends it without clearing it.
+	// set and the artist has no public work, they count as private: see
+	// artistIsLedgerOnly. Actions that publish work by them or share them ask
+	// first and clear it.
 	ledgerPrivate: integer('ledger_private', { mode: 'boolean' }).notNull().default(false),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });

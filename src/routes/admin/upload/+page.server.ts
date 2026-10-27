@@ -5,6 +5,7 @@ import { eq, isNull, sql, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
+import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
 import {
 	MAX_IMAGE_TAGS,
 	MAX_TAGS_INPUT_LENGTH,
@@ -247,13 +248,19 @@ export const actions = {
 			entry = check.entry;
 		}
 
+		// A new published piece by a Keep private artist makes them public, so ask
+		// first (SONA-236). A variant too: its own page is served and credits them.
+		const willPublish = entry ? data.get('commissionVisibility') === 'public' : published;
+		const { refusal, unhide } = await checkUnhide(db, data, willPublish ? [resolvedArtistId] : []);
+		if (refusal) return refusal;
+
 		const shared = {
 			artistId: resolvedArtistId,
 			collectionId: collectionId ? Number(collectionId) : null,
 			// From an entry the piece stays private unless the form says public in so
 			// many words: artists often ask clients to wait until they post first, and
 			// a form that lost its checkbox shouldn't publish.
-			published: entry ? data.get('commissionVisibility') === 'public' : published,
+			published: willPublish,
 			sourcePostUrl: sourcePostUrl || null,
 			commissionedAt: commissionedAt || null
 		};
@@ -342,6 +349,8 @@ export const actions = {
 			await attachTagsAndCharacters(db, variantRow.id, tagNames, characterIds);
 			variantIds.push(variantRow.id);
 		}
+		// Once every piece is in, so a variant added to an existing piece counts.
+		await clearKeepPrivate(db, unhide);
 
 		// Optionally designate the primary (parent) image as the owner character's
 		// reference sheet — same semantics as the edit-page control.

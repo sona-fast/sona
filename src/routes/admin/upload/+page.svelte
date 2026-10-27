@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
+	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { tick } from 'svelte';
 	import { CircleAlert, ClipboardList, CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -77,6 +79,8 @@
 	let selectedArtistId = $state<string | number>(prefill?.artistId ?? '');
 	let showNewArtist = $state(false);
 	let saving = $state(false);
+	// Publishing a piece by a Keep private artist asks first (SONA-236).
+	const unhide = createUnhideConfirm();
 	// Two identical batches say the same thing, so the region is keyed on a
 	// counter rather than on the text — see `$lib/live-announcer.svelte`.
 	const announcer = new Announcer();
@@ -1380,14 +1384,14 @@
 	</div>
 {/if}
 
-<form method="POST" use:enhance={({ formData }) => {
+<form method="POST" use:enhance={({ formData, formElement, submitter }) => {
 	// The owner's own date, for an empty Delivered date on the entry (open
 	// question Q17, built as drawn). It stays on the entry and never becomes the
 	// piece's commissioned date.
 	if (prefill) formData.set('commissionDeliveredOn', localToday());
 	saving = true;
-	return async ({ update }) => {
-		await update();
+	return async ({ result, update }) => {
+		if (!unhide.take(result, formElement, submitter)) await update();
 		saving = false;
 	};
 }} class="upload-form">
@@ -1962,6 +1966,10 @@
 		oncreated={onArtistCreated}
 		oncancel={() => { showNewArtist = false; artistSeed = null; }}
 	/>
+{/if}
+
+{#if unhide.names}
+	<UnhideArtistDialog names={unhide.names} onconfirm={unhide.confirm} oncancel={unhide.cancel} />
 {/if}
 
 <style>

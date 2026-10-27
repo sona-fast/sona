@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
+import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
 import { getSettings } from '$lib/server/settings';
 import { artists } from '$lib/server/db/schema';
 import { isTelegramEnabled } from '$lib/server/telegram';
@@ -93,6 +94,8 @@ export const actions = {
 
 		const absolutize = (u: string) => (u.startsWith('/') ? new URL(u, url.origin).href : u);
 
+		let refusal: Awaited<ReturnType<typeof checkUnhide>>['refusal'] = null;
+		let unhide: number[] = [];
 		try {
 			const result = await importTelegramPack({
 				env: platform?.env,
@@ -102,10 +105,16 @@ export const actions = {
 				managerArtistId,
 				defaultArtistId,
 				perSticker,
-				absolutize
+				absolutize,
+				beforePublishedAppend: async (artistIds) => {
+					({ refusal, unhide } = await checkUnhide(db, data, artistIds));
+					if (refusal) throw refusal;
+				}
 			});
+			await clearKeepPrivate(db, unhide);
 			return { success: true, result };
 		} catch (e) {
+			if (refusal && e === refusal) return refusal;
 			return fail(500, { error: e instanceof Error ? e.message : 'Import failed.' });
 		}
 	},
@@ -147,6 +156,11 @@ export const actions = {
 
 		const absolutize = (u: string) => (u.startsWith('/') ? new URL(u, url.origin).href : u);
 
+		// Appending to a published pack that credits a Keep private artist makes
+		// them public, so the batch asks first (SONA-236): the page shows the
+		// dialog and resends the batch with confirmUnhide.
+		let refusal: Awaited<ReturnType<typeof checkUnhide>>['refusal'] = null;
+		let unhide: number[] = [];
 		try {
 			const result = await importStickerBatch({
 				env: platform?.env,
@@ -155,10 +169,16 @@ export const actions = {
 				nameOrUrl,
 				managerArtistId,
 				items,
-				absolutize
+				absolutize,
+				beforePublishedAppend: async (artistIds) => {
+					({ refusal, unhide } = await checkUnhide(db, data, artistIds));
+					if (refusal) throw refusal;
+				}
 			});
+			await clearKeepPrivate(db, unhide);
 			return { batch: result };
 		} catch (e) {
+			if (refusal && e === refusal) return refusal;
 			return fail(500, { error: e instanceof Error ? e.message : 'Batch import failed.' });
 		}
 	}
