@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Response } from '@playwright/test';
 import { gotoAfterLogin, loginRetrying, waitForHydration } from './admin-login';
 import { settledShot } from './settled-shot';
 import { failOnPageErrors } from './page-errors';
@@ -97,6 +97,14 @@ async function paste(input: ReturnType<Page['getByLabel']>, value: string) {
 		Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, v);
 		field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: v }));
 	}, value);
+}
+
+/** Once a held lookup's response has fully arrived, give the page the tasks
+ * it needs to read the body and apply it (or drop it), so a check that follows
+ * sees the result rather than the moment before it. */
+async function settledAfter(page: Page, response: Response) {
+	await response.finished();
+	await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50))));
 }
 
 /** Counts the lookup requests the page sends, and keeps what each sent so a
@@ -337,9 +345,7 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 		(r) => r.url().endsWith('/api/admin/artist-from-link') && !!r.request().postData()?.includes('e2e_artist')
 	);
 	release();
-	await staleAnswer;
-	// Past the response, the page has had its chance to apply it.
-	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
+	await settledAfter(page, await staleAnswer);
 	await expect(card.getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
 	await expect(page.getByText('e2e_artist is already in your artist list as Test Artist.')).toHaveCount(0);
 	await expect(artist).toHaveValue('');
@@ -372,7 +378,7 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 		(r) => r.url().endsWith('/api/admin/artist-from-link') && !!r.request().postData()?.includes('e2e_artist/status/4')
 	);
 	releaseFirst();
-	await lateAnswer;
+	await settledAfter(page, await lateAnswer);
 	await expect(failedLine).toBeVisible();
 	await expect(card).toHaveCount(0);
 	await expect(artist).toHaveValue('');
@@ -1092,6 +1098,38 @@ test('signing out forgets unsaved drafts', async ({ page }) => {
 	expect(await stored()).not.toContain('E2E draft before sign-out');
 });
 
+test('signing out by address forgets drafts too, and the next session keeps its own', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Title').fill('E2E draft before typed sign-out');
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Commissions' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await page.reload();
+	await waitForHydration(page);
+	const stored = () => page.evaluate(() => sessionStorage.getItem('sveltekit:snapshot') ?? '');
+	expect(await stored()).toContain('E2E draft before typed sign-out');
+
+	// /admin/logout typed into the address bar: no Logout button runs.
+	await page.goto('/admin/logout');
+	await expect(page).toHaveURL(/\/admin\/login$/);
+	await expect.poll(stored).not.toContain('E2E draft before typed sign-out');
+
+	// Signing back in doesn't bring it back, and a draft from the new session
+	// is kept through a reload as usual.
+	await page.fill('input[name="password"]', PASSWORD);
+	await page.click('button[type="submit"]');
+	await page.waitForURL(/\/admin\/images/);
+	expect(await stored()).not.toContain('E2E draft before typed sign-out');
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Title').fill('E2E draft after signing in');
+	await page.locator('.sidebar-nav').getByRole('link', { name: 'Commissions' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await page.reload();
+	await waitForHydration(page);
+	expect(await stored()).toContain('E2E draft after signing in');
+	expect(await stored()).not.toContain('E2E draft before typed sign-out');
+});
+
 test('Other currency finds a currency, and Add New Artist makes a private artist for the entry', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
@@ -1283,4 +1321,30 @@ test('a malformed currency code comes back as a field error, not an error page',
 	});
 	expect(res.status()).toBe(400);
 	expect(await res.text()).toContain('Use a three-letter currency code, like USD or EUR.');
+});
+
+test('an artist added in another tab can be picked by a link', async ({ page, context }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	const artist = page.getByLabel('Artist', { exact: true });
+	await expect(artist.locator('option', { hasText: 'other_tab_artist' })).toHaveCount(0);
+
+	// A second tab adds the artist after this form loaded.
+	const other = await context.newPage();
+	await open(other, '/admin/commissions/new');
+	const otherLink = other.getByLabel('Link to where you asked');
+	await paste(otherLink, 'https://x.com/other_tab_artist/status/1');
+	await other.locator('.lookup').getByRole('button', { name: 'Add other_tab_artist as a new artist' }).click();
+	const dialog = other.getByRole('dialog');
+	await expect(dialog.getByLabel('Artist Name')).toHaveValue('other_tab_artist');
+	await dialog.getByRole('button', { name: 'Create Artist' }).click();
+	await expect(dialog).toHaveCount(0);
+	await other.close();
+
+	// The lookup here finds them, and the select shows them as the pick, so
+	// the required Artist field is filled.
+	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/other_tab_artist/status/2');
+	await expect(page.locator('.lookup')).toContainText('other_tab_artist');
+	await expect(artist.locator('option:checked')).toHaveText('other_tab_artist');
+	expect(await artist.evaluate((el: HTMLSelectElement) => el.checkValidity())).toBe(true);
 });
