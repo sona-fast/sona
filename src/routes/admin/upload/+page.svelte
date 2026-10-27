@@ -1335,9 +1335,11 @@
 			<p>
 				{m.admin_upload_commission_just_added()}{#if refusal.imageId}<a href="/admin/images/{refusal.imageId}/edit"
 						>{m.admin_upload_commission_view_piece()}</a
-					>{m.admin_upload_commission_or()}{/if}<a href="/admin/commissions"
-					>{m.admin_upload_commission_back_lower()}</a
-				>{m.admin_upload_commission_just_added_post()}
+					>{m.admin_upload_commission_or()}<a href="/admin/commissions"
+						>{m.admin_upload_commission_back_lower()}</a
+					>{m.admin_upload_commission_just_added_post()}{:else}<a href="/admin/commissions"
+						>{m.admin_upload_commission_back()}</a
+					>{m.admin_upload_commission_back_post()}{/if}
 			</p>
 		</div>
 	{:else if refusal.commission === 'gated'}
