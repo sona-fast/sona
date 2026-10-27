@@ -624,6 +624,50 @@ test("leaving an entry's upload for a plain one drops everything the entry fille
 	await expect(row.getByRole('link', { name: 'E2E unrelated piece' })).toHaveCount(0);
 });
 
+// A save that loses a race the checks didn't see answers "just added" with no
+// piece to point at, so the notice's link starts its own sentence.
+test('a save that lost a race says so and links back to the ledger', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions');
+	await section(page, 'Finished').getByRole('link', { name: `Add to gallery: ${TITLE}` }).click();
+	await waitForHydration(page);
+
+	// The save answers as the server does after that race. The stub never
+	// reaches the server, so the entry is still unlinked for the next test.
+	await page.route(
+		(url) => url.pathname === '/admin/upload',
+		(route) =>
+			route.request().method() === 'POST'
+				? route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({ type: 'failure', status: 409, data: '[{"commission":1,"imageId":2},"just_added",null]' })
+					})
+				: route.continue()
+	);
+	await page.route(
+		(url) => url.pathname === '/api/upload',
+		(route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/e2e-avatar.svg' }) })
+	);
+	await expect(async () => {
+		await page.setInputFiles('input[type="file"]', { name: 'piece.png', mimeType: 'image/png', buffer: PNG });
+		await page.evaluate(() =>
+			document.querySelector('input[type="file"]')!.dispatchEvent(new Event('change', { bubbles: true }))
+		);
+		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/e2e-avatar.svg', { timeout: 2000 });
+	}).toPass({ timeout: 20_000 });
+	await page.locator('input[name="title"]').fill('E2E lost race');
+	await page.getByRole('button', { name: 'Upload Artwork' }).click();
+
+	const alert = page.getByRole('alert').filter({ hasText: 'This entry was just added to your gallery' });
+	await expect(alert).toHaveText(
+		"This entry was just added to your gallery, so this upload wasn't saved. Go back to Commissions."
+	);
+	await expect(alert.getByRole('link')).toHaveCount(1);
+	await expect(alert.getByRole('link', { name: 'Go back to Commissions' })).toHaveAttribute('href', '/admin/commissions');
+	await settledShot(page, testInfo.outputPath('commission-upload-lost-race.png'));
+});
+
 test('Add to gallery uploads a new piece and links it to the entry', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions');
