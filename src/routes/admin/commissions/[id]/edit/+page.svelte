@@ -34,7 +34,8 @@
 		notes: null,
 		requestedOn: null,
 		acceptedOn: null,
-		deliveredOn: null
+		deliveredOn: null,
+		piece: null
 	});
 
 	let confirmingDelete = $state(false);
