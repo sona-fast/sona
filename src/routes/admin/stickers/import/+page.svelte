@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { deserialize } from '$app/forms';
 	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { Smile, Loader2, CheckCircle2, AlertTriangle, Film, ArrowLeft, ArrowRight, Download, RefreshCw, Check, Plus, UserPlus, Info, Shield, Palette } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -214,6 +214,8 @@
 		});
 	}
 
+	let importButton = $state<HTMLButtonElement>();
+
 	async function runImport() {
 		if (importing) return;
 		const eligible = data.candidates.filter((c) => !perSticker[c.index]?.excluded);
@@ -225,6 +227,7 @@
 		let updated = 0;
 		let skipped = 0;
 		const failedItems: FailedItem[] = [];
+		let cancelled = false;
 
 		try {
 			for (let i = 0; i < eligible.length; i += BATCH_SIZE) {
@@ -248,11 +251,15 @@
 				// Appending to a published pack that credits a Keep private artist asks
 				// first (SONA-236). Make public resends this batch with confirmUnhide,
 				// which covers only the artists the dialog named: a later batch that
-				// credits another private artist asks again. Cancel stops the import
-				// with what's in so far.
+				// credits another private artist asks again. Cancel stops the import:
+				// with nothing in yet the review stays as it was, else it shows what
+				// earlier batches saved.
 				const names = des.type === 'failure' ? (des.data as { confirmUnhide?: string[] } | undefined)?.confirmUnhide : undefined;
 				if (Array.isArray(names)) {
-					if (!(await askUnhide(names))) break;
+					if (!(await askUnhide(names))) {
+						cancelled = true;
+						break;
+					}
 					fd.set('confirmUnhide', '1');
 					des = deserialize(await (await fetch('?/importBatch', { method: 'POST', body: fd })).text());
 				}
@@ -273,6 +280,12 @@
 				progress = { done: Math.min(i + slice.length, eligible.length), total: eligible.length };
 			}
 
+			if (cancelled) {
+				if (imported > 0 || updated > 0 || skipped > 0 || failedItems.length > 0) {
+					result = { imported, updated, skipped, failed: failedItems.length, items: failedItems };
+				}
+				return;
+			}
 			result = { imported, updated, skipped, failed: failedItems.length, items: failedItems };
 			if (failedItems.length === 0) {
 				const parts = [m.admin_import_toast_imported({ count: imported })];
@@ -290,6 +303,12 @@
 			}
 		} finally {
 			importing = false;
+			// The dialog closed while the button was disabled, so its own focus
+			// return had nowhere to go.
+			if (cancelled && !result) {
+				await tick();
+				importButton?.focus();
+			}
 		}
 	}
 </script>
@@ -499,7 +518,7 @@
 			</div>
 			<div class="action-btns">
 				<a class="btn btn-outline" href="/admin/stickers">{m.admin_cancel()}</a>
-				<button class="btn btn-primary" onclick={() => (showConfirm = true)} disabled={eligibleCount === 0 || importing}>
+				<button class="btn btn-primary" bind:this={importButton} onclick={() => (showConfirm = true)} disabled={eligibleCount === 0 || importing}>
 					{#if importing}
 						<Loader2 size={16} class="spin" /> {m.admin_fursuit_importing()} {progress.done} / {progress.total}
 					{:else}
