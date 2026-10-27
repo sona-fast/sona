@@ -18,6 +18,7 @@ import {
 	type CommissionStatus
 } from '$lib/commissions';
 import { CURRENCY_OTHER, CURRENCY_ROW_MAX } from '$lib/currencies';
+import { getLocale } from '$lib/paraglide/runtime';
 import * as m from '$lib/paraglide/messages';
 
 // Commission ledger (SONA-236): form parsing, the reference checks, the writes,
@@ -137,7 +138,9 @@ export function parseCommissionForm(
 		if (currencyFractionDigits(currency) === null) {
 			errors.currency = m.admin_commissions_error_currency_code();
 		} else {
-			const parsed = parsePrice(price, currency);
+			// Read in the language the admin pages render in, which decides whether
+			// 1,000 or 1.000 is a thousand.
+			const parsed = parsePrice(price, currency, getLocale());
 			if (parsed.ok) priceMinor = parsed.minor;
 			else if (parsed.reason === 'format') errors.price = m.admin_commissions_error_price_format();
 			else if (parsed.digits === 0) errors.price = m.admin_commissions_error_price_no_decimals({ currency });
