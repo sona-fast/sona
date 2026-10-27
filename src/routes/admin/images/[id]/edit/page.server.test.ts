@@ -11,6 +11,7 @@ import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
 import { load, actions } from './+page.server';
 
 import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
+import { PUBLIC_WORK_TABLES } from '$lib/server/test/public-work-tables';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -44,6 +45,7 @@ function makeDb() {
 			created_at TEXT NOT NULL DEFAULT ''
 		);
 	`);
+	sqlite.exec(PUBLIC_WORK_TABLES);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
@@ -429,16 +431,21 @@ describe('admin image edit — save with a Keep private artist', () => {
 		expect(await isPrivate(db)).toBe(true);
 	});
 
-	it('saves a published variant without asking', async () => {
+	it('asks before publishing a variant too, since its page is served', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(artists).values({ id: 1, name: 'Quill', ledgerPrivate: true });
 		await seedImage(db, 9, false);
 		await seedImage(db, 5, false);
 
-		const result = await save(platform, { parentImageId: '9' });
+		const refused = await save(platform, { parentImageId: '9' });
+		expect(refused).toMatchObject({ status: 409, data: { confirmUnhide: ['Quill'] } });
+		expect(await imageRow(db)).toEqual({ title: 'Art', published: false });
+		expect(await isPrivate(db)).toBe(true);
+
+		const result = await save(platform, { parentImageId: '9', confirmUnhide: '1' });
 		expect((result as { status: number }).status).toBe(302);
 		expect(await imageRow(db)).toEqual({ title: 'Renamed', published: true });
-		expect(await isPrivate(db)).toBe(true);
+		expect(await isPrivate(db)).toBe(false);
 	});
 });
 

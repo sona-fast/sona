@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
+import { PUBLIC_WORK_TABLES } from '$lib/server/test/public-work-tables';
 import { getDb } from '$lib/server/db';
 import { clearSettingsCache } from '$lib/server/settings';
 import { vrTabEnabled, clearVrTabCache } from '$lib/server/vr-gate';
@@ -52,10 +53,12 @@ function makeDb() {
 		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ledger_private INTEGER NOT NULL DEFAULT 0);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT,
-			title TEXT, file_size INTEGER, nsfw INTEGER NOT NULL DEFAULT 0, created_at TEXT
+			title TEXT, file_size INTEGER, nsfw INTEGER NOT NULL DEFAULT 0, created_at TEXT,
+			artist_id INTEGER, published INTEGER NOT NULL DEFAULT 0, parent_image_id INTEGER
 		);
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
+	sqlite.exec(PUBLIC_WORK_TABLES);
 	const d1 = makeD1(sqlite);
 	// IMAGES makes the R2 provider constructible so validateAvatarMedia can
 	// recognise self-hosted /img/… media URLs as owned.

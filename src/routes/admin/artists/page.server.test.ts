@@ -20,6 +20,7 @@ vi.mock('$lib/server/registry', async (importActual) => ({
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { PUBLIC_WORK_TABLES } from '$lib/server/test/public-work-tables';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -40,6 +41,7 @@ function makeDb() {
 	);
 	CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 	CREATE TABLE commissions (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
+	sqlite.exec(PUBLIC_WORK_TABLES);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
@@ -915,13 +917,14 @@ describe('update action — the keep-private flag', () => {
 		expect((await read(db, row.id))!.ledgerPrivate).toBe(false);
 	});
 
-	it('saves Keep private for an artist whose only piece is a variant', async () => {
+	it('saves the box unticked for an artist whose only piece is a published variant', async () => {
 		const { db, platform } = makeDb();
 		const id = await seedArtist(db, 'Quill');
+		// A variant's own page is served and credits its artist.
 		await db.run(sql`INSERT INTO images (artist_id, published, parent_image_id) VALUES (${id}, 1, 99)`);
 
 		await save(platform, id, { ledgerPrivate: 'on' });
-		expect((await read(db, id))!.ledgerPrivate).toBe(true);
+		expect((await read(db, id))!.ledgerPrivate).toBe(false);
 	});
 
 	it('still keeps a flagged artist private when their only piece is a draft', async () => {

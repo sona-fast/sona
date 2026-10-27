@@ -251,8 +251,8 @@ export const actions = {
 		}
 
 		// A published piece by a Keep private artist makes them public, so ask
-		// first (SONA-236). A variant isn't public work on its own.
-		const { refusal, unhide } = await checkUnhide(db, data, published && !parentImageId ? [resolvedArtistId] : []);
+		// first (SONA-236). A variant too: its own page is served and credits them.
+		const { refusal, unhide } = await checkUnhide(db, data, published ? [resolvedArtistId] : []);
 		if (refusal) return refusal;
 
 		// Update image

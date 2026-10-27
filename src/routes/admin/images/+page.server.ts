@@ -191,15 +191,15 @@ export const actions = {
 		if (!id) return fail(400, { error: 'Image ID is required' });
 
 		const row = await db
-			.select({ published: images.published, artistId: images.artistId, parentImageId: images.parentImageId })
+			.select({ published: images.published, artistId: images.artistId })
 			.from(images)
 			.where(eq(images.id, id))
 			.get();
 		if (!row) return fail(404, { error: 'Image not found' });
 
 		// Publishing a piece by a Keep private artist makes them public, so ask
-		// first (SONA-236). A variant isn't public work on its own.
-		const { refusal, unhide } = await checkUnhide(db, data, !row.published && !row.parentImageId ? [row.artistId] : []);
+		// first (SONA-236). A variant too: its own page is served and credits them.
+		const { refusal, unhide } = await checkUnhide(db, data, !row.published ? [row.artistId] : []);
 		if (refusal) return refusal;
 
 		await db.update(images).set({ published: !row.published }).where(eq(images.id, id));

@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { isTelegramEnabled } from '$lib/server/telegram';
-import { listPacks, clearStickerTabCache, packCreditedArtistIds } from '$lib/server/stickers';
+import { listPacks, clearStickerTabCache } from '$lib/server/stickers';
 import { deletePack } from '$lib/server/sticker-import';
 import { stickerPacks, stickers } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -31,7 +31,9 @@ export const actions = {
 		if (!row) return fail(404, { error: 'Pack not found.' });
 
 		// Publishing a pack that credits a Keep private artist makes them public,
-		// so ask first (SONA-236).
+		// so ask first (SONA-236). Both the manager and every stored sticker's
+		// artist: a re-import into the pack can save stickers under another
+		// artist, and the public pages show what's stored.
 		let credited: (number | null)[] = [];
 		if (!row.published) {
 			const stickerArtists = await db
@@ -39,7 +41,7 @@ export const actions = {
 				.from(stickers)
 				.where(eq(stickers.packId, id))
 				.all();
-			credited = packCreditedArtistIds(row.managerArtistId, stickerArtists.map((s) => s.artistId));
+			credited = [row.managerArtistId, ...stickerArtists.map((s) => s.artistId)];
 		}
 		const { refusal, unhide } = await checkUnhide(db, data, credited);
 		if (refusal) return refusal;

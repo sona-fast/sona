@@ -249,10 +249,9 @@ export const actions = {
 		}
 
 		// A new published piece by a Keep private artist makes them public, so ask
-		// first (SONA-236). Variants added to an existing piece aren't public work
-		// on their own.
+		// first (SONA-236). A variant too: its own page is served and credits them.
 		const willPublish = entry ? data.get('commissionVisibility') === 'public' : published;
-		const { refusal, unhide } = await checkUnhide(db, data, willPublish && !existingParent ? [resolvedArtistId] : []);
+		const { refusal, unhide } = await checkUnhide(db, data, willPublish ? [resolvedArtistId] : []);
 		if (refusal) return refusal;
 
 		const shared = {
@@ -323,7 +322,6 @@ export const actions = {
 				const parentRow = await db.insert(images).values(parentValues).returning({ id: images.id }).get();
 				parentDbId = parentRow.id;
 			}
-			await clearKeepPrivate(db, unhide);
 			await attachTagsAndCharacters(db, parentDbId, tagNames, characterIds);
 			variantTiles = tiles.filter((_, i) => i !== parentIndex).map((tile, i) => ({ tile, n: i + 1 }));
 		}
@@ -351,6 +349,8 @@ export const actions = {
 			await attachTagsAndCharacters(db, variantRow.id, tagNames, characterIds);
 			variantIds.push(variantRow.id);
 		}
+		// Once every piece is in, so a variant added to an existing piece counts.
+		await clearKeepPrivate(db, unhide);
 
 		// Optionally designate the primary (parent) image as the owner character's
 		// reference sheet — same semantics as the edit-page control.

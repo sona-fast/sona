@@ -26,7 +26,7 @@ import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
 import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registry-submissions';
 import { getRawSetting, setRawSetting, getSettings } from '$lib/server/settings';
 import { cleanMessage } from '$lib/server/metrics';
-import { artistHasPublicWork, artistIsLedgerOnly } from '$lib/server/artist-visibility';
+import { artistIsLedgerOnly, artistShownPublicly } from '$lib/server/artist-visibility';
 import { parseDismissed, addDismissed } from '$lib/server/registry-dismissals';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -80,7 +80,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			globalId: artists.globalId,
 			aliases: artists.aliases,
 			ledgerPrivate: artists.ledgerPrivate,
-			hasPublicWork: sql<number>`${artistHasPublicWork(artists.id)}`,
+			hasPublicWork: sql<number>`${artistShownPublicly(artists.id)}`,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
 			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`,
@@ -268,7 +268,7 @@ export const actions = {
 				patreonUrl: artists.patreonUrl,
 				globalId: artists.globalId,
 				storedPrivate: artists.ledgerPrivate,
-				hasPublicWork: sql<number>`${artistHasPublicWork(artists.id)}`,
+				hasPublicWork: sql<number>`${artistShownPublicly(artists.id)}`,
 				// Check against the flag this save will store, so ticking it in this
 				// same save already skips the avatar lookup. A registry-linked artist
 				// can only have the flag cleared, never set (stored AND posted): a

@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
+import { PUBLIC_WORK_TABLES } from '$lib/server/test/public-work-tables';
 import { clearSettingsCache } from '$lib/server/settings';
 
 import { actions } from './+page.server';
@@ -49,6 +50,7 @@ function makeDb() {
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
 	sqlite.prepare("INSERT INTO artists (id, name, ledger_private, created_at) VALUES (2, ?, 1, '')").run('Quill');
+	sqlite.exec(PUBLIC_WORK_TABLES);
 	const d1 = makeD1(sqlite);
 	return { sqlite, platform: { env: { DB: d1, UPLOADTHING_TOKEN: utToken } } as unknown as App.Platform };
 }

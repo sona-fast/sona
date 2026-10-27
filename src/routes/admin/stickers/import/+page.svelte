@@ -201,7 +201,6 @@
 	// Already-imported rows ride along too: the server re-syncs their metadata in place
 	// (no re-download) or skips them if unchanged. On a hard/network error mid-loop we
 	// stop cleanly; already-stored batches stay (re-run to resume — server dedupes).
-	let confirmUnhide = false;
 	let unhideAsk = $state<{ names: string[]; settle: (ok: boolean) => void } | null>(null);
 	function askUnhide(names: string[]): Promise<boolean> {
 		return new Promise((resolve) => {
@@ -221,7 +220,6 @@
 		if (eligible.length === 0) return;
 
 		importing = true;
-		confirmUnhide = false;
 		progress = { done: 0, total: eligible.length };
 		let imported = 0;
 		let updated = 0;
@@ -246,15 +244,15 @@
 				if (managerArtistId !== '') fd.set('managerArtistId', String(managerArtistId));
 				fd.set('items', JSON.stringify(items));
 
-				if (confirmUnhide) fd.set('confirmUnhide', '1');
 				let des = deserialize(await (await fetch('?/importBatch', { method: 'POST', body: fd })).text());
 				// Appending to a published pack that credits a Keep private artist asks
-				// first (SONA-236). Make public resends this batch and every later one
-				// with confirmUnhide; Cancel stops the import with what's in so far.
+				// first (SONA-236). Make public resends this batch with confirmUnhide,
+				// which covers only the artists the dialog named: a later batch that
+				// credits another private artist asks again. Cancel stops the import
+				// with what's in so far.
 				const names = des.type === 'failure' ? (des.data as { confirmUnhide?: string[] } | undefined)?.confirmUnhide : undefined;
 				if (Array.isArray(names)) {
 					if (!(await askUnhide(names))) break;
-					confirmUnhide = true;
 					fd.set('confirmUnhide', '1');
 					des = deserialize(await (await fetch('?/importBatch', { method: 'POST', body: fd })).text());
 				}

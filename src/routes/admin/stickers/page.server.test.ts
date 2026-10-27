@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
+import { PUBLIC_WORK_TABLES } from '$lib/server/test/public-work-tables';
 import { getDb } from '$lib/server/db';
 import { stickerTabEnabled, clearStickerTabCache } from '$lib/server/stickers';
 
@@ -21,6 +22,7 @@ function makeDb() {
 		CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, pack_id INTEGER NOT NULL, artist_id INTEGER);
 		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ledger_private INTEGER NOT NULL DEFAULT 0);
 	`);
+	sqlite.exec(PUBLIC_WORK_TABLES);
 	const d1 = makeD1(sqlite);
 	return { sqlite, platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
@@ -88,19 +90,21 @@ describe('togglePublished — Keep private artists', () => {
 		expect(isPrivate(sqlite, 1)).toBe(0);
 	});
 
-	it('asks about the manager, not the sticker artists, when the pack has one', async () => {
+	it('asks about the manager and every stored sticker artist', async () => {
 		const { sqlite, platform } = makeDb();
+		// A pack managed by Moth holding a sticker saved under Quill, as a
+		// re-import into the pack can leave it. The public pages show both.
 		seed(sqlite, 0, 3);
 
-		const result = await toggle(platform, { id: '1' });
-		expect(result).toMatchObject({ status: 409, data: { confirmUnhide: ['Moth'] } });
+		const result = (await toggle(platform, { id: '1' })) as { status: number; data: { confirmUnhide: string[] } };
+		expect(result.status).toBe(409);
+		expect([...result.data.confirmUnhide].sort()).toEqual(['Moth', 'Quill']);
 		expect(published(sqlite)).toBe(0);
 
 		await toggle(platform, { id: '1', confirmUnhide: '1' });
 		expect(published(sqlite)).toBe(1);
 		expect(isPrivate(sqlite, 3)).toBe(0);
-		// The manager is the pack's credit, so the sticker artist stays private.
-		expect(isPrivate(sqlite, 1)).toBe(1);
+		expect(isPrivate(sqlite, 1)).toBe(0);
 	});
 
 	it('unpublishes without asking', async () => {

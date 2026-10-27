@@ -10,6 +10,7 @@ import { REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
 import { actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { PUBLIC_WORK_TABLES } from '$lib/server/test/public-work-tables';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -44,6 +45,7 @@ function makeDb() {
 			aliases TEXT, avatar_resolved_at TEXT, ledger_private INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 		);
 	`);
+	sqlite.exec(PUBLIC_WORK_TABLES);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
@@ -171,14 +173,19 @@ describe('admin images — togglePublished with a Keep private artist', () => {
 		expect(await isPrivate(db)).toBe(false);
 	});
 
-	it('publishes a variant without asking, since a variant is not public work', async () => {
+	it('asks before publishing a variant too, since its page is served', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, { published: false, parentImageId: 9 });
 
-		const result = await actions.togglePublished({ request: form({ id: '5' }), platform } as never);
+		const refused = await actions.togglePublished({ request: form({ id: '5' }), platform } as never);
+		expect(refused).toMatchObject({ status: 409, data: { confirmUnhide: ['Quill'] } });
+		expect(await published(db)).toBe(false);
+		expect(await isPrivate(db)).toBe(true);
+
+		const result = await actions.togglePublished({ request: form({ id: '5', confirmUnhide: '1' }), platform } as never);
 		expect(result).toEqual({ success: true });
 		expect(await published(db)).toBe(true);
-		expect(await isPrivate(db)).toBe(true);
+		expect(await isPrivate(db)).toBe(false);
 	});
 
 	it('unpublishes without asking', async () => {
