@@ -16,7 +16,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 // Readable whether or not the gate is open. A closed gate shows the entry
 // read-only, with Delete entry still offered.
-export const load: PageServerLoad = async ({ params, platform, request }) => {
+export const load: PageServerLoad = async ({ params, platform, request, url }) => {
 	const id = parseId(params.id);
 	if (id === null) error(404, 'Entry not found');
 	const db = getDb(platform!.env.DB);
@@ -25,7 +25,14 @@ export const load: PageServerLoad = async ({ params, platform, request }) => {
 		loadCommissionChoices(db),
 		commissionGateView(db, platform?.env)
 	]);
-	if (!entry) error(404, 'Entry not found');
+	if (!entry) {
+		// After a save without JavaScript, the page renders the action's answer:
+		// an entry deleted elsewhere keeps the form, with the alert and what was
+		// typed, rather than a 404 page. A delete of it is done either way.
+		if (request.method === 'POST' && url.searchParams.has('/delete')) redirect(303, '/admin/commissions');
+		if (request.method !== 'POST' || !gate.open) error(404, 'Entry not found');
+		return { entry: null, ...choices, gate, localeCurrency: localeCurrency(request.headers.get('accept-language')) };
+	}
 	return { entry, ...choices, gate, localeCurrency: localeCurrency(request.headers.get('accept-language')) };
 };
 
@@ -55,7 +62,7 @@ export const actions = {
 				: 'stale';
 		if (result === 'stale') {
 			// Stale, or deleted since the form loaded: both leave nothing to save.
-			if (!(await loadCommission(db, id))) return fail(404, { missing: true });
+			if (!(await loadCommission(db, id))) return fail(404, { missing: true, ...sent() });
 			return fail(409, { stale: true, ...sent() });
 		}
 		redirect(303, '/admin/commissions');
