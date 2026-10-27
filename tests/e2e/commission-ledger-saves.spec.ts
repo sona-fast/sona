@@ -109,9 +109,13 @@ test('an amount refused for its currency saves once the currency takes decimals'
 	await expect(amount).toBeFocused();
 	await expect(amount).toHaveValue('10.5');
 
-	// The hint follows the currency at once; the server checks again on Save.
+	// The hint follows the currency at once, and the JPY refusal goes with the
+	// JPY pick; the server checks again on Save.
 	await pickCurrency(page, 'USD');
 	await expect(page.locator('#ce-price-hint')).toHaveText(/^USD amounts can have up to 2 decimal places/);
+	await expect(page.getByText("JPY amounts don't use decimals")).toHaveCount(0);
+	await expect(amount).not.toHaveAttribute('aria-invalid', 'true');
+	await expect(amount).toHaveAccessibleDescription(/^USD amounts can have up to 2 decimal places/);
 	await settledShot(page, testInfo.outputPath('commission-edit-currency-changed.png'));
 	await page.getByRole('button', { name: 'Save changes' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
@@ -119,6 +123,24 @@ test('an amount refused for its currency saves once the currency takes decimals'
 	await open(page, `/admin/commissions/${id}/edit`);
 	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
 	await expect(page.getByLabel('Amount')).toHaveValue('10.50');
+});
+
+test('an amount that is not a number stays refused when the currency changes', async ({ page, baseURL }) => {
+	await loginRetrying(page, PASSWORD);
+	const id = await createEntry(page, baseURL!, 'E2E unreadable amount');
+	await open(page, `/admin/commissions/${id}/edit`);
+
+	await pickCurrency(page, 'JPY');
+	const amount = page.getByLabel('Amount');
+	await amount.fill('about 10');
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	const error = page.locator('#ce-price-err');
+	await expect(error).toHaveText(/^Enter the amount as a number/);
+
+	// Wrong in any currency, so it stays until the next save.
+	await pickCurrency(page, 'USD');
+	await expect(error).toHaveText(/^Enter the amount as a number/);
+	await expect(amount).toHaveAttribute('aria-invalid', 'true');
 });
 
 test('a grouped amount and a full-width one save as plain numbers', async ({ page, baseURL }, testInfo) => {
