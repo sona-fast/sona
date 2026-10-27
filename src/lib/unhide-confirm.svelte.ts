@@ -1,3 +1,4 @@
+import { tick } from 'svelte';
 import type { ActionResult } from '@sveltejs/kit';
 
 /**
@@ -36,7 +37,15 @@ export function createUnhideConfirm() {
 			field.remove();
 		},
 		cancel() {
+			const p = pending;
 			pending = null;
+			// A submit button the page disables while the request is out loses
+			// focus, so the dialog's own focus return finds nothing to go back to.
+			// Once it has closed, put focus back on the button that submitted.
+			void tick().then(() => {
+				const active = document.activeElement;
+				if ((!active || active === document.body) && p?.submitter?.isConnected) p.submitter.focus();
+			});
 		}
 	};
 }

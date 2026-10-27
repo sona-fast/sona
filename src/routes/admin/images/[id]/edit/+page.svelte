@@ -35,6 +35,13 @@
 	let saving = $state(false);
 	// Publishing a piece by a Keep private artist asks first (SONA-236).
 	const unhide = createUnhideConfirm();
+	// Bound, not value={data...}: Svelte rewrites a plain value or checked from
+	// data whenever the form's other attributes update, so `saving` flipping would
+	// put back the saved title, Featured, and order. The make-public dialog then
+	// lost those edits on Cancel and resubmitted the old values on Make public.
+	let title = $state(untrack(() => data.image.title));
+	let featured = $state(untrack(() => data.image.featured));
+	let featuredOrder = $state(untrack(() => data.image.featuredOrder));
 	let selectedParentId = $state(String(data.image.parentImageId ?? ''));
 	// The reference button swaps between set/clear on toggle; move focus back to it
 	// so keyboard/screen-reader users hear the new state instead of losing focus.
@@ -188,6 +195,9 @@
 		artistList = data.artists.map((a) => ({ id: a.id, name: a.name }));
 		selectedParentId = String(data.image.parentImageId ?? '');
 		isPrivate = !data.image.published;
+		title = data.image.title;
+		featured = data.image.featured;
+		featuredOrder = data.image.featuredOrder;
 		// Both describe the PREVIOUS image: a send, and a reference sheet cleared.
 		sentPrivate = false;
 		referenceCleared = false;
@@ -574,7 +584,7 @@
 		}} class="edit-form">
 			<label>
 				<span>{m.admin_field_title()}</span>
-				<input type="text" class="input" name="title" value={data.image.title} required />
+				<input type="text" class="input" name="title" bind:value={title} required />
 			</label>
 
 			<fieldset class="artist-section">
@@ -927,13 +937,13 @@
 			</label>
 
 			<label class="checkbox-label">
-				<input type="checkbox" name="featured" checked={data.image.featured} />
+				<input type="checkbox" name="featured" bind:checked={featured} />
 				<span>{m.admin_field_featured()}</span>
 			</label>
 
 			<label>
 				<span>{m.admin_field_featured_order()}</span>
-				<input type="number" class="input" name="featuredOrder" value={data.image.featuredOrder ?? ''} />
+				<input type="number" class="input" name="featuredOrder" bind:value={featuredOrder} />
 				<small class="hint">{m.admin_field_featured_order_hint()}</small>
 			</label>
 

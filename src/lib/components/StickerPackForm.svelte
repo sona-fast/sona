@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
 	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
@@ -135,6 +136,12 @@
 	let saving = $state(false);
 	// Publishing a pack that credits a Keep private artist asks first (SONA-236).
 	const unhide = createUnhideConfirm();
+	// Bound, not value={pack...}: Svelte rewrites a plain value from the pack
+	// whenever the form's other attributes update, so `saving` flipping put the
+	// saved name back, and the make-public dialog lost the edit on Cancel and
+	// resubmitted the old name on Make public.
+	let packName = $state(untrack(() => pack?.name ?? ''));
+	let telegramUrl = $state(untrack(() => pack?.telegramUrl ?? ''));
 
 	// Returns the stored URL, or the response status so the caller can name the
 	// reason in the error banner instead of a bare "failed".
@@ -357,7 +364,7 @@
 		<div class="fields">
 			<label>
 				<span>{m.admin_pack_name()}</span>
-				<input type="text" class="input" name="name" value={pack?.name ?? ''} required placeholder={m.admin_pack_name_placeholder()} />
+				<input type="text" class="input" name="name" bind:value={packName} required placeholder={m.admin_pack_name_placeholder()} />
 			</label>
 			<label>
 				<span>{m.admin_pack_manager({ ownerName })}</span>
@@ -380,7 +387,7 @@
 			</label>
 			<label>
 				<span>{m.admin_pack_telegram_link()}</span>
-				<input type="text" class="input" name="telegramUrl" value={pack?.telegramUrl ?? ''} placeholder="https://t.me/addstickers/…" />
+				<input type="text" class="input" name="telegramUrl" bind:value={telegramUrl} placeholder="https://t.me/addstickers/…" />
 			</label>
 			<div class="pub-row">
 				<!-- No hidden fallback: an unchecked checkbox just omits `published`,
