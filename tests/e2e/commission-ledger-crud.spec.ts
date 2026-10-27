@@ -850,14 +850,19 @@ test('an out-of-date save is refused, and Reload entry brings the typed note bac
 
 	const alert = page.getByRole('alert').filter({ hasText: 'changed after you opened it' });
 	await expect(alert).toBeVisible();
-	await expect(alert).toContainText('Your note comes with it, but your changes to Payment don');
+	await expect(alert).toContainText("Your note comes with it, but your changes to Payment don't, so enter those again.");
 	await expect(alert).toBeFocused();
 	const texts = await page.evaluate(() => (window as unknown as { alertTexts: string[] }).alertTexts);
 	expect(texts.length, JSON.stringify(texts)).toBeGreaterThan(0);
 	expect(texts[0]).toContain('your changes to Payment');
 	expect(new Set(texts).size, JSON.stringify(texts)).toBe(1);
 	await page.getByText('Why did this happen?').click();
-	await expect(page.getByText('Another tab or device changed this entry')).toBeVisible();
+	await expect(
+		page.getByText(
+			'Another tab or device changed this entry after you opened it. For example, Add to gallery marks an entry Delivered. Saving this older copy would undo that change.',
+			{ exact: true }
+		)
+	).toBeVisible();
 	await settledShot(page, testInfo.outputPath('commission-entry-stale.png'));
 
 	await page.getByRole('button', { name: 'Reload entry' }).click();
