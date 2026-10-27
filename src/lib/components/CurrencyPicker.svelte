@@ -78,6 +78,9 @@
 	async function openSearch() {
 		open = true;
 		query = '';
+		// The effect above only resets on a new match list, and an empty query
+		// matches the same list it closed on.
+		active = 0;
 		await tick();
 		searchInput?.focus();
 	}
