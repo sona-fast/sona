@@ -634,7 +634,14 @@
 			// A save redirects to the ledger, which enhance follows; a refusal stays
 			// here with what the owner typed. An error is left out: update() would
 			// render the error page in place of the form and lose the typing.
-			if (result.type === 'redirect') saved = true;
+			if (result.type === 'redirect') {
+				saved = true;
+				// The edit page's own data catches up with the save before leaving.
+				// A Back that lands while the ledger is still loading shows the page
+				// SvelteKit already holds instead of loading it again, and that copy
+				// must not be the one from before the save.
+				if (isEdit) await invalidateAll();
+			}
 			if (result.type !== 'error') await update({ reset: false });
 			saving = false;
 			if (refusal) {
