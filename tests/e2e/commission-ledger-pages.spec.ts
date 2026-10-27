@@ -554,3 +554,25 @@ test('without JavaScript, an artist that no longer exists is refused with the ty
 	expect(html).toMatch(/id="ce-title"[^>]*value="E2E gone artist"/);
 	expect(html).toContain('E2E gone note</textarea>');
 });
+
+// Closing the search on an empty query and opening it again shows the same
+// list, scrolled to the top. The highlight has to start there too, or Enter
+// picks a currency the owner can't see.
+test('reopening Other currency starts on the first currency again', async ({ page }, testInfo) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/commissions/new');
+	await waitForHydration(page);
+	const other = page.getByRole('button', { name: 'Other currency' });
+	const find = page.getByRole('combobox', { name: 'Find a currency' });
+	const options = page.getByRole('listbox', { name: 'Find a currency' }).getByRole('option');
+
+	await other.click();
+	for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+	await expect(find).toHaveAttribute('aria-activedescendant', (await options.nth(3).getAttribute('id'))!);
+	await page.keyboard.press('Escape');
+	await expect(other).toBeFocused();
+
+	await other.click();
+	await expect(find).toHaveAttribute('aria-activedescendant', (await options.first().getAttribute('id'))!);
+	await settledShot(page, testInfo.outputPath('currency-search-reopened.png'));
+});
