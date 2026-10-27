@@ -183,7 +183,7 @@ function normalizeAmount(price: string, locale: string): { whole: string; fracti
 	const text = price.normalize('NFKC').replace(/[\s  ]/g, ' ').replace(/’/g, "'").trim();
 	if (!/^\d+(?:[ ',.]\d+)*$/.test(text)) return null;
 	const runs = text.split(/[ ',.]/);
-	const seps = text.match(/[ ',.]/g) ?? [];
+	const seps: string[] = text.match(/[ ',.]/g) ?? [];
 	const marks = seps.filter((s) => s === ',' || s === '.');
 	const last = seps.length - 1;
 
