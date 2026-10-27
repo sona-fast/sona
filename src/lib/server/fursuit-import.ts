@@ -138,6 +138,9 @@ export async function getImportCandidates(opts: {
 	return { candidates, capped: result.capped };
 }
 
+/** How long one photo download, headers and body, may take. */
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+
 /**
  * Import the selected posts for a character. Re-fetches candidates server-side
  * (so the client can't import arbitrary/restricted posts), then downloads +
@@ -185,8 +188,18 @@ export async function importFursuitPhotos(opts: {
 			result.items.push({ postId: photo.id, status: 'skipped' });
 			continue;
 		}
+		// One photo that stalls mid-download fails its own row instead of holding
+		// the whole import open. The bound covers the body too, which the
+		// 10 MiB cap keeps short.
+		const download = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
+		// Which step a failure came from: only a download-stage abort is this
+		// timeout, never storage.put's own.
+		let stage: 'download' | 'store' = 'download';
 		try {
-			const res = await fetchFn(photo.imageUrl, { headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent } });
+			const res = await fetchFn(photo.imageUrl, {
+				headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent },
+				signal: download
+			});
 			if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
 			const contentType = res.headers.get('content-type') ?? 'image/jpeg';
 			// Only self-host safe raster images. A non-image (or SVG) response would be
@@ -196,6 +209,7 @@ export async function importFursuitPhotos(opts: {
 			// verify the actual leading bytes match an allowed raster type (M7) -
 			// the remote Content-Type can lie.
 			const bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
+			stage = 'store';
 			if (!isAllowedImageType(sniffImageType(bytes))) {
 				throw new Error('image contents do not match an allowed raster type');
 			}
@@ -234,10 +248,26 @@ export async function importFursuitPhotos(opts: {
 			// ("jpeg: segment 0x…") goes to the log.
 			const unscrubbable = isUnscrubbable(e);
 			if (unscrubbable) console.warn('fursuit import: unscrubbable photo', photo.id, e);
+			// The abort's own wording ("The operation was aborted due to timeout")
+			// doesn't say which step gave up. A runtime may reject with its own
+			// AbortError/TimeoutError rather than the signal's reason, so accept
+			// either, but only from the download stage: a storage provider's
+			// timeout must not read as this one.
+			const timedOut =
+				download.aborted &&
+				stage === 'download' &&
+				(e === download.reason ||
+					(e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')));
 			result.items.push({
 				postId: photo.id,
 				status: 'failed',
-				error: unscrubbable ? UNSCRUBBABLE_IMPORT_MESSAGE : e instanceof Error ? e.message : String(e)
+				error: unscrubbable
+					? UNSCRUBBABLE_IMPORT_MESSAGE
+					: timedOut
+						? `download timed out after ${DOWNLOAD_TIMEOUT_MS / 1000}s`
+						: e instanceof Error
+							? e.message
+							: String(e)
 			});
 		}
 	}

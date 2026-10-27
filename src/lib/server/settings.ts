@@ -443,7 +443,7 @@ export async function getRawSettings(
 
 /** The one-statement upsert of a site_settings row, built but not run, so
  * setRawSetting can await it alone and saveSettings can batch many of them. */
-function upsertSetting(db: Database, key: string, value: string) {
+export function upsertSetting(db: Database, key: string, value: string) {
 	return db
 		.insert(siteSettings)
 		.values({ key, value })

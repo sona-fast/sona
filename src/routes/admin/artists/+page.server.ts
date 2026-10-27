@@ -8,7 +8,7 @@ import {
 	isOurAvatarUrl,
 	shouldWriteAvatar
 } from '$lib/server/avatar';
-import { sanitizeText } from '$lib/server/validate';
+import { sanitizeText, parsePageParam } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	isRegistryEnabled,
@@ -37,7 +37,7 @@ const DISMISSED_KEY = 'registryDismissedSubmissions';
 export const load: PageServerLoad = async ({ platform, url }) => {
 	const db = getDb(platform!.env.DB);
 
-	const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+	const page = parsePageParam(url.searchParams.get('page'));
 	const perPage = 25;
 	// Server-side name search so it matches across the WHOLE set, not just the
 	// current page. SQLite LIKE is case-insensitive for ASCII. Also match former
