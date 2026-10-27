@@ -46,9 +46,10 @@ function makeDb() {
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
 
-function loadEvent(platform: App.Platform, q?: string) {
+function loadEvent(platform: App.Platform, q?: string, page?: string) {
 	const url = new URL('http://localhost/admin/artists');
 	if (q !== undefined) url.searchParams.set('q', q);
+	if (page !== undefined) url.searchParams.set('page', page);
 	return { platform, url } as never;
 }
 
@@ -1191,6 +1192,21 @@ describe('refreshAvatars action — backfill (#187)', () => {
 		expect(hot!.avatarResolvedAt).toBeTruthy();
 		const noSocial = await db.select().from(schema.artists).where(eq(schema.artists.name, 'NoSocial')).get();
 		expect(noSocial!.avatarResolvedAt).toBeNull(); // untouched
+	});
+});
+
+describe('admin artists load — a junk ?page= serves page 1', () => {
+	// Number('abc') is NaN, which reached the OFFSET and the pager.
+	it('serves page 1 for ?page=abc', async () => {
+		const { db, platform } = makeDb();
+		await seedArtist(db, 'Kestrel');
+
+		const data = (await load(loadEvent(platform, undefined, 'abc'))) as unknown as {
+			page: number;
+			artists: { name: string }[];
+		};
+		expect(data.page).toBe(1);
+		expect(data.artists.map((a) => a.name)).toEqual(['Kestrel']);
 	});
 });
 

@@ -2,13 +2,13 @@ import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { tags, imageTags } from '$lib/server/db/schema';
 import { eq, sql } from 'drizzle-orm';
-import { sanitizeTag } from '$lib/server/validate';
+import { sanitizeTag, parsePageParam } from '$lib/server/validate';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
 	const db = getDb(platform!.env.DB);
 
-	const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+	const page = parsePageParam(url.searchParams.get('page'));
 	const perPage = 25;
 
 	const totalResult = await db

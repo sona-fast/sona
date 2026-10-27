@@ -929,6 +929,8 @@
 	"admin_settings_registry_connect_desc": "共有レジストリは、フォークごとに同じアーティストを入力し直さなくて済むようにする、審査制・任意参加のアーティスト名簿です。レジストリ管理者から招待トークンをもらってここに貼り付けると、このサイトが登録され、キーが保存されます。CLIも再デプロイも不要です。",
 	"admin_settings_invite_token": "招待トークン",
 	"admin_settings_invite_token_placeholder": "管理者から受け取ったトークンを貼り付け",
+	"admin_settings_invite_error_used": "この招待トークンは使用済みか、取り消し済みです。レジストリ管理者に新しいトークンを依頼してください。",
+	"admin_settings_invite_error_invalid": "レジストリがこの招待トークンを受け付けませんでした。トークン全体を貼り付けたか確認するか、レジストリ管理者に新しいトークンを依頼してください。",
 	"admin_settings_registry_advanced": "詳細設定 — カスタムレジストリURL",
 	"admin_settings_registry_url": "レジストリURL",
 	"admin_settings_registry_url_placeholder": "https://registry.sona.fast（デフォルト）",

@@ -66,3 +66,74 @@ export async function bufferStream(
 	}
 	return out;
 }
+
+/**
+ * A timeout on a source going quiet, not on how long it takes overall. The
+ * timer starts at once (covering the wait for headers), and `watch` re-arms it
+ * on every read of the body, so a slow source that keeps sending finishes
+ * while one that stops sending fails. It only runs while waiting on the
+ * source: a slow consumer between reads never trips it. The watched body has
+ * a high-water mark of 0, so it reads the source only when the consumer asks;
+ * the default of 1 would read ahead and arm the timer while the consumer
+ * pauses.
+ *
+ * When it fires, `signal` aborts with `reason()` and a watched body errors
+ * with that same reason, so the caller sees one message whichever wait it hit.
+ * Call `clear` once the copy is done.
+ */
+export function idleTimeout(
+	ms: number,
+	reason: () => Error
+): {
+	signal: AbortSignal;
+	watch(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array>;
+	clear(): void;
+} {
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const arm = () => {
+		clearTimeout(timer);
+		timer = setTimeout(() => controller.abort(reason()), ms);
+	};
+	const clear = () => clearTimeout(timer);
+	// One read of `reader`, rejected with the reason if the signal aborts first.
+	// The abort listener lives only as long as the read, so a long copy doesn't
+	// pile up a reaction per chunk.
+	const readOrAbort = (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+		const signal = controller.signal;
+		let onAbort = () => {};
+		return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+			if (signal.aborted) return reject(signal.reason);
+			onAbort = () => reject(signal.reason);
+			signal.addEventListener('abort', onAbort, { once: true });
+			reader.read().then(resolve, reject);
+		}).finally(() => signal.removeEventListener('abort', onAbort));
+	};
+	arm();
+	return {
+		signal: controller.signal,
+		clear,
+		watch(body) {
+			const reader = body.getReader();
+			return new ReadableStream<Uint8Array>({
+				async pull(c) {
+					arm();
+					let chunk: ReadableStreamReadResult<Uint8Array>;
+					try {
+						chunk = await readOrAbort(reader);
+					} catch (e) {
+						await reader.cancel(e).catch(() => {});
+						throw e;
+					}
+					clear();
+					if (chunk.done) c.close();
+					else c.enqueue(chunk.value);
+				},
+				cancel(r) {
+					clear();
+					return reader.cancel(r);
+				}
+			}, { highWaterMark: 0 });
+		}
+	};
+}

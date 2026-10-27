@@ -9,13 +9,14 @@ import { variantAssignmentError, REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/se
 import * as m from '$lib/paraglide/messages';
 import { checkUnhide, clearKeepPrivate } from '$lib/server/artist-visibility';
 import type { Actions, PageServerLoad } from './$types';
+import { parsePageParam } from '$lib/server/validate';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
 	const db = getDb(platform!.env.DB);
 
 	const sort = url.searchParams.get('sort') || 'commissioned';
 	const dir = url.searchParams.get('dir') || 'desc';
-	const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+	const page = parsePageParam(url.searchParams.get('page'));
 	const perPage = 20;
 
 	const orderCol = sort === 'uploaded' ? images.createdAt : images.commissionedAt;

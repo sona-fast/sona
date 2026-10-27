@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { loginRetrying } from './admin-login';
 
 // The per-type storage breakdown (SONA-192) on the admin Storage tab: under R2
 // the loader lists the bucket and the tab renders a segmented bar + breakdown
@@ -55,7 +55,7 @@ test.describe.configure({ mode: 'serial' });
 
 test.describe('admin settings storage breakdown', () => {
 	test.beforeEach(async ({ page }) => {
-		await adminLogin(page, PASSWORD);
+		await loginRetrying(page, PASSWORD);
 		await page.goto('/admin/settings');
 	});
 
@@ -128,6 +128,128 @@ test.describe('admin settings storage breakdown', () => {
 		await expect(
 			page.locator('.storage-info .stat-label', { hasText: 'Bucket files' })
 		).toBeVisible();
+	});
+
+	// The bar measures each type against the 10 GB plan limit, so on a small
+	// instance most types are a fraction of a pixel. An earlier version only
+	// checked the inline style width (always > 0) while Chrome drew those
+	// segments as nothing but the 2px page-background separator: no color at
+	// all. These assertions read what is actually rendered.
+	test('every non-zero type shows a visible, ordered sliver of its color', async ({
+		page
+	}, testInfo) => {
+		await setProvider(page, 'r2');
+		const upload = await page.request.post('/api/upload', {
+			multipart: {
+				file: { name: 'e2e-breakdown-bar.png', mimeType: 'image/png', buffer: PNG },
+				folder: 'artwork'
+			}
+		});
+		expect(upload.ok()).toBe(true);
+		await page.goto('/admin/settings');
+		await openStorageTab(page);
+
+		const bar = page.locator('.storage-bar[aria-hidden="true"]');
+		await expect(bar).toBeVisible();
+		// Kept on disk in the test's output folder so a pass can be checked by eye.
+		const shot = async (name: string) => {
+			const path = testInfo.outputPath(`${name}.png`);
+			await bar.screenshot({ path });
+			await testInfo.attach(name, { path, contentType: 'image/png' });
+		};
+
+		// Rendered geometry and color of each segment, plus the track it sits on.
+		const measure = () =>
+			bar.evaluate((barEl) => {
+				const track = barEl.getBoundingClientRect();
+				return {
+					track: { left: track.left, right: track.right },
+					trackColor: getComputedStyle(barEl).backgroundColor,
+					segs: [...barEl.querySelectorAll<HTMLElement>('.storage-seg')].map((el) => {
+						const r = el.getBoundingClientRect();
+						const cs = getComputedStyle(el);
+						const border = parseFloat(cs.borderLeftWidth);
+						return {
+							kind: [...el.classList].find((c) => c.startsWith('seg-'))!.slice(4),
+							left: r.left,
+							right: r.right,
+							border,
+							colorPx: r.width - border,
+							color: cs.backgroundColor
+						};
+					})
+				};
+			});
+
+		// Non-zero rows, in table order, are the segments the bar must show.
+		const rowKinds = await page
+			.locator('table.breakdown tbody tr:not(.zero) .swatch')
+			.evaluateAll((els) =>
+				els.map((el) => [...el.classList].find((c) => c.startsWith('seg-'))!.slice(4))
+			);
+		// The seed stages VR model files and the upload adds artwork, so there
+		// are at least two segments and a separator between them.
+		expect(rowKinds.length).toBeGreaterThan(1);
+
+		const assertVisible = (m: Awaited<ReturnType<typeof measure>>, label: string) => {
+			// Same kinds, same order as the table; zero-byte types draw nothing
+			// (an empty segment would still paint a stray separator gap).
+			expect(m.segs.map((s) => s.kind), label).toEqual(rowKinds);
+			const colors = new Set<string>();
+			m.segs.forEach((s, i) => {
+				const what = `${label}: ${s.kind}`;
+				expect(s.colorPx, what).toBeGreaterThanOrEqual(4);
+				expect(s.color, what).not.toBe('rgba(0, 0, 0, 0)');
+				expect(s.color, what).not.toBe(m.trackColor);
+				// Separator between neighbours only; the first segment has none.
+				expect(s.border, what).toBe(i === 0 ? 0 : 2);
+				// Nothing is clipped by the track's overflow:hidden.
+				expect(s.left, what).toBeGreaterThanOrEqual(m.track.left - 0.5);
+				expect(s.right, what).toBeLessThanOrEqual(m.track.right + 0.5);
+				colors.add(s.color);
+			});
+			// Each type keeps its own color.
+			expect(colors.size, label).toBe(m.segs.length);
+		};
+
+		// Set each mode explicitly (the page's starting mode depends on the
+		// server default), then put the original back.
+		const setMode = (mode: string | null) =>
+			page.evaluate((m) => {
+				if (m === null) document.documentElement.removeAttribute('data-theme');
+				else document.documentElement.setAttribute('data-theme', m);
+			}, mode);
+		const startMode = await page.locator('html').getAttribute('data-theme');
+
+		await setMode('dark');
+		const dark = await measure();
+		assertVisible(dark, 'dark');
+		await shot('storage-bar-dark');
+
+		await setMode('light');
+		const light = await measure();
+		assertVisible(light, 'light');
+		await shot('storage-bar-light');
+
+		// Proves the mode switch reached the bar: each mode has its own palette.
+		expect(light.segs.map((s) => s.color)).not.toEqual(dark.segs.map((s) => s.color));
+		await setMode(startMode);
+
+		// Narrowest supported viewport: the minimum widths still fit the track.
+		await page.setViewportSize({ width: 320, height: 800 });
+		assertVisible(await measure(), '320px');
+		await shot('storage-bar-320');
+		await page.setViewportSize({ width: 1280, height: 720 });
+
+		// A nearly full bar: the first segment takes almost the whole track, as
+		// a big type does near the 10 GB cap. The tiny types must still fit
+		// inside the track rather than being pushed past overflow:hidden.
+		await bar
+			.locator('.storage-seg')
+			.first()
+			.evaluate((el) => ((el as HTMLElement).style.width = '99.9%'));
+		assertVisible(await measure(), 'near full');
+		await shot('storage-bar-near-full');
 	});
 
 	test('hides the table and shows the R2-only note under UploadThing', async ({ page }) => {

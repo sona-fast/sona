@@ -92,6 +92,7 @@ type GalleryData = {
 	fursuitEnabled: boolean;
 	vrEnabled: boolean;
 	stickersEnabled: boolean;
+	page: number;
 };
 
 async function loadData(platform: App.Platform, query = ''): Promise<GalleryData> {
@@ -120,6 +121,22 @@ describe('gallery load — grid excludes unpublished images', () => {
 		// Identity, not just count: a bare length check passes just as happily if
 		// the filter inverted and returned the unpublished image instead.
 		expect(data.images).toEqual([expect.objectContaining({ slug: publishedSlug })]);
+	});
+});
+
+describe('gallery load — a junk ?page= serves page 1', () => {
+	// Number('abc') is NaN, and NaN reached the page data, so the pager drew
+	// ?page=NaN links and marked no page as current.
+	it('serves page 1 for ?page=abc', async () => {
+		const { db, platform } = makeDb();
+		const [{ id }] = await addArtist(db, 'Kestrel');
+		const [{ slug }] = await addImage(db, { artistId: id }).returning({ slug: images.slug });
+
+		const data = await loadData(platform, '?page=abc');
+
+		expect(data.degraded).toBe(false);
+		expect(data.images).toEqual([expect.objectContaining({ slug })]);
+		expect(data.page).toBe(1);
 	});
 });
 
