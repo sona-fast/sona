@@ -511,6 +511,25 @@ test('Back during a navigation leaves the ledger pages working', async ({ page }
 		await page.goBack();
 		await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
 	}
+	// Between two ledger pages the data being left loads `gate` too, so that
+	// alone can't tell a stale render from the page's own.
+	for (let i = 0; i < 4; i++) {
+		await page.getByRole('link', { name: 'Back to Commissions' }).click();
+		await expect(page).toHaveURL(/\/admin\/commissions$/);
+		await page.goBack();
+		await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
+	}
+	// And back onto the list, which gets the form's data.
+	await page.getByRole('link', { name: 'Back to Commissions' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	for (let i = 0; i < 4; i++) {
+		await page.getByRole('link', { name: 'New entry' }).click();
+		await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
+		await page.goBack();
+		await expect(page).toHaveURL(/\/admin\/commissions$/);
+	}
+	await page.goForward();
+	await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
 	await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
 	await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
 	await expect(page.getByLabel('Link to where you asked')).toBeVisible();
