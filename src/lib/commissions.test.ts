@@ -96,34 +96,132 @@ describe('isCalendarDate', () => {
 
 describe('parsePrice', () => {
 	it('stores prices in minor units with the currency’s own digit count', () => {
-		expect(parsePrice('45.50', 'USD')).toEqual({ ok: true, minor: 4550 });
-		expect(parsePrice('45.5', 'USD')).toEqual({ ok: true, minor: 4550 });
-		expect(parsePrice('45', 'USD')).toEqual({ ok: true, minor: 4500 });
-		expect(parsePrice('45', 'JPY')).toEqual({ ok: true, minor: 45 });
-		expect(parsePrice('1.234', 'BHD')).toEqual({ ok: true, minor: 1234 });
-		expect(parsePrice('0.10', 'EUR')).toEqual({ ok: true, minor: 10 });
+		expect(parsePrice('45.50', 'USD', 'en')).toEqual({ ok: true, minor: 4550 });
+		expect(parsePrice('45.5', 'USD', 'en')).toEqual({ ok: true, minor: 4550 });
+		expect(parsePrice('45', 'USD', 'en')).toEqual({ ok: true, minor: 4500 });
+		expect(parsePrice('45', 'JPY', 'en')).toEqual({ ok: true, minor: 45 });
+		expect(parsePrice('1.234', 'BHD', 'en')).toEqual({ ok: true, minor: 1234 });
+		expect(parsePrice('0.10', 'EUR', 'en')).toEqual({ ok: true, minor: 10 });
 	});
 
 	it('refuses decimals the currency does not have, rather than rounding', () => {
-		expect(parsePrice('45.5', 'JPY')).toEqual({ ok: false, reason: 'decimals', digits: 0 });
-		expect(parsePrice('45.505', 'USD')).toEqual({ ok: false, reason: 'decimals', digits: 2 });
+		expect(parsePrice('45.5', 'JPY', 'en')).toEqual({ ok: false, reason: 'decimals', digits: 0 });
+		expect(parsePrice('45.505', 'USD', 'en')).toEqual({ ok: false, reason: 'decimals', digits: 2 });
 	});
 
 	it('refuses anything that is not a plain number', () => {
-		for (const value of ['', '45.', '.5', '-1', '1e3', '4,500', '45 USD', '1234567890123']) {
-			expect(parsePrice(value, 'USD'), value).toEqual({ ok: false, reason: 'format' });
+		for (const value of ['', '45.', '.5', '-1', '1e3', '45 USD', '1234567890123']) {
+			expect(parsePrice(value, 'USD', 'en'), value).toEqual({ ok: false, reason: 'format' });
 		}
 	});
 
 	it('refuses a price too large to store exactly, rather than rounding it', () => {
 		// CLF uses four minor digits, so twelve whole digits make a 16-digit integer.
-		expect(parsePrice('999999999999.9999', 'CLF')).toEqual({ ok: false, reason: 'format' });
-		expect(parsePrice('999999999999.99', 'USD')).toEqual({ ok: true, minor: 99999999999999 });
+		expect(parsePrice('999999999999.9999', 'CLF', 'en')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice('999999999999.99', 'USD', 'en')).toEqual({ ok: true, minor: 99999999999999 });
 	});
 
 	it('refuses a malformed currency code', () => {
-		expect(parsePrice('30', 'XYZ1')).toEqual({ ok: false, reason: 'format' });
-		expect(parsePrice('30', 'usd')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice('30', 'XYZ1', 'en')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice('30', 'usd', 'en')).toEqual({ ok: false, reason: 'format' });
+	});
+
+	it('reads full-width digits and punctuation as their ASCII forms', () => {
+		expect(parsePrice('４５．５０', 'USD', 'en')).toEqual({ ok: true, minor: 4550 });
+		expect(parsePrice('４５', 'JPY', 'ja')).toEqual({ ok: true, minor: 45 });
+		expect(parsePrice('１，２３４', 'JPY', 'ja')).toEqual({ ok: true, minor: 1234 });
+		expect(parsePrice('１，２３４．５', 'USD', 'ja')).toEqual({ ok: true, minor: 123450 });
+	});
+
+	it('reads spaces, NBSP, narrow NBSP, and apostrophes as grouping', () => {
+		for (const value of ['1 000', '1 000', '1 000', "1'000", '1’000', '１　０００']) {
+			expect(parsePrice(value, 'JPY', 'en'), value).toEqual({ ok: true, minor: 1000 });
+		}
+		expect(parsePrice("1'234'567.50", 'USD', 'en')).toEqual({ ok: true, minor: 123456750 });
+		expect(parsePrice('1 234,50', 'EUR', 'en')).toEqual({ ok: true, minor: 123450 });
+		// Grouping only ever groups: never a decimal, even before two digits.
+		expect(parsePrice('45 50', 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice("45'5", 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+	});
+
+	it('with both "," and ".", reads the last as the decimal and the other as grouping', () => {
+		expect(parsePrice('1,234.50', 'USD', 'en')).toEqual({ ok: true, minor: 123450 });
+		expect(parsePrice('1.234,50', 'USD', 'en')).toEqual({ ok: true, minor: 123450 });
+		expect(parsePrice('1,234,567.5', 'USD', 'de')).toEqual({ ok: true, minor: 123456750 });
+		expect(parsePrice('1.234.567,5', 'USD', 'ja')).toEqual({ ok: true, minor: 123456750 });
+		// The decimal kind appears once, after every group, and groups are threes.
+		expect(parsePrice('1.234.50', 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice('1,234.5,0', 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice('12,34.50', 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+		expect(parsePrice('1,2345.50', 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+		// Mixed grouping characters are refused rather than guessed at.
+		expect(parsePrice('1 000,000.50', 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+	});
+
+	it('reads one kind of separator appearing more than once as grouping in threes', () => {
+		for (const locale of ['en', 'ja', 'de']) {
+			expect(parsePrice('1,000,000', 'JPY', locale), locale).toEqual({ ok: true, minor: 1000000 });
+			expect(parsePrice('1.000.000', 'JPY', locale), locale).toEqual({ ok: true, minor: 1000000 });
+			for (const value of ['1,00,0', '1,00,000', '1.0000.000', '1234,567,890', '1,000,00']) {
+				expect(parsePrice(value, 'JPY', locale), `${value} ${locale}`).toEqual({ ok: false, reason: 'format' });
+			}
+		}
+	});
+
+	it('reads a lone separator before exactly three digits by the locale’s group separator', () => {
+		// en and ja group with ",", so 1,000 is a thousand and 1.000 is one.
+		for (const locale of ['en', 'ja']) {
+			expect(parsePrice('1,000', 'JPY', locale), locale).toEqual({ ok: true, minor: 1000 });
+			expect(parsePrice('1.000', 'JPY', locale), locale).toEqual({ ok: false, reason: 'decimals', digits: 0 });
+			expect(parsePrice('1.000', 'BHD', locale), locale).toEqual({ ok: true, minor: 1000 });
+		}
+		// de groups with ".", so the reading flips.
+		expect(parsePrice('1.000', 'JPY', 'de')).toEqual({ ok: true, minor: 1000 });
+		expect(parsePrice('1,000', 'JPY', 'de')).toEqual({ ok: false, reason: 'decimals', digits: 0 });
+		expect(parsePrice('1,000', 'BHD', 'de')).toEqual({ ok: true, minor: 1000 });
+		// A lone group separator still needs a valid first group.
+		expect(parsePrice('1234,567', 'JPY', 'en')).toEqual({ ok: false, reason: 'format' });
+	});
+
+	it('reads a lone separator before any other count of digits as the decimal', () => {
+		for (const locale of ['en', 'ja', 'de']) {
+			expect(parsePrice('45,50', 'USD', locale), locale).toEqual({ ok: true, minor: 4550 });
+			expect(parsePrice('45.5', 'USD', locale), locale).toEqual({ ok: true, minor: 4550 });
+			expect(parsePrice('45,5', 'JPY', locale), locale).toEqual({ ok: false, reason: 'decimals', digits: 0 });
+			expect(parsePrice('1,2345', 'USD', locale), locale).toEqual({ ok: false, reason: 'decimals', digits: 2 });
+		}
+	});
+
+	it('keeps the twelve-digit limit after grouping is removed', () => {
+		expect(parsePrice('999,999,999,999.99', 'USD', 'en')).toEqual({ ok: true, minor: 99999999999999 });
+		expect(parsePrice('1,234,567,890,123', 'USD', 'en')).toEqual({ ok: false, reason: 'format' });
+	});
+
+	it('refuses junk, negatives, and stray separators in any locale', () => {
+		for (const locale of ['en', 'ja', 'de']) {
+			for (const value of [
+				'',
+				' ',
+				'-1',
+				'−1',
+				'－４５',
+				'+45',
+				'$45',
+				'45€',
+				'4 5x',
+				'1,,000',
+				'1..5',
+				'1, 000',
+				',5',
+				'45,',
+				"'1000",
+				'1e3',
+				'0x10',
+				'４５円'
+			]) {
+				expect(parsePrice(value, 'USD', locale), `${JSON.stringify(value)} ${locale}`).toEqual({ ok: false, reason: 'format' });
+			}
+		}
 	});
 });
 
@@ -137,7 +235,7 @@ describe('formatMinor', () => {
 
 	it('round-trips through parsePrice', () => {
 		for (const [minor, currency] of [[4550, 'USD'], [7, 'EUR'], [12000, 'JPY'], [1, 'BHD']] as const) {
-			expect(parsePrice(formatMinor(minor, currency), currency)).toEqual({ ok: true, minor });
+			expect(parsePrice(formatMinor(minor, currency), currency, 'en')).toEqual({ ok: true, minor });
 		}
 	});
 });

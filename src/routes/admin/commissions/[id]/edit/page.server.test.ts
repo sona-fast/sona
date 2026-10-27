@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { isHttpError } from '@sveltejs/kit';
+import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
 import { verifySupporterKey } from '$lib/server/supporter-key';
 import {
@@ -59,12 +59,48 @@ async function loadStatus(platform: App.Platform, id: string): Promise<number | 
 	}
 }
 
+/** The load as it runs after a no-JS POST to `action`, rendering the action's answer. */
+async function loadAfterPost(platform: App.Platform, id: string, action: 'save' | 'delete') {
+	const url = new URL(`http://x/admin/commissions/${id}/edit?/${action}`);
+	try {
+		return await load({ platform, request: new Request(url, { method: 'POST' }), params: { id }, url } as never);
+	} catch (e) {
+		if (isHttpError(e)) return e.status;
+		if (isRedirect(e)) return `${e.status} ${e.location}`;
+		throw e;
+	}
+}
+
 describe('load', () => {
 	it('404s a non-numeric id, and an id with no entry', async () => {
 		setLedgerGa('past');
 		const { platform } = ledgerDb();
 		for (const id of ['abc', '1.5', '-1', '0', '1e3', ' 1']) expect(await loadStatus(platform, id), id).toBe(404);
 		expect(await loadStatus(platform, '42')).toBe(404);
+	});
+
+	// Without JavaScript the page renders again after the action, so a save
+	// that found the entry gone keeps the form instead of a public 404.
+	it('after a no-JS save, an entry deleted elsewhere loads as gone; a GET still 404s', async () => {
+		setLedgerGa('past');
+		const { platform } = ledgerDb();
+		const data = (await loadAfterPost(platform, '42', 'save')) as { entry: unknown; gate: { open: boolean } };
+		expect(data.entry).toBeNull();
+		expect(data.gate.open).toBe(true);
+		expect(await loadStatus(platform, '42')).toBe(404);
+		expect(await loadAfterPost(platform, 'abc', 'save')).toBe(404);
+	});
+
+	it('after a no-JS delete of an entry already gone, goes to the ledger', async () => {
+		setLedgerGa('future');
+		const { platform } = ledgerDb();
+		expect(await loadAfterPost(platform, '42', 'delete')).toBe('303 /admin/commissions');
+	});
+
+	it('after a no-JS save with the gate closed, an entry deleted elsewhere still 404s', async () => {
+		setLedgerGa('future');
+		const { platform } = ledgerDb();
+		expect(await loadAfterPost(platform, '42', 'save')).toBe(404);
 	});
 
 	it('loads an entry while the gate is closed', async () => {
@@ -252,6 +288,18 @@ describe('save action', () => {
 		const { platform } = ledgerDb();
 		expect((await save(platform, 'abc', saveForm())).status).toBe(404);
 		expect((await save(platform, '42', saveForm())).status).toBe(404);
+	});
+
+	it('hands back what was typed when the entry was deleted after the form loaded', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		const id = seedEntry(sqlite);
+		expect((await remove(platform, String(id))).status).toBe('redirected');
+		const result = await save(platform, String(id), saveForm({ notes: 'typed on a deleted entry' }));
+		expect(result.status).toBe(404);
+		expect(result.data.missing).toBe(true);
+		expect(result.data.values).toMatchObject({ title: 'Ref sheet update', notes: 'typed on a deleted entry' });
+		expect(result.data.version).toBe(VERSION);
 	});
 });
 

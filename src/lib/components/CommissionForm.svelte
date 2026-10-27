@@ -192,6 +192,19 @@
 		values.deliveredOn = next.deliveredOn;
 	}
 
+	// A refused currency, or an amount refused for its currency's decimals, no
+	// longer applies once another currency is picked, so those errors go at
+	// once. An amount that isn't a number stays wrong in any currency.
+	function setCurrency(next: string) {
+		if (next !== values.currency && failure?.errors) {
+			const kept = { ...failure.errors };
+			delete kept.currency;
+			if (kept.price !== m.admin_commissions_error_price_format()) delete kept.price;
+			failure = { ...failure, errors: kept };
+		}
+		values.currency = next;
+	}
+
 	function toggleCharacter(id: number) {
 		values.characterIds = values.characterIds.includes(id)
 			? values.characterIds.filter((c) => c !== id)
@@ -883,7 +896,7 @@
 				<span class="field-label" id="ce-currency-label">{m.admin_commissions_field_currency()}</span>
 				<CurrencyPicker
 					row={currencyChoices}
-					bind:value={values.currency}
+					bind:value={() => values.currency, setCurrency}
 					invalid={!!errors.currency}
 					describedBy={describedBy('currency', 'ce-currency-hint')}
 					announce={(text) => announcer.say(text)}

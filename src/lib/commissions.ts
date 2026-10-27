@@ -171,23 +171,69 @@ export type PriceResult =
 	| { ok: false; reason: 'format' }
 	| { ok: false; reason: 'decimals'; digits: number };
 
+/** The digit-group separator `locale` writes: "," in en and ja, "." in de. */
+function groupSeparator(locale: string): string {
+	return new Intl.NumberFormat(locale).formatToParts(1234567).find((p) => p.type === 'group')?.value ?? ',';
+}
+
+/**
+ * A typed amount as plain digits and an optional fraction, or null when it
+ * can't be read as one number. Full-width digits and punctuation count as
+ * their ASCII forms. Spaces (including NBSP and narrow NBSP) and apostrophes
+ * only ever group digits. Of "," and ".": with both present, the last one is
+ * the decimal; one kind appearing more than once groups; one appearing once
+ * before exactly three digits (1,000) groups when it's `locale`'s group
+ * separator and is the decimal otherwise; once before any other count of
+ * digits, it's the decimal. Grouping must be in threes after a first group of
+ * one to three digits, with one separator kind throughout.
+ */
+function normalizeAmount(price: string, locale: string): { whole: string; fraction: string } | null {
+	const text = price.normalize('NFKC').replace(/[\s  ]/g, ' ').replace(/’/g, "'").trim();
+	if (!/^\d+(?:[ ',.]\d+)*$/.test(text)) return null;
+	const runs = text.split(/[ ',.]/);
+	const seps: string[] = text.match(/[ ',.]/g) ?? [];
+	const marks = seps.filter((s) => s === ',' || s === '.');
+	const last = seps.length - 1;
+
+	// Which separator, by position, is the decimal one; -1 when there's none.
+	let decimal = -1;
+	if (new Set(marks).size === 2) {
+		decimal = Math.max(seps.lastIndexOf(','), seps.lastIndexOf('.'));
+		if (marks.filter((s) => s === seps[decimal]).length > 1) return null;
+	} else if (marks.length === 1) {
+		const at = seps.indexOf(marks[0]);
+		const groups = runs[at + 1].length === 3 && marks[0] === groupSeparator(locale);
+		if (!groups) decimal = at;
+	}
+	// The decimal comes after every group.
+	if (decimal !== -1 && decimal !== last) return null;
+
+	const groupSeps = decimal === -1 ? seps : seps.slice(0, -1);
+	const groups = decimal === -1 ? runs : runs.slice(0, -1);
+	if (groupSeps.length > 0) {
+		if (new Set(groupSeps).size > 1) return null;
+		if (groups[0].length > 3 || groups.slice(1).some((g) => g.length !== 3)) return null;
+	}
+	return { whole: groups.join(''), fraction: decimal === -1 ? '' : runs[runs.length - 1] };
+}
+
 /**
  * A typed price in the currency's minor units: 45.50 USD is 4550, 45 JPY is
- * 45. Digits only, with at most one decimal point. Too many decimals for the
- * currency are refused rather than rounded, because a rounded price is a
- * different price from the one the owner typed. Works on the digits as text,
- * so 0.1 + 0.2 never enters into it.
+ * 45. normalizeAmount reads the typing first, in the admin's `locale`. Too many
+ * decimals for the currency are refused rather than rounded, because a
+ * rounded price is a different price from the one the owner typed. Works on
+ * the digits as text, so 0.1 + 0.2 never enters into it.
  */
-export function parsePrice(price: string, currency: string): PriceResult {
+export function parsePrice(price: string, currency: string, locale: string): PriceResult {
 	const digits = currencyFractionDigits(currency);
 	if (digits === null) return { ok: false, reason: 'format' };
-	const match = /^(\d{1,12})(?:\.(\d+))?$/.exec(price);
-	if (!match) return { ok: false, reason: 'format' };
-	const fraction = match[2] ?? '';
+	const amount = normalizeAmount(price, locale);
+	if (!amount || amount.whole.length > 12) return { ok: false, reason: 'format' };
+	const { whole, fraction } = amount;
 	if (fraction.length > digits) return { ok: false, reason: 'decimals', digits };
 	// Currencies with four minor digits (CLF, UYW) put twelve whole digits past
 	// what a double holds exactly, and a rounded price is a different price.
-	const minor = Number(match[1] + fraction.padEnd(digits, '0'));
+	const minor = Number(whole + fraction.padEnd(digits, '0'));
 	if (!Number.isSafeInteger(minor)) return { ok: false, reason: 'format' };
 	return { ok: true, minor };
 }
