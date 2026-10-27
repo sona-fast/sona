@@ -26,6 +26,8 @@ import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
 import { EARLY_ACCESS } from '$lib/early-access';
+import { hashPassword, hashToken, verifyAdminPassword } from '$lib/server/admin-auth';
+import { PASSWORD_RESET_SETTING, hashResetAddress, hashResetPassword, validateResetToken } from '$lib/server/password-reset';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -127,6 +129,39 @@ describe('settings connectRegistry — fork key label', () => {
 
 		expect(result).toMatchObject({ success: true });
 		expect(sentBody()).toMatchObject({ label: 'taro.surf' });
+	});
+});
+
+describe('settings connectRegistry — refused invite tokens', () => {
+	for (const code of ['invite_used', 'invite_invalid'] as const) {
+		it(`returns ${code} for the token field and stores no key`, async () => {
+			fetchMock.mockResolvedValueOnce(
+				new Response(JSON.stringify({ error: 'refused', code }), { status: 401 })
+			);
+			const { db, platform } = makeDb();
+
+			const result = (await actions.connectRegistry(connectEvent(platform, { signupToken: 'tok' }))) as {
+				status: number;
+				data: Record<string, unknown>;
+			};
+
+			expect(result.status).toBe(400);
+			expect(result.data).toEqual({ inviteError: code });
+			expect(await getRawSetting(db, REGISTRY_API_KEY_SETTING)).toBeNull();
+		});
+	}
+
+	it('keeps the general error message for any other refusal', async () => {
+		fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'label too long' }), { status: 400 }));
+		const { platform } = makeDb();
+
+		const result = (await actions.connectRegistry(connectEvent(platform, { signupToken: 'tok' }))) as {
+			status: number;
+			data: Record<string, unknown>;
+		};
+
+		expect(result.status).toBe(400);
+		expect(result.data).toEqual({ error: 'Could not connect: label too long.' });
 	});
 });
 
@@ -256,6 +291,17 @@ describe('settings saveSite — three-path profile fields', () => {
 		expect(saved).toHaveLength(MAX_SONA_COLORS);
 		expect(saved).toEqual(swatches.slice(0, MAX_SONA_COLORS));
 	});
+
+	it('caps a swatch name like any other text field', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(
+			saveSiteEvent(platform, { sonaColors: JSON.stringify([{ name: 'r'.repeat(10_000), hex: '#b45309' }]) })
+		);
+
+		const [saved] = JSON.parse((await getRawSetting(db, 'sonaColors'))!);
+		expect(saved).toEqual({ name: 'r'.repeat(60), hex: '#b45309' });
+	});
 });
 
 describe('settings saveSite — siteUrl + emailLanguage', () => {
@@ -382,6 +428,118 @@ describe('settings saveSecurityEmail — admin recovery address', () => {
 
 		expect(result).toMatchObject({ status: 400 });
 		expect(await getRawSetting(db, 'adminEmail')).toBe('old@x.y');
+	});
+});
+
+// A reset link mailed before the operator changed their password or recovery
+// address must stop working: otherwise whoever holds that email can still set
+// a password over the new one and sign the operator out.
+describe('settings — pending reset link is revoked', () => {
+	const TOKEN = 'pending-reset-token';
+	const OLD_PASSWORD = 'old-password-123';
+	const NEW_PASSWORD = 'brand-new-password-456';
+
+	async function seedPendingReset() {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL);`);
+		const d1 = makeD1(sqlite);
+		const db = drizzle(d1, { schema });
+		const platform = { env: { DB: d1 } } as unknown as App.Platform;
+		const oldHash = await hashPassword(OLD_PASSWORD);
+		await setRawSetting(db, 'adminPasswordHash', oldHash);
+		await setRawSetting(db, 'adminEmail', 'old@x.y');
+		await setRawSetting(
+			db,
+			PASSWORD_RESET_SETTING,
+			JSON.stringify({
+				tokenHash: await hashToken(TOKEN),
+				expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+				requestedAt: new Date().toISOString(),
+				emailHash: await hashResetAddress('old@x.y'),
+				pwHash: await hashResetPassword(oldHash)
+			})
+		);
+		expect(await validateResetToken(db, TOKEN)).toBe(true);
+		return { db, platform };
+	}
+
+	function changePasswordEvent(platform: App.Platform, fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.append(k, v);
+		return {
+			platform,
+			cookies: { set: () => {}, get: () => undefined, delete: () => {} },
+			request: new Request('https://taro.surf/admin/settings?/changePassword', { method: 'POST', body })
+		} as never;
+	}
+
+	it('a password change invalidates the pending reset link', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.changePassword(
+			changePasswordEvent(platform, {
+				currentPassword: OLD_PASSWORD,
+				newPassword: NEW_PASSWORD,
+				confirmPassword: NEW_PASSWORD
+			})
+		);
+
+		expect(result).not.toMatchObject({ status: expect.any(Number) });
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
+		expect(await validateResetToken(db, TOKEN)).toBe(false);
+		// Only the reset row goes: a delete missing its key filter would also wipe
+		// the new hash and the recovery address, and still void the link.
+		expect(await verifyAdminPassword(db, platform.env, NEW_PASSWORD)).toBe(true);
+		expect(await verifyAdminPassword(db, platform.env, OLD_PASSWORD)).toBe(false);
+		expect(await getRawSetting(db, 'adminEmail')).toBe('old@x.y');
+		expect(await db.select().from(schema.sessions)).toHaveLength(1);
+	});
+
+	it('a refused password change leaves the pending reset link alone', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.changePassword(
+			changePasswordEvent(platform, {
+				currentPassword: 'wrong-password',
+				newPassword: 'brand-new-password-456',
+				confirmPassword: 'brand-new-password-456'
+			})
+		);
+
+		expect(result).toMatchObject({ status: 401 });
+		expect(await validateResetToken(db, TOKEN)).toBe(true);
+	});
+
+	it('changing the recovery address invalidates the pending reset link', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, 'new@x.y'));
+
+		expect(result).toEqual({ recoveryEmailSaved: true });
+		expect(await getRawSetting(db, 'adminEmail')).toBe('new@x.y');
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
+		expect(await validateResetToken(db, TOKEN)).toBe(false);
+	});
+
+	it('clearing the recovery address invalidates the pending reset link', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, ''));
+
+		expect(result).toEqual({ recoveryEmailSaved: true });
+		expect(await getRawSetting(db, 'adminEmail')).toBe('');
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
+		expect(await validateResetToken(db, TOKEN)).toBe(false);
+	});
+
+	it('an invalid recovery address leaves the pending reset link alone', async () => {
+		const { db, platform } = await seedPendingReset();
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, 'not-an-email'));
+
+		expect(result).toMatchObject({ status: 400 });
+		expect(await validateResetToken(db, TOKEN)).toBe(true);
 	});
 });
 

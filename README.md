@@ -135,7 +135,7 @@ Sona is single-admin, so there's no second account to let you back in. Two paths
   ```
 
   It prompts for a new password, hashes it the same way the app does, writes it to
-  your remote D1, and clears all sessions. Needs `wrangler login` (or
+  your remote D1, and clears all sessions and any pending reset link. Needs `wrangler login` (or
   `CLOUDFLARE_API_TOKEN`) and a `wrangler.toml` with your `database_name`.
 
 ### Custom domain + image thumbnails (post-deploy)
@@ -236,9 +236,9 @@ _(In the JA UI, Telegram/chat sticker content is always ステッカー — neve
 
 ### Keeping your fork up to date
 
-Pull template improvements into your fork with GitHub's **Sync fork** button (or
-`git merge` + push); your deploy workflow runs the tests, applies new migrations,
-and redeploys automatically. See [`UPDATING.md`](UPDATING.md) for the full guide,
+Merge the newest template release tag into your fork's `main` and push; your
+deploy workflow runs the tests, applies new migrations, and redeploys
+automatically. See [`UPDATING.md`](UPDATING.md) for the full guide,
 including the first-sync gotcha and conflict handling.
 
 ## Configuration model

@@ -4,26 +4,36 @@ Sona is a template you **fork**, so improvements land in the template
 (`sona-fast/sona`) after you've forked. This is the operator's guide to pulling
 those updates into your fork and getting them deployed.
 
-The short version: pull the template's `main` into your fork's `main` and push.
+The short version: merge the newest release tag into your fork's `main` and
+push.
 Your fork's [deploy workflow](.github/workflows/deploy.yml) does the rest — it
 runs the tests, applies any new D1 migrations exactly once, and deploys to Pages.
 There are no manual post-update steps in the normal case.
 
 ## The happy path
 
-1. **Pull template changes into your fork.** Either use GitHub's **Sync fork**
-   button (repo home → *Sync fork* → *Update branch*), or do it from a clone:
+1. **Merge the newest release into your fork.** From a clone of your fork, run:
 
    ```sh
    git checkout main
    git remote add upstream https://github.com/sona-fast/sona.git   # first time only
-   git fetch upstream
-   git merge upstream/main
+   git fetch upstream tag <release-tag> --force
+   git merge <release-tag>
    git push origin main
    ```
 
-   (`gh repo sync <you>/<your-fork> --source sona-fast/sona` does the same as the
-   button, from the command line.)
+   `<release-tag>` is the newest release on the
+   [Releases page](https://github.com/sona-fast/sona/releases), such as `v1.6.2`.
+   The `--force` flag replaces any older local copy of that tag, so you merge the
+   release as published.
+
+   GitHub's **Sync fork** button and `gh repo sync` also update your fork, but
+   they follow the template's `main`, not its releases. `main` can include
+   changes that aren't in a release yet, so use them only if you accept updating
+   to unreleased code. A **Sync fork** update might not start a deploy, so check
+   **Actions** afterwards. If GitHub asks you to enable workflows on the fork, do
+   that first; then, if no **Deploy to Cloudflare Pages** run appeared, start one
+   there with **Run workflow**.
 
 2. **The deploy runs itself.** A push to `main` triggers
    [`deploy.yml`](.github/workflows/deploy.yml), which:
@@ -43,10 +53,12 @@ There are no manual post-update steps in the normal case.
 ## Seeing what changed
 
 The template is versioned with semver tags. To see what you're pulling in before
-you sync — or to catch up on what shipped since you last did — read the
+you update — or to catch up on what shipped since you last did — read the
 [Releases page](https://github.com/sona-fast/sona/releases); each release lists
-the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
-after a fetch gives the same view from a clone.
+the merged changes since the previous one. To get the same view from a clone,
+fetch both tags the same way as in step 1 and run
+`git log --oneline <current-tag>..<release-tag>`. `<current-tag>` is the release
+your fork runs now, and `<release-tag>` is the release you're about to merge.
 
 ## Nothing to do: two more themes (SONA-227)
 
@@ -224,26 +236,27 @@ Two knock-on effects worth knowing:
 
 ## First sync only: check the Actions tab
 
-There is exactly one gotcha, and it only bites the **first time** you ever sync a
-fresh fork.
+There is one gotcha, and it only affects the **first time** you update a fresh
+fork. Check for it whichever way you update, by merging a release tag (step 1)
+or with **Sync fork**.
 
-GitHub registers a fork's workflows on that first sync, and the push event can
-race that registration — so the very first **Sync fork** may fast-forward your
-`main` **without** triggering a deploy. Your code is updated but your live site
-and D1 schema are not.
+GitHub doesn't run workflows in a fork until you enable them on the fork's
+**Actions** tab, so the first update can move your `main` **without**
+triggering a deploy. Your code is updated, but your live site and D1 schema are
+not.
 
-**What to do:** after your first sync, open the **Actions** tab. If no
-"Deploy to Cloudflare Pages" run appeared, trigger it by hand:
+**What to do:** after your first update, open the **Actions** tab. If GitHub
+says workflows aren't being run on this forked repository, click **I understand
+my workflows, go ahead and enable them**. Enabling doesn't replay the update you
+already made, so if no "Deploy to Cloudflare Pages" run appeared, trigger it by
+hand:
 
 > Actions → **Deploy to Cloudflare Pages** → **Run workflow** → branch `main` →
 > **Run workflow**.
 
 That button exists because `deploy.yml` also listens for `workflow_dispatch`.
-Every sync *after* the first one is a normal push event and auto-deploys — you
-only need this once.
-
-> Doing the sync via `git push` (step 1's clone path) instead of the button
-> avoids the race entirely: a push you make always emits a push event.
+Once the fork's workflows are enabled, a push to `main` deploys on its own, so
+you only need this check once.
 
 ## Prerequisites (set once, by `npm run setup`)
 
@@ -344,6 +357,136 @@ done
 
 After this, only *new* migrations pulled from the template will be applied.
 **Fresh forks need none of this.**
+
+## Roll back a bad update
+
+If an update breaks your site, put the last good version back first and work
+out what went wrong after. Code and data roll back separately.
+
+**The code.** Cloudflare keeps every deploy as a Pages deployment. In the
+Cloudflare dashboard, open your Pages project's deployments and roll back to the
+last production deployment that worked. It takes effect in seconds and needs no
+build. For more information, see
+[Pages rollbacks](https://developers.cloudflare.com/pages/configuration/rollbacks/).
+
+A rollback doesn't change your fork's `main`, so the next push redeploys the
+broken version. Before you push again, undo the update on `main`. In a clone of
+your fork, make one commit that restores the last good version, and push it. The
+restore discards uncommitted changes to tracked files, so commit or stash any
+local edits first:
+
+```sh
+git switch main
+git pull origin main
+git restore --source=<last-good> --staged --worktree :/
+git commit -m "Roll back to <last-good>"
+git push origin main
+```
+
+`<last-good>` is the commit of the Pages deployment you rolled back to.
+Untracked files stay as they are. Files that the bad update added are removed.
+This also undoes the changes from any commits made after `<last-good>`.
+Reverting the rollback brings them back.
+
+Alternatively, leave `main` as it is, don't push to it until a release that
+fixes the problem is out, and then update as usual.
+
+If you rolled back `main`, undo that rollback when the release that fixes the
+problem is out. Update from a clone instead of **Sync fork**, and push once with
+both commits in place:
+
+```sh
+git switch main
+git pull origin main
+git fetch upstream tag <release-tag> --force
+git revert <rollback-commit>
+git merge <release-tag>
+git push origin main
+```
+
+`<release-tag>` is the tag of the release that fixes the problem, such as
+`v1.6.2`, from the [Releases page](https://github.com/sona-fast/sona/releases).
+Merging the tag updates your fork to that release. `<rollback-commit>` is the
+commit the restore made. Without the revert, Git treats the rolled-back changes
+as already merged and leaves them out of the update. Every push to `main` deploys, so if you push the revert by
+itself, it redeploys the broken version, and reapplies its migrations if you
+restored the database. **Sync fork** can't add the revert and the update in one
+push, so you can't use it for this one update. If your clone has no `upstream`
+remote, add it as shown in [The happy path](#the-happy-path).
+
+**The data.** A Pages rollback leaves D1 as it is. Each migration so far keeps
+the tables and columns the previous release reads, so the previous code runs
+against the newer schema, and you usually don't need to touch the database. A
+release that breaks this says so in its notes.
+
+If an update damaged data, D1 Time Travel can restore the whole database to any
+point in the last 30 days on Workers Paid, or the last 7 days on the Free plan.
+If your database dates from D1's alpha, Time Travel isn't available for it and
+the restore command fails, so you can't restore it this way. To check, sign in
+as described below and run `npx wrangler d1 time-travel info <database>`. This
+command only reads the database. If Time Travel works, it prints the current
+bookmark, such as `The current bookmark is '<bookmark>'`. For an alpha database,
+it fails with `Time travel is not available for alpha D1 databases`.
+
+Before you restore, disable the orphan cleanup: in your fork on GitHub, go to
+**Actions**, select **Storage orphan cleanup**, click the **Show workflow
+options** menu (**...**), and then click **Disable workflow**. The restore
+removes the database rows for anything uploaded after the restore point, and the
+weekly sweep then deletes those files from storage (R2 or UploadThing)
+permanently.
+
+Disabling the workflow doesn't stop a run that has already started. On the
+**Storage orphan cleanup** page in **Actions**, check for a run that is in
+progress or queued. If you find one, open it, click **Cancel workflow**, and
+wait until the run shows as cancelled before you restore.
+
+Two buttons in your site's admin delete the same files, so don't use them until
+you've re-added the uploads you want to keep:
+
+- **Clear Cache**, in the **Clear upload cache** card under **Danger Zone** on
+  the admin **Settings** page.
+- **Delete original files from UploadThing**, on the **Storage Migration**
+  page.
+
+To restore, sign in with `npx wrangler login` as a user on the Cloudflare
+account that owns the database, then run:
+
+```sh
+npx wrangler d1 time-travel restore <database> --timestamp=<time>
+```
+
+- `<database>` is your D1 database's name: the `D1_DATABASE_NAME` repo
+  variable, or `sona-db` if you never set it.
+- `<time>` is an RFC 3339 timestamp after the previous good deploy's
+  **Deploy to Cloudflare Pages** workflow run finished and before the bad
+  deploy's run started. Use both runs' times in **Actions**, not the Pages
+  deployment times, because the workflow runs migrations before it deploys.
+  **Actions** shows these times in your local time zone, so include your UTC
+  offset, such as
+  `2026-10-17T08:00:00+02:00`, or convert the time to UTC, such as
+  `2026-10-17T06:00:00Z`.
+
+Pair the restore with the code rollback above: roll Pages back to a deployment
+from before `<time>`, and roll back `main` to that deployment's commit. That
+way, the code that runs matches the restored schema.
+
+The restore replaces the whole database: everything written after that time
+disappears from it. It also rolls back the `schema_migrations` table, so the
+next deploy applies those migrations again. Media that you deleted after the
+restore point stays deleted, so some restored rows can point at missing files.
+
+Because the next deploy reruns those migrations, it can rerun a migration from
+the bad release that damaged your data. If you restored the database, read the
+notes of the release that fixes the problem before you adopt it. They say
+whether a migration from the bad release is safe to run again, or what to do
+instead.
+
+The command prints a bookmark for the database's state before the restore. Save
+it. To undo the restore, run the same command with `--bookmark=<bookmark>`
+instead of `--timestamp`, where `<bookmark>` is the bookmark you saved.
+
+After you re-add the uploads you want to keep, or decide not to keep them,
+re-enable **Storage orphan cleanup** in **Actions**.
 
 ## When `git merge` conflicts
 

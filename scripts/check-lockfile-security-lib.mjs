@@ -15,9 +15,10 @@
 /** @type {Record<string, string>} */
 export const FLOORS = {
 	cookie: '0.7.0',
+	devalue: '5.9.3',
 	esbuild: '0.25.0',
 	nanoid: '3.3.18',
-	undici: '7.29.0'
+	undici: '7.30.1'
 };
 
 /**

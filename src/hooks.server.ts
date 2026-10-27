@@ -9,6 +9,8 @@ import {
 	metricUpsert,
 	recordError,
 	pageViewStatements,
+	dailyVisitorPrune,
+	releaseVisitorPruneLatch,
 	routeClass,
 	isAssetPath,
 	deviceClass,
@@ -342,20 +344,8 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// isSecurityTxt is exempt here too, completing the promise the exemptions
 	// above make: a security.txt request touches this fork's DB in NO direction,
 	// writes included (SONA-171). One skipped counter row is a fair trade.
-	if (
-		event.platform?.env.DB &&
-		!isAssetPath(path) &&
-		!isSecurityTxt &&
-		isObservabilityEnabled(event.platform?.env)
-	) {
+	if (event.platform?.env.DB && !isAssetPath(path) && !isSecurityTxt) {
 		const db = getDb(event.platform.env.DB);
-		// All rolled-up counters for this request go into ONE db.batch — the request
-		// counter, the 5xx error rollup, and (below) the Tier-A page-view counters —
-		// so a single request never fans out into five separate D1 writes.
-		const counters: BatchItem<'sqlite'>[] = [metricUpsert(db, 'request', routeClass(path))];
-		if (response.status >= 500) {
-			counters.push(metricUpsert(db, 'error', String(response.status)));
-		}
 
 		// Tier-A visitor aggregate (issue #149). Count ONE page view for a successful
 		// PUBLIC HTML response only: admin/api paths, non-HTML responses (feeds,
@@ -364,8 +354,37 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		// referrer to its bare host, the UA to a coarse device class then discarded.
 		// No cookie, no IP, no per-visitor row.
 		const isHtmlResp = response.headers.get('content-type')?.includes('text/html') ?? false;
-		if (routeClass(path) === 'public' && response.status === 200 && isHtmlResp) {
-			const device = deviceClass(event.request.headers.get('user-agent'));
+		const device =
+			routeClass(path) === 'public' && response.status === 200 && isHtmlResp
+				? deviceClass(event.request.headers.get('user-agent'))
+				: null;
+
+		// Visitor-counter retention rides the same page views, once per isolate per
+		// UTC day, whether or not observability is on: a fork that turns the flag
+		// off after collecting still owes the policy's 35-day delete, and with no
+		// CRON_SECRET nothing else would run it.
+		const prune = device ? dailyVisitorPrune(db) : null;
+		// A failed batch hands the day back so the next counted view retries the
+		// delete. Rethrown so schedule() still swallows it as before.
+		const releaseOnFail = (p: Promise<unknown>) =>
+			prune
+				? p.catch((e) => {
+						releaseVisitorPruneLatch();
+						throw e;
+					})
+				: p;
+
+		if (!isObservabilityEnabled(event.platform.env)) {
+			if (prune) schedule(event.platform, releaseOnFail(db.batch([prune])));
+		} else {
+			// All rolled-up counters for this request go into ONE db.batch — the request
+			// counter, the 5xx error rollup, and (below) the Tier-A page-view counters —
+			// so a single request never fans out into five separate D1 writes.
+			const counters: BatchItem<'sqlite'>[] = [metricUpsert(db, 'request', routeClass(path))];
+			if (response.status >= 500) {
+				counters.push(metricUpsert(db, 'error', String(response.status)));
+			}
+
 			if (device) {
 				counters.push(
 					// The pageview key is deliberately the DECODED path: if a non-canonical
@@ -378,18 +397,19 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 						country: countryCode(event.request.headers.get('cf-ipcountry'))
 					})
 				);
+				if (prune) counters.push(prune);
 			}
-		}
 
-		// The capped-ring error sample (a delete + insert with its own prune) stays
-		// separate from the counter batch. Fire-and-forget so visitors never wait.
-		const work: Promise<unknown>[] = [
-			db.batch(counters as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-		];
-		if (response.status >= 500 && !event.locals.errorSampled) {
-			work.push(recordError(db, { route: path, status: response.status, message: `HTTP ${response.status}` }));
+			// The capped-ring error sample (a delete + insert with its own prune) stays
+			// separate from the counter batch. Fire-and-forget so visitors never wait.
+			const work: Promise<unknown>[] = [
+				releaseOnFail(db.batch(counters as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]))
+			];
+			if (response.status >= 500 && !event.locals.errorSampled) {
+				work.push(recordError(db, { route: path, status: response.status, message: `HTTP ${response.status}` }));
+			}
+			schedule(event.platform, Promise.all(work));
 		}
-		schedule(event.platform, Promise.all(work));
 	}
 
 	// Security headers. Content-Security-Policy is set separately by SvelteKit's
