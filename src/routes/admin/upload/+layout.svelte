@@ -5,11 +5,11 @@
 	// (?commission=ID) to a plain one would carry the entry's artist,
 	// characters, Private, and commissionId into an unrelated upload. Keying on
 	// the parameter remounts the page whenever the entry changes.
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 
 	let { children } = $props();
 </script>
 
-{#key $page.url.searchParams.get('commission')}
+{#key page.url.searchParams.get('commission')}
 	{@render children()}
 {/key}
