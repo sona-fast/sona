@@ -43,7 +43,7 @@ export const EARLY_ACCESS: Record<string, { gaDate: string; label: EarlyAccessLa
 	// because forks get the code when they sync, not at merge: a date set now
 	// would shorten their supporters' week, or pass before the release ships and
 	// make the flag born GA'd.
-	'commission-ledger': { gaDate: '2026-10-28', label: m.early_access_label_commission_ledger }
+	'commission-ledger': { gaDate: '2026-11-04', label: m.early_access_label_commission_ledger }
 };
 
 /**
