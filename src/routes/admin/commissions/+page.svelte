@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { PageData } from './$types';
+	import { page } from '$app/state';
 	import { CircleCheck, ClipboardList, Eye, ImagePlus, Pencil, Plus } from 'lucide-svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
@@ -9,7 +11,10 @@
 	import { isActiveStatus, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
 	import * as m from '$lib/paraglide/messages';
 
-	let { data } = $props();
+	// Read from `page`, not the `data` prop: a Back press that interrupts a
+	// navigation between two ledger pages can leave the prop holding the other
+	// page's data for good (sveltejs/kit#13276), while `page.data` is this page's.
+	const data = $derived(page.data as PageData);
 
 	// "Added to your gallery" after an upload from an entry. The server built it
 	// from the saved rows; the piece's title is the link inside the sentence,

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { PageData } from './$types';
 	import { onMount } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { enhance } from '$app/forms';
@@ -14,7 +15,11 @@
 	import * as m from '$lib/paraglide/messages';
 	import { draftSnapshot } from '$lib/drafts';
 
-	let { data, form } = $props();
+	let { form } = $props();
+	// Read from `page`, not the `data` prop: a Back press that interrupts a
+	// navigation between two ledger pages can leave the prop holding the other
+	// page's data for good (sveltejs/kit#13276), while `page.data` is this page's.
+	const data = $derived(page.data as PageData);
 
 	// Null only after a save without JavaScript found the entry deleted elsewhere.
 	const entry = $derived(data.entry);
