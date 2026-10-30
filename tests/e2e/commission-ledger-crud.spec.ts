@@ -1299,11 +1299,15 @@ test("a row's Delete asks first and deletes only that row's entry", async ({ pag
 	);
 	await trash.click();
 	await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
-	await expect(page.getByRole('status').filter({ hasText: 'Something went wrong' })).toBeVisible();
+	const errorToast = page.getByRole('status').filter({ hasText: 'Something went wrong' });
+	await expect(errorToast).toBeVisible();
 	await expect(page.getByRole('row', { name: /E2E delete me/ })).toHaveCount(1);
 	await expect(trash).toBeEnabled();
 	await expect(trash).toBeFocused();
 	await page.unroute(listDelete);
+	// An error toast stays up for 7 seconds. Let this one go, so the check at the
+	// end only sees what the later deletes say.
+	await expect(errorToast).toHaveCount(0, { timeout: 10_000 });
 
 	await trash.click();
 	await settledShot(page, testInfo.outputPath('commission-row-delete.png'));
