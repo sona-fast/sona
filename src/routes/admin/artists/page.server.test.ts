@@ -1024,7 +1024,7 @@ describe('update action — the keep-private flag', () => {
 			const { db, platform } = makeDb();
 			const bobAvatar = 'https://cdn.bsky.app/img/avatar/plain/bob.jpg';
 			stubRegistryFetch({ 'bob.bsky.social': { avatar: bobAvatar } });
-			const row = await db
+			const { id } = await db
 				.insert(schema.artists)
 				.values({
 					name: 'Quill',
@@ -1034,7 +1034,6 @@ describe('update action — the keep-private flag', () => {
 				})
 				.returning()
 				.get();
-			const id = row.id;
 
 			await actions.update(
 				updateEvent(platform, { id: String(id), name: 'Quill', bluesky: 'bob.bsky.social', ledgerPrivate: 'on' })

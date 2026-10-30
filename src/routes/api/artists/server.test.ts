@@ -171,8 +171,8 @@ describe('POST /api/artists — explicit registry import overrides the local cop
 	});
 });
 
-// Q26: the "keep private (commission ledger only)" checkbox on the new-artist
-// dialog. A private artist's handle must not go to X or Bluesky for an avatar.
+// Q26: the "keep private" checkbox on the new-artist dialog. It keeps the
+// artist off the registry; their avatar is still looked up (SONA-236).
 describe('POST /api/artists — keep private', () => {
 	afterEach(() => vi.unstubAllGlobals());
 
@@ -182,16 +182,25 @@ describe('POST /api/artists — keep private', () => {
 		return fetchSpy;
 	}
 
-	it('stores the flag on a new local artist and still looks up the avatar', async () => {
+	it('stores the flag on a new local artist and still stores their avatar', async () => {
 		const { db, platform } = makeDb();
-		const fetchSpy = stubOfflineFetch();
+		// The profile answers; the CDN copy stays offline, so the source link is kept.
+		const avatar = 'https://cdn.bsky.app/img/avatar/plain/quiet.jpg';
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('public.api.bsky.app')
+					? Promise.resolve(new Response(JSON.stringify({ avatar })))
+					: Promise.reject(new Error('offline'))
+			)
+		);
 
 		const res = await post(platform, { name: 'Quiet', bluesky: 'quiet.bsky.social', ledgerPrivate: true });
 		expect(((await res.json()) as { status: string }).status).toBe('created');
 
 		const row = await db.select().from(artists).where(eq(artists.name, 'Quiet')).get();
 		expect(row!.ledgerPrivate).toBe(true);
-		expect(fetchSpy.mock.calls.some((call) => String((call as unknown[])[0]).includes('quiet.bsky.social'))).toBe(true);
+		expect(row!.avatarUrl).toBe(avatar);
 	});
 
 	it('looks up the avatar for a new artist without the flag', async () => {
