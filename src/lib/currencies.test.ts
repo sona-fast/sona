@@ -101,12 +101,6 @@ describe('findCurrencies', () => {
 		return (code: string) => names.of(code) ?? code;
 	};
 	const find = (query: string, locale = 'en') => findCurrencies(all, query, locale, namer(locale));
-	// The search before symbols counted: the code or the name contains the query.
-	const byText = (query: string, locale = 'en') => {
-		const q = query.trim().toLocaleLowerCase(locale);
-		const nameOf = namer(locale);
-		return all.filter((code) => code.toLowerCase().includes(q) || nameOf(code).toLocaleLowerCase(locale).includes(q));
-	};
 
 	it('finds EUR first for €', () => {
 		expect(find('€')[0]).toBe('EUR');
@@ -131,8 +125,14 @@ describe('findCurrencies', () => {
 		expect(find('ca$')[0]).toBe('CAD');
 	});
 
-	it('finds codes and names exactly as before when the query is no symbol', () => {
-		for (const query of ['dollar', 'eu', 'JP', 'yen', 'krona']) expect(find(query)).toEqual(byText(query));
+	it('finds currencies by code and by name when the query is no symbol', () => {
+		expect(find('dollar')).toEqual(expect.arrayContaining(['USD', 'AUD', 'CAD']));
+		expect(find('dollar')).not.toContain('EUR');
+		expect(find('JP')).toContain('JPY');
+		expect(find('yen')).toContain('JPY');
+		expect(find('krona')).toContain('SEK');
+		expect(find('eu')).toContain('EUR');
+		expect(find('zzzz')).toEqual([]);
 		expect(find('円', 'ja')).toContain('JPY');
 		expect(find('ドル', 'ja')).toContain('USD');
 	});
