@@ -122,7 +122,8 @@ export function entryForm(overrides: Record<string, string | string[] | undefine
 	return form;
 }
 
-/** Runs a form action and reports its status, 'redirected', and any data. */
+/** Runs a form action and reports its status (200 for data returned on
+ * success), 'redirected', and any data. */
 export async function runAction(
 	action: (event: never) => unknown,
 	{ platform, id, form }: { platform: App.Platform; id?: string; form?: FormData }
@@ -132,8 +133,13 @@ export async function runAction(
 	try {
 		const result = (await action({ request, platform, params: id === undefined ? {} : { id }, url } as never)) as
 			| { status: number; data: Record<string, unknown> }
+			| Record<string, unknown>
 			| undefined;
-		return result && 'status' in result ? { status: result.status, data: result.data } : { status: 'redirected', data: {} };
+		// A refusal is an ActionFailure; a success that returns data answers 200.
+		if (result && 'status' in result && 'data' in result) {
+			return { status: result.status as number, data: result.data as Record<string, unknown> };
+		}
+		return result ? { status: 200, data: result } : { status: 'redirected', data: {} };
 	} catch (e) {
 		if (isRedirect(e)) return { status: 'redirected', data: {} };
 		throw e;

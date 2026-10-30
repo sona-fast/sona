@@ -1305,6 +1305,106 @@ test("a row's Delete asks first and deletes only that row's entry", async ({ pag
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
 });
 
+// Art already in the gallery links to its entry instead of being uploaded
+// again (SONA-236). The pieces are the ones the Add to gallery tests above left
+// by Test Artist: E2E Snowfall (with a variant of the same title) and E2E
+// unrelated piece. Ends with the ledger empty, as it started.
+test('Link a piece links gallery art to an entry, with or without JavaScript, and Unlink keeps the piece', async ({ page, browser }, testInfo) => {
+	const ENTRY = 'E2E old commission';
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill(ENTRY);
+	await page.getByLabel('Status').selectOption('delivered');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const row = section(page, 'Finished').getByRole('row', { name: new RegExp(ENTRY) });
+
+	// Without JavaScript, the row's Link a piece opens the entry page's own
+	// picker, and Unlink is a plain form.
+	const context = await browser.newContext({
+		baseURL: testInfo.project.use.baseURL,
+		storageState: await page.context().storageState(),
+		javaScriptEnabled: false
+	});
+	try {
+		const noJs = await context.newPage();
+		await noJs.goto('/admin/commissions');
+		await noJs.getByRole('link', { name: `Link a piece: ${ENTRY}` }).click();
+		const picker = noJs.getByRole('region', { name: 'Link a piece' });
+		await expect(picker.getByRole('group', { name: 'Pieces by Test Artist, newest first' })).toBeVisible();
+		await picker.getByRole('radio', { name: 'E2E unrelated piece' }).check();
+		await settledShot(noJs, testInfo.outputPath('commission-link-piece-nojs.png'));
+		await picker.getByRole('button', { name: 'Link piece' }).click();
+		await expect(galleryPanel(noJs).getByRole('link', { name: 'E2E unrelated piece' })).toBeVisible();
+		await galleryPanel(noJs).getByRole('button', { name: 'Unlink' }).click();
+		await expect(galleryPanel(noJs)).toContainText('Not in your gallery');
+	} finally {
+		await context.close();
+	}
+
+	await open(page, '/admin/commissions');
+	const linkButton = row.getByRole('button', { name: `Link a piece: ${ENTRY}` });
+	await linkButton.click();
+	const dialog = page.getByRole('dialog', { name: 'Link a piece' });
+	const search = dialog.getByRole('searchbox', { name: 'Search titles' });
+	await expect(search).toBeFocused();
+	const pieces = dialog.getByRole('group', { name: 'Pieces by Test Artist, newest first' });
+	// Top-level pieces only: the variant shares its piece's title and isn't offered.
+	await expect(pieces.getByRole('radio', { name: 'E2E Snowfall' })).toHaveCount(1);
+	await expect(pieces.getByRole('radio', { name: 'E2E unrelated piece' })).toBeVisible();
+	await expect(dialog.getByRole('button', { name: 'Link piece' })).toBeDisabled();
+
+	// Esc closes it and puts focus back on the row's button.
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeHidden();
+	await expect(linkButton).toBeFocused();
+
+	// By keyboard: search, then Tab past Search into the pieces and pick one.
+	await linkButton.click();
+	await search.fill('snow');
+	await search.press('Enter');
+	await expect(pieces.getByRole('radio')).toHaveCount(1);
+	await page.keyboard.press('Tab');
+	await page.keyboard.press('Tab');
+	await expect(pieces.getByRole('radio', { name: 'E2E Snowfall' })).toBeFocused();
+	await page.keyboard.press('Space');
+	await expect(pieces.getByRole('radio', { name: 'E2E Snowfall' })).toBeChecked();
+	await settledShot(page, testInfo.outputPath('commission-link-piece-dialog.png'));
+	await dialog.getByRole('button', { name: 'Link piece' }).click();
+
+	const pieceLink = row.getByRole('link', { name: 'E2E Snowfall' });
+	await expect(pieceLink).toBeVisible();
+	await expect(pieceLink).toBeFocused();
+	await expect(row.getByRole('button', { name: `Link a piece: ${ENTRY}` })).toHaveCount(0);
+	await settledShot(page, testInfo.outputPath('commission-link-piece-linked.png'));
+	const pieceUrl = await pieceLink.getAttribute('href');
+
+	// Unlink from the entry form. It keeps unsaved typing, and a save after it
+	// goes through: the form moves on to the version the unlink wrote.
+	await open(page, (await row.getByRole('link', { name: `Edit ${ENTRY}` }).getAttribute('href'))!);
+	await expect(galleryPanel(page).getByRole('link', { name: 'E2E Snowfall' })).toBeVisible();
+	await page.getByLabel('Notes').fill('typed before unlinking');
+	await galleryPanel(page).getByRole('button', { name: 'Unlink' }).click();
+	await expect(galleryPanel(page)).toContainText('Not in your gallery');
+	await expect(galleryPanel(page).getByRole('button', { name: 'Link a piece' })).toBeFocused();
+	await expect(page.getByLabel('Notes')).toHaveValue('typed before unlinking');
+	await settledShot(page, testInfo.outputPath('commission-link-piece-unlinked.png'));
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await expect(row).toContainText('Not in your gallery');
+
+	// Unlinking never deletes the piece.
+	await open(page, pieceUrl!);
+	await expect(page.locator('input[name="title"]')).toHaveValue('E2E Snowfall');
+
+	// Leave the ledger empty for the tests after this one.
+	await open(page, '/admin/commissions');
+	await page.getByRole('button', { name: `Delete ${ENTRY}` }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
+});
+
 test('signing out forgets unsaved drafts', async ({ page }) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
