@@ -182,7 +182,7 @@ describe('POST /api/artists — keep private', () => {
 		return fetchSpy;
 	}
 
-	it('stores the flag on a new local artist and skips the avatar lookup', async () => {
+	it('stores the flag on a new local artist and still looks up the avatar', async () => {
 		const { db, platform } = makeDb();
 		const fetchSpy = stubOfflineFetch();
 
@@ -191,8 +191,7 @@ describe('POST /api/artists — keep private', () => {
 
 		const row = await db.select().from(artists).where(eq(artists.name, 'Quiet')).get();
 		expect(row!.ledgerPrivate).toBe(true);
-		expect(row!.avatarUrl).toBeNull();
-		expect(fetchSpy).not.toHaveBeenCalled();
+		expect(fetchSpy.mock.calls.some((call) => String((call as unknown[])[0]).includes('quiet.bsky.social'))).toBe(true);
 	});
 
 	it('looks up the avatar for a new artist without the flag', async () => {

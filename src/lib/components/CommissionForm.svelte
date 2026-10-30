@@ -1006,7 +1006,7 @@
 
 {#if showNewArtist}
 	<!-- An artist made for a ledger entry starts private, so the nightly sync
-	     and avatar refresh leave them alone even if the entry is never saved. -->
+	     leaves them alone even if the entry is never saved. -->
 	<NewArtistDialog
 		{registryEnabled}
 		allowLedgerPrivate

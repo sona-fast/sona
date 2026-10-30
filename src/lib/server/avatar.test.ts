@@ -610,9 +610,9 @@ describe('refreshArtistAvatars', () => {
 		expect(urls.some((u) => u.includes('hasapiece'))).toBe(true);
 	});
 
-	// Q26: the owner's "keep private" flag skips the lookup with no entries at
-	// all, and a draft piece doesn't end it. Publishing a piece does.
-	it('skips a flagged artist with no entries or only a draft, and refreshes one with a published piece', async () => {
+	// The owner's "keep private" flag keeps an artist off the registry, not out
+	// of the refresh: their avatar shows in admin whether or not they have work.
+	it('refreshes a flagged artist with no entries, only a draft, or a published piece', async () => {
 		const fetchMock = stubFetch();
 		const { db } = makeDb();
 		await db.insert(artists).values([
@@ -630,12 +630,16 @@ describe('refreshArtistAvatars', () => {
 			mode: 'oldest'
 		});
 
-		expect(r).toEqual({ processed: 1, refreshed: 1, remaining: 0 });
+		expect(r).toEqual({ processed: 3, refreshed: 3, remaining: 0 });
 		const urls = fetchMock.mock.calls.map(([u]) => String(u));
-		expect(urls.some((u) => u.includes('flagged.bsky'))).toBe(false);
-		expect(urls.some((u) => u.includes('flaggeddraft'))).toBe(false);
+		expect(urls.some((u) => u.includes('flagged.bsky'))).toBe(true);
+		expect(urls.some((u) => u.includes('flaggeddraft'))).toBe(true);
 		expect(urls.some((u) => u.includes('flaggedpub'))).toBe(true);
-		expect((await db.select().from(artists).where(eq(artists.id, 3)).get())!.avatarResolvedAt).not.toBeNull();
+		for (const id of [1, 2, 3]) {
+			const row = (await db.select().from(artists).where(eq(artists.id, id)).get())!;
+			expect(row.avatarResolvedAt).not.toBeNull();
+			expect(row.ledgerPrivate).toBe(true);
+		}
 	});
 });
 

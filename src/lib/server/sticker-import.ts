@@ -1406,9 +1406,9 @@ export async function resolveOrCreateArtist(
 		/** Storage context so a freshly-resolved avatar is re-hosted to our own CDN
 		 * (can't rot to a 404) instead of stored as a hotlink. */
 		rehost?: AvatarRehostContext;
-		/** The owner's "keep private (commission ledger only)" flag (SONA-236):
-		 * stored on the new row, and the avatar isn't looked up, since that sends
-		 * the handle to X or Bluesky. */
+		/** The owner's "keep private (commission ledger only)" flag (SONA-236),
+		 * stored on the new row. It keeps the artist off the registry, not the
+		 * avatar lookup: that only fetches a public profile picture. */
 		ledgerPrivate?: boolean;
 	}
 ): Promise<number | null> {
@@ -1429,7 +1429,7 @@ export async function resolveOrCreateArtist(
 	// links (best-effort — ignore errors).
 	let avatarUrl: string | null = providedAvatar ?? null;
 	let resolvedNow = false;
-	if (!avatarUrl && !ledgerPrivate) {
+	if (!avatarUrl) {
 		try {
 			const { resolveAvatarUrl } = await import('$lib/server/avatar');
 			avatarUrl = await resolveAvatarUrl(

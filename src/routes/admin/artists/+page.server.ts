@@ -268,19 +268,16 @@ export const actions = {
 				patreonUrl: artists.patreonUrl,
 				globalId: artists.globalId,
 				storedPrivate: artists.ledgerPrivate,
-				hasPublicWork: sql<number>`${artistShownPublicly(artists.id)}`,
-				// Check against the flag this save will store, so ticking it in this
-				// same save already skips the avatar lookup. A registry-linked artist
-				// can only have the flag cleared, never set (stored AND posted): a
-				// shared artist can't be made private (POST /api/artists refuses it
-				// too), but one linked while flagged must still be able to clear it.
-				ledgerOnly: sql<number>`CASE WHEN ${artists.globalId} IS NOT NULL THEN ${artistIsLedgerOnly(artists.id, postedPrivate ? undefined : false)} ELSE ${artistIsLedgerOnly(artists.id, postedPrivate)} END`
+				hasPublicWork: sql<number>`${artistShownPublicly(artists.id)}`
 			})
 			.from(artists)
 			.where(eq(artists.id, id))
 			.get();
 		// An artist with public work is already public, so the box can't be set
-		// for them: it would claim a privacy the site can't give (SONA-236).
+		// for them: it would claim a privacy the site can't give (SONA-236). A
+		// registry-linked artist can only have the flag cleared, never set: a
+		// shared artist can't be made private (POST /api/artists refuses it too),
+		// but one linked while flagged must still be able to clear it.
 		const ledgerPrivate =
 			(existing?.globalId ? existing.storedPrivate && postedPrivate : postedPrivate) && !existing?.hasPublicWork;
 
@@ -289,12 +286,8 @@ export const actions = {
 		//  - EVERY avatar-capable social (bluesky/twitter/FA/patreon) posted empty →
 		//    write null: with nothing left to resolve from, this is a deliberate
 		//    removal and must actually clear a wrong avatar.
-		//  - a "keep private" artist with no public work (SONA-236) → never
-		//    resolve: resolving sends their handle to X or Bluesky,
-		//    which a save doesn't ask for. Keep the stored avatar only while the
-		//    avatar socials are unchanged; a changed handle writes null, since the
-		//    OLD account's face must never persist under the new one. The avatar
-		//    refresh fills a missing one once they have work on the site.
+		//  - "keep private" (SONA-236) doesn't change any of this: it keeps the
+		//    artist off the registry, and their avatar only shows in admin.
 		//  - avatar socials unchanged AND the stored avatar is already ours → skip
 		//    re-resolution entirely; re-hosting the same source again can't change
 		//    anything.
@@ -310,10 +303,9 @@ export const actions = {
 			patreonUrl === (existing?.patreonUrl ?? null);
 		let avatarUrl = existing?.avatarUrl ?? null;
 		let writeResolved = false;
-		if (!avatarSocialsPosted || (existing?.ledgerOnly && !avatarSocialsUnchanged)) {
+		if (!avatarSocialsPosted) {
 			avatarUrl = null;
 		} else if (
-			!existing?.ledgerOnly &&
 			!(
 				avatarSocialsUnchanged &&
 				existing?.avatarUrl &&
