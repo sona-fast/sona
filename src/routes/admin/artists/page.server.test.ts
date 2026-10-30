@@ -1008,7 +1008,7 @@ describe('update action — the keep-private flag', () => {
 	});
 
 	// A private artist's avatar follows their handle like anyone else's: a new
-	// handle is looked up, and the old account's face is replaced or cleared.
+	// handle is looked up, and a found avatar replaces the old one.
 	describe('a flagged artist with a stored avatar', () => {
 		const storedAvatar = '/img/avatars/quill/alice.jpg';
 		async function seedFlagged(db: ReturnType<typeof makeDb>['db']) {
@@ -1044,14 +1044,15 @@ describe('update action — the keep-private flag', () => {
 			expect(after!.ledgerPrivate).toBe(true);
 		});
 
-		it("clears the old account's avatar when the new handle's lookup fails", async () => {
+		it("keeps the avatar when the new handle's lookup fails", async () => {
 			const { db, platform } = makeDb();
 			const id = await seedFlagged(db);
+			const before = await read(db, id);
 
 			await actions.update(updateEvent(platform, { id: String(id), name: 'Quill', twitter: 'bob', ledgerPrivate: 'on' }));
 			const after = await read(db, id);
 			expect(after!.twitterUrl).toBe('https://twitter.com/bob');
-			expect(after!.avatarUrl).toBeNull();
+			expect(after!.avatarUrl).toBe(before!.avatarUrl);
 			expect(after!.avatarResolvedAt).toBeNull(); // the refresh cron tries again later
 		});
 
@@ -1122,9 +1123,9 @@ describe('update action — avatar clobber guard (#187)', () => {
 		expect(after!.avatarResolvedAt).toBeNull(); // not stamped — the cron may still retry it
 	});
 
-	// A changed handle is a different account: the guard protects an avatar from
-	// a failed lookup of the SAME account, never the old account's face.
-	it("clears the old account's avatar when a changed handle's lookup fails", async () => {
+	// A failed lookup never clears an avatar, even after a handle change; the
+	// dropped stamp lets the refresh cron try the new handle soon.
+	it("keeps the avatar when a changed handle's lookup fails", async () => {
 		const { db, platform } = makeDb();
 		const row = await db
 			.insert(schema.artists)
@@ -1140,7 +1141,7 @@ describe('update action — avatar clobber guard (#187)', () => {
 		await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx', bluesky: 'other.bsky.social' }));
 		const after = await db.select().from(schema.artists).get();
 		expect(after!.blueskyUrl).toBe('https://bsky.app/profile/other.bsky.social');
-		expect(after!.avatarUrl).toBeNull();
+		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg');
 		expect(after!.avatarResolvedAt).toBeNull();
 	});
 
@@ -1190,7 +1191,7 @@ describe('update action — avatar clobber guard (#187)', () => {
 		expect(after!.avatarResolvedAt).toBe('2026-10-01T00:00:00.000Z');
 	});
 
-	it('clears the avatar when the X handle changes and there is no Bluesky handle', async () => {
+	it('keeps the avatar when the X handle changes, there is no Bluesky handle, and the lookup fails', async () => {
 		const { db, platform } = makeDb();
 		const row = await db
 			.insert(schema.artists)
@@ -1205,7 +1206,7 @@ describe('update action — avatar clobber guard (#187)', () => {
 
 		await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx', twitter: 'nyx_new' }));
 		const after = await db.select().from(schema.artists).get();
-		expect(after!.avatarUrl).toBeNull();
+		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg');
 		expect(after!.avatarResolvedAt).toBeNull();
 	});
 

@@ -341,10 +341,10 @@ export const actions = {
 				resolved
 			);
 			if (writeResolved) avatarUrl = resolved;
-			// A changed handle is a different account, so the stored avatar is the old
-			// account's face: replace it with whatever the lookup found, even a
-			// hotlink, or clear it. Unstamped, the refresh cron tries again later.
-			else if (avatarAccountChanged) avatarUrl = resolved;
+			// A changed handle is a different account: take whatever the lookup found
+			// for it, even a hotlink. A failed lookup keeps the stored avatar, and
+			// unstamped, the refresh cron tries the new handle again later.
+			else if (avatarAccountChanged && resolved) avatarUrl = resolved;
 		}
 
 		await db
@@ -353,8 +353,8 @@ export const actions = {
 				name, twitterUrl, blueskyUrl, telegramUrl, furAffinityUrl, deviantArtUrl, patreonUrl, instagramUrl, avatarUrl, ledgerPrivate,
 				// Stamp only on an actually-written resolve so the refresh cron can still
 				// pick up a row we failed (or refused) to refresh here. A changed handle
-				// that couldn't be written drops the old account's stamp too, so the
-				// cron, which takes never-stamped rows first, gets to it soon.
+				// drops the old account's stamp too, so the cron, which takes
+				// never-stamped rows first, gets to it soon.
 				...(writeResolved
 					? { avatarResolvedAt: new Date().toISOString() }
 					: avatarAccountChanged
