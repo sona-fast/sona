@@ -1801,6 +1801,13 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	await expect(tip).toBeVisible();
 	await expect(tip).toHaveText(reason);
 	await settledShot(page, testInfo.outputPath('artist-delete-blocked.png'));
+	// Escape hides it and leaves focus where it was; focusing again shows it.
+	await page.keyboard.press('Escape');
+	await expect(tip).toBeHidden();
+	await expect(trash).toBeFocused();
+	await page.keyboard.press('Shift+Tab');
+	await page.keyboard.press('Tab');
+	await expect(tip).toBeVisible();
 
 	// Activating it says the reason instead of asking to delete.
 	await page.keyboard.press('Enter');
@@ -1809,6 +1816,33 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	// A pointer click too. Playwright treats aria-disabled as not enabled, so force it.
 	await trash.click({ force: true });
 	await expect(page.getByRole('dialog')).toHaveCount(0);
+
+	// On hover, the pointer can move from the button onto the reason and it
+	// stays. It sits clear of Edit and inside the table, and Escape hides it
+	// while the pointer is still there.
+	await trash.evaluate((el) => (el as HTMLElement).blur());
+	await page.mouse.move(0, 0);
+	await expect(tip).toBeHidden();
+	await trash.hover();
+	await expect(tip).toBeVisible();
+	const tipBox = (await tip.boundingBox())!;
+	await page.mouse.move(tipBox.x + tipBox.width - 4, tipBox.y + tipBox.height / 2, { steps: 5 });
+	await expect(tip).toBeVisible();
+	const editBox = (await row.getByRole('button', { name: 'Edit artist' }).boundingBox())!;
+	const overlaps =
+		tipBox.x < editBox.x + editBox.width &&
+		editBox.x < tipBox.x + tipBox.width &&
+		tipBox.y < editBox.y + editBox.height &&
+		editBox.y < tipBox.y + tipBox.height;
+	expect(overlaps, 'the reason covers Edit').toBe(false);
+	const wrapBox = (await page.locator('.table-wrapper').boundingBox())!;
+	expect(tipBox.y).toBeGreaterThanOrEqual(wrapBox.y);
+	await page.keyboard.press('Escape');
+	await expect(tip).toBeHidden();
+	// Coming back with the pointer shows it again.
+	await page.mouse.move(0, 0);
+	await trash.hover();
+	await expect(tip).toBeVisible();
 
 	// An artist with nothing in the way still gets the confirm dialog.
 	await open(page, '/admin/artists?q=Twin One');
@@ -1820,11 +1854,106 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	await confirm.getByRole('button', { name: 'Cancel' }).click();
 	await expect(confirm).toHaveCount(0);
 
-	// Leave the ledger empty for the tests after this one.
+	// Take this test's entry back out. Earlier tests leave entries of their own.
 	await open(page, '/admin/commissions');
 	await page.getByRole('button', { name: 'Delete E2E blocks delete' }).click();
 	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
-	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Delete E2E blocks delete' })).toHaveCount(0);
+});
+
+/** Stubs POST /api/admin/artist-telegram, so no artist changes, and records the
+ * link each request sent. `answer.next` is what the next request gets. */
+async function stubAddTelegram(page: Page) {
+	const posted: string[] = [];
+	const answer: { next: { status: number; json: Record<string, unknown> } } = {
+		next: { status: 500, json: { ok: false } }
+	};
+	await page.route('**/api/admin/artist-telegram', async (route) => {
+		posted.push((route.request().postDataJSON() as { url: string }).url);
+		await route.fulfill(answer.next);
+	});
+	return { posted, answer };
+}
+
+// Add this Telegram's refusals (SONA-236), against a stubbed endpoint: each
+// says why in the card and out loud, and only a failure keeps the button.
+test('Add this Telegram says why it was refused, and a failed add can be tried again', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	const { posted, answer } = await stubAddTelegram(page);
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const liveRegion = page.locator('[aria-live="polite"]');
+	const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+	const start = async () => {
+		await open(page, '/admin/commissions/new');
+		await artist.selectOption({ label: 'No Chat Artist' });
+		await paste(link, 'https://t.me/e2e_tg_refused');
+		await expect(addTelegram).toBeVisible();
+	};
+
+	// A failure keeps the button, with focus on it, to try again.
+	await start();
+	const failed = "Couldn't add the Telegram. Try again.";
+	await addTelegram.click();
+	await expect(card.getByText(failed)).toBeVisible();
+	await expect(liveRegion.filter({ hasText: failed })).toHaveCount(1);
+	await expect(addTelegram).toBeFocused();
+	// Another link clears the reason, which was about the last one.
+	await paste(link, 'https://t.me/e2e_tg_refused_2');
+	await expect(card.getByText('e2e_tg_refused_2', { exact: true })).toBeVisible();
+	await expect(card.getByText(failed)).toHaveCount(0);
+	await addTelegram.click();
+	await expect(card.getByText(failed)).toBeVisible();
+	// Trying again goes through.
+	answer.next = { status: 200, json: { ok: true, id: 55, name: 'No Chat Artist', telegramUrl: 'https://t.me/e2e_tg_refused_2' } };
+	await page.keyboard.press('Enter');
+	await expect(card.getByText('Added this Telegram to No Chat Artist.')).toBeVisible();
+	expect(posted).toEqual(['https://t.me/e2e_tg_refused', 'https://t.me/e2e_tg_refused_2', 'https://t.me/e2e_tg_refused_2']);
+
+	// Another artist holds the handle.
+	await start();
+	answer.next = { status: 409, json: { ok: false, reason: 'telegram_taken_by_other' } };
+	await addTelegram.click();
+	const other = "Another artist already has this Telegram, so it wasn't added to No Chat Artist.";
+	await expect(card.getByText(other)).toBeVisible();
+	await expect(liveRegion.filter({ hasText: other })).toHaveCount(1);
+
+	// The artist already has a Telegram: the button goes, and focus moves to why.
+	await start();
+	answer.next = { status: 409, json: { ok: false, reason: 'has_telegram' } };
+	await addTelegram.click();
+	const taken = 'No Chat Artist already has a Telegram. To change it, edit them on the Artists page.';
+	await expect(card.getByText(taken)).toBeVisible();
+	await expect(liveRegion.filter({ hasText: taken })).toHaveCount(1);
+	await expect(addTelegram).toHaveCount(0);
+	await expect(card.locator('.lookup-msg', { hasText: taken })).toBeFocused();
+});
+
+// The card's button adds the link the card was built from. A link typed in
+// after the lookup, whose change fires on the button's own mouse-down, is
+// looked up first, never saved unseen.
+test('Add this Telegram never saves a link typed in after the lookup', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	const { posted } = await stubAddTelegram(page);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const card = page.locator('.lookup');
+	const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'No Chat Artist' });
+	await paste(link, 'https://t.me/e2e_tg_looked_up');
+	await expect(addTelegram).toBeVisible();
+
+	// Typed, not pasted: no lookup until the field loses focus.
+	await link.fill('https://t.me/e2e_tg_typed_after');
+	await addTelegram.click();
+	await expect(card.getByText('e2e_tg_typed_after', { exact: true })).toBeVisible();
+	await expect(addTelegram).toBeVisible();
+	expect(posted).toEqual([]);
+	// Once the card shows the new link, its button adds that one.
+	await addTelegram.click();
+	await expect(card.getByText("Couldn't add the Telegram. Try again.")).toBeVisible();
+	expect(posted).toEqual(['https://t.me/e2e_tg_typed_after']);
 });
 
 // Add this Telegram to {name} (SONA-236): a t.me link pasted for the picked

@@ -63,6 +63,22 @@ describe('POST /api/admin/artist-telegram', () => {
 		expect(telegramOf(sqlite, 2)).toBe('https://t.me/the_real_one');
 	});
 
+	it('refuses, and writes nothing, when another artist already has that Telegram', async () => {
+		const { sqlite, platform } = ledgerDb();
+		// Stored in another letter case and form: still the same account.
+		sqlite.prepare("UPDATE artists SET telegram_url = 'http://telegram.me/Artist_A' WHERE id = 1").run();
+		for (const url of ['https://t.me/artist_a', 'https://t.me/ARTIST_A/42']) {
+			expect(await post(platform, { artistId: 2, url }), url).toEqual({
+				status: 409,
+				body: { ok: false, reason: 'telegram_taken_by_other' }
+			});
+		}
+		expect(telegramOf(sqlite, 2)).toBeNull();
+		expect(telegramOf(sqlite, 1)).toBe('http://telegram.me/Artist_A');
+		// A different handle is still free to add.
+		expect((await post(platform, { artistId: 2, url: 'https://t.me/artist_b' })).status).toBe(200);
+	});
+
 	it('refuses a link that names no Telegram account, and writes nothing', async () => {
 		const { sqlite, platform } = ledgerDb();
 		for (const url of [

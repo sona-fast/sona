@@ -375,6 +375,8 @@
 		| { kind: 'refused'; reason: 'invalid' | 'unsupported' | 'no_handle' | 'failed' }
 		| {
 				kind: 'found';
+				/** The link this answer is about, as sent. */
+				link: string;
 				platform: Platform;
 				handle: string;
 				matches: ArtistChoice[];
@@ -412,6 +414,13 @@
 
 	async function addTelegram(artist: ArtistChoice, found: Extract<LinkLookup, { kind: 'found' }>) {
 		const artistId = String(artist.id);
+		// The field changed since this card was drawn (a typed link's change fires
+		// on this button's mouse-down): look the new link up instead, so what's
+		// saved is always a link the owner has seen the card for.
+		if (values.sourceUrl.trim() !== found.link) {
+			lookUpSource(values.sourceUrl);
+			return;
+		}
 		addingTelegram = true;
 		telegramRefusal = null;
 		let body: { ok?: boolean; reason?: string; telegramUrl?: string };
@@ -419,7 +428,7 @@
 			const res = await fetch('/api/admin/artist-telegram', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ artistId: artist.id, url: values.sourceUrl.trim() })
+				body: JSON.stringify({ artistId: artist.id, url: found.link })
 			});
 			body = await res.json();
 		} catch {
@@ -444,7 +453,9 @@
 				? m.admin_commissions_link_telegram_taken({ name: artist.name })
 				: body.reason === 'missing'
 					? m.admin_commissions_link_telegram_missing({ name: artist.name })
-					: m.admin_commissions_link_telegram_failed();
+					: body.reason === 'telegram_taken_by_other'
+						? m.admin_commissions_link_telegram_other({ name: artist.name })
+						: m.admin_commissions_link_telegram_failed();
 		telegramRefusal = { artistId, text };
 		announcer.say(text);
 		// An artist who already has a Telegram can't take this one, so the
@@ -507,7 +518,7 @@
 			});
 			const body = await res.json();
 			next = body.ok
-				? { kind: 'found', platform: body.platform, handle: body.handle, matches: body.matches, nameMatches: body.nameMatches }
+				? { kind: 'found', link, platform: body.platform, handle: body.handle, matches: body.matches, nameMatches: body.nameMatches }
 				: { kind: 'refused', reason: body.reason ?? 'failed' };
 		} catch {
 			next = { kind: 'refused', reason: 'failed' };

@@ -1,9 +1,9 @@
 import { json } from '@sveltejs/kit';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { artists } from '$lib/server/db/schema';
 import { parseArtistLink } from '$lib/server/artist-from-link';
-import { normalizeSocialUrl } from '$lib/server/handle-normalize';
+import { findLocalArtistsByHandle, normalizeSocialUrl } from '$lib/server/handle-normalize';
 import type { RequestHandler } from './$types';
 
 // POST /api/admin/artist-telegram (admin-only via hooks: everything under /api
@@ -22,6 +22,7 @@ import type { RequestHandler } from './$types';
 // - 400 `not_telegram`: the link names no Telegram account.
 // - 404 `missing`: no artist has that id.
 // - 409 `has_telegram`: the artist already has a Telegram.
+// - 409 `telegram_taken_by_other`: another artist already has this Telegram.
 
 export const POST: RequestHandler = async ({ request, platform }) => {
 	let body: { artistId?: unknown; url?: unknown };
@@ -40,6 +41,15 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	if (!telegramUrl) return json({ ok: false, reason: 'not_telegram' }, { status: 400 });
 
 	const db = getDb(platform!.env.DB);
+	// One Telegram is one person: a handle another artist holds (in any letter
+	// case or link form, matched as the link lookup does) isn't saved here too.
+	const holders = await db
+		.select({ id: artists.id, telegramUrl: artists.telegramUrl })
+		.from(artists)
+		.where(and(ne(artists.id, artistId), isNotNull(artists.telegramUrl), ne(artists.telegramUrl, '')));
+	if (findLocalArtistsByHandle(holders, 'telegram', [parsed.ok ? parsed.handle : '']).length > 0) {
+		return json({ ok: false, reason: 'telegram_taken_by_other' }, { status: 409 });
+	}
 	// The empty check rides the write itself, so two tabs adding different
 	// handles at once can't both land: the second finds the first's.
 	const [updated] = await db

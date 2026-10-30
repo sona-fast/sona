@@ -38,6 +38,16 @@
 	let deleteForm: HTMLFormElement;
 	let saving = $state(false);
 	let deletingId = $state<number | null>(null);
+	// Escape hides a blocked Delete's reason without moving focus or the
+	// pointer (WCAG 1.4.13); the next hover or focus on a Delete shows it again.
+	let tipDismissed = $state(false);
+	/** Focus, or a pointer coming in from outside, reaching a Delete. */
+	function reachesDelete(e: FocusEvent | PointerEvent) {
+		const wrap = (e.target as Element | null)?.closest?.('.delete-wrap');
+		if (!wrap) return false;
+		const from = e.relatedTarget as Node | null;
+		return e.type === 'focusin' || !from || !wrap.contains(from);
+	}
 	let submittingId = $state<number | null>(null);
 	let refreshingAvatars = $state(false);
 	// Submit to registry for a Keep private artist (SONA-236): the server refuses
@@ -104,6 +114,12 @@
 		else deleteTarget = { id: artist.id, name: artist.name };
 	}
 </script>
+
+<svelte:window
+	onkeydown={(e) => e.key === 'Escape' && (tipDismissed = true)}
+	onfocusin={(e) => reachesDelete(e) && (tipDismissed = false)}
+	onpointerover={(e) => reachesDelete(e) && (tipDismissed = false)}
+/>
 
 <div class="page-header">
 	<h1>{m.admin_nav_artists()} <span class="count">{m.admin_count_artists({ count: data.total })}</span></h1>
@@ -237,7 +253,7 @@
 						<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}>
 							<Pencil size={16} />
 						</button>
-						<span class="delete-wrap">
+						<span class="delete-wrap" class:tip-dismissed={tipDismissed}>
 							<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `delete-blocked-${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
 								{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 							</button>
@@ -308,7 +324,7 @@
 					</form>
 				{/if}
 				<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
-				<span class="delete-wrap">
+				<span class="delete-wrap" class:tip-dismissed={tipDismissed}>
 					<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `delete-blocked-m-${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
 						{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 					</button>
@@ -679,7 +695,8 @@
 
 	/* Why Delete won't run: shown beside the button on hover or keyboard focus,
 	   and read as the button's description. A tap shows it as a toast instead.
-	   It sits to the left so the table wrapper's overflow can't clip it. */
+	   It sits above, right-aligned, so it doesn't cover Edit beside it, and the
+	   pointer can move onto it (WCAG 1.4.13): ::before bridges the gap. */
 	.delete-wrap {
 		position: relative;
 		display: inline-flex;
@@ -687,9 +704,8 @@
 
 	.blocked-tip {
 		position: absolute;
-		right: calc(100% + 6px);
-		top: 50%;
-		transform: translateY(-50%);
+		bottom: calc(100% + 6px);
+		right: 0;
 		z-index: 10;
 		width: max-content;
 		max-width: 240px;
@@ -702,11 +718,19 @@
 		text-align: left;
 		white-space: normal;
 		visibility: hidden;
-		pointer-events: none;
 	}
 
-	.delete-wrap:hover .blocked-tip,
-	.delete-wrap:has(:focus-visible) .blocked-tip {
+	.blocked-tip::before {
+		content: '';
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		height: 6px;
+	}
+
+	.delete-wrap:not(.tip-dismissed):hover .blocked-tip,
+	.delete-wrap:not(.tip-dismissed):has(:focus-visible) .blocked-tip {
 		visibility: visible;
 	}
 
