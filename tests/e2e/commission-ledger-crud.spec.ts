@@ -1373,12 +1373,20 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await expect(page.getByRole('radio', { name: /USD/ })).toBeChecked();
 	await expect(page.locator('#ce-currency-hint')).toHaveText('Pick the currency the artist charges in.');
 
+	// The row as it loaded, which picks from Other currency never take away.
+	const rowRadios = page.getByRole('radiogroup').getByRole('radio');
+	const loadedRow = await rowRadios.evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value));
+
 	// Other currency: search by code, Escape closes back to the button, Enter picks.
 	const other = page.getByRole('button', { name: 'Other currency' });
 	await other.click();
 	const find = page.getByRole('combobox', { name: 'Find a currency' });
 	const results = page.getByRole('listbox', { name: 'Find a currency' });
+	const status = page.locator('#ce-currency-search').getByRole('status');
 	await expect(find).toBeFocused();
+	// Before any typing the status says nothing, shown or read out.
+	await expect(status).toHaveText('');
+	await expect(status).toBeHidden();
 	await page.keyboard.press('Escape');
 	await expect(find).toBeHidden();
 	await expect(other).toBeFocused();
@@ -1410,9 +1418,17 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await other.click();
 	await find.fill('zzzz');
 	await expect(results).toBeHidden();
-	await expect(page.getByRole('status').filter({ hasText: 'No currency matches “zzzz”.' })).toBeVisible();
+	await expect(status).toHaveText('No currency matches “zzzz”.');
+	await expect(status).toBeVisible();
+	// A symbol finds its currency, as the list shows it beside the code. The
+	// count is for screen readers only: the list shows it already.
+	await find.fill('€');
+	await expect(results.getByRole('option').first()).toHaveId('ce-currency-opt-EUR');
+	await expect(status).toHaveText(/^\d+ currenc(y matches|ies match)\.$/);
+	await expect(status).toBeHidden();
 	await find.fill('krw');
 	await expect(results.getByRole('option')).toHaveCount(1);
+	await expect(status).toHaveText('1 currency matches.');
 	await page.keyboard.press('Enter');
 	const krw = page.getByRole('radio', { name: /KRW/ });
 	await expect(krw).toBeChecked();
@@ -1442,8 +1458,22 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	expect(countChf(await chfPill.innerText())).toBe(1);
 	expect(countChf(await page.locator('.field-pill.amount').innerText())).toBe(1);
 	await settledShot(page, testInfo.outputPath('commission-entry-currency-picked.png'));
-	// Back to the won, which the entry below is priced in.
-	await krw.check();
+	// Three picks from Other currency in a row: only the latest joins the row,
+	// in front of the row as it loaded.
+	expect(await rowRadios.evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))).toEqual([
+		'CHF',
+		...loadedRow
+	]);
+	// Back to the won, which the entry below is priced in. CHF replaced it in
+	// the row, so it comes from Other currency again.
+	await other.click();
+	await find.fill('krw');
+	await page.keyboard.press('Enter');
+	await expect(krw).toBeChecked();
+	expect(await rowRadios.evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))).toEqual([
+		'KRW',
+		...loadedRow
+	]);
 
 	// Add New Artist: focus lands in the dialog, so Escape closes it.
 	const addArtist = page.getByRole('button', { name: 'Add New Artist' });

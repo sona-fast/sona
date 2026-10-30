@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick, type Snippet } from 'svelte';
 	import { Check, ChevronDown } from 'lucide-svelte';
-	import { CURRENCY_OTHER, currencySymbol, knownCurrencies } from '$lib/currencies';
+	import { CURRENCY_OTHER, currencySymbol, findCurrencies, knownCurrencies } from '$lib/currencies';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
 
@@ -36,13 +36,15 @@
 		}
 	};
 
-	// Currencies picked from Other currency join the row at the front. The row
-	// prop holds what the page loaded with; a pick never removes one of those.
-	let picked = $state<string[]>([]);
+	// The latest currency picked from Other currency joins the row at the front,
+	// and a later pick replaces it, so the row holds at most one more than it
+	// loaded with. The row prop holds what the page loaded with; a pick never
+	// removes one of those, and a pick already in it adds nothing.
+	let picked = $state<string | null>(null);
 	// The current value always has an option, even one the row never offered
 	// (a refused save that came back with an Other currency in it).
 	const shown = $derived.by(() => {
-		const extra = [...picked, value].filter((c, i, a) => c && !row.includes(c) && a.indexOf(c) === i);
+		const extra = [picked, value].filter((c, i, a): c is string => !!c && !row.includes(c) && a.indexOf(c) === i);
 		return [...extra, ...row];
 	});
 
@@ -58,13 +60,8 @@
 	let list = $state<HTMLUListElement>();
 	const radios: Record<string, HTMLInputElement> = $state({});
 
-	// Matches the code or the name in the admin language, so a Japanese owner
-	// can type 円 or ドル.
-	const matches = $derived.by(() => {
-		const q = query.trim().toLocaleLowerCase(locale);
-		if (!q) return all;
-		return all.filter((code) => code.toLowerCase().includes(q) || nameOf(code).toLocaleLowerCase(locale).includes(q));
-	});
+	// A symbol (€, $, ¥), the code, or the name in the admin language.
+	const matches = $derived(findCurrencies(all, query, locale, nameOf));
 	$effect(() => {
 		void matches;
 		active = 0;
@@ -92,7 +89,7 @@
 	}
 
 	async function pick(code: string) {
-		if (!row.includes(code) && !picked.includes(code)) picked = [code, ...picked];
+		if (!row.includes(code)) picked = code;
 		value = code;
 		open = false;
 		announce(m.admin_currency_picked_announce({ code, name: nameOf(code) }));
@@ -238,11 +235,14 @@
 				{/each}
 			</ul>
 		{/if}
+		<!-- Mounted from the start, so the live region exists before its text
+		     changes. Nothing to say before typing; the count is for screen
+		     readers, since the list shows it; no match is said for everyone. -->
 		<p class="count" role="status">
-			{#if matches.length === 0}
+			{#if !query.trim()}{:else if matches.length === 0}
 				{m.admin_currency_matches_none({ query: query.trim() })}
 			{:else}
-				{m.admin_currency_matches({ count: matches.length })}
+				<span class="sr-only">{m.admin_currency_matches({ count: matches.length })}</span>
 			{/if}
 		</p>
 	</div>
