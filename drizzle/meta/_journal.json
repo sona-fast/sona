@@ -225,6 +225,13 @@
       "when": 1792018292107,
       "tag": "0031_commission_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1793345990061,
+      "tag": "0032_commission_receipt_url",
+      "breakpoints": true
     }
   ]
 }

@@ -317,10 +317,13 @@ const refusals: {
 		error: 'Enter the amount as a number, like 45 or 45.50.'
 	},
 	{
+		// A javascript: value isn't a link at all now: it saves as plain text and
+		// never becomes one (commissions.test.ts). Past sanitizeUrl's length cap,
+		// a link is one Sona can't read.
 		name: 'a link Sona cannot read',
 		fill: async (page) => {
 			await page.getByLabel('Artist', { exact: true }).selectOption({ index: 1 });
-			await page.getByLabel('Link').fill('javascript:alert(1)');
+			await page.getByLabel("Where it's happening").fill(`https://example.com/${'a'.repeat(2100)}`);
 		},
 		field: 'sourceUrl',
 		error: "Sona couldn't read this link. Fix it or clear it."

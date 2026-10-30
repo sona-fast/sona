@@ -62,10 +62,43 @@ test('the entry shows plain dates and Delete entry, with no Save', async ({ page
 	await expect(progress.locator('div', { hasText: /^Requested/ })).toContainText('2026.09.03');
 	await expect(progress.locator('div', { hasText: /^Delivered/ }).last()).toContainText('2026.10.08');
 	await expect(progress).toContainText('45.00 USD');
+	await expect(progress.getByRole('link', { name: 'https://example.com/receipt/1' })).toHaveAttribute(
+		'href',
+		'https://example.com/receipt/1'
+	);
 	// SONA-9: 35 days apart, and nothing on the page may say so.
 	await expect(page.locator('main')).not.toContainText(/\b35\b|days?\b|ago\b|since\b/);
 	await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
+	// A stored link still opens as a link, and offers no chat beside it.
+	const artist = page.locator('section', { has: page.getByRole('heading', { name: 'Artist' }) });
+	await expect(artist.getByRole('link', { name: 'https://example.com/opening' })).toHaveAttribute(
+		'href',
+		'https://example.com/opening'
+	);
+	await expect(page.getByRole('link', { name: /Open chat/ })).toHaveCount(0);
 	await settledShot(page, testInfo.outputPath('commission-entry-readonly.png'));
+});
+
+test("a place saved as text shows as text, with Open chat to the entry's artist", async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/commissions/2/edit');
+	await waitForHydration(page);
+
+	const artist = page.locator('section', { has: page.getByRole('heading', { name: 'Artist' }) });
+	const place = artist.locator('div', { hasText: /^Where it's happening/ });
+	await expect(place).toContainText('Telegram DM');
+	await expect(place.getByRole('link', { name: 'Telegram DM' })).toHaveCount(0);
+	const chat = place.getByRole('link', { name: 'Open chat with Chat Artist on Telegram (opens in a new tab)' });
+	await expect(chat).toHaveText('Open chat');
+	await expect(chat).toHaveAttribute('href', 'https://t.me/e2e_chat_artist');
+	await expect(chat).toHaveAttribute('target', '_blank');
+	await settledShot(page, testInfo.outputPath('commission-entry-readonly-plain-place.png'));
+
+	// The last test empties the ledger, so this entry goes now.
+	await page.getByRole('button', { name: 'Delete entry' }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await expect(page.getByRole('link', { name: 'View Chat sketch' })).toHaveCount(0);
 });
 
 test('an upload from the entry waits for the gate too, before any file goes up', async ({ page }, testInfo) => {

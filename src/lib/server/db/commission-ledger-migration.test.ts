@@ -122,3 +122,36 @@ describe('migration 0031 commission ledger', () => {
 		});
 	});
 });
+
+describe('migration 0032 commission receipt_url', () => {
+	const files = readdirSync(dir)
+		.filter((f) => f.endsWith('.sql'))
+		.sort();
+
+	it('adds the column without touching entries saved before it', () => {
+		const sqlite = new Database(':memory:');
+		sqlite.pragma('foreign_keys = ON');
+		for (const name of files.filter((f) => f < '0032')) sqlite.exec(readFileSync(new URL(name, dir), 'utf8'));
+		sqlite.exec(`
+			INSERT INTO artists (id, name, created_at) VALUES (1, 'Artist A', '2026-10-01');
+			INSERT INTO characters (id, name, created_at) VALUES (1, 'Kit', '2026-10-01');
+			INSERT INTO commissions (id, artist_id, title, source_url, created_at, updated_at)
+				VALUES (1, 1, 'Entry', 'https://example.com/opening', '2026-10-01', '2026-10-01');
+			INSERT INTO commission_characters (commission_id, character_id) VALUES (1, 1);
+		`);
+		sqlite.exec(readFileSync(new URL('0032_commission_receipt_url.sql', dir), 'utf8'));
+		expect(sqlite.prepare('SELECT title, source_url, receipt_url FROM commissions').all()).toEqual([
+			{ title: 'Entry', source_url: 'https://example.com/opening', receipt_url: null }
+		]);
+		expect(count(sqlite, 'SELECT COUNT(*) AS n FROM commission_characters')).toBe(1);
+	});
+
+	it('is a single ALTER TABLE ... ADD, never a table rebuild', () => {
+		const sql = readFileSync(new URL('0032_commission_receipt_url.sql', dir), 'utf8')
+			.split('\n')
+			.filter((line) => !line.startsWith('--'))
+			.join('\n')
+			.trim();
+		expect(sql).toBe('ALTER TABLE `commissions` ADD `receipt_url` text;');
+	});
+});

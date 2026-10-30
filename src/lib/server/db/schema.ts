@@ -409,6 +409,8 @@ export const commissions = sqliteTable('commissions', {
 	priceMinor: integer('price_minor'),
 	currency: text('currency'),
 	payment: text('payment', { enum: COMMISSION_PAYMENTS }).notNull().default('unpaid'),
+	// A receipt or order page, such as a Ko-fi order (0032).
+	receiptUrl: text('receipt_url'),
 	notes: text('notes'),
 	requestedOn: text('requested_on'),
 	acceptedOn: text('accepted_on'),

@@ -16,7 +16,8 @@ import {
 	isActiveStatus,
 	isCalendarDate,
 	localToday,
-	parsePrice
+	parsePrice,
+	sourceLinkHref
 } from './commissions';
 
 const messages = (locale: 'en' | 'ja') =>
@@ -265,6 +266,7 @@ const ENTRY = {
 	characters: [{ id: 1 }, { id: 2 }],
 	status: 'in_progress' as const,
 	payment: 'paid' as const,
+	receiptUrl: 'https://ko-fi.com/s/0a1b2c',
 	price: '45.00',
 	currency: 'USD',
 	notes: 'Transparent background.',
@@ -286,6 +288,15 @@ describe('changedFields', () => {
 			'status',
 			'price'
 		]);
+	});
+
+	it('names a changed receipt link after Payment, in form order', () => {
+		expect(changedFields(loaded, { ...loaded, receiptUrl: '', price: '50.00', payment: 'refunded' })).toEqual([
+			'payment',
+			'receiptUrl',
+			'price'
+		]);
+		expect(staleMessage(loaded, { ...loaded, receiptUrl: '' }, 'en')).toMatch(/your changes to Receipt or order link,/);
 	});
 
 	it('compares characters as a set', () => {
@@ -311,7 +322,7 @@ describe('staleMessage', () => {
 			`${head} Your note comes with it, but your changes to Title and Price don't, so enter those again.`
 		);
 		expect(staleMessage(loaded, { ...loaded, sourceUrl: '' }, 'en')).toBe(
-			`${head} Reloading doesn't keep your changes to Link, so enter those again.`
+			`${head} Reloading doesn't keep your changes to Where it's happening, so enter those again.`
 		);
 	});
 
@@ -351,5 +362,30 @@ describe('mergeReloaded', () => {
 		expect(values.notes).toBe('Typed here.');
 		expect(values.status).toBe('delivered');
 		expect(restoredNote).toBe('replaces');
+	});
+});
+
+describe('sourceLinkHref', () => {
+	it('reads a web address as a link, with or without its https://', () => {
+		expect(sourceLinkHref('https://vgen.co/taro/commission/9')).toBe('https://vgen.co/taro/commission/9');
+		expect(sourceLinkHref('  http://example.com/a  ')).toBe('http://example.com/a');
+		expect(sourceLinkHref('bsky.app/profile/taro.bsky.social')).toBe('https://bsky.app/profile/taro.bsky.social');
+	});
+
+	it('reads the owner’s own words as text, not a link', () => {
+		for (const value of ['Telegram DM', 'Telegram', 'DM on t.me/taro', 'https://x.com/a and then Telegram', 'テレグラムのDM', '']) {
+			expect(sourceLinkHref(value)).toBeNull();
+		}
+	});
+
+	it('never makes a link from a script, data, or other non-web scheme', () => {
+		for (const value of ['javascript:alert(1)', 'JAVASCRIPT:alert(1)', 'data:text/html,<b>x</b>', 'vbscript:x', 'tg://resolve?domain=taro', 'mailto:a@b.co']) {
+			expect(sourceLinkHref(value)).toBeNull();
+		}
+	});
+
+	it('takes nothing from a missing value', () => {
+		expect(sourceLinkHref(null)).toBeNull();
+		expect(sourceLinkHref(undefined)).toBeNull();
 	});
 });

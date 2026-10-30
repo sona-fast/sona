@@ -5,6 +5,7 @@ import { sanitizeUrl } from './validate';
 import {
 	KIND_MAX,
 	NOTES_MAX,
+	SOURCE_TEXT_MAX,
 	TITLE_MAX,
 	currencyFractionDigits,
 	formatMinor,
@@ -12,6 +13,7 @@ import {
 	isCommissionPayment,
 	isCommissionStatus,
 	parsePrice,
+	sourceLinkHref,
 	type CommissionField,
 	type CommissionFormValues,
 	type CommissionPayment,
@@ -37,6 +39,7 @@ export interface CommissionInput {
 	characterIds: number[];
 	status: CommissionStatus;
 	payment: CommissionPayment;
+	receiptUrl: string | null;
 	priceMinor: number | null;
 	currency: string | null;
 	notes: string | null;
@@ -103,9 +106,16 @@ export function parseCommissionForm(
 	const notes = text(data, 'notes').replace(/\r\n?/g, '\n');
 	if (notes.length > NOTES_MAX) errors.notes = m.admin_commissions_error_too_long({ max: NOTES_MAX });
 
-	const rawUrl = text(data, 'sourceUrl');
-	const sourceUrl = rawUrl ? sanitizeUrl(rawUrl) : null;
-	if (rawUrl && !sourceUrl) errors.sourceUrl = m.admin_commissions_error_link();
+	// Where it's happening: a link is sanitized as before; anything else is the
+	// owner's own words ("Telegram DM"), kept as typed and never made a link.
+	const rawSource = text(data, 'sourceUrl');
+	let sourceUrl: string | null = null;
+	if (sourceLinkHref(rawSource)) {
+		sourceUrl = sanitizeUrl(rawSource);
+		if (!sourceUrl) errors.sourceUrl = m.admin_commissions_error_link();
+	} else if (rawSource.length > SOURCE_TEXT_MAX) {
+		errors.sourceUrl = m.admin_commissions_error_too_long({ max: SOURCE_TEXT_MAX });
+	} else sourceUrl = rawSource || null;
 
 	const characterIds: number[] = [];
 	for (const value of data.getAll('characterId')) {
@@ -121,6 +131,11 @@ export function parseCommissionForm(
 	if (!isCommissionStatus(status)) errors.status = m.admin_commissions_error_status();
 	const payment = text(data, 'payment');
 	if (!isCommissionPayment(payment)) errors.payment = m.admin_commissions_error_payment();
+
+	// The receipt is always a page to open, so plain text is refused, not kept.
+	const rawReceipt = text(data, 'receiptUrl');
+	const receiptUrl = rawReceipt && sourceLinkHref(rawReceipt) ? sanitizeUrl(rawReceipt) : null;
+	if (rawReceipt && !receiptUrl) errors.receiptUrl = m.admin_commissions_error_link();
 
 	// A price needs its currency. With no amount there's no price, so the
 	// currency the picker still has selected is dropped, not refused.
@@ -166,6 +181,7 @@ export function parseCommissionForm(
 			characterIds,
 			status: status as CommissionStatus,
 			payment: payment as CommissionPayment,
+			receiptUrl,
 			priceMinor,
 			currency: priceMinor === null ? null : currency,
 			notes: notes || null,
@@ -191,6 +207,7 @@ export function submittedValues(data: FormData): CommissionFormValues {
 			.filter((id): id is number => id !== null),
 		status: isCommissionStatus(status) ? status : 'applied',
 		payment: isCommissionPayment(payment) ? payment : 'unpaid',
+		receiptUrl: text(data, 'receiptUrl'),
 		price: text(data, 'price'),
 		currency: submittedCurrency(data),
 		notes: text(data, 'notes').replace(/\r\n?/g, '\n'),
@@ -227,6 +244,7 @@ function fields(input: CommissionInput) {
 		sourceUrl: input.sourceUrl,
 		status: input.status,
 		payment: input.payment,
+		receiptUrl: input.receiptUrl,
 		priceMinor: input.priceMinor,
 		currency: input.currency,
 		notes: input.notes,
@@ -381,11 +399,14 @@ export async function loadCommission(db: Database, id: number) {
 				artistId: commissions.artistId,
 				artistName: artists.name,
 				artistAvatarUrl: artists.avatarUrl,
+				// For Open chat beside a "Where it's happening" that's plain text.
+				artistTelegramUrl: artists.telegramUrl,
 				title: commissions.title,
 				kind: commissions.kind,
 				sourceUrl: commissions.sourceUrl,
 				status: commissions.status,
 				payment: commissions.payment,
+				receiptUrl: commissions.receiptUrl,
 				priceMinor: commissions.priceMinor,
 				currency: commissions.currency,
 				notes: commissions.notes,
@@ -419,10 +440,14 @@ export async function loadCommission(db: Database, id: number) {
 	};
 }
 
-/** The artist and character choices for the entry form, and the currencies
- * saved entries use, most recently saved first (the picker's row). */
+/** How many of the owner's past kinds the Kind field suggests. */
+const KIND_SUGGESTIONS_MAX = 20;
+
+/** The artist and character choices for the entry form, the currencies saved
+ * entries use, most recently saved first (the picker's row), and the kinds
+ * they use, the same way, for the Kind field's suggestions. */
 export async function loadCommissionChoices(db: Database) {
-	const [artistRows, characterRows, currencyRows] = await db.batch([
+	const [artistRows, characterRows, currencyRows, kindRows] = await db.batch([
 		db.select({ id: artists.id, name: artists.name }).from(artists).orderBy(asc(artists.name)),
 		db
 			.select({ id: characters.id, name: characters.name, ownerName: characters.ownerName })
@@ -434,11 +459,32 @@ export async function loadCommissionChoices(db: Database) {
 			.where(isNotNull(commissions.currency))
 			.groupBy(commissions.currency)
 			.orderBy(desc(sql`max(${commissions.updatedAt})`))
-			.limit(CURRENCY_ROW_MAX)
+			.limit(CURRENCY_ROW_MAX),
+		// One row per kind, ignoring letter case. With max() in the select, SQLite
+		// takes the bare kind from the newest row, so the spelling offered is the
+		// one the owner used last.
+		db
+			.select({ kind: commissions.kind, last: sql<string>`max(${commissions.updatedAt})` })
+			.from(commissions)
+			.where(and(isNotNull(commissions.kind), sql`${commissions.kind} <> ''`))
+			.groupBy(sql`lower(${commissions.kind})`)
+			.orderBy(desc(sql`max(${commissions.updatedAt})`))
+			.limit(KIND_SUGGESTIONS_MAX)
 	]);
+	// SQLite's lower() folds only ASCII, so "Étude" and "étude" still arrive as
+	// two rows; the newer one wins here.
+	const seen = new Set<string>();
+	const recentKinds: string[] = [];
+	for (const { kind } of kindRows) {
+		const key = kind?.toLocaleLowerCase();
+		if (!kind || !key || seen.has(key)) continue;
+		seen.add(key);
+		recentKinds.push(kind);
+	}
 	return {
 		artists: artistRows,
 		characters: characterRows,
-		recentCurrencies: currencyRows.map((r) => r.currency).filter((c): c is string => c !== null)
+		recentCurrencies: currencyRows.map((r) => r.currency).filter((c): c is string => c !== null),
+		recentKinds
 	};
 }

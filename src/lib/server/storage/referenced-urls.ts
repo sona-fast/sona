@@ -69,9 +69,10 @@ export const URL_COLUMNS: ReadonlyArray<{ table: SQLiteTable; columns: readonly 
 	// and inert — included per the over-collect rule above.
 	{ table: vrAvatars, columns: ['modelUrl', 'externalUrl'] },
 	{ table: avatarMedia, columns: ['url'] },
-	// An entry's link to where the owner asked: always off-site and inert,
-	// included per the over-collect rule above.
-	{ table: commissions, columns: ['sourceUrl'] }
+	// An entry's place (a link, or plain text such as "Telegram DM") and its
+	// receipt link: always off-site and inert, included per the over-collect
+	// rule above.
+	{ table: commissions, columns: ['sourceUrl', 'receiptUrl'] }
 ];
 
 /**

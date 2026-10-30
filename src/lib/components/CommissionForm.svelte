@@ -32,6 +32,7 @@
 		LINK_ERRORS,
 		localToday,
 		mergeReloaded,
+		sourceLinkHref,
 		staleMessage,
 		type CommissionField,
 		type CommissionFormEntry,
@@ -49,6 +50,9 @@
 		version: string;
 		/** The gallery piece the entry is linked to, if any. */
 		piece: { id: number; title: string; thumb: string | null } | null;
+		/** The saved artist, for Open chat beside a plain-text place. */
+		artistName?: string;
+		artistTelegramUrl?: string | null;
 	}
 	interface FailureData {
 		errors?: Partial<Record<CommissionField, string>>;
@@ -72,6 +76,8 @@
 		gaDate: string | null;
 		/** Currencies saved entries use, most recently saved first. */
 		recentCurrencies?: string[];
+		/** Kinds saved entries use, most recently saved first, one per letter case. */
+		recentKinds?: string[];
 		/** The currency of the region the browser's languages name, if any. */
 		localeCurrency?: string | null;
 		/** Whether the shared registry is connected, for the New Artist dialog. */
@@ -88,6 +94,7 @@
 		gaDate,
 		extraActions,
 		recentCurrencies = [],
+		recentKinds = [],
 		localeCurrency = null,
 		registryEnabled = false
 	}: Props = $props();
@@ -177,6 +184,17 @@
 		failure = form ?? null;
 	});
 	const errors = $derived(failure?.errors ?? {});
+	// Open chat: a place typed as text ("Telegram DM") names no address, so the
+	// saved artist's Telegram stands in. Only while the form still has that
+	// artist: another pick would open the wrong person's chat.
+	const chatHref = $derived(
+		entry?.artistName &&
+			values.artistId === String(entry.artistId) &&
+			values.sourceUrl.trim() &&
+			!sourceLinkHref(values.sourceUrl)
+			? sourceLinkHref(entry.artistTelegramUrl)
+			: null
+	);
 	// The out-of-date refusal's text, fixed when the refusal arrives so the alert
 	// doesn't change under a screen reader while the owner keeps typing.
 	let staleText = $state('');
@@ -386,8 +404,16 @@
 	// lands. While a pointer is down, the lookup waits for it to come up.
 	let pointerDown = false;
 	function lookUpAfterPointer(raw: string) {
-		if (!pointerDown) return lookUpLink(raw);
-		window.addEventListener('pointerup', () => setTimeout(() => lookUpLink(raw)), { once: true });
+		if (!pointerDown) return lookUpSource(raw);
+		window.addEventListener('pointerup', () => setTimeout(() => lookUpSource(raw)), { once: true });
+	}
+
+	/** Where it's happening can be a link or plain text ("Telegram DM"). Only a
+	 * link is looked up: text names no account, and it never leaves the form
+	 * until Save. Text in place of a link clears the last link's answer. */
+	function lookUpSource(raw: string) {
+		if (!raw.trim() || sourceLinkHref(raw)) return lookUpLink(raw);
+		clearLookup();
 	}
 
 	async function lookUpLink(raw: string) {
@@ -491,7 +517,7 @@
 		clearLookup();
 		draftRestored = true;
 		announcer.say(m.admin_commissions_draft_restored());
-		if (values.sourceUrl.trim()) lookUpLink(values.sourceUrl);
+		if (values.sourceUrl.trim()) lookUpSource(values.sourceUrl);
 	}
 
 	/** The sentence that says how a lookup went, shown and read out. */
@@ -831,14 +857,14 @@
 			<input
 				id="ce-sourceUrl"
 				class="input"
-				type="url"
+				type="text"
 				name="sourceUrl"
 				autocomplete="off"
 				bind:value={values.sourceUrl}
 				oninput={(e) => {
 					// A paste is the moment to look; typed text waits for the owner to leave
 					// the field, so a half-typed link isn't sent.
-					if (e instanceof InputEvent && e.inputType === 'insertFromPaste') lookUpLink(e.currentTarget.value);
+					if (e instanceof InputEvent && e.inputType === 'insertFromPaste') lookUpSource(e.currentTarget.value);
 					else if (!e.currentTarget.value.trim()) lookUpLink('');
 				}}
 				onchange={(e) => lookUpAfterPointer(e.currentTarget.value)}
@@ -847,6 +873,16 @@
 			/>
 			{@render fieldError('sourceUrl')}
 			<small class="hint" id="ce-link-hint">{m.admin_commissions_hint_link()}</small>
+			{#if chatHref}
+				<a
+					class="open-chat"
+					href={chatHref}
+					target="_blank"
+					rel="noopener noreferrer"
+					aria-label={m.admin_commissions_open_chat_label({ artist: entry?.artistName ?? '' })}
+					>{m.admin_commissions_open_chat()}</a
+				>
+			{/if}
 			{#if lookup.kind === 'refused'}
 				<p class="hint hint-warn lookup-msg" id="ce-link-msg">
 					<TriangleAlert size={14} aria-hidden="true" /><span>{lookupOutcome(lookup)}</span>
@@ -960,10 +996,18 @@
 				name="kind"
 				maxlength={KIND_MAX}
 				placeholder={m.admin_commissions_kind_placeholder()}
+				list={recentKinds.length > 0 ? 'ce-kind-list' : undefined}
+				autocomplete="off"
 				bind:value={values.kind}
 				aria-invalid={errors.kind ? 'true' : undefined}
 				aria-describedby={describedBy('kind')}
 			/>
+			<!-- Suggestions only: any kind can still be typed. -->
+			{#if recentKinds.length > 0}
+				<datalist id="ce-kind-list">
+					{#each recentKinds as kind (kind)}<option value={kind}></option>{/each}
+				</datalist>
+			{/if}
 			{@render fieldError('kind')}
 		</div>
 		{#if characters.length > 0}
@@ -1061,6 +1105,23 @@
 				</select>
 				{@render fieldError('payment')}
 			</div>
+		</div>
+		<div class="field">
+			<div class="label-row">
+				<label class="field-label" for="ce-receiptUrl">{m.admin_commissions_field_receipt()}</label>{@render optional()}
+			</div>
+			<input
+				id="ce-receiptUrl"
+				class="input"
+				type="url"
+				name="receiptUrl"
+				autocomplete="off"
+				bind:value={values.receiptUrl}
+				aria-invalid={errors.receiptUrl ? 'true' : undefined}
+				aria-describedby={describedBy('receiptUrl', 'ce-receipt-hint')}
+			/>
+			{@render fieldError('receiptUrl')}
+			<small class="hint" id="ce-receipt-hint">{m.admin_commissions_hint_receipt()}</small>
 		</div>
 		<!-- Currency first, so the amount box can show which currency it's in
 		     and the hint can give that currency's decimal rule before Save. -->
@@ -1219,6 +1280,7 @@
 	.hint a { color: var(--foreground); text-decoration: underline; }
 	/* After .hint, which it overrides at the same specificity. */
 	.hint-warn { color: var(--status-warn); }
+	.open-chat { align-self: flex-start; padding-block: 4px; font-size: 13px; color: var(--foreground); text-decoration: underline; }
 	.draft-note { margin: 0; }
 	/* A field with an error gets a red edge as well as its message. The edge
 	   only adds to the text, which carries the error on its own; the

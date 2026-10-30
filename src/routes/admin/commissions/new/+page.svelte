@@ -34,6 +34,7 @@
 		{form}
 		gaDate={data.gate.gaDate}
 		recentCurrencies={data.recentCurrencies}
+		recentKinds={data.recentKinds}
 		localeCurrency={data.localeCurrency}
 		registryEnabled={data.registryEnabled}
 	/>

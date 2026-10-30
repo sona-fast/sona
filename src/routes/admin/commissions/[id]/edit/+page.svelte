@@ -12,7 +12,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import PieceChoices from '$lib/components/PieceChoices.svelte';
 	import { toast } from '$lib/toast.svelte';
-	import { commissionDateRows, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
+	import { commissionDateRows, PAYMENT_LABELS, sourceLinkHref, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
 	import * as m from '$lib/paraglide/messages';
 	import { draftSnapshot } from '$lib/drafts';
 
@@ -25,6 +25,11 @@
 	// Null only after a save without JavaScript found the entry deleted elsewhere.
 	const entry = $derived(data.entry);
 	const dateRows = $derived(entry ? commissionDateRows(entry) : []);
+	// A stored link opens as one; plain text gets Open chat when the entry's
+	// artist has a Telegram link.
+	const sourceHref = $derived(sourceLinkHref(entry?.sourceUrl));
+	const chatHref = $derived(entry && !sourceHref ? sourceLinkHref(entry.artistTelegramUrl) : null);
+	const receiptHref = $derived(sourceLinkHref(entry?.receiptUrl));
 	// The form stands on what that refused save sent, which `form` carries.
 	const goneEntry = $derived({
 		id: Number(page.params.id),
@@ -36,6 +41,7 @@
 		characters: [],
 		status: 'applied' as const,
 		payment: 'unpaid' as const,
+		receiptUrl: null,
 		price: '',
 		currency: null,
 		notes: null,
@@ -191,6 +197,7 @@
 		{form}
 		gaDate={data.gate.gaDate}
 		recentCurrencies={data.recentCurrencies}
+		recentKinds={data.recentKinds}
 		localeCurrency={data.localeCurrency}
 		registryEnabled={data.registryEnabled}
 	/>
@@ -203,6 +210,7 @@
 		{form}
 		gaDate={data.gate.gaDate}
 		recentCurrencies={data.recentCurrencies}
+		recentKinds={data.recentKinds}
 		localeCurrency={data.localeCurrency}
 		registryEnabled={data.registryEnabled}
 		extraActions={deleteButton}
@@ -226,7 +234,25 @@
 				{#if entry.sourceUrl}
 					<div>
 						<dt>{m.admin_commissions_field_link()}</dt>
-						<dd><a href={entry.sourceUrl} target="_blank" rel="noopener noreferrer">{entry.sourceUrl}</a></dd>
+						<dd>
+							{#if sourceHref}
+								<a href={sourceHref} target="_blank" rel="noopener noreferrer">{entry.sourceUrl}</a>
+							{:else}
+								<!-- The owner's own words, such as "Telegram DM": text, never a
+								     link. The artist's Telegram is the chat it most likely means. -->
+								<span class="source-text">{entry.sourceUrl}</span>
+								{#if chatHref}
+									<a
+										class="open-chat"
+										href={chatHref}
+										target="_blank"
+										rel="noopener noreferrer"
+										aria-label={m.admin_commissions_open_chat_label({ artist: entry.artistName })}
+										>{m.admin_commissions_open_chat()}</a
+									>
+								{/if}
+							{/if}
+						</dd>
 					</div>
 				{/if}
 				<div>
@@ -264,6 +290,12 @@
 					<dd><span class="chip {STATUS_TONES[entry.status]}">{STATUS_LABELS[entry.status]()}</span></dd>
 				</div>
 				<div><dt>{m.admin_commissions_field_payment()}</dt><dd>{PAYMENT_LABELS[entry.payment]()}</dd></div>
+				{#if receiptHref}
+					<div>
+						<dt>{m.admin_commissions_field_receipt()}</dt>
+						<dd><a href={receiptHref} target="_blank" rel="noopener noreferrer">{entry.receiptUrl}</a></dd>
+					</div>
+				{/if}
 				{#if entry.price && entry.currency}
 					<div>
 						<dt>{m.admin_commissions_field_price()}</dt>
@@ -327,6 +359,8 @@
 	.ro-list dt { color: var(--muted-foreground); font-size: 13px; }
 	.ro-list dd { margin: 0; overflow-wrap: anywhere; line-height: 1.5; }
 	.ro-list dd.notes { white-space: pre-line; }
+	.source-text { margin-right: 12px; }
+	.open-chat { white-space: nowrap; }
 	@container (max-width: 480px) {
 		.ro-list > div { grid-template-columns: minmax(0, 1fr); }
 	}

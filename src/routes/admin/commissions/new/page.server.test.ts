@@ -138,6 +138,43 @@ describe('load: the currency picker', () => {
 	});
 });
 
+describe('load: the Kind suggestions', () => {
+	beforeEach(() => setLedgerGa('past'));
+
+	const kindsAfter = async (platform: App.Platform) =>
+		((await load({ platform, request: new Request('http://x/') } as never)) as { recentKinds: string[] }).recentKinds;
+
+	it('offers each kind once, newest first, in the spelling used last', async () => {
+		const { platform } = ledgerDb();
+		for (const kind of ['Icon', 'Ref sheet', '', 'icon', 'Étude', 'étude']) {
+			await create(platform, entryForm({ title: `Kind ${kind || 'none'}`, kind }));
+			await new Promise((r) => setTimeout(r, 5));
+		}
+		expect(await kindsAfter(platform)).toEqual(['étude', 'icon', 'Ref sheet']);
+	});
+
+	it('moves a kind up when an entry using it is saved again', async () => {
+		const { sqlite, platform } = ledgerDb();
+		await create(platform, entryForm({ title: 'Old', kind: 'Badge' }));
+		await new Promise((r) => setTimeout(r, 5));
+		await create(platform, entryForm({ title: 'New', kind: 'Scene' }));
+		sqlite.prepare("UPDATE commissions SET updated_at = '2999-01-01T00:00:00.000Z' WHERE title = 'Old'").run();
+		expect(await kindsAfter(platform)).toEqual(['Badge', 'Scene']);
+	});
+
+	it('offers at most 20, and nothing when no entry has a kind', async () => {
+		const { sqlite, platform } = ledgerDb();
+		expect(await kindsAfter(platform)).toEqual([]);
+		const insert = sqlite.prepare(
+			"INSERT INTO commissions (artist_id, title, kind, created_at, updated_at) VALUES (1, 't', ?, '2026-10-01', ?)"
+		);
+		for (let i = 0; i < 25; i++) insert.run(`Kind ${i}`, `2026-10-01T00:00:${String(i).padStart(2, '0')}.000Z`);
+		const kinds = await kindsAfter(platform);
+		expect(kinds).toHaveLength(20);
+		expect(kinds[0]).toBe('Kind 24');
+	});
+});
+
 describe('create action: what it stores', () => {
 	beforeEach(() => setLedgerGa('past'));
 
@@ -192,6 +229,32 @@ describe('create action: what it stores', () => {
 			{ kind: null, source_url: null, price_minor: null, currency: null, notes: null, requested_on: null }
 		]);
 		expect(ledgerSnapshot(sqlite).links).toEqual([]);
+	});
+
+	// Where it's happening: a link is sanitized as before; the owner's own words
+	// are kept as typed, never turned into a link.
+	it.each([
+		['https://vgen.co/taro/commission/9', 'https://vgen.co/taro/commission/9'],
+		['vgen.co/taro', 'https://vgen.co/taro'],
+		['  Telegram DM  ', 'Telegram DM'],
+		['Telegram', 'Telegram'],
+		['DM on t.me/taro', 'DM on t.me/taro'],
+		['javascript:alert(1)', 'javascript:alert(1)'],
+		[`Telegram ${'x'.repeat(111)}`, `Telegram ${'x'.repeat(111)}`]
+	])('stores where it is happening %j as %j', async (sent, stored) => {
+		const { sqlite, platform } = ledgerDb();
+		expect((await create(platform, entryForm({ sourceUrl: sent }))).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT source_url FROM commissions')).toEqual([{ source_url: stored }]);
+	});
+
+	it.each([
+		['https://ko-fi.com/s/0a1b2c', 'https://ko-fi.com/s/0a1b2c'],
+		['ko-fi.com/s/0a1b2c', 'https://ko-fi.com/s/0a1b2c'],
+		['', null]
+	])('stores the receipt link %j as %j', async (sent, stored) => {
+		const { sqlite, platform } = ledgerDb();
+		expect((await create(platform, entryForm({ receiptUrl: sent }))).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT receipt_url FROM commissions')).toEqual([{ receipt_url: stored }]);
 	});
 
 	it('stores no price and no currency when the amount is empty but a currency is picked', async () => {
@@ -276,7 +339,11 @@ describe('create action: bad input', () => {
 		['impossible date', { requestedOn: '2026-02-30' }, 'requestedOn'],
 		['date in another shape', { acceptedOn: '10/14/2026' }, 'acceptedOn'],
 		['not a date', { deliveredOn: 'soon' }, 'deliveredOn'],
-		['script link', { sourceUrl: 'javascript:alert(1)' }, 'sourceUrl'],
+		['link over 2,048 characters', { sourceUrl: `https://example.com/${'a'.repeat(2048)}` }, 'sourceUrl'],
+		['plain text over 120 characters', { sourceUrl: `Telegram ${'x'.repeat(112)}` }, 'sourceUrl'],
+		['receipt that is plain text', { receiptUrl: 'Ko-fi order' }, 'receiptUrl'],
+		['script receipt link', { receiptUrl: 'javascript:alert(1)' }, 'receiptUrl'],
+		['receipt link over 2,048 characters', { receiptUrl: `https://ko-fi.com/${'a'.repeat(2048)}` }, 'receiptUrl'],
 		['no artist', { artistId: '' }, 'artistId'],
 		['artist id that is not a number', { artistId: 'abc' }, 'artistId'],
 		['unknown artist', { artistId: '99' }, 'artistId'],
@@ -315,7 +382,14 @@ describe('create action: bad input', () => {
 		const { platform } = ledgerDb();
 		const result = await create(
 			platform,
-			entryForm({ title: '  Kept title ', notes: 'Line one\r\nline two', price: '45.5', currency: 'JPY', characterId: ['1', 'x'] })
+			entryForm({
+				title: '  Kept title ',
+				notes: 'Line one\r\nline two',
+				price: '45.5',
+				currency: 'JPY',
+				characterId: ['1', 'x'],
+				receiptUrl: ' ko-fi.com/s/0a1b2c '
+			})
 		);
 		expect(result.status).toBe(400);
 		expect(result.data.values).toEqual({
@@ -326,6 +400,7 @@ describe('create action: bad input', () => {
 			characterIds: [1],
 			status: 'applied',
 			payment: 'unpaid',
+			receiptUrl: 'ko-fi.com/s/0a1b2c',
 			price: '45.5',
 			currency: 'JPY',
 			notes: 'Line one\nline two',

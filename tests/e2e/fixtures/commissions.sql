@@ -15,3 +15,7 @@ INSERT INTO artists (id, name, twitter_url, created_at) VALUES
 -- One more artist with a handle of their own, so a second pasted link can
 -- replace the artist the first link picked.
 INSERT INTO artists (id, name, twitter_url, created_at) VALUES (53, 'Solo Artist', 'https://twitter.com/solo_artist', '2026-07-01T00:00:00.000Z');
+
+-- An artist with a Telegram link, for Open chat beside a "Where it's
+-- happening" typed as plain text. The handle is a placeholder.
+INSERT INTO artists (id, name, telegram_url, created_at) VALUES (54, 'Chat Artist', 'https://t.me/e2e_chat_artist', '2026-07-01T00:00:00.000Z');

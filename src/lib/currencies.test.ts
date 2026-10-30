@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { currencyRow, currencySymbol, initialCurrency, localeCurrency } from './currencies';
+import { currencyRow, currencySymbol, findCurrencies, initialCurrency, knownCurrencies, localeCurrency } from './currencies';
 
 describe('localeCurrency', () => {
 	it('reads the region of an Accept-Language header', () => {
@@ -91,5 +91,53 @@ describe('currencySymbol', () => {
 	});
 	it('gives nothing for a code that is not a currency', () => {
 		expect(currencySymbol('not', 'en')).toBeNull();
+	});
+});
+
+describe('findCurrencies', () => {
+	const all = knownCurrencies();
+	const namer = (locale: string) => {
+		const names = new Intl.DisplayNames([locale], { type: 'currency' });
+		return (code: string) => names.of(code) ?? code;
+	};
+	const find = (query: string, locale = 'en') => findCurrencies(all, query, locale, namer(locale));
+	// The search before symbols counted: the code or the name contains the query.
+	const byText = (query: string, locale = 'en') => {
+		const q = query.trim().toLocaleLowerCase(locale);
+		const nameOf = namer(locale);
+		return all.filter((code) => code.toLowerCase().includes(q) || nameOf(code).toLocaleLowerCase(locale).includes(q));
+	};
+
+	it('finds EUR first for €', () => {
+		expect(find('€')[0]).toBe('EUR');
+		expect(find(' € ')[0]).toBe('EUR');
+	});
+
+	it('lists USD first for $, then the other dollars', () => {
+		const found = find('$');
+		expect(found[0]).toBe('USD');
+		expect(found).toEqual(expect.arrayContaining(['AUD', 'CAD', 'NZD']));
+		expect(found.indexOf('USD')).toBeLessThan(found.indexOf('AUD'));
+	});
+
+	it('finds JPY then CNY for ¥, and the full-width ￥ the same way', () => {
+		expect(find('¥').slice(0, 2)).toEqual(['JPY', 'CNY']);
+		expect(find('￥').slice(0, 2)).toEqual(['JPY', 'CNY']);
+		expect(find('¥', 'ja')).toContain('JPY');
+	});
+
+	it('finds a symbol of its own as typed, such as A$', () => {
+		expect(find('A$')[0]).toBe('AUD');
+		expect(find('ca$')[0]).toBe('CAD');
+	});
+
+	it('finds codes and names exactly as before when the query is no symbol', () => {
+		for (const query of ['dollar', 'eu', 'JP', 'yen', 'krona']) expect(find(query)).toEqual(byText(query));
+		for (const query of ['円', 'ドル']) expect(find(query, 'ja')).toEqual(byText(query, 'ja'));
+	});
+
+	it('finds every currency, in order, for an empty query', () => {
+		expect(find('')).toEqual(all);
+		expect(find('   ')).toEqual(all);
 	});
 });

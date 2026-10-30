@@ -115,6 +115,22 @@ describe('load', () => {
 		expect(data.gate.open).toBe(false);
 	});
 
+	// Open chat links the entry's own artist's Telegram, never another artist's.
+	it("loads the entry's own artist's Telegram link, and the plain-text place as typed", async () => {
+		setLedgerGa('future');
+		const { sqlite, platform } = ledgerDb();
+		sqlite.exec(`
+			UPDATE artists SET telegram_url = 'https://t.me/artist_a' WHERE id = 1;
+			UPDATE artists SET telegram_url = 'https://t.me/artist_b' WHERE id = 2;
+		`);
+		const id = seedEntry(sqlite, { artistId: 2 });
+		sqlite.prepare("UPDATE commissions SET source_url = 'Telegram DM' WHERE id = ?").run(id);
+		const { entry } = (await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
+			entry: Record<string, unknown>;
+		};
+		expect(entry).toMatchObject({ artistName: 'Artist B', artistTelegramUrl: 'https://t.me/artist_b', sourceUrl: 'Telegram DM' });
+	});
+
 	// SONA-9: the entry the page receives carries its three dates as plain
 	// values, and nothing that measures time between them or since them.
 	it('ships only allow-listed keys, with the dates and no duration', async () => {
@@ -137,11 +153,14 @@ describe('load', () => {
 				'artistId',
 				'artistName',
 				'artistAvatarUrl',
+				// Open chat beside a plain-text "Where it's happening".
+				'artistTelegramUrl',
 				'title',
 				'kind',
 				'sourceUrl',
 				'status',
 				'payment',
+				'receiptUrl',
 				'price',
 				'currency',
 				'notes',
@@ -203,6 +222,29 @@ describe('save action', () => {
 		>[];
 		expect(row).toMatchObject({ status: 'accepted', accepted_on: '2026-10-14', created_at: VERSION });
 		expect(row.updated_at).not.toBe(VERSION);
+	});
+
+	it('saves, changes, and clears the receipt link, and loads it back', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		const id = seedEntry(sqlite);
+		const loadEntry = async () =>
+			((await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
+				entry: { receiptUrl: string | null; version: string };
+			}).entry;
+
+		expect((await save(platform, String(id), saveForm({ receiptUrl: 'ko-fi.com/s/0a1b2c' }))).status).toBe('redirected');
+		let entry = await loadEntry();
+		expect(entry.receiptUrl).toBe('https://ko-fi.com/s/0a1b2c');
+
+		const refused = await save(platform, String(id), entryForm({ version: entry.version, receiptUrl: 'paid on Ko-fi' }));
+		expect(refused.status).toBe(400);
+		expect(Object.keys(refused.data.errors as object)).toEqual(['receiptUrl']);
+		expect((await loadEntry()).receiptUrl).toBe('https://ko-fi.com/s/0a1b2c');
+
+		entry = await loadEntry();
+		expect((await save(platform, String(id), entryForm({ version: entry.version, receiptUrl: '' }))).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT receipt_url FROM commissions')).toEqual([{ receipt_url: null }]);
 	});
 
 	it('refuses a stale version with 409 and changes nothing; the current version saves', async () => {

@@ -163,6 +163,105 @@ test('a grouped amount and a full-width one save as plain numbers', async ({ pag
 	await settledShot(page, testInfo.outputPath('commission-edit-normalized-amount.png'));
 });
 
+/** The id of the entry listed as `title`, read from the ledger's Edit link. */
+async function listedId(page: Page, title: string) {
+	const list = await (await page.request.get('/admin/commissions')).text();
+	const id = list.match(new RegExp(`href="/admin/commissions/(\\d+)/edit"[^>]*aria-label="Edit ${title}"`))?.[1];
+	expect(id, `${title} lists with an Edit link`).toBeDefined();
+	return Number(id);
+}
+
+// Where it's happening takes plain text for a chat with no message links.
+// fixtures/commissions.sql gives Chat Artist (54) a Telegram link.
+test("a place typed as text saves as text, never looks up an artist, and offers the artist's chat", async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	const lookups: string[] = [];
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname === '/api/admin/artist-from-link') lookups.push(r.postData() ?? '');
+	});
+	await open(page, '/admin/commissions/new');
+	const title = 'E2E plain text place';
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Chat Artist' });
+	await page.getByLabel('Title').fill(title);
+	const place = page.getByLabel("Where it's happening");
+	await place.fill('Telegram DM');
+	await place.blur();
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const id = await listedId(page, title);
+	made.push(id);
+
+	await open(page, `/admin/commissions/${id}/edit`);
+	await expect(place).toHaveValue('Telegram DM');
+	const chat = page.getByRole('link', { name: 'Open chat with Chat Artist on Telegram (opens in a new tab)' });
+	await expect(chat).toHaveText('Open chat');
+	await expect(chat).toHaveAttribute('href', 'https://t.me/e2e_chat_artist');
+	await expect(chat).toHaveAttribute('target', '_blank');
+	await settledShot(page, testInfo.outputPath('commission-edit-plain-place.png'));
+
+	// Another artist picked, the saved artist's chat would be the wrong one.
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await expect(chat).toHaveCount(0);
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Chat Artist' });
+	// A link in the field is the place itself, so there's no chat to offer.
+	await place.fill('https://example.com/opening');
+	await expect(chat).toHaveCount(0);
+	expect(lookups, 'plain text never goes to the artist lookup').toEqual([]);
+});
+
+test('Kind suggests kinds already used, and still takes a new one', async ({ page, baseURL }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await createEntry(page, baseURL!, 'E2E kind older', { kind: 'e2e painted bust' });
+	await createEntry(page, baseURL!, 'E2E kind newer', { kind: 'E2E Painted bust' });
+
+	await open(page, '/admin/commissions/new');
+	const kind = page.getByLabel('Kind');
+	await expect(kind).toHaveAttribute('placeholder', 'Painted bust, icon, ref sheet...');
+	await expect(kind).toHaveAttribute('list', 'ce-kind-list');
+	// One suggestion per kind whatever its letter case, in the spelling used last.
+	const offered = page.locator('#ce-kind-list option');
+	expect(await offered.evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value))).toContain('E2E Painted bust');
+	expect(
+		await offered.evaluateAll((els) => els.filter((el) => (el as HTMLOptionElement).value.toLowerCase() === 'e2e painted bust').length)
+	).toBe(1);
+	await settledShot(page, testInfo.outputPath('commission-kind-suggestions.png'));
+
+	// A suggestion is only a suggestion: a new kind saves as typed.
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill('E2E kind new');
+	await kind.fill('E2E chibi');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const id = await listedId(page, 'E2E kind new');
+	made.push(id);
+	await open(page, `/admin/commissions/${id}/edit`);
+	await expect(kind).toHaveValue('E2E chibi');
+	expect(await page.locator('#ce-kind-list option').evaluateAll((els) => (els[0] as HTMLOptionElement).value)).toBe('E2E chibi');
+});
+
+test('a receipt link saves beside Payment, and plain text there is refused', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill('E2E receipt');
+	const receipt = page.getByLabel('Receipt or order link');
+	await expect(receipt).toHaveAccessibleDescription('A Ko-fi order or other page that shows what you paid.');
+
+	await receipt.fill('Paid on Ko-fi');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page.locator('#ce-receiptUrl-err')).toHaveText("Sona couldn't read this link. Fix it or clear it.");
+	await expect(receipt).toBeFocused();
+
+	await receipt.fill('ko-fi.com/s/e2e0001');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const id = await listedId(page, 'E2E receipt');
+	made.push(id);
+	await open(page, `/admin/commissions/${id}/edit`);
+	await expect(receipt).toHaveValue('https://ko-fi.com/s/e2e0001');
+	await settledShot(page, testInfo.outputPath('commission-edit-receipt.png'));
+});
+
 test('clearing the amount saves the entry with no price', async ({ page, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E cleared price', { price: '45.50', currency: 'EUR' });

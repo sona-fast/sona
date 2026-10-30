@@ -46,6 +46,47 @@ export function currencySymbol(
 	}
 }
 
+// Each currency's two symbols per locale, folded for comparison, worked out
+// once: building a NumberFormat per currency on every keystroke is slow.
+const foldedSymbols = new Map<string, Map<string, [string | null, string | null]>>();
+const fold = (text: string, locale: string) => text.normalize('NFKC').toLocaleLowerCase(locale);
+
+/**
+ * The Other currency search: the codes in `codes` that `query` finds. A
+ * symbol finds the currencies that print with it, first those whose own
+ * symbol it is (¥ is JPY's; $ is USD's in English), then those that print it
+ * only in narrow form (CN¥, A$). After them come the codes and names that
+ * contain the query, so a Japanese owner can type 円 or ドル. Each group keeps
+ * the order of `codes`. Full-width forms count as their plain ones (￥ is ¥).
+ * An empty query finds everything.
+ */
+export function findCurrencies(
+	codes: string[],
+	query: string,
+	locale: string,
+	nameOf: (code: string) => string
+): string[] {
+	const q = fold(query.trim(), locale);
+	if (!q) return codes;
+	let symbols = foldedSymbols.get(locale);
+	if (!symbols) foldedSymbols.set(locale, (symbols = new Map()));
+	const own: string[] = [];
+	const narrow: string[] = [];
+	const text: string[] = [];
+	for (const code of codes) {
+		let pair = symbols.get(code);
+		if (!pair) {
+			const both = [currencySymbol(code, locale, 'symbol'), currencySymbol(code, locale, 'narrowSymbol')];
+			pair = both.map((s) => (s ? fold(s, locale) : null)) as [string | null, string | null];
+			symbols.set(code, pair);
+		}
+		if (pair[0] === q) own.push(code);
+		else if (pair[1] === q) narrow.push(code);
+		else if (code.toLowerCase().includes(q) || fold(nameOf(code), locale).includes(q)) text.push(code);
+	}
+	return [...own, ...narrow, ...text];
+}
+
 let known: Set<string> | null = null;
 function isKnownCurrency(code: string): boolean {
 	known ??= new Set(knownCurrencies());
