@@ -262,6 +262,19 @@ input, select, textarea {
 	cursor: default;
 }
 
+/* A held button that waits on something the owner must do first (Add to
+   gallery and Link a piece wait for a save). The shared look above is the
+   secondary one, which a secondary button already wears, so a held one needs
+   its own: no fill, a dashed edge, and a muted label that still clears 4.5:1,
+   beside the text that says why. */
+.btn-held[aria-disabled='true'],
+.btn-held[aria-disabled='true']:hover {
+	background-color: transparent;
+	border: 1px dashed var(--input);
+	color: var(--muted-foreground);
+	cursor: not-allowed;
+}
+
 .btn-primary {
 	background-color: var(--primary);
 	color: var(--primary-foreground);

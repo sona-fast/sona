@@ -210,7 +210,7 @@ test("a place typed as text saves as text, never looks up an artist, and offers 
 	// in place of the artist's chat.
 	await place.fill('https://t.me/someone_else');
 	await expect(chat).toHaveCount(0);
-	const openLink = page.getByRole('link', { name: "Open the link in Where it's happening (opens in a new tab)" });
+	const openLink = page.getByRole('link', { name: 'Open this link (opens in a new tab)' });
 	await expect(openLink).toHaveText('Open link');
 	await expect(openLink).toHaveAttribute('href', 'https://t.me/someone_else');
 	await place.fill('https://example.com/opening');

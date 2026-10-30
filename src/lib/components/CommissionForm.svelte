@@ -675,7 +675,7 @@
 	{@const tone = primary ? 'btn-primary' : 'btn-secondary'}
 	{@const Icon = entry?.piece ? Plus : ImagePlus}
 	{#if dirty}
-		<button type="button" class="btn {tone}" aria-disabled="true" aria-describedby="ce-gallery-hint">
+		<button type="button" class="btn {tone} btn-held" aria-disabled="true" aria-describedby="ce-gallery-hint">
 			<Icon size={16} aria-hidden="true" />
 			{label}
 		</button>
@@ -696,7 +696,7 @@
      linking can move the entry to Delivered. -->
 {#snippet linkPieceButton()}
 	{#if dirty}
-		<button type="button" class="btn btn-secondary" aria-disabled="true" aria-describedby="ce-gallery-hint" bind:this={linkButton}>
+		<button type="button" class="btn btn-secondary btn-held" aria-disabled="true" aria-describedby="ce-gallery-hint" bind:this={linkButton}>
 			<Link2 size={16} aria-hidden="true" />
 			{m.admin_commissions_link_piece()}
 		</button>
@@ -1291,17 +1291,6 @@
 	/* After .hint, which it overrides at the same specificity. */
 	.hint-warn { color: var(--status-warn); }
 	.save-first { display: inline-flex; align-items: center; gap: 4px; }
-	/* Add to gallery and Link a piece while the form has unsaved changes: the
-	   shared aria-disabled look is the secondary one, which these already wear,
-	   so they need their own. A dashed edge and muted label, readable still,
-	   beside the warning that says why. */
-	.gallery-panel .btn[aria-disabled='true'],
-	.gallery-panel .btn[aria-disabled='true']:hover {
-		background-color: transparent;
-		border: 1px dashed var(--input);
-		color: var(--muted-foreground);
-		cursor: not-allowed;
-	}
 	.open-chat { align-self: flex-start; padding-block: 4px; font-size: 13px; color: var(--foreground); text-decoration: underline; }
 	.draft-note { margin: 0; }
 	/* A field with an error gets a red edge as well as its message. The edge

@@ -1766,7 +1766,7 @@
 	"admin_commissions_open_chat": "チャットを開く",
 	"admin_commissions_open_chat_label": "{artist}とのTelegramのチャットを開く（新しいタブで開きます）",
 	"admin_commissions_open_link": "リンクを開く",
-	"admin_commissions_open_link_label": "「やり取りの場所」のリンクを開く（新しいタブで開きます）",
+	"admin_commissions_open_link_label": "このリンクを開く（新しいタブで開きます）",
 	"admin_commissions_field_artist": "アーティスト",
 	"admin_commissions_select_artist": "アーティストを選択...",
 	"admin_commissions_field_title": "タイトル",
