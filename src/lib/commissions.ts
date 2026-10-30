@@ -44,10 +44,17 @@ export const SOURCE_TEXT_MAX = 120;
  * without its https:// ("vgen.co/taro" counts). Anything with a space, a
  * scheme other than http(s), or a host without a dot is text: it's stored and
  * shown as typed, never as a link, and never sent to the artist lookup.
+ *
+ * Text that a URL parser would still accept stays text too: an email address
+ * or an @handle (an "@" before the path), and a word ending in a period
+ * ("Telegram.") or a host whose last label isn't a real-looking top-level
+ * domain.
  */
 export function sourceLinkHref(value: string | null | undefined): string | null {
 	const text = value?.trim() ?? '';
 	if (!text || /\s/.test(text)) return null;
+	const authority = text.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[/?#]/)[0];
+	if (authority.includes('@')) return null;
 	let url: URL;
 	try {
 		url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`);
@@ -55,7 +62,9 @@ export function sourceLinkHref(value: string | null | undefined): string | null 
 		return null;
 	}
 	if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-	if (!url.hostname.includes('.')) return null;
+	if (url.username || url.password) return null;
+	const labels = url.hostname.split('.');
+	if (labels.length < 2 || !/^(?:[a-z]{2,}|xn--[a-z0-9-]+)$/i.test(labels[labels.length - 1])) return null;
 	return url.href;
 }
 

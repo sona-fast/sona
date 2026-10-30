@@ -384,6 +384,28 @@ describe('sourceLinkHref', () => {
 		}
 	});
 
+	it('reads an email address, an @handle, or a word ending in a period as text', () => {
+		for (const value of [
+			'artist@gmail.com',
+			'orders@ko-fi.com',
+			'https://artist@gmail.com',
+			'@artist.bsky.social',
+			'Telegram.',
+			'DMs.',
+			'vgen.co.',
+			'192.168.1.10',
+			'v1.2'
+		]) {
+			expect(sourceLinkHref(value)).toBeNull();
+		}
+	});
+
+	it('still reads an @ in the path, an idn host, and a port as a link', () => {
+		expect(sourceLinkHref('bsky.app/profile/@taro')).toBe('https://bsky.app/profile/@taro');
+		expect(sourceLinkHref('https://example.xn--p1ai/a')).toBe('https://example.xn--p1ai/a');
+		expect(sourceLinkHref('https://vgen.co:443/taro')).toBe('https://vgen.co/taro');
+	});
+
 	it('takes nothing from a missing value', () => {
 		expect(sourceLinkHref(null)).toBeNull();
 		expect(sourceLinkHref(undefined)).toBeNull();
