@@ -138,6 +138,43 @@ describe('load: the currency picker', () => {
 	});
 });
 
+describe('load: the Kind suggestions', () => {
+	beforeEach(() => setLedgerGa('past'));
+
+	const kindsAfter = async (platform: App.Platform) =>
+		((await load({ platform, request: new Request('http://x/') } as never)) as { recentKinds: string[] }).recentKinds;
+
+	it('offers each kind once, newest first, in the spelling used last', async () => {
+		const { platform } = ledgerDb();
+		for (const kind of ['Icon', 'Ref sheet', '', 'icon', 'Étude', 'étude']) {
+			await create(platform, entryForm({ title: `Kind ${kind || 'none'}`, kind }));
+			await new Promise((r) => setTimeout(r, 5));
+		}
+		expect(await kindsAfter(platform)).toEqual(['étude', 'icon', 'Ref sheet']);
+	});
+
+	it('moves a kind up when an entry using it is saved again', async () => {
+		const { sqlite, platform } = ledgerDb();
+		await create(platform, entryForm({ title: 'Old', kind: 'Badge' }));
+		await new Promise((r) => setTimeout(r, 5));
+		await create(platform, entryForm({ title: 'New', kind: 'Scene' }));
+		sqlite.prepare("UPDATE commissions SET updated_at = '2999-01-01T00:00:00.000Z' WHERE title = 'Old'").run();
+		expect(await kindsAfter(platform)).toEqual(['Badge', 'Scene']);
+	});
+
+	it('offers at most 20, and nothing when no entry has a kind', async () => {
+		const { sqlite, platform } = ledgerDb();
+		expect(await kindsAfter(platform)).toEqual([]);
+		const insert = sqlite.prepare(
+			"INSERT INTO commissions (artist_id, title, kind, created_at, updated_at) VALUES (1, 't', ?, '2026-10-01', ?)"
+		);
+		for (let i = 0; i < 25; i++) insert.run(`Kind ${i}`, `2026-10-01T00:00:${String(i).padStart(2, '0')}.000Z`);
+		const kinds = await kindsAfter(platform);
+		expect(kinds).toHaveLength(20);
+		expect(kinds[0]).toBe('Kind 24');
+	});
+});
+
 describe('create action: what it stores', () => {
 	beforeEach(() => setLedgerGa('past'));
 

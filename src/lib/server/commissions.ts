@@ -430,10 +430,14 @@ export async function loadCommission(db: Database, id: number) {
 	};
 }
 
-/** The artist and character choices for the entry form, and the currencies
- * saved entries use, most recently saved first (the picker's row). */
+/** How many of the owner's past kinds the Kind field suggests. */
+const KIND_SUGGESTIONS_MAX = 20;
+
+/** The artist and character choices for the entry form, the currencies saved
+ * entries use, most recently saved first (the picker's row), and the kinds
+ * they use, the same way, for the Kind field's suggestions. */
 export async function loadCommissionChoices(db: Database) {
-	const [artistRows, characterRows, currencyRows] = await db.batch([
+	const [artistRows, characterRows, currencyRows, kindRows] = await db.batch([
 		db.select({ id: artists.id, name: artists.name }).from(artists).orderBy(asc(artists.name)),
 		db
 			.select({ id: characters.id, name: characters.name, ownerName: characters.ownerName })
@@ -445,11 +449,32 @@ export async function loadCommissionChoices(db: Database) {
 			.where(isNotNull(commissions.currency))
 			.groupBy(commissions.currency)
 			.orderBy(desc(sql`max(${commissions.updatedAt})`))
-			.limit(CURRENCY_ROW_MAX)
+			.limit(CURRENCY_ROW_MAX),
+		// One row per kind, ignoring letter case. With max() in the select, SQLite
+		// takes the bare kind from the newest row, so the spelling offered is the
+		// one the owner used last.
+		db
+			.select({ kind: commissions.kind, last: sql<string>`max(${commissions.updatedAt})` })
+			.from(commissions)
+			.where(and(isNotNull(commissions.kind), sql`${commissions.kind} <> ''`))
+			.groupBy(sql`lower(${commissions.kind})`)
+			.orderBy(desc(sql`max(${commissions.updatedAt})`))
+			.limit(KIND_SUGGESTIONS_MAX)
 	]);
+	// SQLite's lower() folds only ASCII, so "Étude" and "étude" still arrive as
+	// two rows; the newer one wins here.
+	const seen = new Set<string>();
+	const recentKinds: string[] = [];
+	for (const { kind } of kindRows) {
+		const key = kind?.toLocaleLowerCase();
+		if (!kind || !key || seen.has(key)) continue;
+		seen.add(key);
+		recentKinds.push(kind);
+	}
 	return {
 		artists: artistRows,
 		characters: characterRows,
-		recentCurrencies: currencyRows.map((r) => r.currency).filter((c): c is string => c !== null)
+		recentCurrencies: currencyRows.map((r) => r.currency).filter((c): c is string => c !== null),
+		recentKinds
 	};
 }

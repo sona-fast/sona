@@ -2323,7 +2323,7 @@
 	"admin_commissions_field_title": "Title",
 	"admin_commissions_hint_title": "A label for you. It never becomes the piece's public title.",
 	"admin_commissions_field_kind": "Kind",
-	"admin_commissions_kind_placeholder": "Scene, icon, ref sheet...",
+	"admin_commissions_kind_placeholder": "Painted bust, icon, ref sheet...",
 	"admin_commissions_field_characters": "Characters",
 	"admin_commissions_field_notes": "Notes",
 	"admin_commissions_field_status": "Status",

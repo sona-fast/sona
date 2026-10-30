@@ -70,6 +70,8 @@
 		gaDate: string | null;
 		/** Currencies saved entries use, most recently saved first. */
 		recentCurrencies?: string[];
+		/** Kinds saved entries use, most recently saved first, one per letter case. */
+		recentKinds?: string[];
 		/** The currency of the region the browser's languages name, if any. */
 		localeCurrency?: string | null;
 		/** Whether the shared registry is connected, for the New Artist dialog. */
@@ -86,6 +88,7 @@
 		gaDate,
 		extraActions,
 		recentCurrencies = [],
+		recentKinds = [],
 		localeCurrency = null,
 		registryEnabled = false
 	}: Props = $props();
@@ -850,10 +853,18 @@
 				name="kind"
 				maxlength={KIND_MAX}
 				placeholder={m.admin_commissions_kind_placeholder()}
+				list={recentKinds.length > 0 ? 'ce-kind-list' : undefined}
+				autocomplete="off"
 				bind:value={values.kind}
 				aria-invalid={errors.kind ? 'true' : undefined}
 				aria-describedby={describedBy('kind')}
 			/>
+			<!-- Suggestions only: any kind can still be typed. -->
+			{#if recentKinds.length > 0}
+				<datalist id="ce-kind-list">
+					{#each recentKinds as kind (kind)}<option value={kind}></option>{/each}
+				</datalist>
+			{/if}
 			{@render fieldError('kind')}
 		</div>
 		{#if characters.length > 0}

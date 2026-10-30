@@ -209,6 +209,36 @@ test("a place typed as text saves as text, never looks up an artist, and offers 
 	expect(lookups, 'plain text never goes to the artist lookup').toEqual([]);
 });
 
+test('Kind suggests kinds already used, and still takes a new one', async ({ page, baseURL }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await createEntry(page, baseURL!, 'E2E kind older', { kind: 'e2e painted bust' });
+	await createEntry(page, baseURL!, 'E2E kind newer', { kind: 'E2E Painted bust' });
+
+	await open(page, '/admin/commissions/new');
+	const kind = page.getByLabel('Kind');
+	await expect(kind).toHaveAttribute('placeholder', 'Painted bust, icon, ref sheet...');
+	await expect(kind).toHaveAttribute('list', 'ce-kind-list');
+	// One suggestion per kind whatever its letter case, in the spelling used last.
+	const offered = page.locator('#ce-kind-list option');
+	expect(await offered.evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value))).toContain('E2E Painted bust');
+	expect(
+		await offered.evaluateAll((els) => els.filter((el) => (el as HTMLOptionElement).value.toLowerCase() === 'e2e painted bust').length)
+	).toBe(1);
+	await settledShot(page, testInfo.outputPath('commission-kind-suggestions.png'));
+
+	// A suggestion is only a suggestion: a new kind saves as typed.
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill('E2E kind new');
+	await kind.fill('E2E chibi');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const id = await listedId(page, 'E2E kind new');
+	made.push(id);
+	await open(page, `/admin/commissions/${id}/edit`);
+	await expect(kind).toHaveValue('E2E chibi');
+	expect(await page.locator('#ce-kind-list option').evaluateAll((els) => (els[0] as HTMLOptionElement).value)).toBe('E2E chibi');
+});
+
 test('clearing the amount saves the entry with no price', async ({ page, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E cleared price', { price: '45.50', currency: 'EUR' });
