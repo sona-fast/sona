@@ -2320,6 +2320,8 @@
 	"admin_commissions_hint_link": "The chat or page you'd go back to. Change it if the commission moves.",
 	"admin_commissions_open_chat": "Open chat",
 	"admin_commissions_open_chat_label": "Open chat with {artist} on Telegram (opens in a new tab)",
+	"admin_commissions_open_link": "Open link",
+	"admin_commissions_open_link_label": "Open the link in Where it's happening (opens in a new tab)",
 	"admin_commissions_field_artist": "Artist",
 	"admin_commissions_select_artist": "Select artist...",
 	"admin_commissions_field_title": "Title",

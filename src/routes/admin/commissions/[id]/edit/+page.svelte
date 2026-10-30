@@ -146,7 +146,9 @@
 		</p>
 		<form method="GET" action="/admin/commissions/{entry.id}/edit#link-piece" class="link-pick-search" role="search">
 			<input type="hidden" name="link" value="pick" />
-			<input type="hidden" name="scope" value={picker.scope} />
+			<!-- Search looks through every piece: a piece can sit under another
+			     artist's name, and the list doesn't say it's narrowed to one. -->
+			<input type="hidden" name="scope" value="all" />
 			<label for="link-pick-q" class="sr-only">{m.admin_commissions_pick_search()}</label>
 			<span class="link-pick-field"
 				><input id="link-pick-q" class="input" type="search" name="q" value={picker.query} placeholder={m.admin_commissions_pick_search()} /></span

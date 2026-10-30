@@ -184,14 +184,13 @@
 		failure = form ?? null;
 	});
 	const errors = $derived(failure?.errors ?? {});
-	// Open chat: a place typed as text ("Telegram DM") names no address, so the
-	// saved artist's Telegram stands in. Only while the form still has that
-	// artist: another pick would open the wrong person's chat.
+	// A link in the field opens from beside it, since the field itself can't be
+	// clicked. Otherwise (empty, or text like "Telegram DM") there's no address,
+	// so the saved artist's Telegram stands in as Open chat. Only while the form
+	// still has that artist: another pick would open the wrong person's chat.
+	const placeHref = $derived(sourceLinkHref(values.sourceUrl));
 	const chatHref = $derived(
-		entry?.artistName &&
-			values.artistId === String(entry.artistId) &&
-			values.sourceUrl.trim() &&
-			!sourceLinkHref(values.sourceUrl)
+		!placeHref && entry?.artistName && values.artistId === String(entry.artistId)
 			? sourceLinkHref(entry.artistTelegramUrl)
 			: null
 	);
@@ -736,7 +735,9 @@
 				<PieceThumb src={entry.piece.thumb} />
 				<div class="text">
 					<a href="/admin/images/{entry.piece.id}/edit" bind:this={pieceLink}>{entry.piece.title}</a>
-					{#if galleryOpen && dirty}<span class="hint" id="ce-gallery-hint">{m.admin_commissions_gallery_hint_dirty()}</span>{/if}
+					{#if galleryOpen && dirty}<span class="hint hint-warn save-first" id="ce-gallery-hint"
+							><TriangleAlert size={14} aria-hidden="true" />{m.admin_commissions_gallery_hint_dirty()}</span
+						>{/if}
 					<span class="hint" id="ce-unlink-hint">{m.admin_commissions_unlink_hint()}</span>
 				</div>
 				{#if galleryOpen}{@render galleryButton(m.admin_commissions_add_variant(), false, dirty)}{/if}
@@ -755,8 +756,8 @@
 				{@const delivered = loaded.status === 'delivered'}
 				<div class="text">
 					<span>{m.admin_commissions_not_in_gallery()}</span>
-					<span class="hint" id="ce-gallery-hint"
-						>{dirty
+					<span class="hint" class:hint-warn={dirty} class:save-first={dirty} id="ce-gallery-hint"
+						>{#if dirty}<TriangleAlert size={14} aria-hidden="true" />{/if}{dirty
 							? m.admin_commissions_gallery_hint_dirty()
 							: delivered
 								? m.admin_commissions_gallery_hint_delivered()
@@ -873,7 +874,16 @@
 			/>
 			{@render fieldError('sourceUrl')}
 			<small class="hint" id="ce-link-hint">{m.admin_commissions_hint_link()}</small>
-			{#if chatHref}
+			{#if placeHref}
+				<a
+					class="open-chat"
+					href={placeHref}
+					target="_blank"
+					rel="noopener noreferrer"
+					aria-label={m.admin_commissions_open_link_label()}
+					>{m.admin_commissions_open_link()}</a
+				>
+			{:else if chatHref}
 				<a
 					class="open-chat"
 					href={chatHref}
@@ -1280,6 +1290,18 @@
 	.hint a { color: var(--foreground); text-decoration: underline; }
 	/* After .hint, which it overrides at the same specificity. */
 	.hint-warn { color: var(--status-warn); }
+	.save-first { display: inline-flex; align-items: center; gap: 4px; }
+	/* Add to gallery and Link a piece while the form has unsaved changes: the
+	   shared aria-disabled look is the secondary one, which these already wear,
+	   so they need their own. A dashed edge and muted label, readable still,
+	   beside the warning that says why. */
+	.gallery-panel .btn[aria-disabled='true'],
+	.gallery-panel .btn[aria-disabled='true']:hover {
+		background-color: transparent;
+		border: 1px dashed var(--input);
+		color: var(--muted-foreground);
+		cursor: not-allowed;
+	}
 	.open-chat { align-self: flex-start; padding-block: 4px; font-size: 13px; color: var(--foreground); text-decoration: underline; }
 	.draft-note { margin: 0; }
 	/* A field with an error gets a red edge as well as its message. The edge

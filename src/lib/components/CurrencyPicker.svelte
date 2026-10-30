@@ -55,6 +55,7 @@
 	let searchInput = $state<HTMLInputElement>();
 	let otherButton = $state<HTMLButtonElement>();
 	let list = $state<HTMLUListElement>();
+	let searchBox = $state<HTMLDivElement>();
 	const radios: Record<string, HTMLInputElement> = $state({});
 
 	// A symbol (€, $, ¥), the code, or the name in the admin language.
@@ -83,6 +84,25 @@
 		open = false;
 		await tick();
 		otherButton?.focus();
+	}
+
+	// A click outside the search, or Tab out of it, closes it without a pick.
+	// Focus stays where it went, so this doesn't send it back to Other currency
+	// the way Escape does. Other currency itself toggles the search on its own.
+	const outside = (target: EventTarget | null) =>
+		!(target instanceof Node && (searchBox?.contains(target) || otherButton?.contains(target)));
+	$effect(() => {
+		if (!open) return;
+		const onPointerDown = (e: PointerEvent) => {
+			if (outside(e.target)) open = false;
+		};
+		document.addEventListener('pointerdown', onPointerDown);
+		return () => document.removeEventListener('pointerdown', onPointerDown);
+	});
+	// An option click blurs the search box with no relatedTarget (options never
+	// take focus), so only a focus move to somewhere else closes it.
+	function onSearchFocusOut(e: FocusEvent) {
+		if (e.relatedTarget && outside(e.relatedTarget)) open = false;
 	}
 
 	async function pick(code: string) {
@@ -181,7 +201,7 @@
 {@render below?.()}
 
 {#if hydrated && open}
-	<div class="search" id="ce-currency-search">
+	<div class="search" id="ce-currency-search" bind:this={searchBox} onfocusout={onSearchFocusOut}>
 		<label class="search-label" for="ce-currency-find">{m.admin_currency_find()}</label>
 		<input
 			id="ce-currency-find"
@@ -205,6 +225,7 @@
 				id="ce-currency-list"
 				role="listbox"
 				aria-label={m.admin_currency_find()}
+				tabindex="-1"
 				bind:this={list}
 			>
 				{#each matches as code, i (code)}

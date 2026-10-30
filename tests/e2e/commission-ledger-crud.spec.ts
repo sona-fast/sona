@@ -892,21 +892,29 @@ test("an entry with no Delivered date gets the browser's date when added to the 
 	const held = galleryPanel(page).getByRole('button', { name: 'Add to gallery' });
 	await expect(held).toHaveAttribute('aria-disabled', 'true');
 	await expect(galleryPanel(page)).toContainText('Save your changes first.');
-	// Held, it reads as not ready: the secondary fill, hover included, with a
-	// label that still clears 4.5:1 as rendered.
+	// Held, it reads as not ready next to an enabled secondary button: no fill
+	// and a dashed edge, hover included, with a label that still clears 4.5:1
+	// against the page. The reason beside it is a warning, not a grey hint.
 	await held.hover();
 	await expect.poll(() => held.evaluate((el) => el.getAnimations().length)).toBe(0);
-	const [label, fill, secondary] = await held.evaluate((el) => {
-		const probe = document.createElement('span');
-		probe.style.backgroundColor = 'var(--secondary)';
-		document.body.append(probe);
+	const [label, fill, edge, page_] = await held.evaluate((el) => {
 		const style = getComputedStyle(el);
-		const found = [style.color, style.backgroundColor, getComputedStyle(probe).backgroundColor];
+		return [style.color, style.backgroundColor, style.borderTopStyle, getComputedStyle(document.body).backgroundColor];
+	});
+	expect(fill).toBe('rgba(0, 0, 0, 0)');
+	expect(edge).toBe('dashed');
+	expect(contrastRatio(label, page_)).toBeGreaterThanOrEqual(4.5);
+	const reason = galleryPanel(page).locator('#ce-gallery-hint');
+	const [reasonColor, warn] = await reason.evaluate((el) => {
+		const probe = document.createElement('span');
+		probe.style.color = 'var(--status-warn)';
+		document.body.append(probe);
+		const found = [getComputedStyle(el).color, getComputedStyle(probe).color];
 		probe.remove();
 		return found;
 	});
-	expect(fill).toBe(secondary);
-	expect(contrastRatio(label, fill)).toBeGreaterThanOrEqual(4.5);
+	expect(reasonColor).toBe(warn);
+	expect(contrastRatio(reasonColor, page_)).toBeGreaterThanOrEqual(4.5);
 	await settledShot(page, testInfo.outputPath('commission-entry-gallery-dirty.png'));
 	await page.getByLabel('Notes').fill('');
 	await expect(add).toBeVisible();
@@ -1366,6 +1374,10 @@ test('Link a piece links gallery art to an entry, with or without JavaScript, an
 		await noJs.getByRole('link', { name: `Link a piece: ${ENTRY}` }).click();
 		const picker = noJs.getByRole('region', { name: 'Link a piece' });
 		await expect(picker.getByRole('group', { name: 'Pieces by Test Artist, newest first' })).toBeVisible();
+		// Search reloads with every piece in scope, as in the dialog.
+		await picker.getByRole('searchbox', { name: 'Search titles' }).fill('unrelated');
+		await picker.getByRole('button', { name: 'Search', exact: true }).click();
+		await expect(picker.getByRole('group', { name: 'All pieces, newest first' })).toBeVisible();
 		await picker.getByRole('radio', { name: 'E2E unrelated piece' }).check();
 		await settledShot(noJs, testInfo.outputPath('commission-link-piece-nojs.png'));
 		await picker.getByRole('button', { name: 'Link piece' }).click();
@@ -1394,15 +1406,18 @@ test('Link a piece links gallery art to an entry, with or without JavaScript, an
 	await expect(linkButton).toBeFocused();
 
 	// By keyboard: search, then Tab past Search into the pieces and pick one.
+	// Search looks through every piece, not only the entry artist's.
 	await linkButton.click();
 	await search.fill('snow');
 	await search.press('Enter');
-	await expect(pieces.getByRole('radio')).toHaveCount(1);
+	const found = dialog.getByRole('group', { name: 'All pieces, newest first' });
+	await expect(found.getByRole('radio', { name: 'E2E Snowfall' })).toHaveCount(1);
+	await expect(found.getByRole('radio', { name: 'E2E unrelated piece' })).toHaveCount(0);
 	await page.keyboard.press('Tab');
 	await page.keyboard.press('Tab');
-	await expect(pieces.getByRole('radio', { name: 'E2E Snowfall' })).toBeFocused();
+	await expect(found.getByRole('radio', { name: 'E2E Snowfall' })).toBeFocused();
 	await page.keyboard.press('Space');
-	await expect(pieces.getByRole('radio', { name: 'E2E Snowfall' })).toBeChecked();
+	await expect(found.getByRole('radio', { name: 'E2E Snowfall' })).toBeChecked();
 	await settledShot(page, testInfo.outputPath('commission-link-piece-dialog.png'));
 	await dialog.getByRole('button', { name: 'Link piece' }).click();
 
@@ -1523,6 +1538,20 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await page.keyboard.press('Escape');
 	await expect(find).toBeHidden();
 	await expect(other).toBeFocused();
+	// A click outside closes it with no pick, and focus stays where it landed;
+	// so does tabbing out of it.
+	const checkedBefore = await page.getByRole('radiogroup').getByRole('radio', { checked: true }).getAttribute('value');
+	const amount = page.getByRole('textbox', { name: 'Amount' });
+	await other.click();
+	await expect(find).toBeFocused();
+	await amount.click();
+	await expect(find).toBeHidden();
+	await expect(amount).toBeFocused();
+	await expect(page.getByRole('radiogroup').getByRole('radio', { checked: true })).toHaveAttribute('value', checkedBefore!);
+	await other.click();
+	await expect(find).toBeFocused();
+	await page.keyboard.press('Tab');
+	await expect(find).toBeHidden();
 	// Down and Up move through the list and wrap at both ends; Enter picks the
 	// active option.
 	await other.click();
