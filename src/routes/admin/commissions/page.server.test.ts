@@ -187,8 +187,7 @@ describe('/admin/commissions delete action', () => {
 		const gone = seedEntry(sqlite, { title: 'Delete me', characterIds: [1] });
 		seedEntry(sqlite, { title: 'Keep me', characterIds: [1] });
 
-		// runAction reports a plain (non-fail) return as 'redirected'.
-		expect((await remove(platform, String(gone))).status).toBe('redirected');
+		expect((await remove(platform, String(gone))).status).toBe(200);
 		expect((await run(platform)).entries.map((e) => e.title)).toEqual(['Keep me']);
 	});
 
