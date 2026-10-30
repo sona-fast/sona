@@ -294,13 +294,17 @@ export const actions = {
 		//  - otherwise resolve, gated by shouldWriteAvatar: a transient resolve
 		//    failure (null) or a hotlink fallback during an unrelated edit must not
 		//    wipe or downgrade an avatar we host (rationale on shouldWriteAvatar).
+		//    When the avatar socials changed, the guard doesn't apply: the stored
+		//    avatar belongs to the old account.
 		const settings = await getSettings(db);
 		const avatarSocialsPosted = !!(blueskyUrl || twitterUrl || furAffinityUrl || patreonUrl);
+		// Stored values go through the same normalizer as the posted ones: an older
+		// row can hold a raw handle ('nyx.bsky.social') for the same account.
 		const avatarSocialsUnchanged =
-			blueskyUrl === (existing?.blueskyUrl ?? null) &&
-			twitterUrl === (existing?.twitterUrl ?? null) &&
-			furAffinityUrl === (existing?.furAffinityUrl ?? null) &&
-			patreonUrl === (existing?.patreonUrl ?? null);
+			blueskyUrl === (normalizeSocialUrl('bluesky', existing?.blueskyUrl) || null) &&
+			twitterUrl === (normalizeSocialUrl('twitter', existing?.twitterUrl) || null) &&
+			furAffinityUrl === (normalizeSocialUrl('furaffinity', existing?.furAffinityUrl) || null) &&
+			patreonUrl === (normalizeSocialUrl('patreon', existing?.patreonUrl) || null);
 		let avatarUrl = existing?.avatarUrl ?? null;
 		let writeResolved = false;
 		if (!avatarSocialsPosted) {
@@ -324,6 +328,10 @@ export const actions = {
 				resolved
 			);
 			if (writeResolved) avatarUrl = resolved;
+			// A changed handle is a different account, so the stored avatar is the old
+			// account's face: replace it with whatever the lookup found, even a
+			// hotlink, or clear it. Unstamped, the refresh cron tries again later.
+			else if (!avatarSocialsUnchanged) avatarUrl = resolved;
 		}
 
 		await db
