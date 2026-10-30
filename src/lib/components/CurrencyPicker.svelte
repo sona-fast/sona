@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick, type Snippet } from 'svelte';
 	import { Check, ChevronDown } from 'lucide-svelte';
-	import { CURRENCY_OTHER, currencySymbol, findCurrencies, knownCurrencies } from '$lib/currencies';
+	import { CURRENCY_OTHER, currencyOptions, currencySymbol, findCurrencies, knownCurrencies } from '$lib/currencies';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
 
@@ -43,10 +43,7 @@
 	let picked = $state<string | null>(null);
 	// The current value always has an option, even one the row never offered
 	// (a refused save that came back with an Other currency in it).
-	const shown = $derived.by(() => {
-		const extra = [picked, value].filter((c, i, a): c is string => !!c && !row.includes(c) && a.indexOf(c) === i);
-		return [...extra, ...row];
-	});
+	const shown = $derived(currencyOptions(row, value, picked));
 
 	let hydrated = $state(false);
 	onMount(() => (hydrated = true));

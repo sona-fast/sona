@@ -183,3 +183,14 @@ export function currencyRow(opts: {
 export function initialCurrency(opts: { recent: readonly string[]; localeCurrency: string | null }): string {
 	return opts.recent[0] || opts.localeCurrency || '';
 }
+
+/**
+ * The picker's options: the loaded row plus at most one extra in front. The
+ * extra is the current value when it's outside the row (a refused save or
+ * Reload entry can bring one back), else the last currency picked from Other
+ * currency, so the owner can switch back to it.
+ */
+export function currencyOptions(row: readonly string[], value: string | null | undefined, picked: string | null): string[] {
+	const extra = value && !row.includes(value) ? value : picked && !row.includes(picked) ? picked : null;
+	return extra ? [extra, ...row] : [...row];
+}

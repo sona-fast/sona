@@ -305,6 +305,12 @@ export const actions = {
 			twitterUrl === (normalizeSocialUrl('twitter', existing?.twitterUrl) || null) &&
 			furAffinityUrl === (normalizeSocialUrl('furaffinity', existing?.furAffinityUrl) || null) &&
 			patreonUrl === (normalizeSocialUrl('patreon', existing?.patreonUrl) || null);
+		// Only Bluesky and X avatars are looked up today, so only those handles say
+		// whether the stored avatar belongs to a different account now. Adding a
+		// Patreon link is not a new account.
+		const avatarAccountChanged =
+			blueskyUrl !== (normalizeSocialUrl('bluesky', existing?.blueskyUrl) || null) ||
+			twitterUrl !== (normalizeSocialUrl('twitter', existing?.twitterUrl) || null);
 		let avatarUrl = existing?.avatarUrl ?? null;
 		let writeResolved = false;
 		if (!avatarSocialsPosted) {
@@ -331,7 +337,7 @@ export const actions = {
 			// A changed handle is a different account, so the stored avatar is the old
 			// account's face: replace it with whatever the lookup found, even a
 			// hotlink, or clear it. Unstamped, the refresh cron tries again later.
-			else if (!avatarSocialsUnchanged) avatarUrl = resolved;
+			else if (avatarAccountChanged) avatarUrl = resolved;
 		}
 
 		await db
@@ -344,7 +350,7 @@ export const actions = {
 				// cron, which takes never-stamped rows first, gets to it soon.
 				...(writeResolved
 					? { avatarResolvedAt: new Date().toISOString() }
-					: !avatarSocialsUnchanged
+					: avatarAccountChanged
 						? { avatarResolvedAt: null }
 						: {})
 			})

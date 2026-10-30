@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { currencyRow, currencySymbol, findCurrencies, initialCurrency, knownCurrencies, localeCurrency } from './currencies';
+import { currencyOptions, currencyRow, currencySymbol, findCurrencies, initialCurrency, knownCurrencies, localeCurrency } from './currencies';
 
 describe('localeCurrency', () => {
 	it('reads the region of an Accept-Language header', () => {
@@ -139,5 +139,27 @@ describe('findCurrencies', () => {
 	it('finds every currency, in order, for an empty query', () => {
 		expect(find('')).toEqual(all);
 		expect(find('   ')).toEqual(all);
+	});
+});
+
+describe('currencyOptions', () => {
+	const row = ['USD', 'EUR', 'GBP', 'JPY'];
+
+	it('shows the row alone when the value and the last pick are in it', () => {
+		expect(currencyOptions(row, 'EUR', null)).toEqual(row);
+		expect(currencyOptions(row, 'EUR', 'GBP')).toEqual(row);
+	});
+
+	it('puts an Other pick in front, and keeps it while a row currency is chosen', () => {
+		expect(currencyOptions(row, 'KRW', 'KRW')).toEqual(['KRW', ...row]);
+		expect(currencyOptions(row, 'USD', 'KRW')).toEqual(['KRW', ...row]);
+	});
+
+	it('shows one extra at most: a value from Reload entry wins over an older pick', () => {
+		expect(currencyOptions(row, 'CHF', 'KRW')).toEqual(['CHF', ...row]);
+	});
+
+	it('shows a refused save’s outside currency with no pick at all', () => {
+		expect(currencyOptions(row, 'SEK', null)).toEqual(['SEK', ...row]);
 	});
 });

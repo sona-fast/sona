@@ -1144,6 +1144,27 @@ describe('update action — avatar clobber guard (#187)', () => {
 		expect(after!.avatarResolvedAt).toBeNull();
 	});
 
+	// Patreon avatars aren't looked up, so adding one isn't a new account.
+	it('keeps an owned avatar when only a Patreon link is added and the lookup fails', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(schema.artists)
+			.values({
+				name: 'Nyx',
+				avatarUrl: '/img/avatars/nyx/owned.jpg',
+				blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social',
+				avatarResolvedAt: '2026-10-01T00:00:00.000Z'
+			})
+			.returning({ id: schema.artists.id })
+			.get();
+
+		await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx', bluesky: 'nyx.bsky.social', patreon: 'nyx' }));
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.patreonUrl).not.toBeNull();
+		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg');
+		expect(after!.avatarResolvedAt).toBe('2026-10-01T00:00:00.000Z');
+	});
+
 	it("swaps an owned avatar for the new handle's hotlink when the handle changes", async () => {
 		const { db, platform } = makeDb();
 		const row = await db
