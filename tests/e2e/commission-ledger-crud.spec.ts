@@ -1260,10 +1260,10 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await settledShot(page, testInfo.outputPath('commission-ledger-emptied.png'));
 });
 
-/** A bare entry by Test Artist, saved from New entry. */
-async function createEntry(page: Page, title: string) {
+/** A bare entry, by Test Artist unless another artist is named, saved from New entry. */
+async function createEntry(page: Page, title: string, artist = 'Test Artist') {
 	await open(page, '/admin/commissions/new');
-	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: artist });
 	await page.getByLabel('Title').fill(title);
 	await page.getByRole('button', { name: 'Save entry' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
@@ -1774,4 +1774,55 @@ test('an artist added in another tab can be picked by a link', async ({ page, co
 	await expect(page.locator('.lookup')).toContainText('other_tab_artist');
 	await expect(artist.locator('option:checked')).toHaveText('other_tab_artist');
 	expect(await artist.evaluate((el: HTMLSelectElement) => el.checkValidity())).toBe(true);
+});
+
+// A ledger entry blocks deleting its artist, and the Works column doesn't show
+// entries, so the Delete button says why before the owner tries. name_only_artist
+// (50 in fixtures/commissions.sql) has no works, so the entry is the only blocker.
+test('an artist with a ledger entry gets a Delete that says why it will not run', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await createEntry(page, 'E2E blocks delete', 'name_only_artist');
+
+	await open(page, '/admin/artists?q=name_only_artist');
+	const row = page.getByRole('row', { name: /name_only_artist/ });
+	await expect(row.locator('.works-label')).toHaveText('No works yet');
+	const trash = row.getByRole('button', { name: 'Delete artist' });
+	const reason = "Can't delete: 1 ledger entry. Remove them first.";
+	await expect(trash).toHaveAttribute('aria-disabled', 'true');
+	await expect(trash).toHaveAccessibleDescription(reason);
+
+	// Keyboard focus shows the reason beside the button.
+	const tip = row.getByRole('tooltip');
+	await expect(tip).toBeHidden();
+	await trash.focus();
+	await page.keyboard.press('Shift+Tab');
+	await page.keyboard.press('Tab');
+	await expect(trash).toBeFocused();
+	await expect(tip).toBeVisible();
+	await expect(tip).toHaveText(reason);
+	await settledShot(page, testInfo.outputPath('artist-delete-blocked.png'));
+
+	// Activating it says the reason instead of asking to delete.
+	await page.keyboard.press('Enter');
+	await expect(page.getByRole('status').filter({ hasText: reason })).toBeVisible();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	// A pointer click too. Playwright treats aria-disabled as not enabled, so force it.
+	await trash.click({ force: true });
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+
+	// An artist with nothing in the way still gets the confirm dialog.
+	await open(page, '/admin/artists?q=Twin One');
+	const freeTrash = page.getByRole('row', { name: /Twin One/ }).getByRole('button', { name: 'Delete artist' });
+	await expect(freeTrash).not.toHaveAttribute('aria-disabled', 'true');
+	await freeTrash.click();
+	const confirm = page.getByRole('dialog');
+	await expect(confirm).toContainText('Delete artist "Twin One"?');
+	await confirm.getByRole('button', { name: 'Cancel' }).click();
+	await expect(confirm).toHaveCount(0);
+
+	// Leave the ledger empty for the tests after this one.
+	await open(page, '/admin/commissions');
+	await page.getByRole('button', { name: 'Delete E2E blocks delete' }).click();
+	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
 });

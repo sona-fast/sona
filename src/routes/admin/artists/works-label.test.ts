@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as m from '$lib/paraglide/messages';
-import { worksLabel } from './works-label';
+import { setLocale, baseLocale } from '$lib/paraglide/runtime';
+import { worksLabel, deleteBlockersLabel } from './works-label';
 
 // Normalize non-breaking spaces so assertions read as visible words.
 const visible = (s: string) => s.replace(/\u00a0/g, ' ');
@@ -35,5 +36,44 @@ describe('worksLabel', () => {
 		const segments = out.split('\u00a0· ');
 		expect(segments).toHaveLength(3);
 		for (const segment of segments) expect(segment).not.toContain(' ');
+	});
+});
+
+describe('deleteBlockersLabel', () => {
+	const none = { artworkCount: 0, stickerCount: 0, avatarCount: 0, managedPackCount: 0, commissionCount: 0 };
+
+	afterEach(() => setLocale(baseLocale, { reload: false }));
+
+	it('returns null when nothing blocks the delete', () => {
+		expect(deleteBlockersLabel(none)).toBeNull();
+	});
+
+	// Each blocker alone is enough. Managed packs and ledger entries never show in
+	// the Works column, so this label is the only place they surface.
+	it.each([
+		['artworkCount', 'Can\'t delete: 1 artwork. Remove them first.'],
+		['stickerCount', 'Can\'t delete: 1 sticker. Remove them first.'],
+		['avatarCount', 'Can\'t delete: 1 VR avatar. Remove them first.'],
+		['managedPackCount', 'Can\'t delete: 1 sticker pack. Remove them first.'],
+		['commissionCount', 'Can\'t delete: 1 ledger entry. Remove them first.']
+	] as const)('names %s alone', (key, expected) => {
+		expect(deleteBlockersLabel({ ...none, [key]: 1 })).toBe(expected);
+	});
+
+	it('pluralizes each count', () => {
+		const out = deleteBlockersLabel({ ...none, managedPackCount: 3, commissionCount: 2 });
+		expect(out).toBe("Can't delete: 3 sticker packs and 2 ledger entries. Remove them first.");
+	});
+
+	it('lists only the non-zero blockers, in the delete action\'s order', () => {
+		const out = deleteBlockersLabel({ artworkCount: 4, stickerCount: 0, avatarCount: 2, managedPackCount: 0, commissionCount: 1 });
+		expect(out).toBe("Can't delete: 4 artworks, 2 VR avatars, and 1 ledger entry. Remove them first.");
+		expect(out).not.toMatch(/\b0 /);
+	});
+
+	it('reads in Japanese with the Japanese list separator', () => {
+		setLocale('ja', { reload: false });
+		const out = deleteBlockersLabel({ ...none, managedPackCount: 1, commissionCount: 2 });
+		expect(out).toBe('削除できません。ステッカーパック 1件、制作依頼の記録 2件が残っています。先にこれらを外してください。');
 	});
 });

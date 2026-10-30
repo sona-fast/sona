@@ -626,6 +626,36 @@
 			}
 		}
 	],
+	"admin_count_sticker_packs": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} sticker pack",
+				"countPlural=other": "{count} sticker packs"
+			}
+		}
+	],
+	"admin_count_ledger_entries": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} ledger entry",
+				"countPlural=other": "{count} ledger entries"
+			}
+		}
+	],
 	"admin_count_characters": [
 		{
 			"declarations": [
@@ -706,6 +736,7 @@
 	"admin_unhide_artist_confirm": "Make public",
 	"admin_artists_edit_aria": "Edit artist",
 	"admin_artists_delete_aria": "Delete artist",
+	"admin_artists_delete_blocked": "Can't delete: {blockers}. Remove them first.",
 	"admin_artists_no_match": "No artists matching \"{search}\"",
 	"admin_artists_empty": "No artists yet.",
 	"admin_artists_delete_title": "Delete Artist",

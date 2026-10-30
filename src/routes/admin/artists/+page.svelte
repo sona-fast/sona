@@ -10,7 +10,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';
-	import { worksLabel } from './works-label';
+	import { worksLabel, deleteBlockersLabel } from './works-label';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -95,6 +95,14 @@
 		if (data.upToDate?.[id]) return m.admin_artists_up_to_date();
 		return m.admin_artists_submit_registry();
 	}
+
+	// Delete for a row. A blocked artist's button is aria-disabled, so it stays
+	// focusable and its reason can be read; a click says the reason instead of
+	// asking to delete. The server still refuses on its own (the list can be stale).
+	function onDelete(artist: { id: number; name: string }, blocked: string | null) {
+		if (blocked) toast.info(blocked);
+		else deleteTarget = { id: artist.id, name: artist.name };
+	}
 </script>
 
 <div class="page-header">
@@ -168,6 +176,7 @@
 		</thead>
 		<tbody>
 			{#each data.artists as artist}
+				{@const blocked = deleteBlockersLabel(artist)}
 				<tr>
 					<td class="col-avatar">
 						<ArtistAvatar name={artist.name} avatarUrl={artist.avatarUrl} size={36} />
@@ -228,9 +237,12 @@
 						<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}>
 							<Pencil size={16} />
 						</button>
-						<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
-							{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
-						</button>
+						<span class="delete-wrap">
+							<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `delete-blocked-${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
+								{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+							</button>
+							{#if blocked}<span class="blocked-tip" role="tooltip" id="delete-blocked-{artist.id}">{blocked}</span>{/if}
+						</span>
 					</td>
 				</tr>
 			{:else}
@@ -251,6 +263,7 @@
 <!-- Mobile list -->
 <div class="mobile-list">
 	{#each data.artists as artist}
+		{@const blocked = deleteBlockersLabel(artist)}
 		<div class="mobile-artist-item">
 			<ArtistAvatar name={artist.name} avatarUrl={artist.avatarUrl} size={36} />
 			<div class="mobile-artist-info">
@@ -295,9 +308,12 @@
 					</form>
 				{/if}
 				<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
-				<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
-					{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
-				</button>
+				<span class="delete-wrap">
+					<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `delete-blocked-m-${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
+						{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+					</button>
+					{#if blocked}<span class="blocked-tip" role="tooltip" id="delete-blocked-m-{artist.id}">{blocked}</span>{/if}
+				</span>
 			</div>
 		</div>
 	{:else}
@@ -640,7 +656,7 @@
 		transition: color 0.15s;
 	}
 
-	.icon-btn:not(:disabled):hover {
+	.icon-btn:not(:disabled):not([aria-disabled='true']):hover {
 		color: var(--foreground);
 	}
 
@@ -649,6 +665,49 @@
 	.icon-btn:disabled {
 		opacity: 0.35;
 		cursor: default;
+	}
+
+	/* A blocked Delete is aria-disabled instead (focusable, so its reason can be
+	   read) and takes the same look. Only the icon fades, so the focus ring keeps
+	   its full contrast. */
+	.icon-btn[aria-disabled='true'] {
+		cursor: default;
+	}
+	.icon-btn[aria-disabled='true'] > :global(svg) {
+		opacity: 0.35;
+	}
+
+	/* Why Delete won't run: shown beside the button on hover or keyboard focus,
+	   and read as the button's description. A tap shows it as a toast instead.
+	   It sits to the left so the table wrapper's overflow can't clip it. */
+	.delete-wrap {
+		position: relative;
+		display: inline-flex;
+	}
+
+	.blocked-tip {
+		position: absolute;
+		right: calc(100% + 6px);
+		top: 50%;
+		transform: translateY(-50%);
+		z-index: 10;
+		width: max-content;
+		max-width: 240px;
+		padding: 6px 8px;
+		border-radius: var(--radius-xs);
+		background: var(--foreground);
+		color: var(--background);
+		font-size: 12px;
+		line-height: 1.4;
+		text-align: left;
+		white-space: normal;
+		visibility: hidden;
+		pointer-events: none;
+	}
+
+	.delete-wrap:hover .blocked-tip,
+	.delete-wrap:has(:focus-visible) .blocked-tip {
+		visibility: visible;
 	}
 
 	:global(.spin) {

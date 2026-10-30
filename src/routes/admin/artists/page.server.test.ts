@@ -1395,7 +1395,32 @@ describe('admin artists load — works counts', () => {
 	});
 });
 
-describe('delete action — VR avatar credits block deletion', () => {
+// The list carries the two blockers the Works column leaves out, so the Delete
+// button can say why it won't run before the action refuses.
+describe('admin artists load — delete blocker counts', () => {
+	async function rowFor(platform: App.Platform, name: string) {
+		const data = (await load(loadEvent(platform))) as unknown as {
+			artists: { name: string; managedPackCount: number; commissionCount: number }[];
+		};
+		const a = data.artists.find((x) => x.name === name)!;
+		return { managedPackCount: a.managedPackCount, commissionCount: a.commissionCount };
+	}
+
+	it('counts managed sticker packs and ledger entries per artist', async () => {
+		const { db, platform } = makeDb();
+		const manager = await seedArtist(db, 'Manager');
+		const ledger = await seedArtist(db, 'Ledger');
+		await seedArtist(db, 'Clear');
+		await db.run(sql`INSERT INTO sticker_packs (manager_artist_id) VALUES (${manager}), (${manager})`);
+		await db.run(sql`INSERT INTO commissions (artist_id) VALUES (${ledger}), (${ledger}), (${ledger})`);
+
+		expect(await rowFor(platform, 'Manager')).toEqual({ managedPackCount: 2, commissionCount: 0 });
+		expect(await rowFor(platform, 'Ledger')).toEqual({ managedPackCount: 0, commissionCount: 3 });
+		expect(await rowFor(platform, 'Clear')).toEqual({ managedPackCount: 0, commissionCount: 0 });
+	});
+});
+
+describe('delete action — each blocker refuses deletion', () => {
 	function deleteEvent(platform: App.Platform, id: number) {
 		const body = new FormData();
 		body.append('id', String(id));
@@ -1435,6 +1460,26 @@ describe('delete action — VR avatar credits block deletion', () => {
 
 		expect(result.status).toBe(400);
 		expect(result.data.error).toMatch(/2 commission ledger entries/);
+		expect(await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get()).toBeDefined();
+	});
+
+	// The test tables have no FKs, so each refusal here comes from the guard alone.
+	it.each([
+		['an artwork', 'images', 'artist_id', /existing artworks/],
+		['a sticker', 'stickers', 'artist_id', /existing stickers/],
+		['a managed sticker pack', 'sticker_packs', 'manager_artist_id', /manages 1 sticker pack\./]
+	])('refuses to delete an artist with only %s and keeps the row', async (_label, table, column, message) => {
+		const { db, platform } = makeDb();
+		const id = await seedArtist(db, 'Blocked');
+		await db.run(sql.raw(`INSERT INTO ${table} (${column}) VALUES (${id})`));
+
+		const result = (await actions.delete(deleteEvent(platform, id))) as unknown as {
+			status: number;
+			data: { error: string };
+		};
+
+		expect(result.status).toBe(400);
+		expect(result.data.error).toMatch(message);
 		expect(await db.select().from(schema.artists).where(eq(schema.artists.id, id)).get()).toBeDefined();
 	});
 
