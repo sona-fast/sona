@@ -1826,3 +1826,59 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
 });
+
+// Add this Telegram to {name} (SONA-236): a t.me link pasted for the picked
+// artist, who has no Telegram yet, is saved as theirs in one click. Nothing
+// here saves an entry. fixtures/commissions.sql gives Chat Artist (54) a
+// Telegram and No Chat Artist (55) none; this test saves one onto 55.
+test('a pasted t.me link adds its Telegram to the picked artist who has none', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	// The field, not Open link beside it, whose label names the field too.
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const liveRegion = page.locator('[aria-live="polite"]');
+	const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+
+	// An artist who already has a Telegram is never offered another.
+	await artist.selectOption({ label: 'Chat Artist' });
+	await paste(link, 'https://t.me/e2e_tg_new');
+	await expect(card.getByText("e2e_tg_new isn't in your artist list yet.")).toBeVisible();
+	await expect(card.getByRole('button', { name: /^Add this Telegram/ })).toHaveCount(0);
+	await expect(card.getByRole('button', { name: 'Add e2e_tg_new as a new artist' })).toBeVisible();
+
+	// A bare handle stays a note: no lookup, so nothing to add.
+	await link.fill('@e2e_tg_new');
+	await link.press('Tab');
+	await expect(card).toHaveCount(0);
+
+	// The picked artist has no Telegram: adding it to them comes first, and a
+	// new artist stays on offer below.
+	await artist.selectOption({ label: 'No Chat Artist' });
+	await paste(link, 'https://t.me/e2e_tg_new');
+	await expect(addTelegram).toBeVisible();
+	await expect(card.getByRole('button', { name: 'Add e2e_tg_new as a new artist' })).toBeVisible();
+	await settledShot(page, testInfo.outputPath('commission-link-add-telegram.png'));
+
+	await addTelegram.click();
+	await expect(card.getByText('Added this Telegram to No Chat Artist.')).toBeVisible();
+	await expect(liveRegion.filter({ hasText: 'Added this Telegram to No Chat Artist.' })).toHaveCount(1);
+	await expect(addTelegram).toHaveCount(0);
+	// Focus lands on the button that took the old one's place.
+	await expect(card.getByRole('button', { name: 'Using No Chat Artist' })).toBeFocused();
+	await expect(artist).toHaveValue('55');
+	await settledShot(page, testInfo.outputPath('commission-link-telegram-added.png'));
+
+	// With the field as plain text, Open chat uses the new Telegram, no reload.
+	await link.fill('Telegram DM');
+	await link.press('Tab');
+	const chat = page.getByRole('link', { name: 'Open chat with No Chat Artist on Telegram (opens in a new tab)' });
+	await expect(chat).toHaveAttribute('href', 'https://t.me/e2e_tg_new');
+
+	// It's saved: a fresh form finds the artist by the link.
+	await open(page, '/admin/commissions/new');
+	await paste(link, 'https://t.me/e2e_tg_new/42');
+	await expect(card.getByText('e2e_tg_new is already in your artist list as No Chat Artist.')).toBeVisible();
+	await expect(artist).toHaveValue('55');
+});

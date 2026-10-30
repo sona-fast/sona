@@ -102,6 +102,23 @@ describe('create action: early-access gate', () => {
 			{ id: 2, name: 'Pip', ownerName: null }
 		]);
 	});
+
+	// Paste a link: the form offers "Add this Telegram to {name}" only for an
+	// artist with no Telegram, and never needs the saved link to decide.
+	it("says which artists have a Telegram, without sending the link", async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		sqlite.exec(`
+			UPDATE artists SET telegram_url = 'https://t.me/artist_a' WHERE id = 1;
+			INSERT INTO artists (id, name, telegram_url, created_at) VALUES (3, 'Artist C', '', '2026-10-01');
+		`);
+		const data = (await load({ platform, request: new Request('http://x/') } as never)) as { artists: unknown[] };
+		expect(data.artists).toEqual([
+			{ id: 1, name: 'Artist A', hasTelegram: true },
+			{ id: 2, name: 'Artist B', hasTelegram: false },
+			{ id: 3, name: 'Artist C', hasTelegram: false }
+		]);
+	});
 });
 
 describe('load: the currency picker', () => {

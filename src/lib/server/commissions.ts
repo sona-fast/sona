@@ -448,7 +448,16 @@ const KIND_SUGGESTIONS_MAX = 20;
  * they use, the same way, for the Kind field's suggestions. */
 export async function loadCommissionChoices(db: Database) {
 	const [artistRows, characterRows, currencyRows, kindRows] = await db.batch([
-		db.select({ id: artists.id, name: artists.name }).from(artists).orderBy(asc(artists.name)),
+		// Whether each artist has a Telegram, so a pasted t.me link can offer to
+		// add it to the picked artist. The link itself stays on the server.
+		db
+			.select({
+				id: artists.id,
+				name: artists.name,
+				hasTelegram: sql<boolean>`coalesce(${artists.telegramUrl}, '') <> ''`.mapWith(Boolean)
+			})
+			.from(artists)
+			.orderBy(asc(artists.name)),
 		db
 			.select({ id: characters.id, name: characters.name, ownerName: characters.ownerName })
 			.from(characters)

@@ -67,7 +67,9 @@
 		version?: string;
 	}
 	interface Props {
-		artists: { id: number; name: string }[];
+		/** `hasTelegram`: whether the artist has a Telegram saved, so a pasted
+		 * t.me link can offer to add it to the picked artist. */
+		artists: { id: number; name: string; hasTelegram?: boolean }[];
 		characters: { id: number; name: string; ownerName: string | null }[];
 		/** Edit mode when set; create otherwise. */
 		entry?: EntryInit | null;
@@ -101,7 +103,7 @@
 
 	// Artists made from this form join its list without a reload. Add New
 	// Artist needs the page's script, so it only renders once that has run.
-	let addedArtists = $state<{ id: number; name: string }[]>([]);
+	let addedArtists = $state<{ id: number; name: string; hasTelegram?: boolean }[]>([]);
 	const artistOptions = $derived(
 		[...artists, ...addedArtists.filter((a) => !artists.some((b) => b.id === a.id))].sort((a, b) =>
 			a.name.localeCompare(b.name, getLocale())
@@ -184,16 +186,22 @@
 		failure = form ?? null;
 	});
 	const errors = $derived(failure?.errors ?? {});
+	// Add this Telegram to {name}: Telegrams saved from this form, by artist id,
+	// and the artists the server said already have one. An added Telegram counts
+	// for its artist's Open chat from then on, without a reload.
+	let addedTelegrams = $state<Record<string, string>>({});
+	let telegramTaken = $state<Record<string, true>>({});
 	// A link in the field opens from beside it, since the field itself can't be
 	// clicked. Otherwise (empty, or text like "Telegram DM") there's no address,
 	// so the saved artist's Telegram stands in as Open chat. Only while the form
 	// still has that artist: another pick would open the wrong person's chat.
 	const placeHref = $derived(sourceLinkHref(values.sourceUrl));
-	const chatHref = $derived(
-		!placeHref && entry?.artistName && values.artistId === String(entry.artistId)
-			? sourceLinkHref(entry.artistTelegramUrl)
-			: null
+	const pickedArtist = $derived(artistOptions.find((a) => String(a.id) === values.artistId) ?? null);
+	const pickedTelegram = $derived(
+		addedTelegrams[values.artistId] ??
+			(entry?.artistName && values.artistId === String(entry.artistId) ? entry.artistTelegramUrl : null)
 	);
+	const chatHref = $derived(!placeHref ? sourceLinkHref(pickedTelegram) : null);
 	// The out-of-date refusal's text, fixed when the refusal arrives so the alert
 	// doesn't change under a screen reader while the owner keeps typing.
 	let staleText = $state('');
@@ -373,6 +381,8 @@
 				nameMatches: ArtistChoice[];
 				/** The one match was just made from this link with Add {handle}. */
 				added?: boolean;
+				/** The one match just had this link's Telegram added to them. */
+				telegramAdded?: boolean;
 		  };
 	let lookup = $state<LinkLookup>({ kind: 'idle' });
 	// The link last sent, so a blur after a paste doesn't ask twice.
@@ -384,6 +394,68 @@
 	let autoPicked: string | null = null;
 	// A draft came back, so the owner sees why the form isn't empty.
 	let draftRestored = $state(false);
+
+	let addingTelegram = $state(false);
+	// Why the last add was refused, for the artist it was about.
+	let telegramRefusal = $state<{ artistId: string; text: string } | null>(null);
+	let lookupBox = $state<HTMLElement>();
+	let telegramMsg = $state<HTMLElement>();
+
+	/** The picked artist a pasted t.me link can be added to: the link names no
+	 * artist in the list, and the picked one has no Telegram yet. */
+	const telegramTarget = $derived.by(() => {
+		if (lookup.kind !== 'found' || lookup.platform !== 'telegram' || lookup.matches.length > 0) return null;
+		const artist = pickedArtist;
+		if (!artist || artist.hasTelegram || addedTelegrams[String(artist.id)] || telegramTaken[String(artist.id)]) return null;
+		return artist;
+	});
+
+	async function addTelegram(artist: ArtistChoice, found: Extract<LinkLookup, { kind: 'found' }>) {
+		const artistId = String(artist.id);
+		addingTelegram = true;
+		telegramRefusal = null;
+		let body: { ok?: boolean; reason?: string; telegramUrl?: string };
+		try {
+			const res = await fetch('/api/admin/artist-telegram', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ artistId: artist.id, url: values.sourceUrl.trim() })
+			});
+			body = await res.json();
+		} catch {
+			body = { ok: false, reason: 'failed' };
+		}
+		addingTelegram = false;
+		if (body.ok && body.telegramUrl) {
+			addedTelegrams[artistId] = body.telegramUrl;
+			// The card now names the artist the link belongs to, unless the field
+			// has moved on to another link meanwhile.
+			if (lookup.kind === 'found' && lookup.handle === found.handle) {
+				lookup = { ...lookup, matches: [artist], nameMatches: [], telegramAdded: true };
+			}
+			announcer.say(m.admin_commissions_link_telegram_added({ name: artist.name }));
+			// The button is gone: focus moves to the one in its place.
+			await tick();
+			lookupBox?.querySelector<HTMLElement>('.match button')?.focus();
+			return;
+		}
+		const text =
+			body.reason === 'has_telegram'
+				? m.admin_commissions_link_telegram_taken({ name: artist.name })
+				: body.reason === 'missing'
+					? m.admin_commissions_link_telegram_missing({ name: artist.name })
+					: m.admin_commissions_link_telegram_failed();
+		telegramRefusal = { artistId, text };
+		announcer.say(text);
+		// An artist who already has a Telegram can't take this one, so the
+		// button goes and focus moves to the reason. Otherwise focus stays on
+		// the button, so trying again is one key away.
+		if (body.reason === 'has_telegram') {
+			telegramTaken[artistId] = true;
+			await tick();
+			telegramMsg?.focus();
+		}
+	}
 
 	/** The owner chose an artist, from a Use button or the select. */
 	function ownerPicked() {
@@ -425,6 +497,7 @@
 		lookedUp = link;
 		const seq = ++lookupSeq;
 		lookup = { kind: 'searching' };
+		telegramRefusal = null;
 		let next: LinkLookup;
 		try {
 			const res = await fetch('/api/admin/artist-from-link', {
@@ -478,6 +551,7 @@
 	/** No lookup on screen, and any answer still on its way ignored. */
 	function clearLookup() {
 		lookup = { kind: 'idle' };
+		telegramRefusal = null;
 		lookedUp = '';
 		lookupSeq++;
 	}
@@ -531,6 +605,7 @@
 		}
 		if (result.kind !== 'found') return '';
 		const { handle, matches } = result;
+		if (matches.length === 1 && result.telegramAdded) return m.admin_commissions_link_telegram_added({ name: matches[0].name });
 		if (matches.length === 1 && result.added) return m.admin_commissions_link_added({ name: matches[0].name });
 		if (matches.length === 1) return m.admin_commissions_link_found({ handle, name: matches[0].name });
 		if (matches.length > 1) return m.admin_commissions_link_found_several({ handle });
@@ -889,7 +964,7 @@
 					href={chatHref}
 					target="_blank"
 					rel="noopener noreferrer"
-					aria-label={m.admin_commissions_open_chat_label({ artist: entry?.artistName ?? '' })}
+					aria-label={m.admin_commissions_open_chat_label({ artist: pickedArtist?.name ?? entry?.artistName ?? '' })}
 					>{m.admin_commissions_open_chat()}</a
 				>
 			{/if}
@@ -909,7 +984,7 @@
 			     Artists page hint would contradict the choice beside them. -->
 			{@const suggestionTaken =
 				found.matches.length === 0 && found.nameMatches.some((a) => String(a.id) === values.artistId)}
-			<div class="lookup">
+			<div class="lookup" bind:this={lookupBox}>
 				<p class="lookup-line">
 					<span class="platform">{SOCIAL_PLATFORM_NAMES[found.platform]}</span>
 					<span class="handle">{found.handle}</span>
@@ -926,6 +1001,31 @@
 					{@render choice(artist, found.matches.length > 1)}
 				{/each}
 				{#if found.matches.length === 0}
+					<!-- The picked artist first: a t.me link pasted for them is most
+					     likely theirs. Adding someone new stays on offer below. -->
+					{#if telegramTarget}
+						{@const target = telegramTarget}
+						<div class="match">
+							<!-- aria-disabled, not disabled, while it saves: a disabled button
+							     drops focus, and a refusal keeps focus here to try again. -->
+							<button
+								type="button"
+								class="btn-compact btn-tap-mobile"
+								aria-disabled={addingTelegram ? 'true' : undefined}
+								onclick={() => !addingTelegram && addTelegram(target, found)}
+							>
+								{#if addingTelegram}<Loader2 size={14} class="spin" aria-hidden="true" />{:else}<Plus
+										size={14}
+										aria-hidden="true"
+									/>{/if}{m.admin_commissions_link_add_telegram({ name: target.name })}
+							</button>
+						</div>
+					{/if}
+					{#if telegramRefusal && telegramRefusal.artistId === values.artistId}
+						<p class="hint hint-warn lookup-msg" tabindex="-1" bind:this={telegramMsg}>
+							<TriangleAlert size={14} aria-hidden="true" /><span>{telegramRefusal.text}</span>
+						</p>
+					{/if}
 					{#each found.nameMatches as artist (artist.id)}
 						{@render choice(artist, false)}
 					{/each}

@@ -19,3 +19,8 @@ INSERT INTO artists (id, name, twitter_url, created_at) VALUES (53, 'Solo Artist
 -- An artist with a Telegram link, for Open chat beside a "Where it's
 -- happening" typed as plain text. The handle is a placeholder.
 INSERT INTO artists (id, name, telegram_url, created_at) VALUES (54, 'Chat Artist', 'https://t.me/e2e_chat_artist', '2026-07-01T00:00:00.000Z');
+
+-- An artist with no Telegram, for Add this Telegram to {name}: the test saves
+-- one onto them, so no other test may rely on them. The handle the test pastes
+-- is a placeholder.
+INSERT INTO artists (id, name, created_at) VALUES (55, 'No Chat Artist', '2026-07-01T00:00:00.000Z');

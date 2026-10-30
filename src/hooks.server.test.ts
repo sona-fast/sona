@@ -295,6 +295,20 @@ describe('authHandle — /api/admin/artist-from-link stays behind the admin gate
 	});
 });
 
+describe('authHandle — /api/admin/artist-telegram stays behind the admin gate', () => {
+	it('returns 401 to a POST without a session, before the endpoint writes an artist', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('complete');
+		const reached = vi.fn(resolve);
+		const res = (await authHandle({
+			event: makeEvent('/api/admin/artist-telegram', makeDb(), 'POST'),
+			resolve: reached
+		} as never)) as Response;
+
+		expect(res.status).toBe(401);
+		expect(reached).not.toHaveBeenCalled();
+	});
+});
+
 describe('authHandle — /api/admin/commission-pieces stays behind the admin gate', () => {
 	it('returns 401 without a session, before the endpoint lists any piece', async () => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');
