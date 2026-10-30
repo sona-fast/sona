@@ -1292,17 +1292,46 @@ test("a row's Delete asks first and deletes only that row's entry", async ({ pag
 	await expect(trash).toBeFocused();
 	await expect(page.getByRole('row', { name: /E2E delete me/ })).toHaveCount(1);
 
+	// A server error keeps the row, says so, and gives focus back to its Delete.
+	const listDelete = (url: URL) => url.pathname === '/admin/commissions' && url.search === '?/delete';
+	await page.route(listDelete, (route) =>
+		route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ type: 'error', error: { message: 'boom' } }) })
+	);
+	await trash.click();
+	await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page.getByRole('status').filter({ hasText: 'Something went wrong' })).toBeVisible();
+	await expect(page.getByRole('row', { name: /E2E delete me/ })).toHaveCount(1);
+	await expect(trash).toBeEnabled();
+	await expect(trash).toBeFocused();
+	await page.unroute(listDelete);
+
 	await trash.click();
 	await settledShot(page, testInfo.outputPath('commission-row-delete.png'));
 	await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
 	await expect(page.getByRole('row', { name: /E2E delete me/ })).toHaveCount(0);
 	await expect(page.getByRole('row', { name: /E2E keep me/ })).toHaveCount(1);
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	// Said out loud, and focus moves to the neighbouring row, not the lost button.
+	await expect(page.getByRole('status').filter({ hasText: 'Deleted “E2E delete me”.' })).toBeVisible();
+	const keepLink = page.getByRole('link', { name: 'Edit E2E keep me' });
+	await expect(keepLink).toBeFocused();
 
-	// Leave the ledger empty for the tests after this one.
+	// Deleted in another tab while this list still shows it: Delete on the stale
+	// row counts as done, with no error, and leaves the ledger empty for the
+	// tests after this one. Focus falls back to the heading.
+	const keepId = (await keepLink.getAttribute('href'))!.split('/')[3];
+	const elsewhere = await page.request.post('/admin/commissions?/delete', {
+		form: { id: keepId },
+		headers: { origin: new URL(page.url()).origin },
+		maxRedirects: 0
+	});
+	expect(elsewhere.status()).toBeLessThan(400);
 	await page.getByRole('button', { name: 'Delete E2E keep me' }).click();
 	await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	await expect(page.getByRole('status').filter({ hasText: /Couldn't delete|Something went wrong/ })).toHaveCount(0);
+	await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
 });
 
 test('signing out forgets unsaved drafts', async ({ page }) => {

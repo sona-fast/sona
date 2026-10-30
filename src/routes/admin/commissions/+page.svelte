@@ -12,7 +12,7 @@
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
 	import { toast } from '$lib/toast.svelte';
-	import { onMount, untrack } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { isActiveStatus, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
 	import * as m from '$lib/paraglide/messages';
 
@@ -83,7 +83,12 @@
 	onMount(() => (hydrated = true));
 	let deleteTarget = $state<Entry | null>(null);
 	let deletingId = $state<number | null>(null);
+	let deletingTitle = '';
+	// Where focus goes once the row is gone: the next row's link, else the
+	// previous row's, else the page heading.
+	let focusAfterDelete: number | null = null;
 	let deleteForm = $state<HTMLFormElement>();
+	let heading = $state<HTMLHeadingElement>();
 
 	function deleteMessage(entry: Entry): string {
 		return entry.piece
@@ -95,20 +100,30 @@
 		// The id travels with this submit, not in a field the next row could change.
 		formData.set('id', String(deletingId));
 		return async ({ update, result }) => {
+			const id = deletingId;
 			// An error result would swap the list for the error page, so it stays with a toast.
 			if (result.type !== 'error') await update();
 			deletingId = null;
-			if (result.type === 'failure' && (result.data as { missing?: boolean } | undefined)?.missing) {
+			const missing = result.type === 'failure' && (result.data as { missing?: boolean } | undefined)?.missing;
+			if (result.type === 'success' || missing) {
 				// Already deleted somewhere else: the delete is done either way.
-				await invalidateAll();
-			} else if (result.type === 'failure') toast.error(m.admin_commissions_delete_failed());
-			else if (result.type === 'error') toast.error(m.admin_something_wrong());
+				if (missing) await invalidateAll();
+				else toast.success(m.admin_commissions_deleted({ title: deletingTitle }));
+				await tick();
+				const next = document.querySelector<HTMLElement>(`a[href="/admin/commissions/${focusAfterDelete}/edit"]`);
+				(next ?? heading)?.focus();
+				return;
+			}
+			toast.error(result.type === 'failure' ? m.admin_commissions_delete_failed() : m.admin_something_wrong());
+			// The row stays: give focus back to its Delete, enabled again.
+			await tick();
+			document.querySelector<HTMLElement>(`button[data-delete-id="${id}"]`)?.focus();
 		};
 	};
 </script>
 
 <div class="page-header">
-	<h1>
+	<h1 tabindex="-1" bind:this={heading}>
 		{m.admin_nav_commissions()}
 		{#if data.entries.length > 0}<span class="count">{m.admin_commissions_count({ count: data.entries.length })}</span>{/if}
 	</h1>
@@ -230,10 +245,11 @@
 												type="button"
 												class="icon-btn"
 												aria-label={m.admin_commissions_delete_aria({ title: entry.title })}
+												data-delete-id={entry.id}
 												disabled={deletingId !== null}
 												onclick={() => (deleteTarget = entry)}
 											>
-												{#if deletingId === entry.id}<Loader2 size={16} class="spin" aria-hidden="true" />{:else}<Trash2 size={16} aria-hidden="true" />{/if}
+												{#if deletingId === entry.id}<Loader2 size={16} class="tag-spin" aria-hidden="true" />{:else}<Trash2 size={16} aria-hidden="true" />{/if}
 											</button>
 										{:else}
 											<a
@@ -264,6 +280,10 @@
 		message={deleteMessage(deleteTarget)}
 		onconfirm={() => {
 			deletingId = deleteTarget!.id;
+			deletingTitle = deleteTarget!.title;
+			const order = groups.flatMap((g) => g.rows.map((r) => r.id));
+			const at = order.indexOf(deletingId);
+			focusAfterDelete = order[at + 1] ?? order[at - 1] ?? null;
 			deleteTarget = null;
 			deleteForm?.requestSubmit();
 		}}
