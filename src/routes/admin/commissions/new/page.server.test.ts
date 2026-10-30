@@ -247,6 +247,16 @@ describe('create action: what it stores', () => {
 		expect(rows(sqlite, 'SELECT source_url FROM commissions')).toEqual([{ source_url: stored }]);
 	});
 
+	it.each([
+		['https://ko-fi.com/s/0a1b2c', 'https://ko-fi.com/s/0a1b2c'],
+		['ko-fi.com/s/0a1b2c', 'https://ko-fi.com/s/0a1b2c'],
+		['', null]
+	])('stores the receipt link %j as %j', async (sent, stored) => {
+		const { sqlite, platform } = ledgerDb();
+		expect((await create(platform, entryForm({ receiptUrl: sent }))).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT receipt_url FROM commissions')).toEqual([{ receipt_url: stored }]);
+	});
+
 	it('stores no price and no currency when the amount is empty but a currency is picked', async () => {
 		const { sqlite, platform } = ledgerDb();
 		const result = await create(platform, entryForm({ price: '', currency: 'EUR' }));
@@ -331,6 +341,9 @@ describe('create action: bad input', () => {
 		['not a date', { deliveredOn: 'soon' }, 'deliveredOn'],
 		['link over 2,048 characters', { sourceUrl: `https://example.com/${'a'.repeat(2048)}` }, 'sourceUrl'],
 		['plain text over 120 characters', { sourceUrl: `Telegram ${'x'.repeat(112)}` }, 'sourceUrl'],
+		['receipt that is plain text', { receiptUrl: 'Ko-fi order' }, 'receiptUrl'],
+		['script receipt link', { receiptUrl: 'javascript:alert(1)' }, 'receiptUrl'],
+		['receipt link over 2,048 characters', { receiptUrl: `https://ko-fi.com/${'a'.repeat(2048)}` }, 'receiptUrl'],
 		['no artist', { artistId: '' }, 'artistId'],
 		['artist id that is not a number', { artistId: 'abc' }, 'artistId'],
 		['unknown artist', { artistId: '99' }, 'artistId'],
@@ -369,7 +382,14 @@ describe('create action: bad input', () => {
 		const { platform } = ledgerDb();
 		const result = await create(
 			platform,
-			entryForm({ title: '  Kept title ', notes: 'Line one\r\nline two', price: '45.5', currency: 'JPY', characterId: ['1', 'x'] })
+			entryForm({
+				title: '  Kept title ',
+				notes: 'Line one\r\nline two',
+				price: '45.5',
+				currency: 'JPY',
+				characterId: ['1', 'x'],
+				receiptUrl: ' ko-fi.com/s/0a1b2c '
+			})
 		);
 		expect(result.status).toBe(400);
 		expect(result.data.values).toEqual({
@@ -380,6 +400,7 @@ describe('create action: bad input', () => {
 			characterIds: [1],
 			status: 'applied',
 			payment: 'unpaid',
+			receiptUrl: 'ko-fi.com/s/0a1b2c',
 			price: '45.5',
 			currency: 'JPY',
 			notes: 'Line one\nline two',

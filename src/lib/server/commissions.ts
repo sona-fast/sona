@@ -39,6 +39,7 @@ export interface CommissionInput {
 	characterIds: number[];
 	status: CommissionStatus;
 	payment: CommissionPayment;
+	receiptUrl: string | null;
 	priceMinor: number | null;
 	currency: string | null;
 	notes: string | null;
@@ -131,6 +132,11 @@ export function parseCommissionForm(
 	const payment = text(data, 'payment');
 	if (!isCommissionPayment(payment)) errors.payment = m.admin_commissions_error_payment();
 
+	// The receipt is always a page to open, so plain text is refused, not kept.
+	const rawReceipt = text(data, 'receiptUrl');
+	const receiptUrl = rawReceipt && sourceLinkHref(rawReceipt) ? sanitizeUrl(rawReceipt) : null;
+	if (rawReceipt && !receiptUrl) errors.receiptUrl = m.admin_commissions_error_link();
+
 	// A price needs its currency. With no amount there's no price, so the
 	// currency the picker still has selected is dropped, not refused.
 	const price = text(data, 'price');
@@ -175,6 +181,7 @@ export function parseCommissionForm(
 			characterIds,
 			status: status as CommissionStatus,
 			payment: payment as CommissionPayment,
+			receiptUrl,
 			priceMinor,
 			currency: priceMinor === null ? null : currency,
 			notes: notes || null,
@@ -200,6 +207,7 @@ export function submittedValues(data: FormData): CommissionFormValues {
 			.filter((id): id is number => id !== null),
 		status: isCommissionStatus(status) ? status : 'applied',
 		payment: isCommissionPayment(payment) ? payment : 'unpaid',
+		receiptUrl: text(data, 'receiptUrl'),
 		price: text(data, 'price'),
 		currency: submittedCurrency(data),
 		notes: text(data, 'notes').replace(/\r\n?/g, '\n'),
@@ -236,6 +244,7 @@ function fields(input: CommissionInput) {
 		sourceUrl: input.sourceUrl,
 		status: input.status,
 		payment: input.payment,
+		receiptUrl: input.receiptUrl,
 		priceMinor: input.priceMinor,
 		currency: input.currency,
 		notes: input.notes,
@@ -397,6 +406,7 @@ export async function loadCommission(db: Database, id: number) {
 				sourceUrl: commissions.sourceUrl,
 				status: commissions.status,
 				payment: commissions.payment,
+				receiptUrl: commissions.receiptUrl,
 				priceMinor: commissions.priceMinor,
 				currency: commissions.currency,
 				notes: commissions.notes,

@@ -1773,6 +1773,8 @@
 	"admin_commissions_field_notes": "メモ",
 	"admin_commissions_field_status": "状況",
 	"admin_commissions_field_payment": "支払い",
+	"admin_commissions_field_receipt": "領収書・注文のリンク",
+	"admin_commissions_hint_receipt": "Ko-fiの注文ページなど、支払いがわかるページです。",
 	"admin_commissions_field_price": "価格",
 	"admin_commissions_field_currency": "通貨",
 	"admin_commissions_field_amount": "金額",

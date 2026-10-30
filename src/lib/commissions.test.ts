@@ -266,6 +266,7 @@ const ENTRY = {
 	characters: [{ id: 1 }, { id: 2 }],
 	status: 'in_progress' as const,
 	payment: 'paid' as const,
+	receiptUrl: 'https://ko-fi.com/s/0a1b2c',
 	price: '45.00',
 	currency: 'USD',
 	notes: 'Transparent background.',
@@ -287,6 +288,15 @@ describe('changedFields', () => {
 			'status',
 			'price'
 		]);
+	});
+
+	it('names a changed receipt link after Payment, in form order', () => {
+		expect(changedFields(loaded, { ...loaded, receiptUrl: '', price: '50.00', payment: 'refunded' })).toEqual([
+			'payment',
+			'receiptUrl',
+			'price'
+		]);
+		expect(staleMessage(loaded, { ...loaded, receiptUrl: '' }, 'en')).toMatch(/your changes to Receipt or order link,/);
 	});
 
 	it('compares characters as a set', () => {

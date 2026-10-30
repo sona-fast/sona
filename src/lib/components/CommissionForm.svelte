@@ -963,6 +963,23 @@
 				{@render fieldError('payment')}
 			</div>
 		</div>
+		<div class="field">
+			<div class="label-row">
+				<label class="field-label" for="ce-receiptUrl">{m.admin_commissions_field_receipt()}</label>{@render optional()}
+			</div>
+			<input
+				id="ce-receiptUrl"
+				class="input"
+				type="url"
+				name="receiptUrl"
+				autocomplete="off"
+				bind:value={values.receiptUrl}
+				aria-invalid={errors.receiptUrl ? 'true' : undefined}
+				aria-describedby={describedBy('receiptUrl', 'ce-receipt-hint')}
+			/>
+			{@render fieldError('receiptUrl')}
+			<small class="hint" id="ce-receipt-hint">{m.admin_commissions_hint_receipt()}</small>
+		</div>
 		<!-- Currency first, so the amount box can show which currency it's in
 		     and the hint can give that currency's decimal rule before Save. -->
 		<fieldset class="subgroup">

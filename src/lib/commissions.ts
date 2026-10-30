@@ -68,6 +68,7 @@ export type CommissionField =
 	| 'characterIds'
 	| 'status'
 	| 'payment'
+	| 'receiptUrl'
 	| 'price'
 	| 'currency'
 	| 'notes'
@@ -295,6 +296,7 @@ export interface CommissionFormValues {
 	characterIds: number[];
 	status: CommissionStatus;
 	payment: CommissionPayment;
+	receiptUrl: string;
 	price: string;
 	currency: string;
 	notes: string;
@@ -312,6 +314,7 @@ export interface CommissionFormEntry {
 	characters: { id: number }[];
 	status: CommissionStatus;
 	payment: CommissionPayment;
+	receiptUrl: string | null;
 	price: string;
 	currency: string | null;
 	notes: string | null;
@@ -330,6 +333,7 @@ export function formValuesOf(entry: CommissionFormEntry | null): CommissionFormV
 		characterIds: entry ? entry.characters.map((c) => c.id) : [],
 		status: entry?.status ?? 'applied',
 		payment: entry?.payment ?? 'unpaid',
+		receiptUrl: entry?.receiptUrl ?? '',
 		price: entry?.price ?? '',
 		currency: entry?.currency ?? '',
 		notes: entry?.notes ?? '',
@@ -350,6 +354,7 @@ export const FIELD_ORDER: CommissionField[] = [
 	'notes',
 	'status',
 	'payment',
+	'receiptUrl',
 	'price',
 	'currency',
 	'requestedOn',
@@ -384,6 +389,7 @@ const FIELD_NAMES: Record<Exclude<CommissionField, 'notes'>, EarlyAccessLabel> =
 	characterIds: m.admin_commissions_field_characters,
 	status: m.admin_commissions_field_status,
 	payment: m.admin_commissions_field_payment,
+	receiptUrl: m.admin_commissions_field_receipt,
 	price: m.admin_commissions_field_price,
 	currency: m.admin_commissions_field_currency,
 	requestedOn: m.admin_commissions_field_requested,

@@ -239,6 +239,29 @@ test('Kind suggests kinds already used, and still takes a new one', async ({ pag
 	expect(await page.locator('#ce-kind-list option').evaluateAll((els) => (els[0] as HTMLOptionElement).value)).toBe('E2E chibi');
 });
 
+test('a receipt link saves beside Payment, and plain text there is refused', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill('E2E receipt');
+	const receipt = page.getByLabel('Receipt or order link');
+	await expect(receipt).toHaveAccessibleDescription('A Ko-fi order or other page that shows what you paid.');
+
+	await receipt.fill('Paid on Ko-fi');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page.locator('#ce-receiptUrl-err')).toHaveText("Sona couldn't read this link. Fix it or clear it.");
+	await expect(receipt).toBeFocused();
+
+	await receipt.fill('ko-fi.com/s/e2e0001');
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+	const id = await listedId(page, 'E2E receipt');
+	made.push(id);
+	await open(page, `/admin/commissions/${id}/edit`);
+	await expect(receipt).toHaveValue('https://ko-fi.com/s/e2e0001');
+	await settledShot(page, testInfo.outputPath('commission-edit-receipt.png'));
+});
+
 test('clearing the amount saves the entry with no price', async ({ page, baseURL }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	const id = await createEntry(page, baseURL!, 'E2E cleared price', { price: '45.50', currency: 'EUR' });

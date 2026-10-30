@@ -2328,6 +2328,8 @@
 	"admin_commissions_field_notes": "Notes",
 	"admin_commissions_field_status": "Status",
 	"admin_commissions_field_payment": "Payment",
+	"admin_commissions_field_receipt": "Receipt or order link",
+	"admin_commissions_hint_receipt": "A Ko-fi order or other page that shows what you paid.",
 	"admin_commissions_field_price": "Price",
 	"admin_commissions_field_currency": "Currency",
 	"admin_commissions_field_amount": "Amount",

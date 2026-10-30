@@ -28,6 +28,7 @@
 	// artist has a Telegram link.
 	const sourceHref = $derived(sourceLinkHref(entry?.sourceUrl));
 	const chatHref = $derived(entry && !sourceHref ? sourceLinkHref(entry.artistTelegramUrl) : null);
+	const receiptHref = $derived(sourceLinkHref(entry?.receiptUrl));
 	// The form stands on what that refused save sent, which `form` carries.
 	const goneEntry = $derived({
 		id: Number(page.params.id),
@@ -39,6 +40,7 @@
 		characters: [],
 		status: 'applied' as const,
 		payment: 'unpaid' as const,
+		receiptUrl: null,
 		price: '',
 		currency: null,
 		notes: null,
@@ -228,6 +230,12 @@
 					<dd><span class="chip {STATUS_TONES[entry.status]}">{STATUS_LABELS[entry.status]()}</span></dd>
 				</div>
 				<div><dt>{m.admin_commissions_field_payment()}</dt><dd>{PAYMENT_LABELS[entry.payment]()}</dd></div>
+				{#if receiptHref}
+					<div>
+						<dt>{m.admin_commissions_field_receipt()}</dt>
+						<dd><a href={receiptHref} target="_blank" rel="noopener noreferrer">{entry.receiptUrl}</a></dd>
+					</div>
+				{/if}
 				{#if entry.price && entry.currency}
 					<div>
 						<dt>{m.admin_commissions_field_price()}</dt>

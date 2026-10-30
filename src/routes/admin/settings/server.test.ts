@@ -190,10 +190,10 @@ describe('settings export action', () => {
 		sqlite.prepare("INSERT INTO characters (id, name, created_at) VALUES (1, 'Kit', '2026-10-01')").run();
 		sqlite
 			.prepare(
-				`INSERT INTO commissions (id, artist_id, title, kind, source_url, status, price_minor, currency, payment, notes,
+				`INSERT INTO commissions (id, artist_id, title, kind, source_url, status, price_minor, currency, payment, receipt_url, notes,
 					requested_on, accepted_on, delivered_on, created_at, updated_at)
 				VALUES (1, 1, 'Ref sheet update', 'Ref sheet', 'https://example.com/commissions/412', 'in_progress', 4550, 'USD', 'deposit',
-					'Transparent background.', '2026-09-03', '2026-09-05', NULL, '2026-09-03T10:00:00Z', '2026-09-05T10:00:00Z')`
+					'https://ko-fi.com/s/0a1b2c', 'Transparent background.', '2026-09-03', '2026-09-05', NULL, '2026-09-03T10:00:00Z', '2026-09-05T10:00:00Z')`
 			)
 			.run();
 		sqlite.prepare('INSERT INTO commission_characters (commission_id, character_id) VALUES (1, 1)').run();
@@ -210,6 +210,7 @@ describe('settings export action', () => {
 				priceMinor: 4550,
 				currency: 'USD',
 				payment: 'deposit',
+				receiptUrl: 'https://ko-fi.com/s/0a1b2c',
 				notes: 'Transparent background.',
 				requestedOn: '2026-09-03',
 				acceptedOn: '2026-09-05',
