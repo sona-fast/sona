@@ -95,6 +95,17 @@ export const PAYMENT_LABELS: Record<CommissionPayment, EarlyAccessLabel> = {
 	refunded: m.admin_commissions_payment_refunded
 };
 
+/** Why Link a piece was refused, in the owner's words, keyed by the action's
+ * `link` reason. A reason not listed here falls back to the generic failure. */
+export const LINK_ERRORS: Partial<Record<string, EarlyAccessLabel>> = {
+	taken: m.admin_commissions_pick_error_taken,
+	variant: m.admin_commissions_pick_error_variant,
+	no_piece: m.admin_commissions_pick_error_no_piece,
+	linked: m.admin_commissions_pick_error_linked,
+	none_picked: m.admin_commissions_pick_error_none,
+	closed: m.admin_commissions_gallery_closed
+};
+
 /** The status chip's tint. The label text carries the status, so the tint is
  * never the only signal (SONA-81). */
 export const STATUS_TONES: Record<CommissionStatus, '' | 'progress' | 'done' | 'closed'> = {

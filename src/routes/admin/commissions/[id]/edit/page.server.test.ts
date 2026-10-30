@@ -51,7 +51,7 @@ const remove = (platform: App.Platform, id: string) => runAction(actions.delete 
 
 async function loadStatus(platform: App.Platform, id: string): Promise<number | 'ok'> {
 	try {
-		await load({ platform, request: new Request('http://x/'), params: { id } } as never);
+		await load({ platform, request: new Request('http://x/'), url: new URL('http://x/'), params: { id } } as never);
 		return 'ok';
 	} catch (e) {
 		if (isHttpError(e)) return e.status;
@@ -107,7 +107,7 @@ describe('load', () => {
 		setLedgerGa('future');
 		const { sqlite, platform } = ledgerDb();
 		const id = seedEntry(sqlite, { title: 'Headshot icon' });
-		const data = (await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
+		const data = (await load({ platform, request: new Request('http://x/'), url: new URL('http://x/'), params: { id: String(id) } } as never)) as {
 			entry: { title: string };
 			gate: { open: boolean };
 		};
@@ -128,7 +128,7 @@ describe('load', () => {
 			currency: 'USD',
 			characterIds: [2, 1]
 		});
-		const { entry } = (await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
+		const { entry } = (await load({ platform, request: new Request('http://x/'), url: new URL('http://x/'), params: { id: String(id) } } as never)) as {
 			entry: Record<string, unknown>;
 		};
 		expect(Object.keys(entry).sort()).toEqual(
@@ -324,5 +324,162 @@ describe('delete action', () => {
 		expect((await remove(platform, 'abc')).status).toBe(404);
 		expect((await remove(platform, '42')).status).toBe(404);
 		expect(rows(sqlite, 'SELECT COUNT(*) AS n FROM commissions')).toEqual([{ n: 1 }]);
+	});
+});
+
+// Link a piece and Unlink (SONA-236): gated like Save, and refused from an
+// out-of-date form like Save.
+describe('link and unlink actions', () => {
+	const addPiece = (sqlite: Sqlite, id: number, parent: number | null = null) =>
+		sqlite
+			.prepare(
+				"INSERT INTO images (id, slug, title, image_url, artist_id, parent_image_id, created_at) VALUES (?, ?, ?, '/a.png', 1, ?, '2026-10-01')"
+			)
+			.run(id, `p-${id}`, `Piece ${id}`, parent);
+	const linkForm = (fields: Record<string, string>) => {
+		const form = new FormData();
+		for (const [k, v] of Object.entries(fields)) form.set(k, v);
+		return form;
+	};
+	const link = (platform: App.Platform, id: string, fields: Record<string, string>) =>
+		runAction(actions.link as never, { platform, id, form: linkForm(fields) });
+	const unlink = (platform: App.Platform, id: string, fields: Record<string, string>) =>
+		runAction(actions.unlink as never, { platform, id, form: linkForm(fields) });
+	const imageId = (sqlite: Sqlite, id: number) =>
+		(rows(sqlite, 'SELECT image_id FROM commissions WHERE id = ?', id)[0] as { image_id: number | null }).image_id;
+
+	it('links the picked piece and answers with the new version', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		addPiece(sqlite, 7);
+		const id = seedEntry(sqlite, { status: 'delivered' });
+		const result = await link(platform, String(id), { imageId: '7', version: VERSION, deliveredOn: '2026-10-19' });
+		expect(result.status).toBe(200);
+		const [row] = rows(sqlite, 'SELECT image_id, delivered_on, updated_at FROM commissions') as Record<string, unknown>[];
+		expect(row).toMatchObject({ image_id: 7, delivered_on: '2026-10-19' });
+		expect(result.data).toEqual({ linked: true, version: row.updated_at });
+	});
+
+	it('refuses both with 403 before GA without a key, and changes nothing', async () => {
+		setLedgerGa('future');
+		const { sqlite, platform } = ledgerDb();
+		addPiece(sqlite, 7);
+		addPiece(sqlite, 8);
+		const open = seedEntry(sqlite, { status: 'delivered' });
+		const linked = seedEntry(sqlite, { title: 'Linked', status: 'delivered' });
+		sqlite.prepare('UPDATE commissions SET image_id = 8 WHERE id = ?').run(linked);
+		const before = ledgerSnapshot(sqlite);
+		expect((await link(platform, String(open), { imageId: '7', version: VERSION })).status).toBe(403);
+		expect((await unlink(platform, String(linked), { version: VERSION })).status).toBe(403);
+		expect(ledgerSnapshot(sqlite)).toEqual(before);
+	});
+
+	it('links and unlinks before GA with a valid key', async () => {
+		setLedgerGa('future');
+		const { sqlite, platform } = ledgerDb();
+		storeValidKey(sqlite);
+		addPiece(sqlite, 7);
+		const id = seedEntry(sqlite, { status: 'delivered' });
+		const linked = await link(platform, String(id), { imageId: '7', version: VERSION });
+		expect(linked.status).toBe(200);
+		expect((await unlink(platform, String(id), { version: String(linked.data.version) })).status).toBe(200);
+		expect(imageId(sqlite, id)).toBeNull();
+	});
+
+	it('refuses an out-of-date or missing version with 409, as a save is', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		addPiece(sqlite, 7);
+		addPiece(sqlite, 8);
+		const id = seedEntry(sqlite, { status: 'delivered', updatedAt: '2026-10-05T00:00:00.000Z' });
+		const linked = seedEntry(sqlite, { title: 'Linked', status: 'delivered', updatedAt: '2026-10-05T00:00:00.000Z' });
+		sqlite.prepare('UPDATE commissions SET image_id = 8 WHERE id = ?').run(linked);
+		const before = ledgerSnapshot(sqlite);
+		for (const result of [
+			await link(platform, String(id), { imageId: '7', version: VERSION }),
+			await link(platform, String(id), { imageId: '7' }),
+			await unlink(platform, String(linked), { version: VERSION }),
+			await unlink(platform, String(linked), {})
+		]) {
+			expect(result).toEqual({ status: 409, data: { stale: true } });
+		}
+		expect(ledgerSnapshot(sqlite)).toEqual(before);
+	});
+
+	it('names why a piece was refused, and never answers 500', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		addPiece(sqlite, 7);
+		addPiece(sqlite, 8, 7);
+		addPiece(sqlite, 9);
+		const other = seedEntry(sqlite, { title: 'Other', status: 'delivered' });
+		sqlite.prepare('UPDATE commissions SET image_id = 9 WHERE id = ?').run(other);
+		const id = seedEntry(sqlite, { status: 'delivered' });
+		const tryLink = (piece: string | undefined) =>
+			link(platform, String(id), piece === undefined ? { version: VERSION } : { imageId: piece, version: VERSION });
+		expect(await tryLink('9')).toEqual({ status: 409, data: { link: 'taken' } });
+		expect(await tryLink('8')).toEqual({ status: 400, data: { link: 'variant' } });
+		expect(await tryLink('99')).toEqual({ status: 400, data: { link: 'no_piece' } });
+		expect(await tryLink('abc')).toEqual({ status: 400, data: { link: 'none_picked' } });
+		expect(await tryLink(undefined)).toEqual({ status: 400, data: { link: 'none_picked' } });
+		expect(imageId(sqlite, id)).toBeNull();
+	});
+
+	it('unlinking keeps the piece in the gallery', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		addPiece(sqlite, 7);
+		const id = seedEntry(sqlite, { status: 'delivered' });
+		sqlite.prepare('UPDATE commissions SET image_id = 7 WHERE id = ?').run(id);
+		const piece = rows(sqlite, 'SELECT * FROM images');
+		expect((await unlink(platform, String(id), { version: VERSION })).status).toBe(200);
+		expect(imageId(sqlite, id)).toBeNull();
+		expect(rows(sqlite, 'SELECT * FROM images')).toEqual(piece);
+	});
+
+	it('404s a non-numeric id and an entry that is gone', async () => {
+		setLedgerGa('past');
+		const { platform } = ledgerDb();
+		expect((await link(platform, 'abc', { imageId: '7', version: VERSION })).status).toBe(404);
+		expect((await link(platform, '42', { imageId: '7', version: VERSION })).status).toBe(404);
+		expect((await unlink(platform, 'abc', { version: VERSION })).status).toBe(404);
+		expect((await unlink(platform, '42', { version: VERSION })).status).toBe(404);
+	});
+
+	// Without the page's script, Link a piece opens the page with ?link=pick.
+	describe("the page's own picker", () => {
+		const loadAt = async (platform: App.Platform, id: number, query: string) =>
+			(await load({
+				platform,
+				request: new Request('http://x/'),
+				url: new URL(`http://x/admin/commissions/${id}/edit${query}`),
+				params: { id: String(id) }
+			} as never)) as { picker: { scope: string; query: string; pieces: { id: number }[] } | null };
+
+		it('lists the pieces with ?link=pick, with its search and scope', async () => {
+			setLedgerGa('past');
+			const { sqlite, platform } = ledgerDb();
+			addPiece(sqlite, 7);
+			sqlite.exec("INSERT INTO images (id, slug, title, image_url, artist_id, created_at) VALUES (8, 'b', 'By B', '/b.png', 2, '2026-10-02')");
+			const id = seedEntry(sqlite, { status: 'delivered' });
+			expect((await loadAt(platform, id, '')).picker).toBeNull();
+			expect((await loadAt(platform, id, '?link=pick')).picker).toMatchObject({ scope: 'artist', pieces: [{ id: 7 }] });
+			expect((await loadAt(platform, id, '?link=pick&scope=all')).picker!.pieces.map((p) => p.id)).toEqual([8, 7]);
+			expect((await loadAt(platform, id, '?link=pick&scope=all&q=by')).picker).toMatchObject({ query: 'by', pieces: [{ id: 8 }] });
+		});
+
+		it('lists nothing while the gate is closed, for a linked entry, or for a closed one', async () => {
+			setLedgerGa('past');
+			const { sqlite, platform } = ledgerDb();
+			addPiece(sqlite, 7);
+			const linked = seedEntry(sqlite, { status: 'delivered' });
+			sqlite.prepare('UPDATE commissions SET image_id = 7 WHERE id = ?').run(linked);
+			const cancelled = seedEntry(sqlite, { status: 'cancelled' });
+			const open = seedEntry(sqlite, { status: 'delivered' });
+			expect((await loadAt(platform, linked, '?link=pick')).picker).toBeNull();
+			expect((await loadAt(platform, cancelled, '?link=pick')).picker).toBeNull();
+			setLedgerGa('future');
+			expect((await loadAt(platform, open, '?link=pick')).picker).toBeNull();
+		});
 	});
 });

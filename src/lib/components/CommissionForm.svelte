@@ -1,13 +1,16 @@
 <script lang="ts">
 	import { onMount, tick, type Snippet } from 'svelte';
 	import { enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import { invalidateAll } from '$app/navigation';
-	import { Check, CircleAlert, ImagePlus, Loader2, Plus, RefreshCw, TriangleAlert } from 'lucide-svelte';
+	import { Check, CircleAlert, ImagePlus, Link2, Loader2, Plus, RefreshCw, TriangleAlert, Unlink } from 'lucide-svelte';
 	import CurrencyPicker from '$lib/components/CurrencyPicker.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { SOCIAL_PLATFORM_NAMES } from '$lib/social-label';
 	import type { Platform } from '$lib/social-platforms';
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
+	import PiecePicker from '$lib/components/PiecePicker.svelte';
+	import type { PickerPiece } from '$lib/server/commission-link';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
 	import { toast } from '$lib/toast.svelte';
@@ -26,6 +29,7 @@
 		FIELD_ORDER,
 		formValuesOf,
 		isCommissionStatus,
+		LINK_ERRORS,
 		localToday,
 		mergeReloaded,
 		staleMessage,
@@ -52,6 +56,8 @@
 		stale?: boolean;
 		/** The entry was deleted after the form loaded. */
 		missing?: boolean;
+		/** Why Link a piece was refused. */
+		link?: string;
 		/** What the refused save sent, and the version it sent with it. */
 		values?: CommissionFormValues;
 		version?: string;
@@ -184,6 +190,7 @@
 	let notesInput = $state<HTMLTextAreaElement>();
 	let titleInput = $state<HTMLInputElement>();
 	let saveButton = $state<HTMLButtonElement>();
+	let linkBox = $state<HTMLElement>();
 
 	// Moving to Accepted or Delivered fills that step's empty date with today
 	// (open question Q17, built as drawn). The owner can change or clear it.
@@ -251,6 +258,87 @@
 		(merged.restoredNote ? notesInput : titleInput)?.focus();
 	}
 
+
+	/** The entry as saved, values and version together, with the opening
+	 * currency a form with no currency gets. */
+	function adoptSaved() {
+		const asSaved = () => {
+			const v = formValuesOf(entry);
+			if (!v.currency) v.currency = initialCurrency({ recent: recentCurrencies, localeCurrency });
+			return v;
+		};
+		loaded = asSaved();
+		values = asSaved();
+		version = entry?.version ?? '';
+	}
+
+	// Link a piece and Unlink (SONA-236). Each is its own small form beside the
+	// entry form, sending the version the form loaded with, so a link from an
+	// out-of-date form is refused as a save is.
+	let picking = $state(false);
+	let linkPick = $state<PickerPiece | null>(null);
+	let linkBusy = $state(false);
+	let linkForm = $state<HTMLFormElement>();
+	let linkButton = $state<HTMLElement>();
+	let pieceLink = $state<HTMLAnchorElement>();
+
+	/** A refused link or unlink, shown the way a refused save is. */
+	async function linkRefused(refusal: FailureData) {
+		staleText = '';
+		failure = refusal;
+		if (!refusal.gated && !refusal.stale && !refusal.missing && !refusal.link) toast.error(m.admin_commissions_link_piece_failed());
+		await focusFailure();
+	}
+
+	const enhanceLink: SubmitFunction = ({ formData, cancel }) => {
+		if (saving || linkBusy || !linkPick) {
+			cancel();
+			return;
+		}
+		const piece = linkPick;
+		linkBusy = true;
+		failure = null;
+		formData.set('imageId', String(piece.id));
+		formData.set('deliveredOn', localToday());
+		return async ({ update, result }) => {
+			if (result.type !== 'error') await update({ reset: false });
+			linkBusy = false;
+			linkPick = null;
+			if (result.type === 'success') {
+				// Linking can move the entry to Delivered and fill its date, and the
+				// form wasn't changed (Link a piece waits for a save), so it takes the
+				// entry as saved.
+				adoptSaved();
+				announcer.say(m.admin_commissions_linked_announce({ piece: piece.title }));
+				await tick();
+				pieceLink?.focus();
+			} else if (result.type === 'failure') await linkRefused((result.data as FailureData | undefined) ?? {});
+			else if (result.type === 'error') toast.error(m.admin_something_wrong());
+		};
+	};
+
+	const enhanceUnlink: SubmitFunction = ({ cancel }) => {
+		if (saving || linkBusy) {
+			cancel();
+			return;
+		}
+		const piece = entry?.piece?.title ?? '';
+		linkBusy = true;
+		failure = null;
+		return async ({ update, result }) => {
+			if (result.type !== 'error') await update({ reset: false });
+			linkBusy = false;
+			if (result.type === 'success') {
+				// Unlinking changes nothing the form shows, so unsaved typing stays and
+				// only the version moves on to the one this unlink wrote.
+				version = String((result.data as { version?: string } | undefined)?.version ?? version);
+				announcer.say(m.admin_commissions_unlinked_announce({ piece }));
+				await tick();
+				linkButton?.focus();
+			} else if (result.type === 'failure') await linkRefused((result.data as FailureData | undefined) ?? {});
+			else if (result.type === 'error') toast.error(m.admin_something_wrong());
+		};
+	};
 
 	// Paste a link (SONA-236): the link field looks up the artist it names. The
 	// server parses the link and never fetches it; the link itself stays in this
@@ -436,6 +524,7 @@
 		if (failure?.stale) staleBox?.focus();
 		else if (failure?.gated) gateBox?.focus();
 		else if (failure?.missing) missingBox?.focus();
+		else if (failure?.link) linkBox?.focus();
 		else {
 			const first = FIELD_ORDER.find((f) => errors[f]);
 			if (first) document.getElementById(`ce-${first}`)?.focus();
@@ -577,19 +666,63 @@
 	{/if}
 {/snippet}
 
+<!-- Link a piece: the dialog with the page's script, the page's own picker
+     (?link=pick) without it. Waits for a save like Add to gallery, because
+     linking can move the entry to Delivered. -->
+{#snippet linkPieceButton()}
+	{#if dirty}
+		<button type="button" class="btn btn-secondary" aria-disabled="true" aria-describedby="ce-gallery-hint" bind:this={linkButton}>
+			<Link2 size={16} aria-hidden="true" />
+			{m.admin_commissions_link_piece()}
+		</button>
+	{:else if hydrated}
+		<button
+			type="button"
+			class="btn btn-secondary"
+			disabled={linkBusy}
+			bind:this={linkButton}
+			onclick={() => (picking = true)}
+		>
+			{#if linkBusy}<Loader2 size={16} class="spin" aria-hidden="true" />{:else}<Link2 size={16} aria-hidden="true" />{/if}
+			{m.admin_commissions_link_piece()}
+		</button>
+	{:else}
+		<a class="btn btn-secondary" href="/admin/commissions/{entry?.id}/edit?link=pick#link-piece">
+			<Link2 size={16} aria-hidden="true" />
+			{m.admin_commissions_link_piece()}
+		</a>
+	{/if}
+{/snippet}
+
 {#if entry}
 	<!-- Add to gallery opens the upload form prefilled from the saved entry. A
 	     piece already linked takes variants instead. -->
 	<section class="gallery-panel" aria-labelledby="ce-gallery-h">
 		<h2 id="ce-gallery-h">{m.admin_commissions_legend_gallery()}</h2>
+		{#if failure?.link}
+			<p class="error" role="alert" tabindex="-1" bind:this={linkBox}>
+				<CircleAlert size={16} aria-hidden="true" />
+				<span>{(LINK_ERRORS[failure.link] ?? m.admin_commissions_link_piece_failed)()}</span>
+			</p>
+		{/if}
 		<div class="gallery-row">
 			{#if entry.piece}
 				<PieceThumb src={entry.piece.thumb} />
 				<div class="text">
-					<a href="/admin/images/{entry.piece.id}/edit">{entry.piece.title}</a>
+					<a href="/admin/images/{entry.piece.id}/edit" bind:this={pieceLink}>{entry.piece.title}</a>
 					{#if galleryOpen && dirty}<span class="hint" id="ce-gallery-hint">{m.admin_commissions_gallery_hint_dirty()}</span>{/if}
+					<span class="hint" id="ce-unlink-hint">{m.admin_commissions_unlink_hint()}</span>
 				</div>
 				{#if galleryOpen}{@render galleryButton(m.admin_commissions_add_variant(), false, dirty)}{/if}
+				<!-- A plain form, so Unlink works without the page's script. Unlinking
+				     changes no field, so it doesn't wait for a save. -->
+				<form method="POST" action="?/unlink" use:enhance={enhanceUnlink}>
+					<input type="hidden" name="version" value={version} />
+					<button type="submit" class="btn btn-secondary" disabled={linkBusy} aria-describedby="ce-unlink-hint">
+						{#if linkBusy}<Loader2 size={16} class="spin" aria-hidden="true" />{:else}<Unlink size={16} aria-hidden="true" />{/if}
+						{m.admin_commissions_unlink()}
+					</button>
+				</form>
 			{:else if !galleryOpen}
 				<div class="text"><span>{m.admin_commissions_gallery_closed()}</span></div>
 			{:else}
@@ -605,9 +738,26 @@
 					>
 				</div>
 				{@render galleryButton(m.admin_commissions_add_to_gallery(), delivered, true)}
+				{@render linkPieceButton()}
 			{/if}
 		</div>
 	</section>
+
+	<form method="POST" action="?/link" hidden bind:this={linkForm} use:enhance={enhanceLink}>
+		<input type="hidden" name="version" value={version} />
+	</form>
+	{#if picking}
+		<PiecePicker
+			entryId={entry.id}
+			marksDelivered={loaded.status !== 'delivered'}
+			onpick={(piece) => {
+				linkPick = piece;
+				picking = false;
+				linkForm?.requestSubmit();
+			}}
+			oncancel={() => (picking = false)}
+		/>
+	{/if}
 {/if}
 
 <form
@@ -647,14 +797,7 @@
 					// can't send older values under a newer version, and a change
 					// typed there is kept as a draft again. Nothing differs from the
 					// entry now, so leaving keeps no draft.
-					const asSaved = () => {
-						const v = formValuesOf(entry);
-						if (!v.currency) v.currency = initialCurrency({ recent: recentCurrencies, localeCurrency });
-						return v;
-					};
-					loaded = asSaved();
-					values = asSaved();
-					version = entry?.version ?? '';
+					adoptSaved();
 					saved = false;
 				}
 			}
