@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { and, desc, eq, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { Database } from './db';
 import { artists, commissions, images } from './db/schema';
 import { parseId } from './commissions';
@@ -208,15 +208,19 @@ export async function unlinkPiece(
 	const updated = await db
 		.update(commissions)
 		.set({ imageId: null, updatedAt: stamp })
-		.where(and(eq(commissions.id, entryId), eq(commissions.updatedAt, version)))
+		.where(and(eq(commissions.id, entryId), eq(commissions.updatedAt, version), isNotNull(commissions.imageId)))
 		.returning({ id: commissions.id });
 	if (updated.length > 0) return { ok: true, version: stamp };
 	const entry = await db
-		.select({ version: commissions.updatedAt })
+		.select({ version: commissions.updatedAt, imageId: commissions.imageId })
 		.from(commissions)
 		.where(eq(commissions.id, entryId))
 		.get();
-	return { ok: false, reason: entry ? 'stale' : 'missing' };
+	if (!entry) return { ok: false, reason: 'missing' };
+	// Nothing linked at this version: already unlinked, so it's done without a
+	// write, and other open forms for the entry stay current.
+	if (entry.version === version && entry.imageId === null) return { ok: true, version };
+	return { ok: false, reason: 'stale' };
 }
 
 /** The piece and the owner's local date a link form sends. A malformed piece

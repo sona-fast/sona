@@ -280,6 +280,15 @@ describe('unlinkPiece', () => {
 		expect(imageRows(sqlite)).toEqual(before);
 	});
 
+	it('counts an entry with no piece as already unlinked, without a write', async () => {
+		const { sqlite, db } = setup();
+		const id = seedEntry(sqlite, { status: 'delivered' });
+		const before = entryRow(sqlite, id);
+
+		expect(await unlinkPiece(db, id, VERSION, NOW)).toEqual({ ok: true, version: VERSION });
+		expect(entryRow(sqlite, id)).toEqual(before);
+	});
+
 	it('refuses an out-of-date form and keeps the link; a missing entry says so', async () => {
 		const { sqlite, db } = setup();
 		piece(sqlite, 1);

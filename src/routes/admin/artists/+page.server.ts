@@ -339,8 +339,14 @@ export const actions = {
 			.set({
 				name, twitterUrl, blueskyUrl, telegramUrl, furAffinityUrl, deviantArtUrl, patreonUrl, instagramUrl, avatarUrl, ledgerPrivate,
 				// Stamp only on an actually-written resolve so the refresh cron can still
-				// pick up a row we failed (or refused) to refresh here.
-				...(writeResolved ? { avatarResolvedAt: new Date().toISOString() } : {})
+				// pick up a row we failed (or refused) to refresh here. A changed handle
+				// that couldn't be written drops the old account's stamp too, so the
+				// cron, which takes never-stamped rows first, gets to it soon.
+				...(writeResolved
+					? { avatarResolvedAt: new Date().toISOString() }
+					: !avatarSocialsUnchanged
+						? { avatarResolvedAt: null }
+						: {})
 			})
 			.where(eq(artists.id, id));
 

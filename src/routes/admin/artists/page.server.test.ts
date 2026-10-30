@@ -1128,7 +1128,12 @@ describe('update action — avatar clobber guard (#187)', () => {
 		const { db, platform } = makeDb();
 		const row = await db
 			.insert(schema.artists)
-			.values({ name: 'Nyx', avatarUrl: '/img/avatars/nyx/owned.jpg', blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social' })
+			.values({
+				name: 'Nyx',
+				avatarUrl: '/img/avatars/nyx/owned.jpg',
+				blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social',
+				avatarResolvedAt: '2026-10-01T00:00:00.000Z'
+			})
 			.returning({ id: schema.artists.id })
 			.get();
 

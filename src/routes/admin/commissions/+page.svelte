@@ -146,7 +146,10 @@
 				return;
 			}
 			const reason = result.type === 'failure' ? (result.data as { link?: string; missing?: boolean } | undefined) : undefined;
-			if (reason?.missing) await invalidateAll();
+			// A refused link means this row is out of date (deleted, canceled, or
+			// linked somewhere else), so the list catches up either way.
+			if (result.type === 'failure') await invalidateAll();
+			if (reason?.missing) return;
 			else if (reason?.link && LINK_ERRORS[reason.link]) toast.error(LINK_ERRORS[reason.link]!());
 			else if (result.type === 'error') toast.error(m.admin_something_wrong());
 			else toast.error(m.admin_commissions_link_piece_failed());
