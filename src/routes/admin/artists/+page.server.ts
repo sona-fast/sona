@@ -305,12 +305,19 @@ export const actions = {
 			twitterUrl === (normalizeSocialUrl('twitter', existing?.twitterUrl) || null) &&
 			furAffinityUrl === (normalizeSocialUrl('furaffinity', existing?.furAffinityUrl) || null) &&
 			patreonUrl === (normalizeSocialUrl('patreon', existing?.patreonUrl) || null);
-		// Only Bluesky and X avatars are looked up today, so only those handles say
-		// whether the stored avatar belongs to a different account now. Adding a
-		// Patreon link is not a new account.
+		// The account the avatar comes from: Bluesky when it's set, else X (the
+		// order resolveAvatarUrl tries them; FA and Patreon aren't looked up yet).
+		// Only a change of that account means the stored avatar is someone else's:
+		// a new X handle beside the same Bluesky handle, or an added Patreon link,
+		// is the same face.
+		const avatarSource = (bluesky: string | null, twitter: string | null) =>
+			bluesky ? `bluesky:${bluesky}` : twitter ? `twitter:${twitter}` : null;
 		const avatarAccountChanged =
-			blueskyUrl !== (normalizeSocialUrl('bluesky', existing?.blueskyUrl) || null) ||
-			twitterUrl !== (normalizeSocialUrl('twitter', existing?.twitterUrl) || null);
+			avatarSource(blueskyUrl, twitterUrl) !==
+			avatarSource(
+				normalizeSocialUrl('bluesky', existing?.blueskyUrl) || null,
+				normalizeSocialUrl('twitter', existing?.twitterUrl) || null
+			);
 		let avatarUrl = existing?.avatarUrl ?? null;
 		let writeResolved = false;
 		if (!avatarSocialsPosted) {

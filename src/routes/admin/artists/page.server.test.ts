@@ -1165,6 +1165,50 @@ describe('update action — avatar clobber guard (#187)', () => {
 		expect(after!.avatarResolvedAt).toBe('2026-10-01T00:00:00.000Z');
 	});
 
+	// The avatar comes from Bluesky when it's set, so a new X handle beside the
+	// same Bluesky handle is the same account; without Bluesky, X is the account.
+	it('keeps the avatar when only the X handle changes beside the same Bluesky handle', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(schema.artists)
+			.values({
+				name: 'Nyx',
+				avatarUrl: '/img/avatars/nyx/owned.jpg',
+				blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social',
+				twitterUrl: 'https://twitter.com/nyx_old',
+				avatarResolvedAt: '2026-10-01T00:00:00.000Z'
+			})
+			.returning({ id: schema.artists.id })
+			.get();
+
+		await actions.update(
+			updateEvent(platform, { id: String(row.id), name: 'Nyx', bluesky: 'nyx.bsky.social', twitter: 'nyx_new' })
+		);
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.twitterUrl).toBe('https://twitter.com/nyx_new');
+		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg');
+		expect(after!.avatarResolvedAt).toBe('2026-10-01T00:00:00.000Z');
+	});
+
+	it('clears the avatar when the X handle changes and there is no Bluesky handle', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(schema.artists)
+			.values({
+				name: 'Nyx',
+				avatarUrl: '/img/avatars/nyx/owned.jpg',
+				twitterUrl: 'https://twitter.com/nyx_old',
+				avatarResolvedAt: '2026-10-01T00:00:00.000Z'
+			})
+			.returning({ id: schema.artists.id })
+			.get();
+
+		await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx', twitter: 'nyx_new' }));
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.avatarUrl).toBeNull();
+		expect(after!.avatarResolvedAt).toBeNull();
+	});
+
 	it("swaps an owned avatar for the new handle's hotlink when the handle changes", async () => {
 		const { db, platform } = makeDb();
 		const row = await db
