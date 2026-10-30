@@ -5,6 +5,7 @@ import { sanitizeUrl } from './validate';
 import {
 	KIND_MAX,
 	NOTES_MAX,
+	SOURCE_TEXT_MAX,
 	TITLE_MAX,
 	currencyFractionDigits,
 	formatMinor,
@@ -12,6 +13,7 @@ import {
 	isCommissionPayment,
 	isCommissionStatus,
 	parsePrice,
+	sourceLinkHref,
 	type CommissionField,
 	type CommissionFormValues,
 	type CommissionPayment,
@@ -103,9 +105,16 @@ export function parseCommissionForm(
 	const notes = text(data, 'notes').replace(/\r\n?/g, '\n');
 	if (notes.length > NOTES_MAX) errors.notes = m.admin_commissions_error_too_long({ max: NOTES_MAX });
 
-	const rawUrl = text(data, 'sourceUrl');
-	const sourceUrl = rawUrl ? sanitizeUrl(rawUrl) : null;
-	if (rawUrl && !sourceUrl) errors.sourceUrl = m.admin_commissions_error_link();
+	// Where it's happening: a link is sanitized as before; anything else is the
+	// owner's own words ("Telegram DM"), kept as typed and never made a link.
+	const rawSource = text(data, 'sourceUrl');
+	let sourceUrl: string | null = null;
+	if (sourceLinkHref(rawSource)) {
+		sourceUrl = sanitizeUrl(rawSource);
+		if (!sourceUrl) errors.sourceUrl = m.admin_commissions_error_link();
+	} else if (rawSource.length > SOURCE_TEXT_MAX) {
+		errors.sourceUrl = m.admin_commissions_error_too_long({ max: SOURCE_TEXT_MAX });
+	} else sourceUrl = rawSource || null;
 
 	const characterIds: number[] = [];
 	for (const value of data.getAll('characterId')) {
@@ -381,6 +390,8 @@ export async function loadCommission(db: Database, id: number) {
 				artistId: commissions.artistId,
 				artistName: artists.name,
 				artistAvatarUrl: artists.avatarUrl,
+				// For Open chat beside a "Where it's happening" that's plain text.
+				artistTelegramUrl: artists.telegramUrl,
 				title: commissions.title,
 				kind: commissions.kind,
 				sourceUrl: commissions.sourceUrl,

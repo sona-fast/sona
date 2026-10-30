@@ -129,7 +129,7 @@ function countLookups(page: Page) {
 test('a pasted link picks the artist it names, or says why it can\'t', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
-	const link = page.getByLabel('Link to where you asked');
+	const link = page.getByLabel("Where it's happening");
 	const artist = page.getByLabel('Artist', { exact: true });
 	const card = page.locator('.lookup');
 	await expect(artist).toHaveValue('');
@@ -274,7 +274,7 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 test('a name that only looks like the handle, or a handle two artists share, waits for the owner', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
-	const link = page.getByLabel('Link to where you asked');
+	const link = page.getByLabel("Where it's happening");
 	const artist = page.getByLabel('Artist', { exact: true });
 	const card = page.locator('.lookup');
 
@@ -310,7 +310,7 @@ test('a name that only looks like the handle, or a handle two artists share, wai
 test('a lookup sends once per link, drops a stale answer, and can be tried again', async ({ page }) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
-	const link = page.getByLabel('Link to where you asked');
+	const link = page.getByLabel("Where it's happening");
 	const artist = page.getByLabel('Artist', { exact: true });
 	const card = page.locator('.lookup');
 	const lookups = countLookups(page);
@@ -448,7 +448,7 @@ test('a lookup sends once per link, drops a stale answer, and can be tried again
 test('the draft survives a trip to the Artists page, and the lookup asks again on return', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
-	const link = page.getByLabel('Link to where you asked');
+	const link = page.getByLabel("Where it's happening");
 	const artist = page.getByLabel('Artist', { exact: true });
 	await page.getByLabel('Title').fill('E2E draft title');
 	// A FurAffinity handle, because adding an artist with an X or Bluesky
@@ -479,7 +479,7 @@ test('the draft survives a trip to the Artists page, and the lookup asks again o
 test("a restored draft keeps the lookup's own pick replaceable", async ({ page }) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
-	const link = page.getByLabel('Link to where you asked');
+	const link = page.getByLabel("Where it's happening");
 	const artist = page.getByLabel('Artist', { exact: true });
 	const card = page.locator('.lookup');
 	await paste(link, 'https://x.com/e2e_artist/status/21');
@@ -532,7 +532,7 @@ test('Back during a navigation leaves the ledger pages working', async ({ page }
 	await expect(page).toHaveURL(/\/admin\/commissions\/new$/);
 	await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
 	await expect(page.getByRole('heading', { level: 1, name: 'New entry' })).toBeVisible();
-	await expect(page.getByLabel('Link to where you asked')).toBeVisible();
+	await expect(page.getByLabel("Where it's happening")).toBeVisible();
 });
 
 test('a saved form leaves no draft to come back to', async ({ page }) => {
@@ -540,7 +540,7 @@ test('a saved form leaves no draft to come back to', async ({ page }) => {
 	await open(page, '/admin/commissions/new');
 	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
 	await page.getByLabel('Title').fill('E2E saved once');
-	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/30');
+	await paste(page.getByLabel("Where it's happening"), 'https://x.com/nobody_here/status/30');
 	await page.getByRole('button', { name: 'Save entry' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
 
@@ -1027,7 +1027,7 @@ test('Reload entry clears the last lookup, and the same link can be looked up ag
 	await expect(other).toHaveURL(/\/admin\/commissions$/);
 	await other.close();
 
-	const link = page.getByLabel('Link to where you asked');
+	const link = page.getByLabel("Where it's happening");
 	await paste(link, 'https://x.com/nobody_here/status/12');
 	await expect(page.locator('.lookup').getByText("nobody_here isn't in your artist list yet.")).toBeVisible();
 	await page.getByRole('button', { name: 'Save changes' }).click();
@@ -1050,7 +1050,7 @@ test('a draft typed against an older copy of the entry is dropped on return', as
 	const keptKind = await kind.inputValue();
 
 	await page.getByLabel('Notes').fill('E2E draft note');
-	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/40');
+	await paste(page.getByLabel("Where it's happening"), 'https://x.com/nobody_here/status/40');
 	await page.locator('.sidebar-nav').getByRole('link', { name: 'Artists' }).click();
 	await expect(page).toHaveURL(/\/admin\/artists$/);
 
@@ -1066,7 +1066,7 @@ test('a draft typed against an older copy of the entry is dropped on return', as
 	await page.goBack();
 	await expect(kind).toHaveValue('Changed elsewhere');
 	await expect(page.getByLabel('Notes')).not.toHaveValue('E2E draft note');
-	await expect(page.getByLabel('Link to where you asked')).not.toHaveValue('https://x.com/nobody_here/status/40');
+	await expect(page.getByLabel("Where it's happening")).not.toHaveValue('https://x.com/nobody_here/status/40');
 	await expect(draftNote(page)).toHaveCount(0);
 	// Saving now keeps the other tab's change.
 	await page.getByRole('button', { name: 'Save changes' }).click();
@@ -1139,7 +1139,7 @@ test('Reload entry takes away the draft-is-back line', async ({ page, context })
 	const keptNotes = await notes.inputValue();
 
 	await notes.fill('E2E draft before reload');
-	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/nobody_here/status/41');
+	await paste(page.getByLabel("Where it's happening"), 'https://x.com/nobody_here/status/41');
 	await page.locator('.sidebar-nav').getByRole('link', { name: 'Artists' }).click();
 	await expect(page).toHaveURL(/\/admin\/artists$/);
 	await page.goBack();
@@ -1567,7 +1567,7 @@ test('an artist added in another tab can be picked by a link', async ({ page, co
 	// A second tab adds the artist after this form loaded.
 	const other = await context.newPage();
 	await open(other, '/admin/commissions/new');
-	const otherLink = other.getByLabel('Link to where you asked');
+	const otherLink = other.getByLabel("Where it's happening");
 	await paste(otherLink, 'https://x.com/other_tab_artist/status/1');
 	await other.locator('.lookup').getByRole('button', { name: 'Add other_tab_artist as a new artist' }).click();
 	const dialog = other.getByRole('dialog');
@@ -1578,7 +1578,7 @@ test('an artist added in another tab can be picked by a link', async ({ page, co
 
 	// The lookup here finds them, and the select shows them as the pick, so
 	// the required Artist field is filled.
-	await paste(page.getByLabel('Link to where you asked'), 'https://x.com/other_tab_artist/status/2');
+	await paste(page.getByLabel("Where it's happening"), 'https://x.com/other_tab_artist/status/2');
 	await expect(page.locator('.lookup')).toContainText('other_tab_artist');
 	await expect(artist.locator('option:checked')).toHaveText('other_tab_artist');
 	expect(await artist.evaluate((el: HTMLSelectElement) => el.checkValidity())).toBe(true);

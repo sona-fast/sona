@@ -34,6 +34,30 @@ export type CommissionPayment = (typeof COMMISSION_PAYMENTS)[number];
 export const TITLE_MAX = 120;
 export const KIND_MAX = 60;
 export const NOTES_MAX = 2000;
+/** "Where it's happening" as plain text, such as "Telegram DM". A link can be
+ * longer, up to sanitizeUrl's cap. */
+export const SOURCE_TEXT_MAX = 120;
+
+/**
+ * The address a "Where it's happening" value links to, or null when the value
+ * is plain text. A link is one word that reads as a web address, with or
+ * without its https:// ("vgen.co/taro" counts). Anything with a space, a
+ * scheme other than http(s), or a host without a dot is text: it's stored and
+ * shown as typed, never as a link, and never sent to the artist lookup.
+ */
+export function sourceLinkHref(value: string | null | undefined): string | null {
+	const text = value?.trim() ?? '';
+	if (!text || /\s/.test(text)) return null;
+	let url: URL;
+	try {
+		url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`);
+	} catch {
+		return null;
+	}
+	if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+	if (!url.hostname.includes('.')) return null;
+	return url.href;
+}
 
 /** The entry form's fields, as the server keys its errors. */
 export type CommissionField =

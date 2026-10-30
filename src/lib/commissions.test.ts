@@ -16,7 +16,8 @@ import {
 	isActiveStatus,
 	isCalendarDate,
 	localToday,
-	parsePrice
+	parsePrice,
+	sourceLinkHref
 } from './commissions';
 
 const messages = (locale: 'en' | 'ja') =>
@@ -311,7 +312,7 @@ describe('staleMessage', () => {
 			`${head} Your note comes with it, but your changes to Title and Price don't, so enter those again.`
 		);
 		expect(staleMessage(loaded, { ...loaded, sourceUrl: '' }, 'en')).toBe(
-			`${head} Reloading doesn't keep your changes to Link, so enter those again.`
+			`${head} Reloading doesn't keep your changes to Where it's happening, so enter those again.`
 		);
 	});
 
@@ -351,5 +352,30 @@ describe('mergeReloaded', () => {
 		expect(values.notes).toBe('Typed here.');
 		expect(values.status).toBe('delivered');
 		expect(restoredNote).toBe('replaces');
+	});
+});
+
+describe('sourceLinkHref', () => {
+	it('reads a web address as a link, with or without its https://', () => {
+		expect(sourceLinkHref('https://vgen.co/taro/commission/9')).toBe('https://vgen.co/taro/commission/9');
+		expect(sourceLinkHref('  http://example.com/a  ')).toBe('http://example.com/a');
+		expect(sourceLinkHref('bsky.app/profile/taro.bsky.social')).toBe('https://bsky.app/profile/taro.bsky.social');
+	});
+
+	it('reads the owner’s own words as text, not a link', () => {
+		for (const value of ['Telegram DM', 'Telegram', 'DM on t.me/taro', 'https://x.com/a and then Telegram', 'テレグラムのDM', '']) {
+			expect(sourceLinkHref(value)).toBeNull();
+		}
+	});
+
+	it('never makes a link from a script, data, or other non-web scheme', () => {
+		for (const value of ['javascript:alert(1)', 'JAVASCRIPT:alert(1)', 'data:text/html,<b>x</b>', 'vbscript:x', 'tg://resolve?domain=taro', 'mailto:a@b.co']) {
+			expect(sourceLinkHref(value)).toBeNull();
+		}
+	});
+
+	it('takes nothing from a missing value', () => {
+		expect(sourceLinkHref(null)).toBeNull();
+		expect(sourceLinkHref(undefined)).toBeNull();
 	});
 });

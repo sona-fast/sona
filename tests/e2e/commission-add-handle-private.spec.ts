@@ -38,7 +38,7 @@ async function offerAdd(page: Page, link: string, handle: string) {
 	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/commissions/new');
 	await waitForHydration(page);
-	await paste(page.getByLabel('Link to where you asked'), link);
+	await paste(page.getByLabel("Where it's happening"), link);
 	const addHandle = page.locator('.lookup').getByRole('button', { name: `Add ${handle} as a new artist` });
 	await expect(addHandle).toBeVisible();
 	return addHandle;

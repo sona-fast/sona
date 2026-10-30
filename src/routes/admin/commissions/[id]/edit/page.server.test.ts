@@ -115,6 +115,22 @@ describe('load', () => {
 		expect(data.gate.open).toBe(false);
 	});
 
+	// Open chat links the entry's own artist's Telegram, never another artist's.
+	it("loads the entry's own artist's Telegram link, and the plain-text place as typed", async () => {
+		setLedgerGa('future');
+		const { sqlite, platform } = ledgerDb();
+		sqlite.exec(`
+			UPDATE artists SET telegram_url = 'https://t.me/artist_a' WHERE id = 1;
+			UPDATE artists SET telegram_url = 'https://t.me/artist_b' WHERE id = 2;
+		`);
+		const id = seedEntry(sqlite, { artistId: 2 });
+		sqlite.prepare("UPDATE commissions SET source_url = 'Telegram DM' WHERE id = ?").run(id);
+		const { entry } = (await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
+			entry: Record<string, unknown>;
+		};
+		expect(entry).toMatchObject({ artistName: 'Artist B', artistTelegramUrl: 'https://t.me/artist_b', sourceUrl: 'Telegram DM' });
+	});
+
 	// SONA-9: the entry the page receives carries its three dates as plain
 	// values, and nothing that measures time between them or since them.
 	it('ships only allow-listed keys, with the dates and no duration', async () => {
@@ -137,6 +153,8 @@ describe('load', () => {
 				'artistId',
 				'artistName',
 				'artistAvatarUrl',
+				// Open chat beside a plain-text "Where it's happening".
+				'artistTelegramUrl',
 				'title',
 				'kind',
 				'sourceUrl',

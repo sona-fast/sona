@@ -194,6 +194,22 @@ describe('create action: what it stores', () => {
 		expect(ledgerSnapshot(sqlite).links).toEqual([]);
 	});
 
+	// Where it's happening: a link is sanitized as before; the owner's own words
+	// are kept as typed, never turned into a link.
+	it.each([
+		['https://vgen.co/taro/commission/9', 'https://vgen.co/taro/commission/9'],
+		['vgen.co/taro', 'https://vgen.co/taro'],
+		['  Telegram DM  ', 'Telegram DM'],
+		['Telegram', 'Telegram'],
+		['DM on t.me/taro', 'DM on t.me/taro'],
+		['javascript:alert(1)', 'javascript:alert(1)'],
+		[`Telegram ${'x'.repeat(111)}`, `Telegram ${'x'.repeat(111)}`]
+	])('stores where it is happening %j as %j', async (sent, stored) => {
+		const { sqlite, platform } = ledgerDb();
+		expect((await create(platform, entryForm({ sourceUrl: sent }))).status).toBe('redirected');
+		expect(rows(sqlite, 'SELECT source_url FROM commissions')).toEqual([{ source_url: stored }]);
+	});
+
 	it('stores no price and no currency when the amount is empty but a currency is picked', async () => {
 		const { sqlite, platform } = ledgerDb();
 		const result = await create(platform, entryForm({ price: '', currency: 'EUR' }));
@@ -276,7 +292,8 @@ describe('create action: bad input', () => {
 		['impossible date', { requestedOn: '2026-02-30' }, 'requestedOn'],
 		['date in another shape', { acceptedOn: '10/14/2026' }, 'acceptedOn'],
 		['not a date', { deliveredOn: 'soon' }, 'deliveredOn'],
-		['script link', { sourceUrl: 'javascript:alert(1)' }, 'sourceUrl'],
+		['link over 2,048 characters', { sourceUrl: `https://example.com/${'a'.repeat(2048)}` }, 'sourceUrl'],
+		['plain text over 120 characters', { sourceUrl: `Telegram ${'x'.repeat(112)}` }, 'sourceUrl'],
 		['no artist', { artistId: '' }, 'artistId'],
 		['artist id that is not a number', { artistId: 'abc' }, 'artistId'],
 		['unknown artist', { artistId: '99' }, 'artistId'],

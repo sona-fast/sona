@@ -7,3 +7,10 @@ INSERT INTO commissions (id, artist_id, title, kind, source_url, status, payment
 VALUES (1, 1, 'Headshot icon', 'Icon', 'https://example.com/opening', 'delivered', 'paid', 4500, 'USD',
   'Placeholder note.', '2026-09-03', NULL, '2026-10-08', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z');
 INSERT INTO commission_characters (commission_id, character_id) VALUES (1, 1);
+
+-- A second entry whose "Where it's happening" is plain text, by an artist with
+-- a Telegram link, so the read-only page shows the text and Open chat. The
+-- spec deletes it before the last test empties the ledger.
+INSERT INTO artists (id, name, telegram_url, created_at) VALUES (60, 'Chat Artist', 'https://t.me/e2e_chat_artist', '2026-07-01T00:00:00.000Z');
+INSERT INTO commissions (id, artist_id, title, source_url, status, payment, created_at, updated_at)
+VALUES (2, 60, 'Chat sketch', 'Telegram DM', 'accepted', 'unpaid', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z');
