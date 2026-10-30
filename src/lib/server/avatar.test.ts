@@ -583,8 +583,8 @@ describe('refreshArtistAvatars', () => {
 		expect(newest!.avatarResolvedAt).toBe('2026-06-01T00:00:00Z');
 	});
 
-	// SONA-236: the lookup sends the handle to Bluesky, so an artist who exists
-	// only for a private commission entry is never looked up.
+	// SONA-236: only the Keep private box decides privacy, and even a ticked box
+	// doesn't skip the lookup; entries alone change nothing here.
 	it('refreshes an artist who has only commission entries when Keep private is unticked', async () => {
 		const fetchMock = stubFetch();
 		const { db } = makeDb();
