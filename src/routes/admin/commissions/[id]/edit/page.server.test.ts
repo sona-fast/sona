@@ -125,7 +125,7 @@ describe('load', () => {
 		`);
 		const id = seedEntry(sqlite, { artistId: 2 });
 		sqlite.prepare("UPDATE commissions SET source_url = 'Telegram DM' WHERE id = ?").run(id);
-		const { entry } = (await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
+		const { entry } = (await load({ platform, request: new Request('http://x/'), url: new URL('http://x/'), params: { id: String(id) } } as never)) as {
 			entry: Record<string, unknown>;
 		};
 		expect(entry).toMatchObject({ artistName: 'Artist B', artistTelegramUrl: 'https://t.me/artist_b', sourceUrl: 'Telegram DM' });
@@ -229,7 +229,7 @@ describe('save action', () => {
 		const { sqlite, platform } = ledgerDb();
 		const id = seedEntry(sqlite);
 		const loadEntry = async () =>
-			((await load({ platform, request: new Request('http://x/'), params: { id: String(id) } } as never)) as {
+			((await load({ platform, request: new Request('http://x/'), url: new URL('http://x/'), params: { id: String(id) } } as never)) as {
 				entry: { receiptUrl: string | null; version: string };
 			}).entry;
 
