@@ -144,6 +144,9 @@ export const E2E_WRANGLER_CONFIG_REGISTRY = path.join(here, 'wrangler.e2e-regist
 export const E2E_PERSIST_TO_REGISTRY = path.join(persistRoot, '.wrangler-e2e-registry');
 export const E2E_PLATFORM_PERSIST_REGISTRY = path.join(E2E_PERSIST_TO_REGISTRY, 'v3');
 export const E2E_REGISTRY_MOCK = path.join(here, 'registry-mock.mjs');
+// Answers X and Bluesky locally for the commissions server, whose avatar
+// lookups run server-side (SONA-236).
+export const E2E_SOCIAL_OFFLINE = path.join(here, 'social-offline.mjs');
 // A registry-linked artist that is already private, which no API can create:
 // share-private-artist.spec.ts edits it (SONA-236).
 export const E2E_REGISTRY_OVERLAY = path.join(here, 'fixtures', 'registry.sql');

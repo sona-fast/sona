@@ -1739,6 +1739,7 @@
 	"admin_commissions_not_in_gallery": "ギャラリーにはありません",
 	"admin_commissions_edit_aria": "{title}を編集",
 	"admin_commissions_view_aria": "{title}を表示",
+	"admin_commissions_delete_aria": "{title}を削除",
 	"admin_commissions_status_applied": "応募済み",
 	"admin_commissions_status_waitlisted": "キャンセル待ち",
 	"admin_commissions_status_not_picked": "落選",

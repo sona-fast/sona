@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
-import { ledgerDb, restoreRegistry, seedEntry, setLedgerGa } from '$lib/server/test/ledger-db';
-import { load } from './+page.server';
+import { ledgerDb, restoreRegistry, runAction, seedEntry, setLedgerGa } from '$lib/server/test/ledger-db';
+import { actions, load } from './+page.server';
 
 beforeEach(() => {
 	restoreRegistry();
@@ -171,5 +171,33 @@ describe('/admin/commissions load', () => {
 				expect((await run(platform, query)).added, query).toBeNull();
 			}
 		});
+	});
+});
+
+describe('/admin/commissions delete action', () => {
+	const remove = (platform: App.Platform, id: string) => {
+		const form = new FormData();
+		form.set('id', id);
+		return runAction(actions.delete as never, { platform, form });
+	};
+
+	it("deletes only the row's entry, before GA and without a key", async () => {
+		setLedgerGa('future');
+		const { sqlite, platform } = ledgerDb();
+		const gone = seedEntry(sqlite, { title: 'Delete me', characterIds: [1] });
+		seedEntry(sqlite, { title: 'Keep me', characterIds: [1] });
+
+		expect((await remove(platform, String(gone))).status).not.toBe(404);
+		expect((await run(platform)).entries.map((e) => e.title)).toEqual(['Keep me']);
+	});
+
+	it('404s an unknown or malformed id and deletes nothing', async () => {
+		setLedgerGa('past');
+		const { sqlite, platform } = ledgerDb();
+		seedEntry(sqlite, { title: 'Still here' });
+
+		expect((await remove(platform, '42')).status).toBe(404);
+		expect((await remove(platform, 'abc')).status).toBe(404);
+		expect((await run(platform)).entries.map((e) => e.title)).toEqual(['Still here']);
 	});
 });

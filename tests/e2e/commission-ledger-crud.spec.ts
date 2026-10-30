@@ -1252,6 +1252,59 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await settledShot(page, testInfo.outputPath('commission-ledger-emptied.png'));
 });
 
+/** A bare entry by Test Artist, saved from New entry. */
+async function createEntry(page: Page, title: string) {
+	await open(page, '/admin/commissions/new');
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Title').fill(title);
+	await page.getByRole('button', { name: 'Save entry' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+}
+
+test("a row's Delete asks first and deletes only that row's entry", async ({ page, browser }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await createEntry(page, 'E2E keep me');
+	await createEntry(page, 'E2E delete me');
+
+	// Without JavaScript, the row's Delete opens the entry page's own confirmation.
+	const context = await browser.newContext({
+		baseURL: testInfo.project.use.baseURL,
+		storageState: await page.context().storageState(),
+		javaScriptEnabled: false
+	});
+	try {
+		const noJs = await context.newPage();
+		await noJs.goto('/admin/commissions');
+		await noJs.getByRole('link', { name: 'Delete E2E delete me' }).click();
+		await expect(noJs.getByRole('region', { name: 'Delete this entry?' })).toContainText('“E2E delete me”');
+	} finally {
+		await context.close();
+	}
+
+	await open(page, '/admin/commissions');
+	const trash = page.getByRole('button', { name: 'Delete E2E delete me' });
+	await trash.click();
+	const dialog = page.getByRole('dialog', { name: 'Delete this entry?' });
+	await expect(dialog).toContainText('“E2E delete me”');
+	await expect(dialog).toContainText('Test Artist stays in your artist list');
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(dialog).toBeHidden();
+	await expect(trash).toBeFocused();
+	await expect(page.getByRole('row', { name: /E2E delete me/ })).toHaveCount(1);
+
+	await trash.click();
+	await settledShot(page, testInfo.outputPath('commission-row-delete.png'));
+	await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page.getByRole('row', { name: /E2E delete me/ })).toHaveCount(0);
+	await expect(page.getByRole('row', { name: /E2E keep me/ })).toHaveCount(1);
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+
+	// Leave the ledger empty for the tests after this one.
+	await page.getByRole('button', { name: 'Delete E2E keep me' }).click();
+	await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'No commissions yet' })).toBeVisible();
+});
+
 test('signing out forgets unsaved drafts', async ({ page }) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');

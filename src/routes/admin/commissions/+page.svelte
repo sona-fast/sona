@@ -1,13 +1,18 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import type { SubmitFunction } from '@sveltejs/kit';
+	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { CircleCheck, ClipboardList, Eye, ImagePlus, Pencil, Plus } from 'lucide-svelte';
+	import { CircleCheck, ClipboardList, Eye, ImagePlus, Loader2, Pencil, Plus, Trash2 } from 'lucide-svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import PieceThumb from '$lib/components/PieceThumb.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
-	import { untrack } from 'svelte';
+	import { toast } from '$lib/toast.svelte';
+	import { onMount, untrack } from 'svelte';
 	import { isActiveStatus, PAYMENT_LABELS, STATUS_LABELS, STATUS_TONES } from '$lib/commissions';
 	import * as m from '$lib/paraglide/messages';
 
@@ -71,6 +76,35 @@
 			? m.admin_commissions_edit_aria({ title: entry.title })
 			: m.admin_commissions_view_aria({ title: entry.title });
 	}
+
+	// A row's Delete asks with the entry page's own words. Without the page's
+	// script it opens that page's in-page confirmation instead.
+	let hydrated = $state(false);
+	onMount(() => (hydrated = true));
+	let deleteTarget = $state<Entry | null>(null);
+	let deletingId = $state<number | null>(null);
+	let deleteForm = $state<HTMLFormElement>();
+
+	function deleteMessage(entry: Entry): string {
+		return entry.piece
+			? m.admin_commissions_delete_message_linked({ title: entry.title, piece: entry.piece.title, artist: entry.artistName })
+			: m.admin_commissions_delete_message({ title: entry.title, artist: entry.artistName });
+	}
+
+	const enhanceDelete: SubmitFunction = ({ formData }) => {
+		// The id travels with this submit, not in a field the next row could change.
+		formData.set('id', String(deletingId));
+		return async ({ update, result }) => {
+			// An error result would swap the list for the error page, so it stays with a toast.
+			if (result.type !== 'error') await update();
+			deletingId = null;
+			if (result.type === 'failure' && (result.data as { missing?: boolean } | undefined)?.missing) {
+				// Already deleted somewhere else: the delete is done either way.
+				await invalidateAll();
+			} else if (result.type === 'failure') toast.error(m.admin_commissions_delete_failed());
+			else if (result.type === 'error') toast.error(m.admin_something_wrong());
+		};
+	};
 </script>
 
 <div class="page-header">
@@ -191,6 +225,25 @@
 										<a href="/admin/commissions/{entry.id}/edit" class="icon-btn" aria-label={rowLinkLabel(entry)}>
 											{#if data.gate.open}<Pencil size={16} aria-hidden="true" />{:else}<Eye size={16} aria-hidden="true" />{/if}
 										</a>
+										{#if hydrated}
+											<button
+												type="button"
+												class="icon-btn"
+												aria-label={m.admin_commissions_delete_aria({ title: entry.title })}
+												disabled={deletingId !== null}
+												onclick={() => (deleteTarget = entry)}
+											>
+												{#if deletingId === entry.id}<Loader2 size={16} class="spin" aria-hidden="true" />{:else}<Trash2 size={16} aria-hidden="true" />{/if}
+											</button>
+										{:else}
+											<a
+												href="/admin/commissions/{entry.id}/edit?delete=confirm#delete-confirm"
+												class="icon-btn"
+												aria-label={m.admin_commissions_delete_aria({ title: entry.title })}
+											>
+												<Trash2 size={16} aria-hidden="true" />
+											</a>
+										{/if}
 									</td>
 								</tr>
 							{/each}
@@ -200,6 +253,22 @@
 			{/if}
 		</section>
 	{/each}
+{/if}
+
+<!-- Never gated: an owner can always remove their own private data. -->
+<form method="POST" action="?/delete" bind:this={deleteForm} hidden use:enhance={enhanceDelete}></form>
+
+{#if deleteTarget}
+	<ConfirmDialog
+		title={m.admin_commissions_delete_title()}
+		message={deleteMessage(deleteTarget)}
+		onconfirm={() => {
+			deletingId = deleteTarget!.id;
+			deleteTarget = null;
+			deleteForm?.requestSubmit();
+		}}
+		oncancel={() => (deleteTarget = null)}
+	/>
 {/if}
 
 <style>
@@ -255,7 +324,8 @@
 	.col-status, .col-pay { width: 6.5rem; }
 	/* Room for the 40px thumbnail and a short title on one line beside it. */
 	.col-gallery { width: 11rem; }
-	.col-actions { width: 56px; white-space: nowrap; }
+	/* Two icon buttons: Edit (or View) and Delete. */
+	.col-actions { width: 80px; white-space: nowrap; }
 
 	.entry-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 	.entry-title { font-weight: 500; }
@@ -299,7 +369,7 @@
 
 	/* Cards when the section is narrower than the seven columns need, which is
 	   760px in the mocks. In a card, the row header leaves room on its right for
-	   the row's one link, which sits in the top-right corner. */
+	   the row's two buttons, which sit in the top-right corner. */
 	@container (max-width: 760px) {
 		.table-wrapper { border: none; border-radius: 0; overflow: visible; }
 		.data-table { display: block; }
@@ -328,7 +398,7 @@
 			flex-shrink: 0;
 			text-align: left;
 		}
-		.data-table th[scope='row'] { display: block; padding: 0 36px 6px 0; border: none; }
+		.data-table th[scope='row'] { display: block; padding: 0 72px 6px 0; border: none; }
 		.data-table th[scope='row'] + td { border-top: 1px solid var(--border); }
 		.data-table td.col-actions {
 			position: absolute; top: 6px; right: 6px; width: auto; padding: 0; border: none;

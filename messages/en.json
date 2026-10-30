@@ -2294,6 +2294,7 @@
 	"admin_commissions_not_in_gallery": "Not in your gallery",
 	"admin_commissions_edit_aria": "Edit {title}",
 	"admin_commissions_view_aria": "View {title}",
+	"admin_commissions_delete_aria": "Delete {title}",
 	"admin_commissions_status_applied": "Applied",
 	"admin_commissions_status_waitlisted": "Waitlisted",
 	"admin_commissions_status_not_picked": "Not picked",
