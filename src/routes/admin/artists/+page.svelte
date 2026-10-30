@@ -24,6 +24,16 @@
 	let search = $state(data.q ?? '');
 	let showAdd = $state(false);
 	let editingArtist = $state<typeof data.artists[0] | null>(null);
+	// Why the edit form's Keep private box can't apply, or null when it can.
+	const privateBlocked = $derived(
+		!editingArtist
+			? null
+			: editingArtist.hasPublicWork
+				? m.admin_artists_ledger_private_public_work({ name: editingArtist.name })
+				: editingArtist.globalId && !editingArtist.ledgerPrivate
+					? m.admin_artists_ledger_private_shared({ name: editingArtist.name })
+					: null
+	);
 	let deleteTarget = $state<{ id: number; name: string } | null>(null);
 	let deleteForm: HTMLFormElement;
 	let saving = $state(false);
@@ -415,16 +425,21 @@
 					</div>
 				</div>
 
-				<!-- A shared (registry-linked) artist can't be made private; the box shows only so one linked while flagged can clear it. An artist with public work is already public, so it can't be set for them either. -->
-				{#if (!editingArtist.globalId || editingArtist.ledgerPrivate) && !editingArtist.hasPublicWork}
-					<div class="private-field">
-						<label class="private-check">
-							<input type="checkbox" name="ledgerPrivate" checked={editingArtist.ledgerPrivate} disabled={saving} aria-describedby="edit-artist-private-hint" />
-							<span>{m.admin_artists_ledger_private()}</span>
-						</label>
-						<p class="private-hint" id="edit-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
-					</div>
-				{/if}
+				<!-- Always shown, enabled only where it can apply. An artist with public work is already public. A shared (registry-linked) artist can't be made private, but one linked while flagged can still clear it. The save action ignores the box where it can't apply. -->
+				<div class="private-field">
+					<label class="private-check" class:blocked={privateBlocked}>
+						<input
+							type="checkbox"
+							name="ledgerPrivate"
+							checked={!privateBlocked && editingArtist.ledgerPrivate}
+							disabled={saving || !!privateBlocked}
+							aria-describedby={privateBlocked ? 'edit-artist-private-hint edit-artist-private-blocked' : 'edit-artist-private-hint'}
+						/>
+						<span>{m.admin_artists_ledger_private()}</span>
+					</label>
+					<p class="private-hint" id="edit-artist-private-hint">{m.admin_artists_ledger_private_hint()}</p>
+					{#if privateBlocked}<p class="private-hint" id="edit-artist-private-blocked">{privateBlocked}</p>{/if}
+				</div>
 
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingArtist = null)}>{m.admin_cancel()}</button>
@@ -757,6 +772,8 @@
 		font-weight: 400;
 		color: var(--foreground);
 	}
+
+	.modal-form .private-check.blocked { cursor: default; }
 
 	.private-check input {
 		margin: 0;

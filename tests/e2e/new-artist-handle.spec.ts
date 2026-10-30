@@ -125,7 +125,7 @@ test('Keep private sends no registry search until it is unticked', async ({ page
 		await expect(dialog).toBeVisible({ timeout: 1_500 });
 	}).toPass({ timeout: 30_000 });
 
-	const keepPrivate = dialog.getByLabel('Keep private (commission ledger only)');
+	const keepPrivate = dialog.getByLabel('Keep private');
 	await keepPrivate.check();
 	await dialog.getByLabel('Artist Name').fill('Private Marrow');
 	await page.waitForTimeout(PAST_DEBOUNCE_MS);

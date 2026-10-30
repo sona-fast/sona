@@ -75,11 +75,12 @@ test('a private artist asks before sharing, and only Share anyway resubmits', as
 	await page.screenshot({ path: testInfo.outputPath('shared-anyway.png') });
 });
 
-// The Edit Artist modal offers "Keep private" only where it can mean something:
-// a shared (registry-linked) artist can't be made private, so the box is absent
-// for one that isn't private already. A local private artist keeps the box. The
-// unit suite covers the update action; only the browser shows what renders.
-test('the edit modal hides Keep private for a shared artist, not a local private one', async ({
+// The Edit Artist modal always shows "Keep private", enabled only where it can
+// mean something: a shared (registry-linked) artist can't be made private, so
+// the box is disabled, with the reason, for one that isn't private already. A
+// local private artist can use it. The unit suite covers the update action;
+// only the browser shows what renders.
+test('the edit modal disables Keep private for a shared artist, not a local private one', async ({
 	page
 }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
@@ -97,7 +98,7 @@ test('the edit modal hides Keep private for a shared artist, not a local private
 	const local = await page.request.post('/api/artists', { data: { name: privateName, ledgerPrivate: true } });
 	expect(local.ok()).toBe(true);
 
-	const keepPrivate = page.getByRole('checkbox', { name: 'Keep private (commission ledger only)' });
+	const keepPrivate = page.getByRole('checkbox', { name: 'Keep private' });
 	const nameField = page.getByRole('textbox', { name: 'Artist Name' });
 
 	const openEdit = async (name: string) => {
@@ -110,11 +111,13 @@ test('the edit modal hides Keep private for a shared artist, not a local private
 	};
 
 	await openEdit(linkedName);
-	await expect(keepPrivate).toHaveCount(0);
+	await expect(keepPrivate).toBeDisabled();
+	await expect(keepPrivate).not.toBeChecked();
+	await expect(keepPrivate).toHaveAccessibleDescription(new RegExp(`${linkedName} is already shared with the registry\\.`));
 	await page.screenshot({ path: testInfo.outputPath('linked-edit.png') });
 
 	await openEdit(privateName);
-	await expect(keepPrivate).toBeVisible();
+	await expect(keepPrivate).toBeEnabled();
 	await expect(keepPrivate).toBeChecked();
 	await page.screenshot({ path: testInfo.outputPath('private-edit.png') });
 });
@@ -132,7 +135,7 @@ test('the edit modal keeps Keep private for a shared artist that is already priv
 	await page.waitForLoadState('load');
 
 	const name = 'Linked Private Seeded';
-	const keepPrivate = page.getByRole('checkbox', { name: 'Keep private (commission ledger only)' });
+	const keepPrivate = page.getByRole('checkbox', { name: 'Keep private' });
 	const nameField = page.getByRole('textbox', { name: 'Artist Name' });
 	const row = page.getByRole('row').filter({ hasText: name });
 
@@ -156,9 +159,64 @@ test('the edit modal keeps Keep private for a shared artist that is already priv
 	await page.screenshot({ path: testInfo.outputPath('linked-private-saved.png') });
 
 	await openEdit();
-	await expect(keepPrivate).toHaveCount(0);
+	await expect(keepPrivate).toBeDisabled();
+	await expect(keepPrivate).not.toBeChecked();
 	await expect(nameField).toBeVisible();
 	await page.screenshot({ path: testInfo.outputPath('linked-cleared-edit.png') });
+});
+
+// An artist with published work already shows on the site, so the box is
+// disabled with that reason; an unpublished piece alone doesn't do that.
+test('the edit modal disables Keep private once an artist has published work', async ({ page, baseURL }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await page.waitForLoadState('load');
+
+	const stamp = Date.now();
+	const withPiece = async (name: string, published: boolean) => {
+		const created = await page.request.post('/api/artists', { data: { name } });
+		expect(created.ok()).toBe(true);
+		const { id } = (await created.json()) as { id: number };
+		// "published" is the upload form's Private box, so sending it keeps the piece unpublished.
+		const upload = await page.request.post('/admin/upload', {
+			form: {
+				title: `${name} piece`,
+				artistId: String(id),
+				count: '1',
+				imageUrl_0: '/x1.png',
+				...(published ? {} : { published: 'on' })
+			},
+			headers: { origin: baseURL! },
+			maxRedirects: 0
+		});
+		expect(upload.status()).toBeLessThan(400);
+	};
+	const publicName = `Published Work ${stamp}`;
+	const draftName = `Draft Work ${stamp}`;
+	await withPiece(publicName, true);
+	await withPiece(draftName, false);
+
+	const keepPrivate = page.getByRole('checkbox', { name: 'Keep private' });
+	const nameField = page.getByRole('textbox', { name: 'Artist Name' });
+	const openEdit = async (name: string) => {
+		await gotoAfterLogin(page, `/admin/artists?q=${encodeURIComponent(name)}`);
+		const row = page.getByRole('row').filter({ hasText: name });
+		await expect(row).toBeVisible();
+		await waitForHydration(page);
+		await row.getByRole('button', { name: 'Edit artist' }).click();
+		await expect(nameField).toHaveValue(name);
+	};
+
+	await openEdit(publicName);
+	await expect(keepPrivate).toBeDisabled();
+	await expect(keepPrivate).toHaveAccessibleDescription(
+		new RegExp(`${publicName} already shows on your site through published work\\.`)
+	);
+	await page.screenshot({ path: testInfo.outputPath('published-work-edit.png') });
+
+	await openEdit(draftName);
+	await expect(keepPrivate).toBeEnabled();
+	await expect(keepPrivate).not.toBeChecked();
+	await expect(page.getByText('already shows on your site')).toHaveCount(0);
 });
 
 // Keep private promises the artist stays out of the shared registry, so the New
@@ -184,7 +242,7 @@ test('the New Artist dialog sends no registry search while Keep private is ticke
 		await expect(dialog).toBeVisible({ timeout: 1_500 });
 	}).toPass({ timeout: 30_000 });
 
-	const keepPrivate = dialog.getByLabel('Keep private (commission ledger only)');
+	const keepPrivate = dialog.getByLabel('Keep private');
 	await keepPrivate.check();
 	await dialog.getByLabel('Artist Name').fill('Quiet Quill');
 	// Longer than the dialog's 250 ms search debounce, so a search that was going

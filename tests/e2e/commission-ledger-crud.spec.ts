@@ -228,7 +228,7 @@ test('a pasted link picks the artist it names, or says why it can\'t', async ({ 
 	await expect(
 		dialog.getByText('Sona filled the name and Twitter link from the link you pasted. They\'re a guess until you check them.')
 	).toBeVisible();
-	await expect(dialog.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+	await expect(dialog.getByLabel('Keep private')).toBeChecked();
 	await settledShot(page, testInfo.outputPath('commission-link-add-artist.png'));
 	await dialog.getByRole('button', { name: 'Cancel' }).click();
 	await expect(dialog).toHaveCount(0);
@@ -1460,7 +1460,7 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 
 	await addArtist.click();
 	// An entry's artist starts private, so a sync can't share them before Save.
-	await expect(dialog.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+	await expect(dialog.getByLabel('Keep private')).toBeChecked();
 	await dialog.getByLabel('Artist Name').fill('E2E Private Artist');
 	await settledShot(page, testInfo.outputPath('commission-entry-new-artist.png'));
 	await dialog.getByRole('button', { name: 'Create Artist' }).click();
@@ -1483,7 +1483,7 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 		.getByRole('button', { name: 'Edit artist' })
 		.click();
 	// The Edit Artist modal has no dialog role, so the label alone finds it.
-	await expect(page.getByLabel('Keep private (commission ledger only)')).toBeChecked();
+	await expect(page.getByLabel('Keep private')).toBeChecked();
 
 	// Back on a new entry, the row leads with the newest saved currency.
 	await open(page, '/admin/commissions/new');

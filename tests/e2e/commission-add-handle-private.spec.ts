@@ -57,7 +57,7 @@ test('Add {handle} searches the registry only after Keep private is unticked', a
 	await addHandle.click();
 	const dialog = page.getByRole('dialog', { name: 'New Artist' });
 	await expect(dialog.getByLabel('Artist Name')).toHaveValue(handle);
-	const keepPrivate = dialog.getByLabel('Keep private (commission ledger only)');
+	const keepPrivate = dialog.getByLabel('Keep private');
 	await expect(keepPrivate).toBeChecked();
 	// The guess lines render for a pasted link, so a missing registry line below
 	// is the gate, not the whole block being absent.
