@@ -29,8 +29,10 @@
 	interface Props {
 		/** May be async: the upload page awaits a tick to move focus after the
 		 * dialog closes. The dialog resolves whatever comes back and logs a
-		 * rejection rather than letting it escape as an unhandled one. */
-		oncreated: (artist: { id: number; name: string }) => void | Promise<void>;
+		 * rejection rather than letting it escape as an unhandled one.
+		 * `hasTelegram` is the server's answer for the stored artist, so the
+		 * commission form knows whether to offer "Add this Telegram". */
+		oncreated: (artist: { id: number; name: string; hasTelegram?: boolean }) => void | Promise<void>;
 		oncancel: () => void;
 		/** Dialog heading — e.g. "New Manager" when the created artist will manage a pack. */
 		title?: string;
@@ -452,7 +454,7 @@
 				toast.error(errorMsg);
 				return;
 			}
-			const result = (await res.json()) as { id: number; name: string; status?: string };
+			const result = (await res.json()) as { id: number; name: string; status?: string; hasTelegram?: boolean };
 			if (result.status === 'linked')
 				toast.success(m.admin_new_artist_linked({ name: result.name }));
 			else if (result.status === 'reused')

@@ -2253,3 +2253,69 @@ test('a pasted t.me link adds its Telegram to the picked artist who has none', a
 	await expect(card.getByText(`${handle} is already in your artist list as ${name}.`)).toBeVisible();
 	await expect(artist).toHaveValue(String(id));
 });
+
+// An artist made with Add New Artist joins the form's list knowing whether the
+// owner gave them a Telegram (SONA-236). One who has one is never offered a
+// pasted t.me link that no artist holds, which would only end in a refusal;
+// one made without a Telegram still is. Names and handles carry the retry, so
+// a CI retry starts clean. Nothing here saves an entry or adds a Telegram.
+test('an artist made with Add New Artist is offered a pasted Telegram only when they have none', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const dialog = page.getByRole('dialog');
+	const unheld = `e2e_tg_unheld_${testInfo.retry}`;
+
+	const makeArtist = async (name: string, telegram?: string) => {
+		await page.getByRole('button', { name: 'Add New Artist' }).click();
+		await dialog.getByLabel('Artist Name').fill(name);
+		if (telegram) await dialog.getByLabel('Telegram').fill(telegram);
+		await dialog.getByRole('button', { name: 'Create Artist' }).click();
+		await expect(dialog).toBeHidden();
+		await expect(artist.locator('option:checked')).toHaveText(name);
+	};
+
+	// Made with a Telegram: a link no artist holds offers no add.
+	const withTg = `Dialog Telegram ${testInfo.retry}`;
+	await makeArtist(withTg, `https://t.me/e2e_tg_dialog_${testInfo.retry}`);
+	await paste(link, `https://t.me/${unheld}`);
+	await expect(card.getByText(`${unheld} isn't in your artist list yet.`)).toBeVisible();
+	await expect(card.getByRole('button', { name: /^Add this Telegram/ })).toHaveCount(0);
+
+	// Made without one: the same link is offered to them.
+	const withoutTg = `Dialog No Telegram ${testInfo.retry}`;
+	await link.fill('');
+	await link.press('Tab');
+	await makeArtist(withoutTg);
+	await paste(link, `https://t.me/${unheld}`);
+	await expect(card.getByRole('button', { name: `Add this Telegram to ${withoutTg}` })).toBeVisible();
+});
+
+// The dialog can reuse or link an artist the page already lists and give them
+// a Telegram from the registry. The server's answer replaces the page's older
+// one, so No Chat Artist (55) isn't offered a second Telegram. The creation is
+// stubbed: nothing is written.
+test('an artist the dialog reuses with a Telegram is not offered another', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await page.route('**/api/artists', (route) =>
+		route.request().method() === 'POST'
+			? route.fulfill({ status: 200, json: { id: 55, name: 'No Chat Artist', status: 'linked', hasTelegram: true } })
+			: route.fallback()
+	);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const dialog = page.getByRole('dialog');
+
+	await page.getByRole('button', { name: 'Add New Artist' }).click();
+	await dialog.getByLabel('Artist Name').fill('No Chat Artist');
+	await dialog.getByRole('button', { name: 'Create Artist' }).click();
+	await expect(dialog).toBeHidden();
+	await expect(artist).toHaveValue('55');
+	await paste(link, 'https://t.me/e2e_tg_unheld_reused');
+	await expect(card.getByText("e2e_tg_unheld_reused isn't in your artist list yet.")).toBeVisible();
+	await expect(card.getByRole('button', { name: /^Add this Telegram/ })).toHaveCount(0);
+});

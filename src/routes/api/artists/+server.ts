@@ -9,8 +9,11 @@ import { normalizeSocialUrl, socialsToHandles } from '$lib/server/handle-normali
 import type { RequestHandler } from './$types';
 
 // POST /api/artists  (admin-only via hooks)
-// Creates an artist and returns { id, name, status } so the sticker import review
-// and other admin UIs can add an artist on the fly. When the artist was pulled
+// Creates an artist and returns { id, name, status, hasTelegram } so the sticker
+// import review and other admin UIs can add an artist on the fly. `hasTelegram`
+// is read from the row as stored after the write, not from what was typed:
+// normalization can drop an invalid handle, and 'reused'/'linked' keep a local
+// Telegram the request didn't send (SONA-236). When the artist was pulled
 // from the shared registry (globalId present), this first tries to reuse/link an
 // existing LOCAL artist instead of creating a duplicate — and because importing
 // from the registry is an explicit "give me the registry's copy", the registry
@@ -24,6 +27,12 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	const db = getDb(platform!.env.DB);
 	const body = (await request.json().catch(() => null)) as Record<string, string> | null;
 	if (!body) error(400, 'Invalid request body');
+
+	/** Whether the stored artist row has a Telegram, read after the write. */
+	const storedHasTelegram = async (id: number) => {
+		const row = await db.select({ telegramUrl: artists.telegramUrl }).from(artists).where(eq(artists.id, id)).get();
+		return !!row?.telegramUrl;
+	};
 
 	const name = sanitizeText(body.name ?? '', 200);
 	if (!name) error(400, 'Artist name is required');
@@ -74,7 +83,7 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 			.get();
 		if (byGid) {
 			await db.update(artists).set(registryFields).where(eq(artists.id, byGid.id));
-			return json({ id: byGid.id, name, status: 'reused' });
+			return json({ id: byGid.id, name, status: 'reused', hasTelegram: await storedHasTelegram(byGid.id) });
 		}
 
 		// 2. An UNLINKED local artist that matches by handle → link it (no duplicate)
@@ -91,7 +100,7 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 						.update(artists)
 						.set({ ...registryFields, globalId, ledgerPrivate: false })
 						.where(eq(artists.id, a.id));
-					return json({ id: a.id, name, status: 'linked' });
+					return json({ id: a.id, name, status: 'linked', hasTelegram: await storedHasTelegram(a.id) });
 				}
 			}
 		}
@@ -114,5 +123,5 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	});
 	if (!id) error(400, 'Could not create artist');
 
-	return json({ id, name, status: 'created' });
+	return json({ id, name, status: 'created', hasTelegram: await storedHasTelegram(id) });
 };

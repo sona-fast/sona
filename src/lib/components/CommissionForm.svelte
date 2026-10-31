@@ -104,10 +104,14 @@
 	// Artists made from this form join its list without a reload. Add New
 	// Artist needs the page's script, so it only renders once that has run.
 	let addedArtists = $state<{ id: number; name: string; hasTelegram?: boolean }[]>([]);
+	// The server's latest answer on whether an artist has a Telegram, from the
+	// New Artist dialog. It covers artists the page already listed too: the
+	// dialog can reuse or link one and give them a Telegram from the registry.
+	let telegramKnown = $state<Record<number, boolean>>({});
 	const artistOptions = $derived(
-		[...artists, ...addedArtists.filter((a) => !artists.some((b) => b.id === a.id))].sort((a, b) =>
-			a.name.localeCompare(b.name, getLocale())
-		)
+		[...artists, ...addedArtists.filter((a) => !artists.some((b) => b.id === a.id))]
+			.map((a) => (a.id in telegramKnown ? { ...a, hasTelegram: telegramKnown[a.id] } : a))
+			.sort((a, b) => a.name.localeCompare(b.name, getLocale()))
 	);
 	let showNewArtist = $state(false);
 	// Set when the dialog opens from a link's "Add {handle}": it seeds the name
@@ -119,12 +123,16 @@
 
 	/** A lookup can name an artist added since this page loaded (in another tab,
 	 * say). Picking one the select has no option for would leave it blank and
-	 * block Save, so the artist joins the list first. */
-	function includeArtist(artist: { id: number; name: string }) {
-		if (!artistOptions.some((a) => a.id === artist.id)) addedArtists = [...addedArtists, { id: artist.id, name: artist.name }];
+	 * block Save, so the artist joins the list first. `hasTelegram` comes along
+	 * when the source knows it (a dialog-made artist), so a pasted t.me link
+	 * isn't offered to an artist who already has one. */
+	function includeArtist(artist: { id: number; name: string; hasTelegram?: boolean }) {
+		if (artist.hasTelegram !== undefined) telegramKnown[artist.id] = artist.hasTelegram;
+		if (!artistOptions.some((a) => a.id === artist.id))
+			addedArtists = [...addedArtists, { id: artist.id, name: artist.name, hasTelegram: artist.hasTelegram }];
 	}
 
-	async function onArtistCreated(artist: { id: number; name: string }) {
+	async function onArtistCreated(artist: { id: number; name: string; hasTelegram?: boolean }) {
 		if (artistSeed && lookup.kind === 'found' && lookup.handle === artistSeed.handle) {
 			lookup = { ...lookup, matches: [artist], nameMatches: [], added: true };
 		}
@@ -505,7 +513,7 @@
 		autoPicked = null;
 	}
 
-	function useArtist(artist: ArtistChoice) {
+	function useArtist(artist: ArtistChoice & { hasTelegram?: boolean }) {
 		includeArtist(artist);
 		values.artistId = String(artist.id);
 		ownerPicked();

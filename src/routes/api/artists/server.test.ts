@@ -224,3 +224,79 @@ describe('POST /api/artists — keep private', () => {
 		expect(row!.ledgerPrivate).toBe(false);
 	});
 });
+
+// The commission form offers "Add this Telegram" only to an artist with no
+// Telegram, so a dialog-made artist has to come back saying whether it has one.
+// The answer is the stored row's, not what the dialog sent (SONA-236).
+describe('POST /api/artists — hasTelegram', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	async function hasTelegram(res: Response) {
+		return ((await res.json()) as { hasTelegram?: unknown }).hasTelegram;
+	}
+
+	it('created: true when a valid Telegram was given', async () => {
+		const { platform } = makeDb();
+		vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+		const res = await post(platform, { name: 'Tg Artist', telegram: 'https://t.me/tgartist' });
+		expect(await hasTelegram(res)).toBe(true);
+	});
+
+	it('created: false when no Telegram was given', async () => {
+		const { platform } = makeDb();
+		vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+		const res = await post(platform, { name: 'No Tg' });
+		expect(await hasTelegram(res)).toBe(false);
+	});
+
+	it('created: false when the typed Telegram is dropped as invalid', async () => {
+		const { db, platform } = makeDb();
+		vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+		const res = await post(platform, { name: 'Bad Tg', telegram: 'not a handle!' });
+		expect(await hasTelegram(res)).toBe(false);
+		const row = await db.select().from(artists).where(eq(artists.name, 'Bad Tg')).get();
+		expect(row!.telegramUrl).toBeNull();
+	});
+
+	it('reused: true from the local Telegram when the registry sends none', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ name: 'Kept', globalId: GID, telegramUrl: 'https://t.me/keptlocal', createdAt: '2026-07-01' });
+		const res = await post(platform, { name: 'Kept', globalId: GID, registryVersion: 2 });
+		expect(await hasTelegram(res)).toBe(true);
+	});
+
+	it('reused: true when the registry copy brings a Telegram', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ name: 'Gains', globalId: GID, createdAt: '2026-07-01' });
+		const res = await post(platform, { name: 'Gains', globalId: GID, registryVersion: 2, telegram: 'https://t.me/gains' });
+		expect(await hasTelegram(res)).toBe(true);
+	});
+
+	it('reused: false when neither side has a Telegram', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ name: 'Bare', globalId: GID, createdAt: '2026-07-01' });
+		const res = await post(platform, { name: 'Bare', globalId: GID, registryVersion: 2 });
+		expect(await hasTelegram(res)).toBe(false);
+	});
+
+	it('linked: true from the local Telegram on the matched artist', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({
+			name: 'furfoggy',
+			twitterUrl: 'https://x.com/furfoggy',
+			telegramUrl: 'https://t.me/furfoggy',
+			createdAt: '2026-07-01'
+		});
+		const res = await post(platform, { name: 'FurFoggy', globalId: GID, registryVersion: 5, twitter: 'https://x.com/furfoggy' });
+		expect(((await res.clone().json()) as { status: string }).status).toBe('linked');
+		expect(await hasTelegram(res)).toBe(true);
+	});
+
+	it('linked: false when the matched artist has no Telegram', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ name: 'furfoggy', twitterUrl: 'https://x.com/furfoggy', createdAt: '2026-07-01' });
+		const res = await post(platform, { name: 'FurFoggy', globalId: GID, registryVersion: 5, twitter: 'https://x.com/furfoggy' });
+		expect(((await res.clone().json()) as { status: string }).status).toBe('linked');
+		expect(await hasTelegram(res)).toBe(false);
+	});
+});
