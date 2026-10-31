@@ -1844,6 +1844,44 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	await trash.hover();
 	await expect(tip).toBeVisible();
 
+	// In Japanese the same reason wraps to three lines. On the first row, in the
+	// table and in the phone list, the whole of it shows: nothing clips its top,
+	// and the phone layout doesn't scroll sideways.
+	/** Lines of text in the shown tooltip, and whether both its top corners
+	 * are the tooltip itself (a clipped corner hits whatever is beneath). */
+	const tipShows = (t: typeof tip) =>
+		t.evaluate((el) => {
+			const r = el.getBoundingClientRect();
+			const hits = [r.left + 2, r.right - 2].map((x) => el.contains(document.elementFromPoint(x, r.top + 2)));
+			return { lines: Math.round((el.clientHeight - 12) / parseFloat(getComputedStyle(el).lineHeight)), unclipped: hits.every(Boolean) };
+		});
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+	try {
+		await open(page, '/admin/artists?q=name_only_artist');
+		const jaRow = page.locator('.data-table tbody tr').first();
+		await expect(jaRow).toContainText('name_only_artist');
+		const jaTip = jaRow.getByRole('tooltip');
+		await jaRow.locator('.delete-wrap button').hover();
+		await expect(jaTip).toBeVisible();
+		expect(await tipShows(jaTip)).toEqual({ lines: 3, unclipped: true });
+
+		const desktop = page.viewportSize()!;
+		await page.setViewportSize({ width: 390, height: 844 });
+		try {
+			const item = page.locator('.mobile-artist-item').first();
+			await expect(item).toContainText('name_only_artist');
+			const mobileTip = item.getByRole('tooltip');
+			await item.locator('.delete-wrap button').hover();
+			await expect(mobileTip).toBeVisible();
+			expect(await tipShows(mobileTip)).toEqual({ lines: 3, unclipped: true });
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+		} finally {
+			await page.setViewportSize(desktop);
+		}
+	} finally {
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+	}
+
 	// An artist with nothing in the way still gets the confirm dialog.
 	await open(page, '/admin/artists?q=Twin One');
 	const freeTrash = page.getByRole('row', { name: /Twin One/ }).getByRole('button', { name: 'Delete artist' });

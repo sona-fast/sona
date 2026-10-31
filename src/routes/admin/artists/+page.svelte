@@ -553,10 +553,16 @@
 		padding-left: 40px;
 	}
 
+	/* No overflow: hidden here, so Delete's reason can rise above the first
+	   row. Cells have no fill; the only paint that reached the rounded corners
+	   was the last row's bottom border, which the wrapper's border repeats. */
 	.table-wrapper {
 		border: 1px solid var(--border);
 		border-radius: var(--radius-s);
-		overflow: hidden;
+	}
+
+	.data-table tbody tr:last-child td {
+		border-bottom: none;
 	}
 
 	.col-avatar {
