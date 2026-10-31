@@ -2292,3 +2292,30 @@ test('an artist made with Add New Artist is offered a pasted Telegram only when 
 	await paste(link, `https://t.me/${unheld}`);
 	await expect(card.getByRole('button', { name: `Add this Telegram to ${withoutTg}` })).toBeVisible();
 });
+
+// The dialog can reuse or link an artist the page already lists and give them
+// a Telegram from the registry. The server's answer replaces the page's older
+// one, so No Chat Artist (55) isn't offered a second Telegram. The creation is
+// stubbed: nothing is written.
+test('an artist the dialog reuses with a Telegram is not offered another', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await page.route('**/api/artists', (route) =>
+		route.request().method() === 'POST'
+			? route.fulfill({ status: 200, json: { id: 55, name: 'No Chat Artist', status: 'linked', hasTelegram: true } })
+			: route.fallback()
+	);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const dialog = page.getByRole('dialog');
+
+	await page.getByRole('button', { name: 'Add New Artist' }).click();
+	await dialog.getByLabel('Artist Name').fill('No Chat Artist');
+	await dialog.getByRole('button', { name: 'Create Artist' }).click();
+	await expect(dialog).toBeHidden();
+	await expect(artist).toHaveValue('55');
+	await paste(link, 'https://t.me/e2e_tg_unheld_reused');
+	await expect(card.getByText("e2e_tg_unheld_reused isn't in your artist list yet.")).toBeVisible();
+	await expect(card.getByRole('button', { name: /^Add this Telegram/ })).toHaveCount(0);
+});
