@@ -45,6 +45,23 @@ export function buildMigrationSql(migrations: Migration[]): string {
 	return parts.join('\n') + '\n';
 }
 
+/**
+ * Reads the migration names out of `wrangler d1 execute --json` output for a
+ * command whose LAST statement is `SELECT name FROM schema_migrations`. Wrangler
+ * returns one result set per statement, so earlier statements (the CREATE TABLE
+ * IF NOT EXISTS that makes the SELECT safe on a fresh database) are skipped.
+ * Throws on output it can't read: guessing "nothing applied" would re-run every
+ * migration against a populated database and fail on its first CREATE TABLE.
+ */
+export function parseAppliedMigrations(json: string): string[] {
+	const sets = JSON.parse(json) as { results?: { name?: unknown }[] }[];
+	const last = Array.isArray(sets) ? sets[sets.length - 1] : undefined;
+	if (!last || !Array.isArray(last.results)) {
+		throw new Error('unexpected `wrangler d1 execute --json` output for schema_migrations');
+	}
+	return last.results.map((r) => r.name).filter((n): n is string => typeof n === 'string');
+}
+
 export interface SeedSettingsInput {
 	/** Active image store: 'r2' | 'uploadthing'. */
 	provider: string;

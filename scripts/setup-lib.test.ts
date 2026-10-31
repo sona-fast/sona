@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
 	buildMigrationSql,
+	parseAppliedMigrations,
 	buildSeedSql,
 	sanitizeProjectName,
 	isValidResourceName,
@@ -94,6 +95,27 @@ describe('buildMigrationSql', () => {
 	it('escapes single quotes in a basename', () => {
 		const sql = buildMigrationSql([{ name: "0000_o'brien.sql", sql: 'SELECT 1;' }]);
 		expect(sql).toContain("VALUES ('0000_o''brien.sql'");
+	});
+});
+
+describe('parseAppliedMigrations', () => {
+	it('reads the names from the last result set, skipping the CREATE before it', () => {
+		const json = JSON.stringify([
+			{ results: [], success: true },
+			{ results: [{ name: '0000_a.sql' }, { name: '0001_b.sql' }], success: true }
+		]);
+		expect(parseAppliedMigrations(json)).toEqual(['0000_a.sql', '0001_b.sql']);
+	});
+
+	it('returns [] for a fresh database with an empty schema_migrations', () => {
+		const json = JSON.stringify([{ results: [] }, { results: [] }]);
+		expect(parseAppliedMigrations(json)).toEqual([]);
+	});
+
+	it('throws on output it cannot read instead of assuming nothing is applied', () => {
+		expect(() => parseAppliedMigrations('✘ [ERROR] not json')).toThrow();
+		expect(() => parseAppliedMigrations('[]')).toThrow();
+		expect(() => parseAppliedMigrations('[{"error":"x"}]')).toThrow();
 	});
 });
 
@@ -1886,8 +1908,24 @@ describe('setup.ts ↔ no operator answer reaches a shell', () => {
 });
 
 describe('setup.ts ↔ SQL never rides a command line', () => {
-	it('never hands wrangler SQL with --command', () => {
-		expect(setupCode).not.toContain('--command');
+	// The one --command is the applied-migrations read: D1 returns no rows for a
+	// --file execute, so a SELECT has to ride --command. It must stay a fixed
+	// literal — nothing interpolated — so no operator answer can reach it.
+	// The literal must be the whole argv element — followed by `,` or `]` —
+	// so `'SELECT ' + value` (a literal with a variable glued on) doesn't count.
+	const FIXED_COMMAND_ARG = /'--command',\s*'[^'`$]*'\s*[,\]]/g;
+
+	it('hands wrangler --command only a fixed SQL literal, never an interpolated one', () => {
+		const uses = setupCode.match(/'--command'/g) ?? [];
+		const literals = setupCode.match(FIXED_COMMAND_ARG) ?? [];
+		expect(uses).toHaveLength(1);
+		expect(literals).toHaveLength(uses.length);
+	});
+
+	it('rejects a --command literal with a variable concatenated onto it', () => {
+		expect("'--command', 'SELECT 1;'\n\t\t\t\t],".match(FIXED_COMMAND_ARG)).toHaveLength(1);
+		expect("'--command', 'SELECT ' + value,".match(FIXED_COMMAND_ARG)).toBeNull();
+		expect("'--command', `SELECT ${value}`,".match(FIXED_COMMAND_ARG)).toBeNull();
 	});
 
 	it('passes the migration and seed SQL as files, written through the private helper', () => {
