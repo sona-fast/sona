@@ -1807,152 +1807,158 @@ test('an artist added in another tab can be picked by a link', async ({ page, co
 // (50 in fixtures/commissions.sql) has no works, so the entry is the only blocker.
 test('an artist with a ledger entry gets a Delete that says why it will not run', async ({ page, browser }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
-	await createEntry(page, 'E2E blocks delete', 'name_only_artist');
-
-	await open(page, '/admin/artists?q=name_only_artist');
-	const row = page.getByRole('row', { name: /name_only_artist/ });
-	await expect(row.locator('.works-label')).toHaveText('No works yet');
-	const trash = row.getByRole('button', { name: 'Delete artist' });
-	const reason = "Can't delete while this artist has 1 commission ledger entry. Move or remove those first.";
-	await expect(trash).toHaveAttribute('aria-disabled', 'true');
-	await expect(trash).toHaveAccessibleDescription(reason);
-
-	// Keyboard focus shows the reason beside the button.
-	const tip = row.getByRole('tooltip');
-	await expect(tip).toBeHidden();
-	await trash.focus();
-	await page.keyboard.press('Shift+Tab');
-	await page.keyboard.press('Tab');
-	await expect(trash).toBeFocused();
-	await expect(tip).toBeVisible();
-	await expect(tip).toHaveText(reason);
-	await settledShot(page, testInfo.outputPath('artist-delete-blocked.png'));
-	// Escape hides it and leaves focus where it was; focusing again shows it.
-	await page.keyboard.press('Escape');
-	await expect(tip).toBeHidden();
-	await expect(trash).toBeFocused();
-	await page.keyboard.press('Shift+Tab');
-	await page.keyboard.press('Tab');
-	await expect(tip).toBeVisible();
-
-	// Activating it says the reason instead of asking to delete.
-	await page.keyboard.press('Enter');
-	await expect(page.getByRole('status').filter({ hasText: reason })).toBeVisible();
-	await expect(page.getByRole('dialog')).toHaveCount(0);
-	// A pointer click too. Playwright treats aria-disabled as not enabled, so force it.
-	await trash.click({ force: true });
-	await expect(page.getByRole('dialog')).toHaveCount(0);
-
-	// On hover, the pointer can move from the button onto the reason and it
-	// stays. It sits clear of Edit, and Escape hides it while the pointer is
-	// still there. On the first row it may rise above the table; the Japanese
-	// check below proves nothing clips it there.
-	await trash.evaluate((el) => (el as HTMLElement).blur());
-	await page.mouse.move(0, 0);
-	await expect(tip).toBeHidden();
-	await trash.hover();
-	await expect(tip).toBeVisible();
-	const tipBox = (await tip.boundingBox())!;
-	await page.mouse.move(tipBox.x + tipBox.width - 4, tipBox.y + tipBox.height / 2, { steps: 5 });
-	await expect(tip).toBeVisible();
-	const editBox = (await row.getByRole('button', { name: 'Edit artist' }).boundingBox())!;
-	const overlaps =
-		tipBox.x < editBox.x + editBox.width &&
-		editBox.x < tipBox.x + tipBox.width &&
-		tipBox.y < editBox.y + editBox.height &&
-		editBox.y < tipBox.y + tipBox.height;
-	expect(overlaps, 'the reason covers Edit').toBe(false);
-	await page.keyboard.press('Escape');
-	await expect(tip).toBeHidden();
-	// Coming back with the pointer shows it again.
-	await page.mouse.move(0, 0);
-	await trash.hover();
-	await expect(tip).toBeVisible();
-
-	// On a phone, the list's Delete is blocked the same way. A tap says why in
-	// a toast and opens no dialog, and the tap's hover doesn't show the reason
-	// on top of the toast.
-	const phone = await browser.newContext({
-		baseURL: testInfo.project.use.baseURL,
-		storageState: await page.context().storageState(),
-		viewport: { width: 390, height: 844 },
-		hasTouch: true,
-		isMobile: true
-	});
 	try {
-		const tab = await phone.newPage();
-		await tab.goto('/admin/artists?q=name_only_artist');
-		await waitForHydration(tab);
-		const item = tab.locator('.mobile-artist-item', { hasText: 'name_only_artist' });
-		const mobileTrash = item.getByRole('button', { name: 'Delete artist' });
-		await expect(mobileTrash).toHaveAttribute('aria-disabled', 'true');
-		await expect(mobileTrash).toHaveAccessibleDescription(reason);
-		await mobileTrash.tap({ force: true });
-		await expect(tab.getByRole('status').filter({ hasText: reason })).toBeVisible();
-		await expect(tab.getByRole('dialog')).toHaveCount(0);
-		await expect(item.getByRole('tooltip')).toBeHidden();
-		await settledShot(tab, testInfo.outputPath('artist-delete-blocked-phone.png'));
-	} finally {
-		await phone.close();
-	}
+		await createEntry(page, 'E2E blocks delete', 'name_only_artist');
 
-	// In Japanese the same reason wraps to three lines or more. On the first
-	// row, in the table and in the phone list, the whole of it shows: nothing
-	// clips its top, and the phone layout doesn't scroll sideways.
-	/** Lines of text in the shown tooltip, and whether both its top corners
-	 * are the tooltip itself (a clipped corner hits whatever is beneath). */
-	const tipShows = (t: typeof tip) =>
-		t.evaluate((el) => {
-			const r = el.getBoundingClientRect();
-			const hits = [r.left + 2, r.right - 2].map((x) => el.contains(document.elementFromPoint(x, r.top + 2)));
-			return { lines: Math.round((el.clientHeight - 12) / parseFloat(getComputedStyle(el).lineHeight)), unclipped: hits.every(Boolean) };
-		});
-	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
-	try {
 		await open(page, '/admin/artists?q=name_only_artist');
-		const jaRow = page.locator('.data-table tbody tr').first();
-		await expect(jaRow).toContainText('name_only_artist');
-		const jaTip = jaRow.getByRole('tooltip');
-		await jaRow.locator('.delete-wrap button').hover();
-		await expect(jaTip).toBeVisible();
-		const jaShown = await tipShows(jaTip);
-		expect(jaShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
-		expect(jaShown.unclipped, 'the reason is clipped').toBe(true);
+		const row = page.getByRole('row', { name: /name_only_artist/ });
+		await expect(row.locator('.works-label')).toHaveText('No works yet');
+		const trash = row.getByRole('button', { name: 'Delete artist' });
+		const reason = "Can't delete while this artist has 1 commission ledger entry. Move or remove those first.";
+		await expect(trash).toHaveAttribute('aria-disabled', 'true');
+		await expect(trash).toHaveAccessibleDescription(reason);
 
-		const desktop = page.viewportSize()!;
-		await page.setViewportSize({ width: 390, height: 844 });
+		// Keyboard focus shows the reason beside the button.
+		const tip = row.getByRole('tooltip');
+		await expect(tip).toBeHidden();
+		await trash.focus();
+		await page.keyboard.press('Shift+Tab');
+		await page.keyboard.press('Tab');
+		await expect(trash).toBeFocused();
+		await expect(tip).toBeVisible();
+		await expect(tip).toHaveText(reason);
+		await settledShot(page, testInfo.outputPath('artist-delete-blocked.png'));
+		// Escape hides it and leaves focus where it was; focusing again shows it.
+		await page.keyboard.press('Escape');
+		await expect(tip).toBeHidden();
+		await expect(trash).toBeFocused();
+		await page.keyboard.press('Shift+Tab');
+		await page.keyboard.press('Tab');
+		await expect(tip).toBeVisible();
+
+		// Activating it says the reason instead of asking to delete.
+		await page.keyboard.press('Enter');
+		await expect(page.getByRole('status').filter({ hasText: reason })).toBeVisible();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		// A pointer click too. Playwright treats aria-disabled as not enabled, so force it.
+		await trash.click({ force: true });
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+
+		// On hover, the pointer can move from the button onto the reason and it
+		// stays. It sits clear of Edit, and Escape hides it while the pointer is
+		// still there. On the first row it may rise above the table; the Japanese
+		// check below proves nothing clips it there.
+		await trash.evaluate((el) => (el as HTMLElement).blur());
+		await page.mouse.move(0, 0);
+		await expect(tip).toBeHidden();
+		await trash.hover();
+		await expect(tip).toBeVisible();
+		const tipBox = (await tip.boundingBox())!;
+		await page.mouse.move(tipBox.x + tipBox.width - 4, tipBox.y + tipBox.height / 2, { steps: 5 });
+		await expect(tip).toBeVisible();
+		const editBox = (await row.getByRole('button', { name: 'Edit artist' }).boundingBox())!;
+		const overlaps =
+			tipBox.x < editBox.x + editBox.width &&
+			editBox.x < tipBox.x + tipBox.width &&
+			tipBox.y < editBox.y + editBox.height &&
+			editBox.y < tipBox.y + tipBox.height;
+		expect(overlaps, 'the reason covers Edit').toBe(false);
+		await page.keyboard.press('Escape');
+		await expect(tip).toBeHidden();
+		// Coming back with the pointer shows it again.
+		await page.mouse.move(0, 0);
+		await trash.hover();
+		await expect(tip).toBeVisible();
+
+		// On a phone, the list's Delete is blocked the same way. A tap says why in
+		// a toast and opens no dialog, and the tap's hover doesn't show the reason
+		// on top of the toast.
+		const phone = await browser.newContext({
+			baseURL: testInfo.project.use.baseURL,
+			storageState: await page.context().storageState(),
+			viewport: { width: 390, height: 844 },
+			hasTouch: true,
+			isMobile: true
+		});
 		try {
-			const item = page.locator('.mobile-artist-item').first();
-			await expect(item).toContainText('name_only_artist');
-			const mobileTip = item.getByRole('tooltip');
-			await item.locator('.delete-wrap button').hover();
-			await expect(mobileTip).toBeVisible();
-			const mobileShown = await tipShows(mobileTip);
-			expect(mobileShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
-			expect(mobileShown.unclipped, 'the reason is clipped').toBe(true);
-			expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+			const tab = await phone.newPage();
+			await tab.goto('/admin/artists?q=name_only_artist');
+			await waitForHydration(tab);
+			const item = tab.locator('.mobile-artist-item', { hasText: 'name_only_artist' });
+			const mobileTrash = item.getByRole('button', { name: 'Delete artist' });
+			await expect(mobileTrash).toHaveAttribute('aria-disabled', 'true');
+			await expect(mobileTrash).toHaveAccessibleDescription(reason);
+			await mobileTrash.tap({ force: true });
+			await expect(tab.getByRole('status').filter({ hasText: reason })).toBeVisible();
+			await expect(tab.getByRole('dialog')).toHaveCount(0);
+			await expect(item.getByRole('tooltip')).toBeHidden();
+			await settledShot(tab, testInfo.outputPath('artist-delete-blocked-phone.png'));
 		} finally {
-			await page.setViewportSize(desktop);
+			await phone.close();
 		}
+
+		// In Japanese the same reason wraps to three lines or more. On the first
+		// row, in the table and in the phone list, the whole of it shows: nothing
+		// clips its top, and the phone layout doesn't scroll sideways.
+		/** Lines of text in the shown tooltip, and whether both its top corners
+		 * are the tooltip itself (a clipped corner hits whatever is beneath). */
+		const tipShows = (t: typeof tip) =>
+			t.evaluate((el) => {
+				const r = el.getBoundingClientRect();
+				const hits = [r.left + 2, r.right - 2].map((x) => el.contains(document.elementFromPoint(x, r.top + 2)));
+				return { lines: Math.round((el.clientHeight - 12) / parseFloat(getComputedStyle(el).lineHeight)), unclipped: hits.every(Boolean) };
+			});
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+		try {
+			await open(page, '/admin/artists?q=name_only_artist');
+			const jaRow = page.locator('.data-table tbody tr').first();
+			await expect(jaRow).toContainText('name_only_artist');
+			const jaTip = jaRow.getByRole('tooltip');
+			await jaRow.locator('.delete-wrap button').hover();
+			await expect(jaTip).toBeVisible();
+			const jaShown = await tipShows(jaTip);
+			expect(jaShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
+			expect(jaShown.unclipped, 'the reason is clipped').toBe(true);
+
+			const desktop = page.viewportSize()!;
+			await page.setViewportSize({ width: 390, height: 844 });
+			try {
+				const item = page.locator('.mobile-artist-item').first();
+				await expect(item).toContainText('name_only_artist');
+				const mobileTip = item.getByRole('tooltip');
+				await item.locator('.delete-wrap button').hover();
+				await expect(mobileTip).toBeVisible();
+				const mobileShown = await tipShows(mobileTip);
+				expect(mobileShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
+				expect(mobileShown.unclipped, 'the reason is clipped').toBe(true);
+				expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+			} finally {
+				await page.setViewportSize(desktop);
+			}
+		} finally {
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+		}
+
+		// An artist with nothing in the way still gets the confirm dialog.
+		await open(page, '/admin/artists?q=Twin One');
+		const freeTrash = page.getByRole('row', { name: /Twin One/ }).getByRole('button', { name: 'Delete artist' });
+		await expect(freeTrash).not.toHaveAttribute('aria-disabled', 'true');
+		await freeTrash.click();
+		const confirm = page.getByRole('dialog');
+		await expect(confirm).toContainText('Delete artist "Twin One"?');
+		await confirm.getByRole('button', { name: 'Cancel' }).click();
+		await expect(confirm).toHaveCount(0);
 	} finally {
-		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+		// Take this test's entries back out, even after a failure, so a retry
+		// starts with none. Earlier tests leave entries of their own.
+		await open(page, '/admin/commissions');
+		const leftover = page.getByRole('button', { name: 'Delete E2E blocks delete' });
+		for (let n = await leftover.count(); n > 0; n--) {
+			await leftover.first().click();
+			await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+			await expect(leftover).toHaveCount(n - 1);
+		}
 	}
-
-	// An artist with nothing in the way still gets the confirm dialog.
-	await open(page, '/admin/artists?q=Twin One');
-	const freeTrash = page.getByRole('row', { name: /Twin One/ }).getByRole('button', { name: 'Delete artist' });
-	await expect(freeTrash).not.toHaveAttribute('aria-disabled', 'true');
-	await freeTrash.click();
-	const confirm = page.getByRole('dialog');
-	await expect(confirm).toContainText('Delete artist "Twin One"?');
-	await confirm.getByRole('button', { name: 'Cancel' }).click();
-	await expect(confirm).toHaveCount(0);
-
-	// Take this test's entry back out. Earlier tests leave entries of their own.
-	await open(page, '/admin/commissions');
-	await page.getByRole('button', { name: 'Delete E2E blocks delete' }).click();
-	await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
-	await expect(page.getByRole('button', { name: 'Delete E2E blocks delete' })).toHaveCount(0);
 });
 
 /** Stubs POST /api/admin/artist-telegram, so no artist changes, and records the
