@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowLeft, Info, AlertTriangle } from 'lucide-svelte';
+	import { ArrowLeft, Info, AlertTriangle } from '@lucide/svelte';
 	import { page as pageState } from '$app/state';
 	import { MAX_VR_MODEL_BYTES, formatBytes } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';

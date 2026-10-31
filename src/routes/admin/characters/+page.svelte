@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Search, Plus, Pencil, Trash2, X, Link as LinkIcon, Loader2 } from 'lucide-svelte';
+	import { Search, Plus, Pencil, Trash2, X, Link as LinkIcon, Loader2 } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';

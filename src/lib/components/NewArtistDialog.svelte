@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
-	import { X, Loader2 } from 'lucide-svelte';
+	import { X, Loader2 } from '@lucide/svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { focusTrap } from '$lib/focus-trap';
 	import * as m from '$lib/paraglide/messages';

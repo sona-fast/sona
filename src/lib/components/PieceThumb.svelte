@@ -2,7 +2,7 @@
 	// A gallery piece's thumbnail in the ledger: the piece's thumbnail, or its
 	// full image when it has none, through the CDN like the admin pickers. The
 	// link beside it names the piece, so the image itself is decorative.
-	import { Image as ImageIcon } from 'lucide-svelte';
+	import { Image as ImageIcon } from '@lucide/svelte';
 	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib/img';
 
 	let { src }: { src: string | null } = $props();

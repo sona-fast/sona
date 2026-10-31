@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Box, Plus, Pencil, ExternalLink } from 'lucide-svelte';
+	import { Box, Plus, Pencil, ExternalLink } from '@lucide/svelte';
 	import {
 		externalSiteName,
 		formatBytes,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, Pipette, X } from 'lucide-svelte';
+	import { Check, Pipette, X } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { extractPalette } from '$lib/palette-extract';
 	import { MAX_SONA_COLORS, paletteHas } from '$lib/palette-merge';

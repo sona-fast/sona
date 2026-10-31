@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { Download, ChevronUp } from 'lucide-svelte';
+	import { Download, ChevronUp } from '@lucide/svelte';
 
 	interface DownloadMenuOption {
 		/** Visible row label ("WebP", "PNG") — i18n'd by the caller. */

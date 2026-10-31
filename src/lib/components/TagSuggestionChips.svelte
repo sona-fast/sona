@@ -7,7 +7,7 @@
 	// check icon marks a tag that will be added, and the plus on a left-out tag
 	// says it can come back. Nothing here writes anywhere — the parent owns the
 	// state and decides what a toggle means.
-	import { Check, Plus } from 'lucide-svelte';
+	import { Check, Plus } from '@lucide/svelte';
 
 	let {
 		tags,

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ArrowRight, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-svelte';
+	import { ArrowRight, CheckCircle2, AlertTriangle, Loader2 } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();

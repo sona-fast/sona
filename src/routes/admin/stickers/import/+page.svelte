@@ -4,7 +4,7 @@
 	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
 	import { tick, untrack } from 'svelte';
 	import { toast } from '$lib/toast.svelte';
-	import { Smile, Loader2, CheckCircle2, AlertTriangle, Film, ArrowLeft, ArrowRight, Download, RefreshCw, Check, Plus, UserPlus, Info, Shield, Palette } from 'lucide-svelte';
+	import { Smile, Loader2, CheckCircle2, AlertTriangle, Film, ArrowLeft, ArrowRight, Download, RefreshCw, Check, Plus, UserPlus, Info, Shield, Palette } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import * as m from '$lib/paraglide/messages';

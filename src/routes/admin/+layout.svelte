@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
-	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Camera, Sticker, Box, CalendarDays, Activity, ClipboardList, X } from 'lucide-svelte';
+	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Camera, Sticker, Box, CalendarDays, Activity, ClipboardList, X } from '@lucide/svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';

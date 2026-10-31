@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Camera, ArrowRight, ShieldCheck } from 'lucide-svelte';
+	import { Camera, ArrowRight, ShieldCheck } from '@lucide/svelte';
 	import type { FursuitPhoto } from '$lib/furtrack/types';
 	import * as m from '$lib/paraglide/messages';
 	import { licenseTerms } from '$lib/furtrack/license-terms';

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
 	import { page as pageState } from '$app/state';
-	import { Box, ExternalLink } from 'lucide-svelte';
+	import { Box, ExternalLink } from '@lucide/svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage, rawFallback } from '$lib';
 	import { platformLabel } from '$lib/vr';

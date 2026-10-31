@@ -12,7 +12,7 @@
 	// its lookup result: a capsule sitting next to a button reads as a second
 	// button.
 	import { tick } from 'svelte';
-	import { TriangleAlert } from 'lucide-svelte';
+	import { TriangleAlert } from '@lucide/svelte';
 	import { ratingLabel, type EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 

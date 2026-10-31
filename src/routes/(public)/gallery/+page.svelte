@@ -4,7 +4,7 @@
 	import { tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
-	import { Search, ChevronDown, LayoutGrid, List, ImageOff, ArrowRight } from 'lucide-svelte';
+	import { Search, ChevronDown, LayoutGrid, List, ImageOff, ArrowRight } from '@lucide/svelte';
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import FursuitPhotoCard from '$lib/components/FursuitPhotoCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';

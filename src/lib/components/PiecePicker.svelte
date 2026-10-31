@@ -3,7 +3,7 @@
 	// on the entry artist's pieces, newest first, and can search titles or every
 	// piece. Picking only chooses: the page that opened it does the link.
 	import { onMount } from 'svelte';
-	import { Link2, Loader2, Search } from 'lucide-svelte';
+	import { Link2, Loader2, Search } from '@lucide/svelte';
 	import { focusTrap } from '$lib/focus-trap';
 	import PieceChoices from './PieceChoices.svelte';
 	import type { PickerList, PickerPiece, PickerScope } from '$lib/server/commission-link';

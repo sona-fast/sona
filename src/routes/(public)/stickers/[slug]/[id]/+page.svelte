@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
 	import { page as pageState } from '$app/state';
-	import { ArrowLeft, ChevronRight } from 'lucide-svelte';
+	import { ArrowLeft, ChevronRight } from '@lucide/svelte';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import DownloadMenu from '$lib/components/DownloadMenu.svelte';
 	import { isRasterFormat, stickerDownloadOptions } from '$lib/sticker-download';

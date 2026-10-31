@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, type Snippet } from 'svelte';
-	import { Check, ChevronDown } from 'lucide-svelte';
+	import { Check, ChevronDown } from '@lucide/svelte';
 	import { CURRENCY_OTHER, currencyOptions, currencySymbol, findCurrencies, knownCurrencies } from '$lib/currencies';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
