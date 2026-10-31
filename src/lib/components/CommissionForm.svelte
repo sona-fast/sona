@@ -119,12 +119,15 @@
 
 	/** A lookup can name an artist added since this page loaded (in another tab,
 	 * say). Picking one the select has no option for would leave it blank and
-	 * block Save, so the artist joins the list first. */
-	function includeArtist(artist: { id: number; name: string }) {
-		if (!artistOptions.some((a) => a.id === artist.id)) addedArtists = [...addedArtists, { id: artist.id, name: artist.name }];
+	 * block Save, so the artist joins the list first. `hasTelegram` comes along
+	 * when the source knows it (a dialog-made artist), so a pasted t.me link
+	 * isn't offered to an artist who already has one. */
+	function includeArtist(artist: { id: number; name: string; hasTelegram?: boolean }) {
+		if (!artistOptions.some((a) => a.id === artist.id))
+			addedArtists = [...addedArtists, { id: artist.id, name: artist.name, hasTelegram: artist.hasTelegram }];
 	}
 
-	async function onArtistCreated(artist: { id: number; name: string }) {
+	async function onArtistCreated(artist: { id: number; name: string; hasTelegram?: boolean }) {
 		if (artistSeed && lookup.kind === 'found' && lookup.handle === artistSeed.handle) {
 			lookup = { ...lookup, matches: [artist], nameMatches: [], added: true };
 		}
@@ -505,7 +508,7 @@
 		autoPicked = null;
 	}
 
-	function useArtist(artist: ArtistChoice) {
+	function useArtist(artist: ArtistChoice & { hasTelegram?: boolean }) {
 		includeArtist(artist);
 		values.artistId = String(artist.id);
 		ownerPicked();
