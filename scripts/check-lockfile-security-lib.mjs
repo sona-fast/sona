@@ -16,8 +16,10 @@
 export const FLOORS = {
 	cookie: '0.7.0',
 	devalue: '5.9.3',
+	effect: '3.20.0',
 	esbuild: '0.25.0',
 	nanoid: '3.3.18',
+	sharp: '0.35.5',
 	undici: '7.30.1'
 };
 

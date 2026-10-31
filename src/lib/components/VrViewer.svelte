@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import type { Snippet } from 'svelte';
-	import { AlertTriangle, Box, Maximize, Minimize, X } from 'lucide-svelte';
+	import { AlertTriangle, Box, Maximize, Minimize, X } from '@lucide/svelte';
 	import { VR_CAMERA_FAR, VR_FRAME_DISTANCE_CAP, formatBytes, frameHumanoid } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 

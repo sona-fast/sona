@@ -4,7 +4,7 @@
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { CircleCheck, ClipboardList, Eye, ImagePlus, Link2, Loader2, Pencil, Plus, Trash2 } from 'lucide-svelte';
+	import { CircleCheck, ClipboardList, Eye, ImagePlus, Link2, Loader2, Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';

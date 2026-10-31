@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { page } from '$app/state';
-	import { ArrowLeft } from 'lucide-svelte';
+	import { ArrowLeft } from '@lucide/svelte';
 	import CommissionForm from '$lib/components/CommissionForm.svelte';
 	import CommissionIntro from '$lib/components/CommissionIntro.svelte';
 	import * as m from '$lib/paraglide/messages';

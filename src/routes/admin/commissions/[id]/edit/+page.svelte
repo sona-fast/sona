@@ -5,7 +5,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ArrowLeft, Loader2, Trash2 } from 'lucide-svelte';
+	import { ArrowLeft, Loader2, Trash2 } from '@lucide/svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import CommissionForm from '$lib/components/CommissionForm.svelte';
 	import CommissionIntro from '$lib/components/CommissionIntro.svelte';

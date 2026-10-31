@@ -4,7 +4,7 @@
 	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
 	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { flip } from 'svelte/animate';
-	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
+	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from '@lucide/svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';

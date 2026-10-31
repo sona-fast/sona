@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SquareX, ShieldCheck, Info, OctagonAlert, X } from 'lucide-svelte';
+	import { SquareX, ShieldCheck, Info, OctagonAlert, X } from '@lucide/svelte';
 	import { fly } from 'svelte/transition';
 	import { getToasts, dismissToast, type ToastType } from '$lib/toast.svelte';
 

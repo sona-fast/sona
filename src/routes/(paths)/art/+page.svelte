@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { page } from '$app/state';
-	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight, Star } from 'lucide-svelte';
+	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight, Star } from '@lucide/svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage, rawFallback } from '$lib';

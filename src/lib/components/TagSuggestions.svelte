@@ -12,7 +12,7 @@
 	// direction: a slow, rate-limited, or dead entail.dev leaves the field and
 	// the form untouched.
 	import { tick, untrack } from 'svelte';
-	import { Check, LoaderCircle, LogIn, RefreshCw, Tag } from 'lucide-svelte';
+	import { Check, LoaderCircle, LogIn, RefreshCw, Tag } from '@lucide/svelte';
 	import TagSuggestionChips from './TagSuggestionChips.svelte';
 	import { classifySourceUrl } from '$lib/tags';
 	import {

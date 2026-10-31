@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Hand } from 'lucide-svelte';
+	import { Hand } from '@lucide/svelte';
 	import { formatDate } from '$lib';
 	import LinkRow from '$lib/components/LinkRow.svelte';
 	import Meta from '$lib/components/Meta.svelte';

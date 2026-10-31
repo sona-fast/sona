@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
-	import { Box, Download, ExternalLink, Play } from 'lucide-svelte';
+	import { Box, Download, ExternalLink, Play } from '@lucide/svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import VrViewer from '$lib/components/VrViewer.svelte';

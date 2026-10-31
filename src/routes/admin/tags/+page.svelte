@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Search, Plus, Pencil, Trash2, Loader2 } from 'lucide-svelte';
+	import { Search, Plus, Pencil, Trash2, Loader2 } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';

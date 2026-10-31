@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Copy, Check } from 'lucide-svelte';
+	import { Copy, Check } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {

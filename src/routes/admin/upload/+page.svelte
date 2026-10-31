@@ -3,7 +3,7 @@
 	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
 	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { tick } from 'svelte';
-	import { CircleAlert, ClipboardList, CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
+	import { CircleAlert, ClipboardList, CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from '@lucide/svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
 	import TagRatingNote from '$lib/components/TagRatingNote.svelte';

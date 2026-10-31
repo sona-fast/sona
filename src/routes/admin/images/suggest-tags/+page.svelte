@@ -13,7 +13,7 @@
 	import { applyAction, enhance } from '$app/forms';
 	import { afterNavigate } from '$app/navigation';
 	import { tick } from 'svelte';
-	import { Check, ImageOff, LoaderCircle, LogIn, Pencil, RefreshCw, Tag } from 'lucide-svelte';
+	import { Check, ImageOff, LoaderCircle, LogIn, Pencil, RefreshCw, Tag } from '@lucide/svelte';
 	import TagSuggestionChips from '$lib/components/TagSuggestionChips.svelte';
 	import { cdnImage, THUMB_WIDTH } from '$lib/img';
 	import { sanitizeTag } from '$lib/tags';

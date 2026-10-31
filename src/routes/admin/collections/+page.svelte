@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Plus, Pencil, Trash2, X, Loader2 } from 'lucide-svelte';
+	import { Plus, Pencil, Trash2, X, Loader2 } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib';
 	import * as m from '$lib/paraglide/messages';

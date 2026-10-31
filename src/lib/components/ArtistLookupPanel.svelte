@@ -5,7 +5,7 @@
 	// artist change happens in the page, so the two pages keep their own idea of
 	// what "empty" means and what a click may overwrite.
 	import { tick } from 'svelte';
-	import { Check, Globe, Info, Loader2 } from 'lucide-svelte';
+	import { Check, Globe, Info, Loader2 } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';

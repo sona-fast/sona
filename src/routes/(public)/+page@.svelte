@@ -4,7 +4,7 @@
      MobileNav) explicitly, mirroring that layout's composition. -->
 <script lang="ts">
 	import { page } from '$app/state';
-	import { User, Palette, Hand, Camera, ChevronRight } from 'lucide-svelte';
+	import { User, Palette, Hand, Camera, ChevronRight } from '@lucide/svelte';
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import MosaicBanner from '$lib/components/MosaicBanner.svelte';
 	import Meta from '$lib/components/Meta.svelte';

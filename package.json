@@ -54,15 +54,15 @@
 		"vitest": "^4.1.7"
 	},
 	"dependencies": {
+		"@lucide/svelte": "^1.65.0",
 		"@pixiv/three-vrm": "^3.5.5",
 		"@sveltejs/adapter-cloudflare": "^7.2.8",
 		"@uploadthing/shared": "^7.1.10",
 		"@uploadthing/svelte": "^7.3.3",
 		"drizzle-orm": "^0.45.2",
-		"effect": "^3.17.7",
+		"effect": "^3.22.4",
 		"emojilib": "^4.0.3",
 		"lottie-web": "^5.13.0",
-		"lucide-svelte": "^0.468.0",
 		"qrcode-generator": "^2.0.4",
 		"three": "^0.185.1",
 		"uploadthing": "^7.7.4",
@@ -73,6 +73,15 @@
 		"cookie@<0.7.0": "^0.7.2",
 		"esbuild@<0.25.0": "^0.25.0",
 		"nanoid@<3.3.18": "^3.3.18",
-		"devalue@<5.9.3": "^5.9.3"
+		"devalue@<5.9.3": "^5.9.3",
+		"sharp@<0.35.5": "^0.35.5",
+		"effect@<3.20.0": "^3.22.4"
+	},
+	"allowScripts": {
+		"better-sqlite3@12.11.1": true,
+		"esbuild@0.25.12": true,
+		"esbuild@0.28.2": true,
+		"workerd@1.20260730.1": true,
+		"workerd@1.20261023.1": true
 	}
 }

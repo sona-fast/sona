@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
-	import { ExternalLink, Share2, ShieldCheck } from 'lucide-svelte';
+	import { ExternalLink, Share2, ShieldCheck } from '@lucide/svelte';
 	import FurTrackIcon from '$lib/components/icons/FurTrackIcon.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate } from '$lib';

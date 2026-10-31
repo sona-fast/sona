@@ -6,7 +6,7 @@
 	// here — this is guidance only.
 	import SetupDialog from './SetupDialog.svelte';
 	import CopyCommand from './CopyCommand.svelte';
-	import { Cloud, Check, AlertTriangle } from 'lucide-svelte';
+	import { Cloud, Check, AlertTriangle } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { onclose }: { onclose: () => void } = $props();

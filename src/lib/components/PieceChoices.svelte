@@ -2,7 +2,7 @@
 	// Link a piece (SONA-236): the picker's pieces as one radio group, so arrow
 	// keys move between them and a taken piece can't be chosen. Shared by the
 	// dialog and the page's own picker for a browser without the page's script.
-	import { Image as ImageIcon } from 'lucide-svelte';
+	import { Image as ImageIcon } from '@lucide/svelte';
 	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib/img';
 	import type { PickerList } from '$lib/server/commission-link';
 	import * as m from '$lib/paraglide/messages';

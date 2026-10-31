@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Camera, Mail, Globe, Info, CircleCheck } from 'lucide-svelte';
+	import { Camera, Mail, Globe, Info, CircleCheck } from '@lucide/svelte';
 	import LinkRow from '$lib/components/LinkRow.svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Meta from '$lib/components/Meta.svelte';

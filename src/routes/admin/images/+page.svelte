@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2, Layers, Tag } from 'lucide-svelte';
+	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2, Layers, Tag } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
 	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';

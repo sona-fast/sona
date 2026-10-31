@@ -12,7 +12,7 @@
 	import { BACKUP_FILENAME_BASE, R2_FREE_TIER_BYTES } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
 	import { MAX_SONA_COLORS, mergeSuggestions, paletteHas } from '$lib/palette-merge';
-	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X, Pipette } from 'lucide-svelte';
+	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X, Pipette } from '@lucide/svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
 	import { resendSetupProgress } from '$lib/resend-setup';

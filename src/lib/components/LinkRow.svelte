@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowUpRight } from 'lucide-svelte';
+	import { ArrowUpRight } from '@lucide/svelte';
 
 	let {
 		icon,

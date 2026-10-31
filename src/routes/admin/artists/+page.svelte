@@ -3,7 +3,7 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { tick } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
-	import { Search, Plus, Pencil, Trash2, X, Share2, Loader2 } from 'lucide-svelte';
+	import { Search, Plus, Pencil, Trash2, X, Share2, Loader2 } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';

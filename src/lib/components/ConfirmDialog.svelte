@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AlertTriangle } from 'lucide-svelte';
+	import { AlertTriangle } from '@lucide/svelte';
 	import { focusTrap } from '$lib/focus-trap';
 	import * as m from '$lib/paraglide/messages';
 

@@ -3,7 +3,7 @@
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
 	import { onNavigate } from '$app/navigation';
-	import { Download, Share2, ExternalLink } from 'lucide-svelte';
+	import { Download, Share2, ExternalLink } from '@lucide/svelte';
 	import { formatDate } from '$lib';
 	import { heroSrc, heroSrcset, heroSizes, variantThumbSrc, rawFallback } from './hero-image';
 	import Meta from '$lib/components/Meta.svelte';

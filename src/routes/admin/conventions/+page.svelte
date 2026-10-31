@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { Plus, Trash2, ExternalLink, RefreshCw, QrCode } from 'lucide-svelte';
+	import { Plus, Trash2, ExternalLink, RefreshCw, QrCode } from '@lucide/svelte';
 	import { formatDate, formatDateRange } from '$lib';
 	import { zoneGroups } from '$lib/convention-window';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';

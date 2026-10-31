@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
-	import { Search, Send, Server, Sticker, X, RotateCcw, ChevronDown } from 'lucide-svelte';
+	import { Search, Send, Server, Sticker, X, RotateCcw, ChevronDown } from '@lucide/svelte';
 	import StickerCard from '$lib/components/StickerCard.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import Meta from '$lib/components/Meta.svelte';

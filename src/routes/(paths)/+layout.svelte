@@ -3,7 +3,7 @@
      from the full (public) chrome. The pages are always routable; the splash
      homepage surfaces them when landingLayout === 'threePath'. -->
 <script lang="ts">
-	import { ArrowLeft } from 'lucide-svelte';
+	import { ArrowLeft } from '@lucide/svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';

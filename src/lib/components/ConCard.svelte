@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { Download, Smartphone } from 'lucide-svelte';
+	import { Download, Smartphone } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 	import {
 		conCardFaceSvg,

@@ -114,7 +114,7 @@ describe('scanLockfile', () => {
 		const { missing } = scanLockfile({
 			packages: packages({ 'node_modules/cookie': entry('0.7.2') })
 		});
-		expect(missing).toEqual(['devalue', 'esbuild', 'nanoid', 'undici']);
+		expect(missing).toEqual(['devalue', 'effect', 'esbuild', 'nanoid', 'sharp', 'undici']);
 	});
 
 	it('matches an aliased entry by its name field, not the path tail', () => {

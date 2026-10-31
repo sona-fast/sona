@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { Home, LayoutGrid, Sticker, User } from 'lucide-svelte';
+	import { Home, LayoutGrid, Sticker, User } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { stickersEnabled = true }: { stickersEnabled?: boolean } = $props();

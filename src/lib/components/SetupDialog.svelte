@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { focusTrap } from '$lib/focus-trap';
 

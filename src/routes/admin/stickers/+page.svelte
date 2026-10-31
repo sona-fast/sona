@@ -3,7 +3,7 @@
 	import UnhideArtistDialog from '$lib/components/UnhideArtistDialog.svelte';
 	import { createUnhideConfirm } from '$lib/unhide-confirm.svelte';
 	import { goto } from '$app/navigation';
-	import { Smile, Plus, ExternalLink, Pencil, Trash2, Send, Search, Loader2, RefreshCw, AlertTriangle } from 'lucide-svelte';
+	import { Smile, Plus, ExternalLink, Pencil, Trash2, Send, Search, Loader2, RefreshCw, AlertTriangle } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
