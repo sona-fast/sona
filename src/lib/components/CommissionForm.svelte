@@ -447,11 +447,12 @@
 			body = { ok: false, reason: 'failed' };
 		}
 		addingTelegram = false;
-		// The field moved on while this was out: the card, any reason and focus
-		// now belong to the newer link, so leave them alone. A save is still kept,
-		// so the artist isn't offered a second Telegram, and still said out loud:
-		// the owner asked for it, and nothing on the newer card says it happened.
-		if (values.sourceUrl.trim() !== found.link) {
+		// The field or the artist moved on while this was out: the card, any
+		// reason and focus now belong to the newer pick, so leave them alone. A
+		// save is still kept, so the artist isn't offered a second Telegram, and
+		// still said out loud: the owner asked for it, and nothing on the newer
+		// card says it happened.
+		if (values.sourceUrl.trim() !== found.link || values.artistId !== artistId) {
 			if (body.ok && body.telegramUrl) {
 				addedTelegrams[artistId] = body.telegramUrl;
 				announcer.say(m.admin_commissions_link_telegram_added({ name: artist.name }));

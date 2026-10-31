@@ -91,20 +91,39 @@
 	// the way Escape does. Other currency itself toggles the search on its own.
 	const outside = (target: EventTarget | null) =>
 		!(target instanceof Node && (searchBox?.contains(target) || otherButton?.contains(target)));
+	// A press outside closes it only once the press's click has landed: the
+	// search sits in the page's flow, so closing on the way down would move
+	// Save and the fields below it up under the pointer, and the click would
+	// miss them.
+	let pressedOutside = false;
 	$effect(() => {
 		if (!open) return;
 		const onPointerDown = (e: PointerEvent) => {
-			if (outside(e.target)) open = false;
+			pressedOutside = outside(e.target);
+		};
+		const onPointerUp = () => {
+			if (!pressedOutside) return;
+			pressedOutside = false;
+			// The click fires after pointerup in the same task; this runs after it.
+			setTimeout(() => (open = false));
 		};
 		document.addEventListener('pointerdown', onPointerDown);
-		return () => document.removeEventListener('pointerdown', onPointerDown);
+		document.addEventListener('pointerup', onPointerUp);
+		document.addEventListener('pointercancel', onPointerUp);
+		return () => {
+			pressedOutside = false;
+			document.removeEventListener('pointerdown', onPointerDown);
+			document.removeEventListener('pointerup', onPointerUp);
+			document.removeEventListener('pointercancel', onPointerUp);
+		};
 	});
 	// An option click blurs the search box with no relatedTarget (options never
 	// take focus), so only a focus move to somewhere else closes it. Other
 	// currency uses it too: Shift+Tab from the search stops there first, and the
 	// next move out of the picker closes it.
 	function onSearchFocusOut(e: FocusEvent) {
-		if (e.relatedTarget && outside(e.relatedTarget)) open = false;
+		// A press outside moves focus on the way down; its pointerup closes it.
+		if (e.relatedTarget && outside(e.relatedTarget) && !pressedOutside) open = false;
 	}
 
 	async function pick(code: string) {

@@ -1513,6 +1513,17 @@ test('signing out by address forgets drafts too, and the next session keeps its 
 	expect(await stored()).not.toContain('E2E draft before typed sign-out');
 });
 
+// The open search sits in the page's flow. A click below it lands where the
+// owner pressed: closing the search mustn't move the target up mid-click.
+test('a click below the open currency search lands on its target', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByRole('button', { name: 'Other currency' }).click();
+	await expect(page.getByRole('combobox', { name: 'Find a currency' })).toBeFocused();
+	await page.getByRole('link', { name: 'Cancel' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+});
+
 test('Other currency finds a currency, and Add New Artist makes a private artist for the entry', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
@@ -2111,6 +2122,42 @@ for (const { newer, ...answer } of lateTelegramAnswers) {
 		}
 	});
 }
+
+// The artist changes while an add is still out: the answer is kept, but the
+// card and the artist pick stay with the owner's newer choice.
+test('a late Add this Telegram answer leaves a changed artist pick alone', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	let release = () => {};
+	await page.route('**/api/admin/artist-telegram', async (route) => {
+		await new Promise<void>((r) => (release = r));
+		await route.fulfill({
+			status: 200,
+			json: { ok: true, id: 55, name: 'No Chat Artist', telegramUrl: 'https://t.me/e2e_tg_late_pick' }
+		});
+	});
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+	await open(page, '/admin/commissions/new');
+	await artist.selectOption({ label: 'No Chat Artist' });
+	await paste(link, 'https://t.me/e2e_tg_late_pick');
+	await expect(addTelegram).toBeVisible();
+	const posted = page.waitForRequest('**/api/admin/artist-telegram');
+	await addTelegram.click();
+	await posted;
+	await artist.selectOption({ label: 'Chat Artist' });
+	const picked = await artist.inputValue();
+	await artist.focus();
+	const answered = page.waitForResponse('**/api/admin/artist-telegram');
+	release();
+	await settledAfter(page, await answered);
+
+	await expect(artist).toHaveValue(picked);
+	await expect(card.getByText("e2e_tg_late_pick isn't in your artist list yet.")).toBeVisible();
+	await expect(card.getByRole('button', { name: /No Chat Artist/ })).toHaveCount(0);
+	await expect(artist).toBeFocused();
+});
 
 // The card's button adds the link the card was built from. A link typed in
 // after the lookup, whose change fires on the button's own mouse-down, is
