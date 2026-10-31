@@ -100,7 +100,9 @@
 		return () => document.removeEventListener('pointerdown', onPointerDown);
 	});
 	// An option click blurs the search box with no relatedTarget (options never
-	// take focus), so only a focus move to somewhere else closes it.
+	// take focus), so only a focus move to somewhere else closes it. Other
+	// currency uses it too: Shift+Tab from the search stops there first, and the
+	// next move out of the picker closes it.
 	function onSearchFocusOut(e: FocusEvent) {
 		if (e.relatedTarget && outside(e.relatedTarget)) open = false;
 	}
@@ -177,6 +179,7 @@
 			aria-expanded={open}
 			aria-controls="ce-currency-search"
 			bind:this={otherButton}
+			onfocusout={onSearchFocusOut}
 			onclick={() => (open ? closeSearch() : openSearch())}
 		>
 			{m.admin_currency_other()}
