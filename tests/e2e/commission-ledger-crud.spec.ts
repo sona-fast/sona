@@ -2034,6 +2034,74 @@ test('Add this Telegram says why it was refused, and a failed add can be tried a
 	await expect(liveRegion.filter({ hasText: taken })).toHaveCount(0);
 });
 
+// An add whose answer comes back after the field moved on to another link was
+// about a link that's gone. Whatever the answer, it leaves the newer link's
+// card alone: no refusal on it, no second lookup of the old link, and focus
+// stays where the owner left it. A save that went through is still kept, so
+// the artist isn't offered a second Telegram, and still said out loud.
+// The success case moves on to Chat Artist's own link (fixtures/commissions.sql),
+// so the newer card has a Use button a stray focus move would land on.
+const lateTelegramAnswers = [
+	{ status: 409, json: { ok: false, reason: 'has_telegram' }, newer: 'e2e_tg_late_new' },
+	{ status: 409, json: { ok: false, reason: 'telegram_taken_by_other' }, newer: 'e2e_tg_late_new' },
+	{ status: 404, json: { ok: false, reason: 'missing' }, newer: 'e2e_tg_late_new' },
+	{ status: 500, json: { ok: false }, newer: 'e2e_tg_late_new' },
+	{
+		status: 200,
+		json: { ok: true, id: 55, name: 'No Chat Artist', telegramUrl: 'https://t.me/e2e_tg_late_old' },
+		newer: 'e2e_chat_artist'
+	}
+];
+for (const { newer, ...answer } of lateTelegramAnswers) {
+	const late = (answer.json as { reason?: string }).reason ?? (answer.json.ok ? 'success' : 'failure');
+	test(`a late Add this Telegram answer (${late}) leaves a newer link's card alone`, async ({ page }) => {
+		await loginRetrying(page, PASSWORD);
+		let release = () => {};
+		await page.route('**/api/admin/artist-telegram', async (route) => {
+			await new Promise<void>((r) => (release = r));
+			await route.fulfill(answer);
+		});
+		const lookups = countLookups(page);
+		const link = page.getByRole('textbox', { name: "Where it's happening" });
+		const card = page.locator('.lookup');
+		const liveRegion = page.locator('[aria-live="polite"]');
+		const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+		await open(page, '/admin/commissions/new');
+		await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'No Chat Artist' });
+		await paste(link, 'https://t.me/e2e_tg_late_old');
+		await expect(addTelegram).toBeVisible();
+		const posted = page.waitForRequest('**/api/admin/artist-telegram');
+		await addTelegram.click();
+		await posted;
+		// The owner moves on while the add is still out.
+		await paste(link, `https://t.me/${newer}`);
+		await expect(card.getByText(newer, { exact: true })).toBeVisible();
+		await link.focus();
+		const asked = lookups.count;
+		const answered = page.waitForResponse('**/api/admin/artist-telegram');
+		release();
+		await settledAfter(page, await answered);
+		// Any lookup the late answer starts would be out and back by now.
+		await page.waitForLoadState('networkidle');
+
+		await expect(card.getByText(newer, { exact: true })).toBeVisible();
+		await expect(card.getByText('e2e_tg_late_old', { exact: true })).toHaveCount(0);
+		await expect(card.locator('.lookup-msg')).toHaveCount(0);
+		await expect(link).toBeFocused();
+		expect(lookups.sent).toHaveLength(asked);
+		if (answer.json.ok) {
+			// Saved all the same: said out loud, and not offered again.
+			await expect(liveRegion.filter({ hasText: 'Added this Telegram to No Chat Artist.' })).toHaveCount(1);
+			await expect(card.getByRole('button', { name: 'Use Chat Artist' })).toBeVisible();
+			await paste(link, 'https://t.me/e2e_tg_late_other');
+			await expect(card.getByText('e2e_tg_late_other', { exact: true })).toBeVisible();
+			await expect(addTelegram).toHaveCount(0);
+		} else {
+			await expect(addTelegram).toBeVisible();
+		}
+	});
+}
+
 // The card's button adds the link the card was built from. A link typed in
 // after the lookup, whose change fires on the button's own mouse-down, is
 // looked up first, never saved unseen.
