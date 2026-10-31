@@ -41,13 +41,6 @@
 	// Escape hides a blocked Delete's reason without moving focus or the
 	// pointer (WCAG 1.4.13); the next hover or focus on a Delete shows it again.
 	let tipDismissed = $state(false);
-	/** Focus, or a pointer coming in from outside, reaching a Delete. */
-	function reachesDelete(e: FocusEvent | PointerEvent) {
-		const wrap = (e.target as Element | null)?.closest?.('.delete-wrap');
-		if (!wrap) return false;
-		const from = e.relatedTarget as Node | null;
-		return e.type === 'focusin' || !from || !wrap.contains(from);
-	}
 	let submittingId = $state<number | null>(null);
 	let refreshingAvatars = $state(false);
 	// Submit to registry for a Keep private artist (SONA-236): the server refuses
@@ -115,11 +108,21 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(e) => e.key === 'Escape' && (tipDismissed = true)}
-	onfocusin={(e) => reachesDelete(e) && (tipDismissed = false)}
-	onpointerover={(e) => reachesDelete(e) && (tipDismissed = false)}
-/>
+<svelte:window onkeydown={(e) => e.key === 'Escape' && (tipDismissed = true)} />
+
+<!-- One row's Delete, for the desktop table and the mobile list. idPrefix keeps
+     the two copies' tooltip ids apart. -->
+{#snippet deleteButton(artist: (typeof data.artists)[number], idPrefix: string)}
+	{@const blocked = deleteBlockersLabel(artist)}
+	<!-- The handlers only bring a dismissed reason back; the button is the control. -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<span class="delete-wrap" class:tip-dismissed={tipDismissed} onpointerenter={() => (tipDismissed = false)} onfocusin={() => (tipDismissed = false)}>
+		<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `${idPrefix}${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
+			{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+		</button>
+		{#if blocked}<span class="blocked-tip" role="tooltip" id="{idPrefix}{artist.id}">{blocked}</span>{/if}
+	</span>
+{/snippet}
 
 <div class="page-header">
 	<h1>{m.admin_nav_artists()} <span class="count">{m.admin_count_artists({ count: data.total })}</span></h1>
@@ -192,7 +195,6 @@
 		</thead>
 		<tbody>
 			{#each data.artists as artist}
-				{@const blocked = deleteBlockersLabel(artist)}
 				<tr>
 					<td class="col-avatar">
 						<ArtistAvatar name={artist.name} avatarUrl={artist.avatarUrl} size={36} />
@@ -253,12 +255,7 @@
 						<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}>
 							<Pencil size={16} />
 						</button>
-						<span class="delete-wrap" class:tip-dismissed={tipDismissed}>
-							<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `delete-blocked-${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
-								{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
-							</button>
-							{#if blocked}<span class="blocked-tip" role="tooltip" id="delete-blocked-{artist.id}">{blocked}</span>{/if}
-						</span>
+						{@render deleteButton(artist, 'delete-blocked-')}
 					</td>
 				</tr>
 			{:else}
@@ -279,7 +276,6 @@
 <!-- Mobile list -->
 <div class="mobile-list">
 	{#each data.artists as artist}
-		{@const blocked = deleteBlockersLabel(artist)}
 		<div class="mobile-artist-item">
 			<ArtistAvatar name={artist.name} avatarUrl={artist.avatarUrl} size={36} />
 			<div class="mobile-artist-info">
@@ -324,12 +320,7 @@
 					</form>
 				{/if}
 				<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
-				<span class="delete-wrap" class:tip-dismissed={tipDismissed}>
-					<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `delete-blocked-m-${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
-						{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
-					</button>
-					{#if blocked}<span class="blocked-tip" role="tooltip" id="delete-blocked-m-{artist.id}">{blocked}</span>{/if}
-				</span>
+				{@render deleteButton(artist, 'delete-blocked-m-')}
 			</div>
 		</div>
 	{:else}
@@ -619,8 +610,11 @@
 		color: var(--destructive);
 	}
 
+	/* Long names and former names wrap anywhere, so they can't widen the table
+	   past its wrapper. */
 	.artist-name {
 		font-weight: 500;
+		overflow-wrap: anywhere;
 	}
 
 	/* Registry-synced former names — a muted line under the artist name so a
@@ -630,6 +624,7 @@
 		font-size: 12px;
 		font-weight: 400;
 		color: var(--muted-foreground);
+		overflow-wrap: anywhere;
 	}
 
 	.artwork-count {
@@ -643,6 +638,7 @@
 
 	.social-icons {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 8px;
 	}
 
@@ -735,7 +731,13 @@
 		height: 6px;
 	}
 
-	.delete-wrap:not(.tip-dismissed):hover .blocked-tip,
+	/* Hover only where a pointer can hover: on touch, a tap's sticky hover would
+	   show the reason on top of the toast. */
+	@media (hover: hover) {
+		.delete-wrap:not(.tip-dismissed):hover .blocked-tip {
+			visibility: visible;
+		}
+	}
 	.delete-wrap:not(.tip-dismissed):has(:focus-visible) .blocked-tip {
 		visibility: visible;
 	}

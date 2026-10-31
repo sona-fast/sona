@@ -227,6 +227,7 @@
 				aria-label={m.admin_currency_find()}
 				tabindex="-1"
 				bind:this={list}
+				onfocus={() => searchInput?.focus()}
 			>
 				{#each matches as code, i (code)}
 					{@const listSymbol = listSymbols.get(code)}

@@ -51,29 +51,46 @@ describe('deleteBlockersLabel', () => {
 	// Each blocker alone is enough. Managed packs and ledger entries never show in
 	// the Works column, so this label is the only place they surface.
 	it.each([
-		['artworkCount', 'Can\'t delete: 1 artwork. Remove them first.'],
-		['stickerCount', 'Can\'t delete: 1 sticker. Remove them first.'],
-		['avatarCount', 'Can\'t delete: 1 VR avatar. Remove them first.'],
-		['managedPackCount', 'Can\'t delete: 1 sticker pack. Remove them first.'],
-		['commissionCount', 'Can\'t delete: 1 ledger entry. Remove them first.']
+		['artworkCount', "Can't delete while this artist has 1 artwork. Move or remove those first."],
+		['stickerCount', "Can't delete while this artist has 1 sticker. Move or remove those first."],
+		['avatarCount', "Can't delete while this artist has 1 VR avatar. Move or remove those first."],
+		['managedPackCount', "Can't delete while this artist has 1 sticker pack. Move or remove those first."],
+		['commissionCount', "Can't delete while this artist has 1 commission ledger entry. Move or remove those first."]
 	] as const)('names %s alone', (key, expected) => {
 		expect(deleteBlockersLabel({ ...none, [key]: 1 })).toBe(expected);
 	});
 
 	it('pluralizes each count', () => {
 		const out = deleteBlockersLabel({ ...none, managedPackCount: 3, commissionCount: 2 });
-		expect(out).toBe("Can't delete: 3 sticker packs and 2 ledger entries. Remove them first.");
+		expect(out).toBe("Can't delete while this artist has 3 sticker packs and 2 commission ledger entries. Move or remove those first.");
 	});
 
 	it('lists only the non-zero blockers, in the delete action\'s order', () => {
 		const out = deleteBlockersLabel({ artworkCount: 4, stickerCount: 0, avatarCount: 2, managedPackCount: 0, commissionCount: 1 });
-		expect(out).toBe("Can't delete: 4 artworks, 2 VR avatars, and 1 ledger entry. Remove them first.");
+		expect(out).toBe("Can't delete while this artist has 4 artworks, 2 VR avatars, and 1 commission ledger entry. Move or remove those first.");
 		expect(out).not.toMatch(/\b0 /);
 	});
 
 	it('reads in Japanese with the Japanese list separator', () => {
 		setLocale('ja', { reload: false });
 		const out = deleteBlockersLabel({ ...none, managedPackCount: 1, commissionCount: 2 });
-		expect(out).toBe('削除できません。ステッカーパック 1件、制作依頼の記録 2件が残っています。先にこれらを外してください。');
+		expect(out?.replace(/\u2060/g, '')).toBe(
+			'このアーティストにはステッカーパック 1件、制作依頼の記録 2件があるため、削除できません。先に移動するか外してください。'
+		);
+	});
+
+	// CJK breaks between any two characters, so "VRアバター 1" could end a line
+	// with "体" starting the next. Each number holds on to its counter.
+	it('keeps each Japanese number with its counter', () => {
+		setLocale('ja', { reload: false });
+		const out = deleteBlockersLabel({ ...none, artworkCount: 12, avatarCount: 1 })!;
+		expect(out).toContain('12\u2060件');
+		expect(out).toContain('1\u2060体');
+		// Only the number and its counter are joined, nothing else.
+		expect(out.match(/\u2060/g)).toHaveLength(2);
+	});
+
+	it('leaves English counts as they are', () => {
+		expect(deleteBlockersLabel({ ...none, artworkCount: 12 })).not.toContain('\u2060');
 	});
 });

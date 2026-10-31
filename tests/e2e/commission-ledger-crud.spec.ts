@@ -1573,6 +1573,11 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	const listBackground = await results.evaluate((el) => getComputedStyle(el).backgroundColor);
 	expect(contrastRatio(await edgeOf(secondId), listBackground)).toBeGreaterThanOrEqual(3);
 	expect(await edgeOf(firstId)).not.toBe(await edgeOf(secondId));
+	// Focus that lands on the list itself (a click on its scrollbar) goes back
+	// to the search box, so the arrow keys and Enter still work.
+	await results.focus();
+	await expect(find).toBeFocused();
+	await expect(find).toHaveAttribute('aria-activedescendant', secondId);
 	await page.keyboard.press('Enter');
 	const secondCode = secondId.replace('ce-currency-opt-', '');
 	await expect(page.getByRole('radio', { name: new RegExp(secondCode) })).toBeChecked();
@@ -1779,7 +1784,7 @@ test('an artist added in another tab can be picked by a link', async ({ page, co
 // A ledger entry blocks deleting its artist, and the Works column doesn't show
 // entries, so the Delete button says why before the owner tries. name_only_artist
 // (50 in fixtures/commissions.sql) has no works, so the entry is the only blocker.
-test('an artist with a ledger entry gets a Delete that says why it will not run', async ({ page }, testInfo) => {
+test('an artist with a ledger entry gets a Delete that says why it will not run', async ({ page, browser }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await createEntry(page, 'E2E blocks delete', 'name_only_artist');
 
@@ -1787,7 +1792,7 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	const row = page.getByRole('row', { name: /name_only_artist/ });
 	await expect(row.locator('.works-label')).toHaveText('No works yet');
 	const trash = row.getByRole('button', { name: 'Delete artist' });
-	const reason = "Can't delete: 1 ledger entry. Remove them first.";
+	const reason = "Can't delete while this artist has 1 commission ledger entry. Move or remove those first.";
 	await expect(trash).toHaveAttribute('aria-disabled', 'true');
 	await expect(trash).toHaveAccessibleDescription(reason);
 
@@ -1818,8 +1823,9 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	await expect(page.getByRole('dialog')).toHaveCount(0);
 
 	// On hover, the pointer can move from the button onto the reason and it
-	// stays. It sits clear of Edit and inside the table, and Escape hides it
-	// while the pointer is still there.
+	// stays. It sits clear of Edit, and Escape hides it while the pointer is
+	// still there. On the first row it may rise above the table; the Japanese
+	// check below proves nothing clips it there.
 	await trash.evaluate((el) => (el as HTMLElement).blur());
 	await page.mouse.move(0, 0);
 	await expect(tip).toBeHidden();
@@ -1835,8 +1841,6 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 		tipBox.y < editBox.y + editBox.height &&
 		editBox.y < tipBox.y + tipBox.height;
 	expect(overlaps, 'the reason covers Edit').toBe(false);
-	const wrapBox = (await page.locator('.table-wrapper').boundingBox())!;
-	expect(tipBox.y).toBeGreaterThanOrEqual(wrapBox.y);
 	await page.keyboard.press('Escape');
 	await expect(tip).toBeHidden();
 	// Coming back with the pointer shows it again.
@@ -1844,9 +1848,36 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 	await trash.hover();
 	await expect(tip).toBeVisible();
 
-	// In Japanese the same reason wraps to three lines. On the first row, in the
-	// table and in the phone list, the whole of it shows: nothing clips its top,
-	// and the phone layout doesn't scroll sideways.
+	// On a phone, the list's Delete is blocked the same way. A tap says why in
+	// a toast and opens no dialog, and the tap's hover doesn't show the reason
+	// on top of the toast.
+	const phone = await browser.newContext({
+		baseURL: testInfo.project.use.baseURL,
+		storageState: await page.context().storageState(),
+		viewport: { width: 390, height: 844 },
+		hasTouch: true,
+		isMobile: true
+	});
+	try {
+		const tab = await phone.newPage();
+		await tab.goto('/admin/artists?q=name_only_artist');
+		await waitForHydration(tab);
+		const item = tab.locator('.mobile-artist-item', { hasText: 'name_only_artist' });
+		const mobileTrash = item.getByRole('button', { name: 'Delete artist' });
+		await expect(mobileTrash).toHaveAttribute('aria-disabled', 'true');
+		await expect(mobileTrash).toHaveAccessibleDescription(reason);
+		await mobileTrash.tap({ force: true });
+		await expect(tab.getByRole('status').filter({ hasText: reason })).toBeVisible();
+		await expect(tab.getByRole('dialog')).toHaveCount(0);
+		await expect(item.getByRole('tooltip')).toBeHidden();
+		await settledShot(tab, testInfo.outputPath('artist-delete-blocked-phone.png'));
+	} finally {
+		await phone.close();
+	}
+
+	// In Japanese the same reason wraps to three lines or more. On the first
+	// row, in the table and in the phone list, the whole of it shows: nothing
+	// clips its top, and the phone layout doesn't scroll sideways.
 	/** Lines of text in the shown tooltip, and whether both its top corners
 	 * are the tooltip itself (a clipped corner hits whatever is beneath). */
 	const tipShows = (t: typeof tip) =>
@@ -1863,7 +1894,9 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 		const jaTip = jaRow.getByRole('tooltip');
 		await jaRow.locator('.delete-wrap button').hover();
 		await expect(jaTip).toBeVisible();
-		expect(await tipShows(jaTip)).toEqual({ lines: 3, unclipped: true });
+		const jaShown = await tipShows(jaTip);
+		expect(jaShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
+		expect(jaShown.unclipped, 'the reason is clipped').toBe(true);
 
 		const desktop = page.viewportSize()!;
 		await page.setViewportSize({ width: 390, height: 844 });
@@ -1873,7 +1906,9 @@ test('an artist with a ledger entry gets a Delete that says why it will not run'
 			const mobileTip = item.getByRole('tooltip');
 			await item.locator('.delete-wrap button').hover();
 			await expect(mobileTip).toBeVisible();
-			expect(await tipShows(mobileTip)).toEqual({ lines: 3, unclipped: true });
+			const mobileShown = await tipShows(mobileTip);
+			expect(mobileShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
+			expect(mobileShown.unclipped, 'the reason is clipped').toBe(true);
 			expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 		} finally {
 			await page.setViewportSize(desktop);
@@ -1914,7 +1949,9 @@ async function stubAddTelegram(page: Page) {
 }
 
 // Add this Telegram's refusals (SONA-236), against a stubbed endpoint: each
-// says why in the card and out loud, and only a failure keeps the button.
+// says why in the card. A failure or a missing artist keeps the button and
+// says the reason out loud; the other two take the button away and move focus
+// to the reason.
 test('Add this Telegram says why it was refused, and a failed add can be tried again', async ({ page }) => {
 	await loginRetrying(page, PASSWORD);
 	const { posted, answer } = await stubAddTelegram(page);
@@ -1949,13 +1986,41 @@ test('Add this Telegram says why it was refused, and a failed add can be tried a
 	await expect(card.getByText('Added this Telegram to No Chat Artist.')).toBeVisible();
 	expect(posted).toEqual(['https://t.me/e2e_tg_refused', 'https://t.me/e2e_tg_refused_2', 'https://t.me/e2e_tg_refused_2']);
 
-	// Another artist holds the handle.
+	// No artist has that id any more (deleted in another tab): the reason
+	// shows, and the button stays.
+	await start();
+	answer.next = { status: 404, json: { ok: false, reason: 'missing' } };
+	await addTelegram.click();
+	const missing = "No Chat Artist isn't in your artist list anymore. Reload the page and pick the artist again.";
+	await expect(card.getByText(missing)).toBeVisible();
+	await expect(liveRegion.filter({ hasText: missing })).toHaveCount(1);
+	await expect(addTelegram).toBeFocused();
+
+	// Another artist holds the handle, saved since the card was drawn: the link
+	// is looked up again, so the card names them in place of a button that can
+	// only fail, and focus moves to the reason.
 	await start();
 	answer.next = { status: 409, json: { ok: false, reason: 'telegram_taken_by_other' } };
+	await page.route('**/api/admin/artist-from-link', (route) =>
+		route.fulfill({
+			json: {
+				ok: true,
+				platform: 'telegram',
+				handle: 'e2e_tg_refused',
+				matches: [{ id: 54, name: 'Chat Artist' }],
+				nameMatches: []
+			}
+		})
+	);
 	await addTelegram.click();
-	const other = "Another artist already has this Telegram, so it wasn't added to No Chat Artist.";
-	await expect(card.getByText(other)).toBeVisible();
-	await expect(liveRegion.filter({ hasText: other })).toHaveCount(1);
+	const other = "Another artist already has this Telegram, so Sona didn't add it to No Chat Artist.";
+	await expect(card.getByText('e2e_tg_refused is already in your artist list as Chat Artist.')).toBeVisible();
+	await expect(card.getByRole('button', { name: 'Use Chat Artist' })).toBeVisible();
+	await expect(card.locator('.lookup-msg', { hasText: other })).toBeFocused();
+	await expect(addTelegram).toHaveCount(0);
+	// The owner's pick stays theirs: the match is on offer, not taken.
+	await expect(artist.locator('option:checked')).toHaveText('No Chat Artist');
+	await page.unroute('**/api/admin/artist-from-link');
 
 	// The artist already has a Telegram: the button goes, and focus moves to why.
 	await start();
@@ -1963,9 +2028,10 @@ test('Add this Telegram says why it was refused, and a failed add can be tried a
 	await addTelegram.click();
 	const taken = 'No Chat Artist already has a Telegram. To change it, edit them on the Artists page.';
 	await expect(card.getByText(taken)).toBeVisible();
-	await expect(liveRegion.filter({ hasText: taken })).toHaveCount(1);
 	await expect(addTelegram).toHaveCount(0);
+	// Focus reads it out, so the live region doesn't say it a second time.
 	await expect(card.locator('.lookup-msg', { hasText: taken })).toBeFocused();
+	await expect(liveRegion.filter({ hasText: taken })).toHaveCount(0);
 });
 
 // The card's button adds the link the card was built from. A link typed in

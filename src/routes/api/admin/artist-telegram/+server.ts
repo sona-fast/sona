@@ -37,7 +37,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	}
 
 	const parsed = parseArtistLink(url);
-	const telegramUrl = parsed.ok && parsed.platform === 'telegram' ? normalizeSocialUrl('telegram', parsed.handle) : '';
+	if (!parsed.ok || parsed.platform !== 'telegram') return json({ ok: false, reason: 'not_telegram' }, { status: 400 });
+	const telegramUrl = normalizeSocialUrl('telegram', parsed.handle);
 	if (!telegramUrl) return json({ ok: false, reason: 'not_telegram' }, { status: 400 });
 
 	const db = getDb(platform!.env.DB);
@@ -47,7 +48,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		.select({ id: artists.id, telegramUrl: artists.telegramUrl })
 		.from(artists)
 		.where(and(ne(artists.id, artistId), isNotNull(artists.telegramUrl), ne(artists.telegramUrl, '')));
-	if (findLocalArtistsByHandle(holders, 'telegram', [parsed.ok ? parsed.handle : '']).length > 0) {
+	if (findLocalArtistsByHandle(holders, 'telegram', [parsed.handle]).length > 0) {
 		return json({ ok: false, reason: 'telegram_taken_by_other' }, { status: 409 });
 	}
 	// The empty check rides the write itself, so two tabs adding different

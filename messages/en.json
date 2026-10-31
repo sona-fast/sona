@@ -651,8 +651,8 @@
 				"countPlural"
 			],
 			"match": {
-				"countPlural=one": "{count} ledger entry",
-				"countPlural=other": "{count} ledger entries"
+				"countPlural=one": "{count} commission ledger entry",
+				"countPlural=other": "{count} commission ledger entries"
 			}
 		}
 	],
@@ -736,7 +736,7 @@
 	"admin_unhide_artist_confirm": "Make public",
 	"admin_artists_edit_aria": "Edit artist",
 	"admin_artists_delete_aria": "Delete artist",
-	"admin_artists_delete_blocked": "Can't delete: {blockers}. Remove them first.",
+	"admin_artists_delete_blocked": "Can't delete while this artist has {blockers}. Move or remove those first.",
 	"admin_artists_no_match": "No artists matching \"{search}\"",
 	"admin_artists_empty": "No artists yet.",
 	"admin_artists_delete_title": "Delete Artist",
@@ -2484,7 +2484,7 @@
 	"admin_commissions_link_telegram_added": "Added this Telegram to {name}.",
 	"admin_commissions_link_telegram_taken": "{name} already has a Telegram. To change it, edit them on the Artists page.",
 	"admin_commissions_link_telegram_missing": "{name} isn't in your artist list anymore. Reload the page and pick the artist again.",
-	"admin_commissions_link_telegram_other": "Another artist already has this Telegram, so it wasn't added to {name}.",
+	"admin_commissions_link_telegram_other": "Another artist already has this Telegram, so Sona didn't add it to {name}.",
 	"admin_commissions_link_telegram_failed": "Couldn't add the Telegram. Try again.",
 	"admin_commissions_draft_restored": "Your draft is back.",
 	"admin_commissions_link_piece": "Link a piece",
