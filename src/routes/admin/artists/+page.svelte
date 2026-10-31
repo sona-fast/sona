@@ -10,7 +10,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';
-	import { worksLabel } from './works-label';
+	import { worksLabel, deleteBlockersLabel } from './works-label';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -38,6 +38,9 @@
 	let deleteForm: HTMLFormElement;
 	let saving = $state(false);
 	let deletingId = $state<number | null>(null);
+	// Escape hides a blocked Delete's reason without moving focus or the
+	// pointer (WCAG 1.4.13); the next hover or focus on a Delete shows it again.
+	let tipDismissed = $state(false);
 	let submittingId = $state<number | null>(null);
 	let refreshingAvatars = $state(false);
 	// Submit to registry for a Keep private artist (SONA-236): the server refuses
@@ -95,7 +98,31 @@
 		if (data.upToDate?.[id]) return m.admin_artists_up_to_date();
 		return m.admin_artists_submit_registry();
 	}
+
+	// Delete for a row. A blocked artist's button is aria-disabled, so it stays
+	// focusable and its reason can be read; a click says the reason instead of
+	// asking to delete. The server still refuses on its own (the list can be stale).
+	function onDelete(artist: { id: number; name: string }, blocked: string | null) {
+		if (blocked) toast.info(blocked);
+		else deleteTarget = { id: artist.id, name: artist.name };
+	}
 </script>
+
+<svelte:window onkeydown={(e) => e.key === 'Escape' && (tipDismissed = true)} />
+
+<!-- One row's Delete, for the desktop table and the mobile list. idPrefix keeps
+     the two copies' tooltip ids apart. -->
+{#snippet deleteButton(artist: (typeof data.artists)[number], idPrefix: string)}
+	{@const blocked = deleteBlockersLabel(artist)}
+	<!-- The handlers only bring a dismissed reason back; the button is the control. -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<span class="delete-wrap" class:tip-dismissed={tipDismissed} onpointerenter={() => (tipDismissed = false)} onfocusin={() => (tipDismissed = false)}>
+		<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} aria-disabled={blocked ? 'true' : undefined} aria-describedby={blocked ? `${idPrefix}${artist.id}` : undefined} disabled={deletingId === artist.id} onclick={() => onDelete(artist, blocked)}>
+			{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+		</button>
+		{#if blocked}<span class="blocked-tip" role="tooltip" id="{idPrefix}{artist.id}">{blocked}</span>{/if}
+	</span>
+{/snippet}
 
 <div class="page-header">
 	<h1>{m.admin_nav_artists()} <span class="count">{m.admin_count_artists({ count: data.total })}</span></h1>
@@ -228,9 +255,7 @@
 						<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}>
 							<Pencil size={16} />
 						</button>
-						<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
-							{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
-						</button>
+						{@render deleteButton(artist, 'delete-blocked-')}
 					</td>
 				</tr>
 			{:else}
@@ -295,9 +320,7 @@
 					</form>
 				{/if}
 				<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
-				<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
-					{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
-				</button>
+				{@render deleteButton(artist, 'delete-blocked-m-')}
 			</div>
 		</div>
 	{:else}
@@ -521,10 +544,16 @@
 		padding-left: 40px;
 	}
 
+	/* No overflow: hidden here, so Delete's reason can rise above the first
+	   row. Cells have no fill; the only paint that reached the rounded corners
+	   was the last row's bottom border, which the wrapper's border repeats. */
 	.table-wrapper {
 		border: 1px solid var(--border);
 		border-radius: var(--radius-s);
-		overflow: hidden;
+	}
+
+	.data-table tbody tr:last-child td {
+		border-bottom: none;
 	}
 
 	.col-avatar {
@@ -581,8 +610,11 @@
 		color: var(--destructive);
 	}
 
+	/* Long names and former names wrap anywhere, so they can't widen the table
+	   past its wrapper. */
 	.artist-name {
 		font-weight: 500;
+		overflow-wrap: anywhere;
 	}
 
 	/* Registry-synced former names — a muted line under the artist name so a
@@ -592,6 +624,7 @@
 		font-size: 12px;
 		font-weight: 400;
 		color: var(--muted-foreground);
+		overflow-wrap: anywhere;
 	}
 
 	.artwork-count {
@@ -605,6 +638,7 @@
 
 	.social-icons {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 8px;
 	}
 
@@ -640,7 +674,7 @@
 		transition: color 0.15s;
 	}
 
-	.icon-btn:not(:disabled):hover {
+	.icon-btn:not(:disabled):not([aria-disabled='true']):hover {
 		color: var(--foreground);
 	}
 
@@ -649,6 +683,63 @@
 	.icon-btn:disabled {
 		opacity: 0.35;
 		cursor: default;
+	}
+
+	/* A blocked Delete is aria-disabled instead (focusable, so its reason can be
+	   read) and takes the same look. Only the icon fades, so the focus ring keeps
+	   its full contrast. */
+	.icon-btn[aria-disabled='true'] {
+		cursor: default;
+	}
+	.icon-btn[aria-disabled='true'] > :global(svg) {
+		opacity: 0.35;
+	}
+
+	/* Why Delete won't run: shown beside the button on hover or keyboard focus,
+	   and read as the button's description. A tap shows it as a toast instead.
+	   It sits above, right-aligned, so it doesn't cover Edit beside it, and the
+	   pointer can move onto it (WCAG 1.4.13): ::before bridges the gap. */
+	.delete-wrap {
+		position: relative;
+		display: inline-flex;
+	}
+
+	.blocked-tip {
+		position: absolute;
+		bottom: calc(100% + 6px);
+		right: 0;
+		z-index: 10;
+		width: max-content;
+		max-width: 240px;
+		padding: 6px 8px;
+		border-radius: var(--radius-xs);
+		background: var(--foreground);
+		color: var(--background);
+		font-size: 12px;
+		line-height: 1.4;
+		text-align: left;
+		white-space: normal;
+		visibility: hidden;
+	}
+
+	.blocked-tip::before {
+		content: '';
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		height: 6px;
+	}
+
+	/* Hover only where a pointer can hover: on touch, a tap's sticky hover would
+	   show the reason on top of the toast. */
+	@media (hover: hover) {
+		.delete-wrap:not(.tip-dismissed):hover .blocked-tip {
+			visibility: visible;
+		}
+	}
+	.delete-wrap:not(.tip-dismissed):has(:focus-visible) .blocked-tip {
+		visibility: visible;
 	}
 
 	:global(.spin) {

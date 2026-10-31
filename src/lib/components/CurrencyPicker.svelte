@@ -55,6 +55,7 @@
 	let searchInput = $state<HTMLInputElement>();
 	let otherButton = $state<HTMLButtonElement>();
 	let list = $state<HTMLUListElement>();
+	let searchBox = $state<HTMLDivElement>();
 	const radios: Record<string, HTMLInputElement> = $state({});
 
 	// A symbol (€, $, ¥), the code, or the name in the admin language.
@@ -83,6 +84,46 @@
 		open = false;
 		await tick();
 		otherButton?.focus();
+	}
+
+	// A click outside the search, or Tab out of it, closes it without a pick.
+	// Focus stays where it went, so this doesn't send it back to Other currency
+	// the way Escape does. Other currency itself toggles the search on its own.
+	const outside = (target: EventTarget | null) =>
+		!(target instanceof Node && (searchBox?.contains(target) || otherButton?.contains(target)));
+	// A press outside closes it only once the press's click has landed: the
+	// search sits in the page's flow, so closing on the way down would move
+	// Save and the fields below it up under the pointer, and the click would
+	// miss them.
+	let pressedOutside = false;
+	$effect(() => {
+		if (!open) return;
+		const onPointerDown = (e: PointerEvent) => {
+			pressedOutside = outside(e.target);
+		};
+		const onPointerUp = () => {
+			if (!pressedOutside) return;
+			pressedOutside = false;
+			// The click fires after pointerup in the same task; this runs after it.
+			setTimeout(() => (open = false));
+		};
+		document.addEventListener('pointerdown', onPointerDown);
+		document.addEventListener('pointerup', onPointerUp);
+		document.addEventListener('pointercancel', onPointerUp);
+		return () => {
+			pressedOutside = false;
+			document.removeEventListener('pointerdown', onPointerDown);
+			document.removeEventListener('pointerup', onPointerUp);
+			document.removeEventListener('pointercancel', onPointerUp);
+		};
+	});
+	// An option click blurs the search box with no relatedTarget (options never
+	// take focus), so only a focus move to somewhere else closes it. Other
+	// currency uses it too: Shift+Tab from the search stops there first, and the
+	// next move out of the picker closes it.
+	function onSearchFocusOut(e: FocusEvent) {
+		// A press outside moves focus on the way down; its pointerup closes it.
+		if (e.relatedTarget && outside(e.relatedTarget) && !pressedOutside) open = false;
 	}
 
 	async function pick(code: string) {
@@ -157,6 +198,7 @@
 			aria-expanded={open}
 			aria-controls="ce-currency-search"
 			bind:this={otherButton}
+			onfocusout={onSearchFocusOut}
 			onclick={() => (open ? closeSearch() : openSearch())}
 		>
 			{m.admin_currency_other()}
@@ -181,7 +223,7 @@
 {@render below?.()}
 
 {#if hydrated && open}
-	<div class="search" id="ce-currency-search">
+	<div class="search" id="ce-currency-search" bind:this={searchBox} onfocusout={onSearchFocusOut}>
 		<label class="search-label" for="ce-currency-find">{m.admin_currency_find()}</label>
 		<input
 			id="ce-currency-find"
@@ -205,7 +247,9 @@
 				id="ce-currency-list"
 				role="listbox"
 				aria-label={m.admin_currency_find()}
+				tabindex="-1"
 				bind:this={list}
+				onfocus={() => searchInput?.focus()}
 			>
 				{#each matches as code, i (code)}
 					{@const listSymbol = listSymbols.get(code)}

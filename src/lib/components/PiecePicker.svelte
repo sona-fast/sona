@@ -99,7 +99,9 @@
 			role="search"
 			onsubmit={(e) => {
 				e.preventDefault();
-				void load();
+				// Search looks through every piece: a piece can sit under another
+				// artist's name, and nothing here says the list is one artist's.
+				setScope('all');
 			}}
 		>
 			<label for="piece-picker-q" class="sr-only">{m.admin_commissions_pick_search()}</label>

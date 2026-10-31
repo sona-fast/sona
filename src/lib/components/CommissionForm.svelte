@@ -67,7 +67,9 @@
 		version?: string;
 	}
 	interface Props {
-		artists: { id: number; name: string }[];
+		/** `hasTelegram`: whether the artist has a Telegram saved, so a pasted
+		 * t.me link can offer to add it to the picked artist. */
+		artists: { id: number; name: string; hasTelegram?: boolean }[];
 		characters: { id: number; name: string; ownerName: string | null }[];
 		/** Edit mode when set; create otherwise. */
 		entry?: EntryInit | null;
@@ -101,7 +103,7 @@
 
 	// Artists made from this form join its list without a reload. Add New
 	// Artist needs the page's script, so it only renders once that has run.
-	let addedArtists = $state<{ id: number; name: string }[]>([]);
+	let addedArtists = $state<{ id: number; name: string; hasTelegram?: boolean }[]>([]);
 	const artistOptions = $derived(
 		[...artists, ...addedArtists.filter((a) => !artists.some((b) => b.id === a.id))].sort((a, b) =>
 			a.name.localeCompare(b.name, getLocale())
@@ -184,16 +186,33 @@
 		failure = form ?? null;
 	});
 	const errors = $derived(failure?.errors ?? {});
-	// Open chat: a place typed as text ("Telegram DM") names no address, so the
-	// saved artist's Telegram stands in. Only while the form still has that
-	// artist: another pick would open the wrong person's chat.
-	const chatHref = $derived(
-		entry?.artistName &&
-			values.artistId === String(entry.artistId) &&
-			values.sourceUrl.trim() &&
-			!sourceLinkHref(values.sourceUrl)
-			? sourceLinkHref(entry.artistTelegramUrl)
-			: null
+	// Add this Telegram to {name}: Telegrams saved from this form, by artist id,
+	// and the artists the server said already have one. An added Telegram counts
+	// for its artist's Open chat from then on, without a reload.
+	let addedTelegrams = $state<Record<string, string>>({});
+	let telegramTaken = $state<Record<string, true>>({});
+	// A link in the field opens from beside it, since the field itself can't be
+	// clicked. Otherwise (empty, or text like "Telegram DM") there's no address,
+	// so the saved artist's Telegram stands in as Open chat. Only while the form
+	// still has that artist: another pick would open the wrong person's chat.
+	const placeHref = $derived(sourceLinkHref(values.sourceUrl));
+	const pickedArtist = $derived(artistOptions.find((a) => String(a.id) === values.artistId) ?? null);
+	const pickedTelegram = $derived(
+		addedTelegrams[values.artistId] ??
+			(entry?.artistName && values.artistId === String(entry.artistId) ? entry.artistTelegramUrl : null)
+	);
+	const chatHref = $derived(!placeHref ? sourceLinkHref(pickedTelegram) : null);
+	// The one anchor beside the field: Open link, else Open chat, else none.
+	const openAnchor = $derived(
+		placeHref
+			? { href: placeHref, label: m.admin_commissions_open_link_label(), text: m.admin_commissions_open_link() }
+			: chatHref
+				? {
+						href: chatHref,
+						label: m.admin_commissions_open_chat_label({ artist: pickedArtist?.name ?? entry?.artistName ?? '' }),
+						text: m.admin_commissions_open_chat()
+					}
+				: null
 	);
 	// The out-of-date refusal's text, fixed when the refusal arrives so the alert
 	// doesn't change under a screen reader while the owner keeps typing.
@@ -368,12 +387,16 @@
 		| { kind: 'refused'; reason: 'invalid' | 'unsupported' | 'no_handle' | 'failed' }
 		| {
 				kind: 'found';
+				/** The link this answer is about, as sent. */
+				link: string;
 				platform: Platform;
 				handle: string;
 				matches: ArtistChoice[];
 				nameMatches: ArtistChoice[];
 				/** The one match was just made from this link with Add {handle}. */
 				added?: boolean;
+				/** The one match just had this link's Telegram added to them. */
+				telegramAdded?: boolean;
 		  };
 	let lookup = $state<LinkLookup>({ kind: 'idle' });
 	// The link last sent, so a blur after a paste doesn't ask twice.
@@ -385,6 +408,97 @@
 	let autoPicked: string | null = null;
 	// A draft came back, so the owner sees why the form isn't empty.
 	let draftRestored = $state(false);
+
+	let addingTelegram = $state(false);
+	// Why the last add was refused, for the artist it was about.
+	let telegramRefusal = $state<{ artistId: string; text: string } | null>(null);
+	let lookupBox = $state<HTMLElement>();
+	let telegramMsg = $state<HTMLElement>();
+
+	/** The picked artist a pasted t.me link can be added to: the link names no
+	 * artist in the list, and the picked one has no Telegram yet. */
+	const telegramTarget = $derived.by(() => {
+		if (lookup.kind !== 'found' || lookup.platform !== 'telegram' || lookup.matches.length > 0) return null;
+		const id = values.artistId;
+		if (!pickedArtist || pickedArtist.hasTelegram || addedTelegrams[id] || telegramTaken[id]) return null;
+		return pickedArtist;
+	});
+
+	async function addTelegram(artist: ArtistChoice, found: Extract<LinkLookup, { kind: 'found' }>) {
+		const artistId = String(artist.id);
+		// The field changed since this card was drawn (a typed link's change fires
+		// on this button's mouse-down): look the new link up instead, so what's
+		// saved is always a link the owner has seen the card for.
+		if (values.sourceUrl.trim() !== found.link) {
+			lookUpSource(values.sourceUrl);
+			return;
+		}
+		addingTelegram = true;
+		telegramRefusal = null;
+		let body: { ok?: boolean; reason?: string; telegramUrl?: string };
+		try {
+			const res = await fetch('/api/admin/artist-telegram', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ artistId: artist.id, url: found.link })
+			});
+			body = await res.json();
+		} catch {
+			body = { ok: false, reason: 'failed' };
+		}
+		addingTelegram = false;
+		// The field or the artist moved on while this was out: the card, any
+		// reason and focus now belong to the newer pick, so leave them alone. A
+		// save is still kept, so the artist isn't offered a second Telegram, and
+		// still said out loud: the owner asked for it, and nothing on the newer
+		// card says it happened.
+		if (values.sourceUrl.trim() !== found.link || values.artistId !== artistId) {
+			if (body.ok && body.telegramUrl) {
+				addedTelegrams[artistId] = body.telegramUrl;
+				announcer.say(m.admin_commissions_link_telegram_added({ name: artist.name }));
+			}
+			return;
+		}
+		if (body.ok && body.telegramUrl) {
+			addedTelegrams[artistId] = body.telegramUrl;
+			// The card now names the artist the link belongs to, unless the field
+			// has moved on to another link meanwhile.
+			if (lookup.kind === 'found' && lookup.handle === found.handle) {
+				lookup = { ...lookup, matches: [artist], nameMatches: [], telegramAdded: true };
+			}
+			announcer.say(m.admin_commissions_link_telegram_added({ name: artist.name }));
+			// The button is gone: focus moves to the one in its place.
+			await tick();
+			lookupBox?.querySelector<HTMLElement>('.match button')?.focus();
+			return;
+		}
+		const refusals: Record<string, () => string> = {
+			has_telegram: () => m.admin_commissions_link_telegram_taken({ name: artist.name }),
+			missing: () => m.admin_commissions_link_telegram_missing({ name: artist.name }),
+			telegram_taken_by_other: () => m.admin_commissions_link_telegram_other({ name: artist.name })
+		};
+		const text = (refusals[body.reason ?? ''] ?? m.admin_commissions_link_telegram_failed)();
+		// Another artist holds this Telegram: ask the lookup again, so the card
+		// shows them as the link's match instead of a button that can only fail.
+		if (body.reason === 'telegram_taken_by_other') {
+			lookedUp = '';
+			await lookUpLink(found.link);
+			// The field moved on meanwhile: the reason was about a link that's gone.
+			if (lookup.kind !== 'found' || lookup.link !== found.link) return;
+		}
+		telegramRefusal = { artistId, text };
+		// The artist already has a Telegram, or another artist does, so the
+		// button goes and focus moves to the reason, which reads it out. Otherwise
+		// focus stays on the button, so trying again is one key away, and the
+		// reason is announced.
+		if (body.reason === 'has_telegram' || body.reason === 'telegram_taken_by_other') {
+			if (body.reason === 'has_telegram') telegramTaken[artistId] = true;
+			await tick();
+			telegramMsg?.focus();
+		} else {
+			announcer.say(text);
+		}
+	}
 
 	/** The owner chose an artist, from a Use button or the select. */
 	function ownerPicked() {
@@ -426,6 +540,7 @@
 		lookedUp = link;
 		const seq = ++lookupSeq;
 		lookup = { kind: 'searching' };
+		telegramRefusal = null;
 		let next: LinkLookup;
 		try {
 			const res = await fetch('/api/admin/artist-from-link', {
@@ -435,7 +550,7 @@
 			});
 			const body = await res.json();
 			next = body.ok
-				? { kind: 'found', platform: body.platform, handle: body.handle, matches: body.matches, nameMatches: body.nameMatches }
+				? { kind: 'found', link, platform: body.platform, handle: body.handle, matches: body.matches, nameMatches: body.nameMatches }
 				: { kind: 'refused', reason: body.reason ?? 'failed' };
 		} catch {
 			next = { kind: 'refused', reason: 'failed' };
@@ -479,6 +594,7 @@
 	/** No lookup on screen, and any answer still on its way ignored. */
 	function clearLookup() {
 		lookup = { kind: 'idle' };
+		telegramRefusal = null;
 		lookedUp = '';
 		lookupSeq++;
 	}
@@ -532,6 +648,7 @@
 		}
 		if (result.kind !== 'found') return '';
 		const { handle, matches } = result;
+		if (matches.length === 1 && result.telegramAdded) return m.admin_commissions_link_telegram_added({ name: matches[0].name });
 		if (matches.length === 1 && result.added) return m.admin_commissions_link_added({ name: matches[0].name });
 		if (matches.length === 1) return m.admin_commissions_link_found({ handle, name: matches[0].name });
 		if (matches.length > 1) return m.admin_commissions_link_found_several({ handle });
@@ -676,7 +793,7 @@
 	{@const tone = primary ? 'btn-primary' : 'btn-secondary'}
 	{@const Icon = entry?.piece ? Plus : ImagePlus}
 	{#if dirty}
-		<button type="button" class="btn {tone}" aria-disabled="true" aria-describedby="ce-gallery-hint">
+		<button type="button" class="btn {tone} btn-held" aria-disabled="true" aria-describedby="ce-gallery-hint">
 			<Icon size={16} aria-hidden="true" />
 			{label}
 		</button>
@@ -697,7 +814,7 @@
      linking can move the entry to Delivered. -->
 {#snippet linkPieceButton()}
 	{#if dirty}
-		<button type="button" class="btn btn-secondary" aria-disabled="true" aria-describedby="ce-gallery-hint" bind:this={linkButton}>
+		<button type="button" class="btn btn-secondary btn-held" aria-disabled="true" aria-describedby="ce-gallery-hint" bind:this={linkButton}>
 			<Link2 size={16} aria-hidden="true" />
 			{m.admin_commissions_link_piece()}
 		</button>
@@ -736,7 +853,9 @@
 				<PieceThumb src={entry.piece.thumb} />
 				<div class="text">
 					<a href="/admin/images/{entry.piece.id}/edit" bind:this={pieceLink}>{entry.piece.title}</a>
-					{#if galleryOpen && dirty}<span class="hint" id="ce-gallery-hint">{m.admin_commissions_gallery_hint_dirty()}</span>{/if}
+					{#if galleryOpen && dirty}<span class="hint hint-warn save-first" id="ce-gallery-hint"
+							><TriangleAlert size={14} aria-hidden="true" />{m.admin_commissions_gallery_hint_dirty()}</span
+						>{/if}
 					<span class="hint" id="ce-unlink-hint">{m.admin_commissions_unlink_hint()}</span>
 				</div>
 				{#if galleryOpen}{@render galleryButton(m.admin_commissions_add_variant(), false, dirty)}{/if}
@@ -755,8 +874,8 @@
 				{@const delivered = loaded.status === 'delivered'}
 				<div class="text">
 					<span>{m.admin_commissions_not_in_gallery()}</span>
-					<span class="hint" id="ce-gallery-hint"
-						>{dirty
+					<span class="hint" class:hint-warn={dirty} class:save-first={dirty} id="ce-gallery-hint"
+						>{#if dirty}<TriangleAlert size={14} aria-hidden="true" />{/if}{dirty
 							? m.admin_commissions_gallery_hint_dirty()
 							: delivered
 								? m.admin_commissions_gallery_hint_delivered()
@@ -873,14 +992,9 @@
 			/>
 			{@render fieldError('sourceUrl')}
 			<small class="hint" id="ce-link-hint">{m.admin_commissions_hint_link()}</small>
-			{#if chatHref}
-				<a
-					class="open-chat"
-					href={chatHref}
-					target="_blank"
-					rel="noopener noreferrer"
-					aria-label={m.admin_commissions_open_chat_label({ artist: entry?.artistName ?? '' })}
-					>{m.admin_commissions_open_chat()}</a
+			{#if openAnchor}
+				<a class="open-chat" href={openAnchor.href} target="_blank" rel="noopener noreferrer" aria-label={openAnchor.label}
+					>{openAnchor.text}</a
 				>
 			{/if}
 			{#if lookup.kind === 'refused'}
@@ -899,7 +1013,7 @@
 			     Artists page hint would contradict the choice beside them. -->
 			{@const suggestionTaken =
 				found.matches.length === 0 && found.nameMatches.some((a) => String(a.id) === values.artistId)}
-			<div class="lookup">
+			<div class="lookup" bind:this={lookupBox}>
 				<p class="lookup-line">
 					<span class="platform">{SOCIAL_PLATFORM_NAMES[found.platform]}</span>
 					<span class="handle">{found.handle}</span>
@@ -912,10 +1026,35 @@
 							/>{/if}<span>{lookupOutcome(found)}</span>
 					</p>
 				{/if}
+				{#if telegramRefusal && telegramRefusal.artistId === values.artistId}
+					<p class="hint hint-warn lookup-msg" tabindex="-1" bind:this={telegramMsg}>
+						<TriangleAlert size={14} aria-hidden="true" /><span>{telegramRefusal.text}</span>
+					</p>
+				{/if}
 				{#each found.matches as artist (artist.id)}
 					{@render choice(artist, found.matches.length > 1)}
 				{/each}
 				{#if found.matches.length === 0}
+					<!-- The picked artist first: a t.me link pasted for them is most
+					     likely theirs. Adding someone new stays on offer below. -->
+					{#if telegramTarget}
+						{@const target = telegramTarget}
+						<div class="match">
+							<!-- aria-disabled, not disabled, while it saves: a disabled button
+							     drops focus, and a refusal keeps focus here to try again. -->
+							<button
+								type="button"
+								class="btn-compact btn-tap-mobile"
+								aria-disabled={addingTelegram ? 'true' : undefined}
+								onclick={() => !addingTelegram && addTelegram(target, found)}
+							>
+								{#if addingTelegram}<Loader2 size={14} class="tag-spin" aria-hidden="true" />{:else}<Plus
+										size={14}
+										aria-hidden="true"
+									/>{/if}{m.admin_commissions_link_add_telegram({ name: target.name })}
+							</button>
+						</div>
+					{/if}
 					{#each found.nameMatches as artist (artist.id)}
 						{@render choice(artist, false)}
 					{/each}
@@ -1280,6 +1419,7 @@
 	.hint a { color: var(--foreground); text-decoration: underline; }
 	/* After .hint, which it overrides at the same specificity. */
 	.hint-warn { color: var(--status-warn); }
+	.save-first { display: inline-flex; align-items: center; gap: 4px; }
 	.open-chat { align-self: flex-start; padding-block: 4px; font-size: 13px; color: var(--foreground); text-decoration: underline; }
 	.draft-note { margin: 0; }
 	/* A field with an error gets a red edge as well as its message. The edge

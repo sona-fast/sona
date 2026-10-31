@@ -892,21 +892,29 @@ test("an entry with no Delivered date gets the browser's date when added to the 
 	const held = galleryPanel(page).getByRole('button', { name: 'Add to gallery' });
 	await expect(held).toHaveAttribute('aria-disabled', 'true');
 	await expect(galleryPanel(page)).toContainText('Save your changes first.');
-	// Held, it reads as not ready: the secondary fill, hover included, with a
-	// label that still clears 4.5:1 as rendered.
+	// Held, it reads as not ready next to an enabled secondary button: no fill
+	// and a dashed edge, hover included, with a label that still clears 4.5:1
+	// against the page. The reason beside it is a warning, not a grey hint.
 	await held.hover();
 	await expect.poll(() => held.evaluate((el) => el.getAnimations().length)).toBe(0);
-	const [label, fill, secondary] = await held.evaluate((el) => {
-		const probe = document.createElement('span');
-		probe.style.backgroundColor = 'var(--secondary)';
-		document.body.append(probe);
+	const [label, fill, edge, page_] = await held.evaluate((el) => {
 		const style = getComputedStyle(el);
-		const found = [style.color, style.backgroundColor, getComputedStyle(probe).backgroundColor];
+		return [style.color, style.backgroundColor, style.borderTopStyle, getComputedStyle(document.body).backgroundColor];
+	});
+	expect(fill).toBe('rgba(0, 0, 0, 0)');
+	expect(edge).toBe('dashed');
+	expect(contrastRatio(label, page_)).toBeGreaterThanOrEqual(4.5);
+	const reason = galleryPanel(page).locator('#ce-gallery-hint');
+	const [reasonColor, warn] = await reason.evaluate((el) => {
+		const probe = document.createElement('span');
+		probe.style.color = 'var(--status-warn)';
+		document.body.append(probe);
+		const found = [getComputedStyle(el).color, getComputedStyle(probe).color];
 		probe.remove();
 		return found;
 	});
-	expect(fill).toBe(secondary);
-	expect(contrastRatio(label, fill)).toBeGreaterThanOrEqual(4.5);
+	expect(reasonColor).toBe(warn);
+	expect(contrastRatio(reasonColor, page_)).toBeGreaterThanOrEqual(4.5);
 	await settledShot(page, testInfo.outputPath('commission-entry-gallery-dirty.png'));
 	await page.getByLabel('Notes').fill('');
 	await expect(add).toBeVisible();
@@ -1252,10 +1260,10 @@ test('deleting the entry empties the ledger', async ({ page }, testInfo) => {
 	await settledShot(page, testInfo.outputPath('commission-ledger-emptied.png'));
 });
 
-/** A bare entry by Test Artist, saved from New entry. */
-async function createEntry(page: Page, title: string) {
+/** A bare entry, by Test Artist unless another artist is named, saved from New entry. */
+async function createEntry(page: Page, title: string, artist = 'Test Artist') {
 	await open(page, '/admin/commissions/new');
-	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'Test Artist' });
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: artist });
 	await page.getByLabel('Title').fill(title);
 	await page.getByRole('button', { name: 'Save entry' }).click();
 	await expect(page).toHaveURL(/\/admin\/commissions$/);
@@ -1366,6 +1374,10 @@ test('Link a piece links gallery art to an entry, with or without JavaScript, an
 		await noJs.getByRole('link', { name: `Link a piece: ${ENTRY}` }).click();
 		const picker = noJs.getByRole('region', { name: 'Link a piece' });
 		await expect(picker.getByRole('group', { name: 'Pieces by Test Artist, newest first' })).toBeVisible();
+		// Search reloads with every piece in scope, as in the dialog.
+		await picker.getByRole('searchbox', { name: 'Search titles' }).fill('unrelated');
+		await picker.getByRole('button', { name: 'Search', exact: true }).click();
+		await expect(picker.getByRole('group', { name: 'All pieces, newest first' })).toBeVisible();
 		await picker.getByRole('radio', { name: 'E2E unrelated piece' }).check();
 		await settledShot(noJs, testInfo.outputPath('commission-link-piece-nojs.png'));
 		await picker.getByRole('button', { name: 'Link piece' }).click();
@@ -1394,15 +1406,18 @@ test('Link a piece links gallery art to an entry, with or without JavaScript, an
 	await expect(linkButton).toBeFocused();
 
 	// By keyboard: search, then Tab past Search into the pieces and pick one.
+	// Search looks through every piece, not only the entry artist's.
 	await linkButton.click();
 	await search.fill('snow');
 	await search.press('Enter');
-	await expect(pieces.getByRole('radio')).toHaveCount(1);
+	const found = dialog.getByRole('group', { name: 'All pieces, newest first' });
+	await expect(found.getByRole('radio', { name: 'E2E Snowfall' })).toHaveCount(1);
+	await expect(found.getByRole('radio', { name: 'E2E unrelated piece' })).toHaveCount(0);
 	await page.keyboard.press('Tab');
 	await page.keyboard.press('Tab');
-	await expect(pieces.getByRole('radio', { name: 'E2E Snowfall' })).toBeFocused();
+	await expect(found.getByRole('radio', { name: 'E2E Snowfall' })).toBeFocused();
 	await page.keyboard.press('Space');
-	await expect(pieces.getByRole('radio', { name: 'E2E Snowfall' })).toBeChecked();
+	await expect(found.getByRole('radio', { name: 'E2E Snowfall' })).toBeChecked();
 	await settledShot(page, testInfo.outputPath('commission-link-piece-dialog.png'));
 	await dialog.getByRole('button', { name: 'Link piece' }).click();
 
@@ -1498,6 +1513,17 @@ test('signing out by address forgets drafts too, and the next session keeps its 
 	expect(await stored()).not.toContain('E2E draft before typed sign-out');
 });
 
+// The open search sits in the page's flow. A click below it lands where the
+// owner pressed: closing the search mustn't move the target up mid-click.
+test('a click below the open currency search lands on its target', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	await open(page, '/admin/commissions/new');
+	await page.getByRole('button', { name: 'Other currency' }).click();
+	await expect(page.getByRole('combobox', { name: 'Find a currency' })).toBeFocused();
+	await page.getByRole('link', { name: 'Cancel' }).click();
+	await expect(page).toHaveURL(/\/admin\/commissions$/);
+});
+
 test('Other currency finds a currency, and Add New Artist makes a private artist for the entry', async ({ page }, testInfo) => {
 	await loginRetrying(page, PASSWORD);
 	await open(page, '/admin/commissions/new');
@@ -1523,6 +1549,30 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	await page.keyboard.press('Escape');
 	await expect(find).toBeHidden();
 	await expect(other).toBeFocused();
+	// A click outside closes it with no pick, and focus stays where it landed;
+	// so does tabbing out of it.
+	const checkedBefore = await page.getByRole('radiogroup').getByRole('radio', { checked: true }).getAttribute('value');
+	const amount = page.getByRole('textbox', { name: 'Amount' });
+	await other.click();
+	await expect(find).toBeFocused();
+	await amount.click();
+	await expect(find).toBeHidden();
+	await expect(amount).toBeFocused();
+	await expect(page.getByRole('radiogroup').getByRole('radio', { checked: true })).toHaveAttribute('value', checkedBefore!);
+	await other.click();
+	await expect(find).toBeFocused();
+	await page.keyboard.press('Tab');
+	await expect(find).toBeHidden();
+	// Shift+Tab stops on Other currency with the search still open; the next
+	// one leaves the picker and closes it.
+	await other.click();
+	await expect(find).toBeFocused();
+	await page.keyboard.press('Shift+Tab');
+	await expect(other).toBeFocused();
+	await expect(find).toBeVisible();
+	await page.keyboard.press('Shift+Tab');
+	await expect(other).not.toBeFocused();
+	await expect(find).toBeHidden();
 	// Down and Up move through the list and wrap at both ends; Enter picks the
 	// active option.
 	await other.click();
@@ -1544,6 +1594,11 @@ test('Other currency finds a currency, and Add New Artist makes a private artist
 	const listBackground = await results.evaluate((el) => getComputedStyle(el).backgroundColor);
 	expect(contrastRatio(await edgeOf(secondId), listBackground)).toBeGreaterThanOrEqual(3);
 	expect(await edgeOf(firstId)).not.toBe(await edgeOf(secondId));
+	// Focus that lands on the list itself (a click on its scrollbar) goes back
+	// to the search box, so the arrow keys and Enter still work.
+	await results.focus();
+	await expect(find).toBeFocused();
+	await expect(find).toHaveAttribute('aria-activedescendant', secondId);
 	await page.keyboard.press('Enter');
 	const secondCode = secondId.replace('ce-currency-opt-', '');
 	await expect(page.getByRole('radio', { name: new RegExp(secondCode) })).toBeChecked();
@@ -1745,4 +1800,456 @@ test('an artist added in another tab can be picked by a link', async ({ page, co
 	await expect(page.locator('.lookup')).toContainText('other_tab_artist');
 	await expect(artist.locator('option:checked')).toHaveText('other_tab_artist');
 	expect(await artist.evaluate((el: HTMLSelectElement) => el.checkValidity())).toBe(true);
+});
+
+// A ledger entry blocks deleting its artist, and the Works column doesn't show
+// entries, so the Delete button says why before the owner tries. name_only_artist
+// (50 in fixtures/commissions.sql) has no works, so the entry is the only blocker.
+test('an artist with a ledger entry gets a Delete that says why it will not run', async ({ page, browser }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	try {
+		await createEntry(page, 'E2E blocks delete', 'name_only_artist');
+
+		await open(page, '/admin/artists?q=name_only_artist');
+		const row = page.getByRole('row', { name: /name_only_artist/ });
+		await expect(row.locator('.works-label')).toHaveText('No works yet');
+		const trash = row.getByRole('button', { name: 'Delete artist' });
+		const reason = "Can't delete while this artist has 1 commission ledger entry. Move or remove those first.";
+		await expect(trash).toHaveAttribute('aria-disabled', 'true');
+		await expect(trash).toHaveAccessibleDescription(reason);
+
+		// Keyboard focus shows the reason beside the button.
+		const tip = row.getByRole('tooltip');
+		await expect(tip).toBeHidden();
+		await trash.focus();
+		await page.keyboard.press('Shift+Tab');
+		await page.keyboard.press('Tab');
+		await expect(trash).toBeFocused();
+		await expect(tip).toBeVisible();
+		await expect(tip).toHaveText(reason);
+		await settledShot(page, testInfo.outputPath('artist-delete-blocked.png'));
+		// Escape hides it and leaves focus where it was; focusing again shows it.
+		await page.keyboard.press('Escape');
+		await expect(tip).toBeHidden();
+		await expect(trash).toBeFocused();
+		await page.keyboard.press('Shift+Tab');
+		await page.keyboard.press('Tab');
+		await expect(tip).toBeVisible();
+
+		// Activating it says the reason instead of asking to delete.
+		await page.keyboard.press('Enter');
+		await expect(page.getByRole('status').filter({ hasText: reason })).toBeVisible();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		// A pointer click too. Playwright treats aria-disabled as not enabled, so force it.
+		await trash.click({ force: true });
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+
+		// On hover, the pointer can move from the button onto the reason and it
+		// stays. It sits clear of Edit, and Escape hides it while the pointer is
+		// still there. On the first row it may rise above the table; the Japanese
+		// check below proves nothing clips it there.
+		await trash.evaluate((el) => (el as HTMLElement).blur());
+		await page.mouse.move(0, 0);
+		await expect(tip).toBeHidden();
+		await trash.hover();
+		await expect(tip).toBeVisible();
+		const tipBox = (await tip.boundingBox())!;
+		await page.mouse.move(tipBox.x + tipBox.width - 4, tipBox.y + tipBox.height / 2, { steps: 5 });
+		await expect(tip).toBeVisible();
+		const editBox = (await row.getByRole('button', { name: 'Edit artist' }).boundingBox())!;
+		const overlaps =
+			tipBox.x < editBox.x + editBox.width &&
+			editBox.x < tipBox.x + tipBox.width &&
+			tipBox.y < editBox.y + editBox.height &&
+			editBox.y < tipBox.y + tipBox.height;
+		expect(overlaps, 'the reason covers Edit').toBe(false);
+		await page.keyboard.press('Escape');
+		await expect(tip).toBeHidden();
+		// Coming back with the pointer shows it again.
+		await page.mouse.move(0, 0);
+		await trash.hover();
+		await expect(tip).toBeVisible();
+
+		// On a phone, the list's Delete is blocked the same way. A tap says why in
+		// a toast and opens no dialog, and the tap's hover doesn't show the reason
+		// on top of the toast.
+		const phone = await browser.newContext({
+			baseURL: testInfo.project.use.baseURL,
+			storageState: await page.context().storageState(),
+			viewport: { width: 390, height: 844 },
+			hasTouch: true,
+			isMobile: true
+		});
+		try {
+			const tab = await phone.newPage();
+			await tab.goto('/admin/artists?q=name_only_artist');
+			await waitForHydration(tab);
+			const item = tab.locator('.mobile-artist-item', { hasText: 'name_only_artist' });
+			const mobileTrash = item.getByRole('button', { name: 'Delete artist' });
+			await expect(mobileTrash).toHaveAttribute('aria-disabled', 'true');
+			await expect(mobileTrash).toHaveAccessibleDescription(reason);
+			await mobileTrash.tap({ force: true });
+			await expect(tab.getByRole('status').filter({ hasText: reason })).toBeVisible();
+			await expect(tab.getByRole('dialog')).toHaveCount(0);
+			await expect(item.getByRole('tooltip')).toBeHidden();
+			await settledShot(tab, testInfo.outputPath('artist-delete-blocked-phone.png'));
+		} finally {
+			await phone.close();
+		}
+
+		// In Japanese the same reason wraps to three lines or more. On the first
+		// row, in the table and in the phone list, the whole of it shows: nothing
+		// clips its top, and the phone layout doesn't scroll sideways.
+		/** Lines of text in the shown tooltip, and whether both its top corners
+		 * are the tooltip itself (a clipped corner hits whatever is beneath). */
+		const tipShows = (t: typeof tip) =>
+			t.evaluate((el) => {
+				const r = el.getBoundingClientRect();
+				const hits = [r.left + 2, r.right - 2].map((x) => el.contains(document.elementFromPoint(x, r.top + 2)));
+				return { lines: Math.round((el.clientHeight - 12) / parseFloat(getComputedStyle(el).lineHeight)), unclipped: hits.every(Boolean) };
+			});
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+		try {
+			await open(page, '/admin/artists?q=name_only_artist');
+			const jaRow = page.locator('.data-table tbody tr').first();
+			await expect(jaRow).toContainText('name_only_artist');
+			const jaTip = jaRow.getByRole('tooltip');
+			await jaRow.locator('.delete-wrap button').hover();
+			await expect(jaTip).toBeVisible();
+			const jaShown = await tipShows(jaTip);
+			expect(jaShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
+			expect(jaShown.unclipped, 'the reason is clipped').toBe(true);
+
+			const desktop = page.viewportSize()!;
+			await page.setViewportSize({ width: 390, height: 844 });
+			try {
+				const item = page.locator('.mobile-artist-item').first();
+				await expect(item).toContainText('name_only_artist');
+				const mobileTip = item.getByRole('tooltip');
+				await item.locator('.delete-wrap button').hover();
+				await expect(mobileTip).toBeVisible();
+				const mobileShown = await tipShows(mobileTip);
+				expect(mobileShown.lines, 'the Japanese reason is the tall case').toBeGreaterThanOrEqual(3);
+				expect(mobileShown.unclipped, 'the reason is clipped').toBe(true);
+				expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+			} finally {
+				await page.setViewportSize(desktop);
+			}
+		} finally {
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', domain: 'localhost', path: '/' }]);
+		}
+
+		// An artist with nothing in the way still gets the confirm dialog.
+		await open(page, '/admin/artists?q=Twin One');
+		const freeTrash = page.getByRole('row', { name: /Twin One/ }).getByRole('button', { name: 'Delete artist' });
+		await expect(freeTrash).not.toHaveAttribute('aria-disabled', 'true');
+		await freeTrash.click();
+		const confirm = page.getByRole('dialog');
+		await expect(confirm).toContainText('Delete artist "Twin One"?');
+		await confirm.getByRole('button', { name: 'Cancel' }).click();
+		await expect(confirm).toHaveCount(0);
+	} finally {
+		// Take this test's entries back out, even after a failure, so a retry
+		// starts with none. Earlier tests leave entries of their own.
+		await open(page, '/admin/commissions');
+		const leftover = page.getByRole('button', { name: 'Delete E2E blocks delete' });
+		for (let n = await leftover.count(); n > 0; n--) {
+			await leftover.first().click();
+			await page.getByRole('dialog', { name: 'Delete this entry?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+			await expect(leftover).toHaveCount(n - 1);
+		}
+	}
+});
+
+/** Stubs POST /api/admin/artist-telegram, so no artist changes, and records the
+ * link each request sent. `answer.next` is what the next request gets. */
+async function stubAddTelegram(page: Page) {
+	const posted: string[] = [];
+	const answer: { next: { status: number; json: Record<string, unknown> } } = {
+		next: { status: 500, json: { ok: false } }
+	};
+	await page.route('**/api/admin/artist-telegram', async (route) => {
+		posted.push((route.request().postDataJSON() as { url: string }).url);
+		await route.fulfill(answer.next);
+	});
+	return { posted, answer };
+}
+
+// Add this Telegram's refusals (SONA-236), against a stubbed endpoint: each
+// says why in the card. A failure or a missing artist keeps the button and
+// says the reason out loud; the other two take the button away and move focus
+// to the reason.
+test('Add this Telegram says why it was refused, and a failed add can be tried again', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	const { posted, answer } = await stubAddTelegram(page);
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const liveRegion = page.locator('[aria-live="polite"]');
+	const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+	const start = async () => {
+		await open(page, '/admin/commissions/new');
+		await artist.selectOption({ label: 'No Chat Artist' });
+		await paste(link, 'https://t.me/e2e_tg_refused');
+		await expect(addTelegram).toBeVisible();
+	};
+
+	// A failure keeps the button, with focus on it, to try again.
+	await start();
+	const failed = "Couldn't add the Telegram. Try again.";
+	await addTelegram.click();
+	await expect(card.getByText(failed)).toBeVisible();
+	await expect(liveRegion.filter({ hasText: failed })).toHaveCount(1);
+	await expect(addTelegram).toBeFocused();
+	// Another link clears the reason, which was about the last one.
+	await paste(link, 'https://t.me/e2e_tg_refused_2');
+	await expect(card.getByText('e2e_tg_refused_2', { exact: true })).toBeVisible();
+	await expect(card.getByText(failed)).toHaveCount(0);
+	await addTelegram.click();
+	await expect(card.getByText(failed)).toBeVisible();
+	// Trying again goes through.
+	answer.next = { status: 200, json: { ok: true, id: 55, name: 'No Chat Artist', telegramUrl: 'https://t.me/e2e_tg_refused_2' } };
+	await page.keyboard.press('Enter');
+	await expect(card.getByText('Added this Telegram to No Chat Artist.')).toBeVisible();
+	expect(posted).toEqual(['https://t.me/e2e_tg_refused', 'https://t.me/e2e_tg_refused_2', 'https://t.me/e2e_tg_refused_2']);
+
+	// No artist has that id any more (deleted in another tab): the reason
+	// shows, and the button stays.
+	await start();
+	answer.next = { status: 404, json: { ok: false, reason: 'missing' } };
+	await addTelegram.click();
+	const missing = "No Chat Artist isn't in your artist list anymore. Reload the page and pick the artist again.";
+	await expect(card.getByText(missing)).toBeVisible();
+	await expect(liveRegion.filter({ hasText: missing })).toHaveCount(1);
+	await expect(addTelegram).toBeFocused();
+
+	// Another artist holds the handle, saved since the card was drawn: the link
+	// is looked up again, so the card names them in place of a button that can
+	// only fail, and focus moves to the reason.
+	await start();
+	answer.next = { status: 409, json: { ok: false, reason: 'telegram_taken_by_other' } };
+	await page.route('**/api/admin/artist-from-link', (route) =>
+		route.fulfill({
+			json: {
+				ok: true,
+				platform: 'telegram',
+				handle: 'e2e_tg_refused',
+				matches: [{ id: 54, name: 'Chat Artist' }],
+				nameMatches: []
+			}
+		})
+	);
+	await addTelegram.click();
+	const other = "Another artist already has this Telegram, so Sona didn't add it to No Chat Artist.";
+	await expect(card.getByText('e2e_tg_refused is already in your artist list as Chat Artist.')).toBeVisible();
+	await expect(card.getByRole('button', { name: 'Use Chat Artist' })).toBeVisible();
+	await expect(card.locator('.lookup-msg', { hasText: other })).toBeFocused();
+	await expect(addTelegram).toHaveCount(0);
+	// The owner's pick stays theirs: the match is on offer, not taken.
+	await expect(artist.locator('option:checked')).toHaveText('No Chat Artist');
+	await page.unroute('**/api/admin/artist-from-link');
+
+	// The artist already has a Telegram: the button goes, and focus moves to why.
+	await start();
+	answer.next = { status: 409, json: { ok: false, reason: 'has_telegram' } };
+	await addTelegram.click();
+	const taken = 'No Chat Artist already has a Telegram. To change it, edit them on the Artists page.';
+	await expect(card.getByText(taken)).toBeVisible();
+	await expect(addTelegram).toHaveCount(0);
+	// Focus reads it out, so the live region doesn't say it a second time.
+	await expect(card.locator('.lookup-msg', { hasText: taken })).toBeFocused();
+	await expect(liveRegion.filter({ hasText: taken })).toHaveCount(0);
+});
+
+// An add whose answer comes back after the field moved on to another link was
+// about a link that's gone. Whatever the answer, it leaves the newer link's
+// card alone: no refusal on it, no second lookup of the old link, and focus
+// stays where the owner left it. A save that went through is still kept, so
+// the artist isn't offered a second Telegram, and still said out loud.
+// The success case moves on to Chat Artist's own link (fixtures/commissions.sql),
+// so the newer card has a Use button a stray focus move would land on.
+const lateTelegramAnswers = [
+	{ status: 409, json: { ok: false, reason: 'has_telegram' }, newer: 'e2e_tg_late_new' },
+	{ status: 409, json: { ok: false, reason: 'telegram_taken_by_other' }, newer: 'e2e_tg_late_new' },
+	{ status: 404, json: { ok: false, reason: 'missing' }, newer: 'e2e_tg_late_new' },
+	{ status: 500, json: { ok: false }, newer: 'e2e_tg_late_new' },
+	{
+		status: 200,
+		json: { ok: true, id: 55, name: 'No Chat Artist', telegramUrl: 'https://t.me/e2e_tg_late_old' },
+		newer: 'e2e_chat_artist'
+	}
+];
+for (const { newer, ...answer } of lateTelegramAnswers) {
+	const late = (answer.json as { reason?: string }).reason ?? (answer.json.ok ? 'success' : 'failure');
+	test(`a late Add this Telegram answer (${late}) leaves a newer link's card alone`, async ({ page }) => {
+		await loginRetrying(page, PASSWORD);
+		let release = () => {};
+		await page.route('**/api/admin/artist-telegram', async (route) => {
+			await new Promise<void>((r) => (release = r));
+			await route.fulfill(answer);
+		});
+		const lookups = countLookups(page);
+		const link = page.getByRole('textbox', { name: "Where it's happening" });
+		const card = page.locator('.lookup');
+		const liveRegion = page.locator('[aria-live="polite"]');
+		const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+		await open(page, '/admin/commissions/new');
+		await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'No Chat Artist' });
+		await paste(link, 'https://t.me/e2e_tg_late_old');
+		await expect(addTelegram).toBeVisible();
+		const posted = page.waitForRequest('**/api/admin/artist-telegram');
+		await addTelegram.click();
+		await posted;
+		// The owner moves on while the add is still out.
+		await paste(link, `https://t.me/${newer}`);
+		await expect(card.getByText(newer, { exact: true })).toBeVisible();
+		await link.focus();
+		const asked = lookups.count;
+		const answered = page.waitForResponse('**/api/admin/artist-telegram');
+		release();
+		await settledAfter(page, await answered);
+		// Any lookup the late answer starts would be out and back by now.
+		await page.waitForLoadState('networkidle');
+
+		await expect(card.getByText(newer, { exact: true })).toBeVisible();
+		await expect(card.getByText('e2e_tg_late_old', { exact: true })).toHaveCount(0);
+		await expect(card.locator('.lookup-msg')).toHaveCount(0);
+		await expect(link).toBeFocused();
+		expect(lookups.sent).toHaveLength(asked);
+		if (answer.json.ok) {
+			// Saved all the same: said out loud, and not offered again.
+			await expect(liveRegion.filter({ hasText: 'Added this Telegram to No Chat Artist.' })).toHaveCount(1);
+			await expect(card.getByRole('button', { name: 'Use Chat Artist' })).toBeVisible();
+			await paste(link, 'https://t.me/e2e_tg_late_other');
+			await expect(card.getByText('e2e_tg_late_other', { exact: true })).toBeVisible();
+			await expect(addTelegram).toHaveCount(0);
+		} else {
+			await expect(addTelegram).toBeVisible();
+		}
+	});
+}
+
+// The artist changes while an add is still out: the answer is kept, but the
+// card and the artist pick stay with the owner's newer choice.
+test('a late Add this Telegram answer leaves a changed artist pick alone', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	let release = () => {};
+	await page.route('**/api/admin/artist-telegram', async (route) => {
+		await new Promise<void>((r) => (release = r));
+		await route.fulfill({
+			status: 200,
+			json: { ok: true, id: 55, name: 'No Chat Artist', telegramUrl: 'https://t.me/e2e_tg_late_pick' }
+		});
+	});
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+	await open(page, '/admin/commissions/new');
+	await artist.selectOption({ label: 'No Chat Artist' });
+	await paste(link, 'https://t.me/e2e_tg_late_pick');
+	await expect(addTelegram).toBeVisible();
+	const posted = page.waitForRequest('**/api/admin/artist-telegram');
+	await addTelegram.click();
+	await posted;
+	await artist.selectOption({ label: 'Chat Artist' });
+	const picked = await artist.inputValue();
+	await artist.focus();
+	const answered = page.waitForResponse('**/api/admin/artist-telegram');
+	release();
+	await settledAfter(page, await answered);
+
+	await expect(artist).toHaveValue(picked);
+	await expect(card.getByText("e2e_tg_late_pick isn't in your artist list yet.")).toBeVisible();
+	await expect(card.getByRole('button', { name: /No Chat Artist/ })).toHaveCount(0);
+	await expect(artist).toBeFocused();
+});
+
+// The card's button adds the link the card was built from. A link typed in
+// after the lookup, whose change fires on the button's own mouse-down, is
+// looked up first, never saved unseen.
+test('Add this Telegram never saves a link typed in after the lookup', async ({ page }) => {
+	await loginRetrying(page, PASSWORD);
+	const { posted } = await stubAddTelegram(page);
+	await open(page, '/admin/commissions/new');
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const card = page.locator('.lookup');
+	const addTelegram = card.getByRole('button', { name: 'Add this Telegram to No Chat Artist' });
+	await page.getByLabel('Artist', { exact: true }).selectOption({ label: 'No Chat Artist' });
+	await paste(link, 'https://t.me/e2e_tg_looked_up');
+	await expect(addTelegram).toBeVisible();
+
+	// Typed, not pasted: no lookup until the field loses focus.
+	await link.fill('https://t.me/e2e_tg_typed_after');
+	await addTelegram.click();
+	await expect(card.getByText('e2e_tg_typed_after', { exact: true })).toBeVisible();
+	await expect(addTelegram).toBeVisible();
+	expect(posted).toEqual([]);
+	// Once the card shows the new link, its button adds that one.
+	await addTelegram.click();
+	await expect(card.getByText("Couldn't add the Telegram. Try again.")).toBeVisible();
+	expect(posted).toEqual(['https://t.me/e2e_tg_typed_after']);
+});
+
+// Add this Telegram to {name} (SONA-236): a t.me link pasted for the picked
+// artist, who has no Telegram yet, is saved as theirs in one click. Nothing
+// here saves an entry. fixtures/commissions.sql gives Chat Artist (54) a
+// Telegram. The test makes its own artist and handle for each attempt, so a
+// CI retry starts clean and the fixture artists the earlier tests use stay
+// without a Telegram.
+test('a pasted t.me link adds its Telegram to the picked artist who has none', async ({ page }, testInfo) => {
+	await loginRetrying(page, PASSWORD);
+	const name = `Telegram Target ${testInfo.retry}`;
+	const handle = `e2e_tg_new_${testInfo.retry}`;
+	const created = await page.request.post('/api/artists', { data: { name } });
+	expect(created.ok()).toBe(true);
+	const { id } = (await created.json()) as { id: number };
+	await open(page, '/admin/commissions/new');
+	// The field, not Open link beside it, whose label names the field too.
+	const link = page.getByRole('textbox', { name: "Where it's happening" });
+	const artist = page.getByLabel('Artist', { exact: true });
+	const card = page.locator('.lookup');
+	const liveRegion = page.locator('[aria-live="polite"]');
+	const addTelegram = card.getByRole('button', { name: `Add this Telegram to ${name}` });
+
+	// An artist who already has a Telegram is never offered another.
+	await artist.selectOption({ label: 'Chat Artist' });
+	await paste(link, `https://t.me/${handle}`);
+	await expect(card.getByText(`${handle} isn't in your artist list yet.`)).toBeVisible();
+	await expect(card.getByRole('button', { name: /^Add this Telegram/ })).toHaveCount(0);
+	await expect(card.getByRole('button', { name: `Add ${handle} as a new artist` })).toBeVisible();
+
+	// A bare handle stays a note: no lookup, so nothing to add.
+	await link.fill(`@${handle}`);
+	await link.press('Tab');
+	await expect(card).toHaveCount(0);
+
+	// The picked artist has no Telegram: adding it to them comes first, and a
+	// new artist stays on offer below.
+	await artist.selectOption({ label: name });
+	await paste(link, `https://t.me/${handle}`);
+	await expect(addTelegram).toBeVisible();
+	await expect(card.getByRole('button', { name: `Add ${handle} as a new artist` })).toBeVisible();
+	await settledShot(page, testInfo.outputPath('commission-link-add-telegram.png'));
+
+	await addTelegram.click();
+	await expect(card.getByText(`Added this Telegram to ${name}.`)).toBeVisible();
+	await expect(liveRegion.filter({ hasText: `Added this Telegram to ${name}.` })).toHaveCount(1);
+	await expect(addTelegram).toHaveCount(0);
+	// Focus lands on the button that took the old one's place.
+	await expect(card.getByRole('button', { name: `Using ${name}` })).toBeFocused();
+	await expect(artist).toHaveValue(String(id));
+	await settledShot(page, testInfo.outputPath('commission-link-telegram-added.png'));
+
+	// With the field as plain text, Open chat uses the new Telegram, no reload.
+	await link.fill('Telegram DM');
+	await link.press('Tab');
+	const chat = page.getByRole('link', { name: `Open chat with ${name} on Telegram (opens in a new tab)` });
+	await expect(chat).toHaveAttribute('href', `https://t.me/${handle}`);
+
+	// It's saved: a fresh form finds the artist by the link.
+	await open(page, '/admin/commissions/new');
+	await paste(link, `https://t.me/${handle}/42`);
+	await expect(card.getByText(`${handle} is already in your artist list as ${name}.`)).toBeVisible();
+	await expect(artist).toHaveValue(String(id));
 });

@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { artists, images, stickers, stickerPacks, avatarCredits, commissions } from '$lib/server/db/schema';
+import { artists } from '$lib/server/db/schema';
 import { eq, sql, like, or } from 'drizzle-orm';
 import {
 	resolveAvatarUrl,
@@ -27,6 +27,7 @@ import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registr
 import { getRawSetting, setRawSetting, getSettings } from '$lib/server/settings';
 import { cleanMessage } from '$lib/server/metrics';
 import { artistIsLedgerOnly, artistShownPublicly } from '$lib/server/artist-visibility';
+import { artistDeleteBlockerCounts, artistDeleteBlockedError } from '$lib/server/artist-delete-blockers';
 import { parseDismissed, addDismissed } from '$lib/server/registry-dismissals';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -82,10 +83,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			ledgerPrivate: artists.ledgerPrivate,
 			hasPublicWork: sql<number>`${artistShownPublicly(artists.id)}`,
 			createdAt: artists.createdAt,
-			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
-			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`,
-			// Distinct avatars: an artist credited in two roles on one avatar is one avatar.
-			avatarCount: sql<number>`(SELECT COUNT(DISTINCT avatar_id) FROM avatar_credits WHERE avatar_credits.artist_id = artists.id)`
+			// The works counts plus what else blocks a delete, so the Delete button can
+			// say why it won't run before the action refuses.
+			...artistDeleteBlockerCounts()
 		})
 		.from(artists)
 		.where(whereClause)
@@ -494,62 +494,14 @@ export const actions = {
 
 		if (!id) return fail(400, { error: 'Artist ID is required' });
 
-		// Block deletion while the artist is still referenced by artworks OR stickers
-		// (stickers.artist_id is a non-cascading FK — deleting would fail / orphan).
-		const imageCount = await db
-			.select({ count: sql<number>`COUNT(*)` })
-			.from(images)
-			.where(eq(images.artistId, id))
+		// The same counts the list shows, so the list and this guard can't disagree.
+		const blockers = await db
+			.select(artistDeleteBlockerCounts())
+			.from(artists)
+			.where(eq(artists.id, id))
 			.get();
-		if (imageCount && imageCount.count > 0) {
-			return fail(400, { error: 'Cannot delete artist with existing artworks. Remove their images first.' });
-		}
-
-		const stickerCountRow = await db
-			.select({ count: sql<number>`COUNT(*)` })
-			.from(stickers)
-			.where(eq(stickers.artistId, id))
-			.get();
-		if (stickerCountRow && stickerCountRow.count > 0) {
-			return fail(400, { error: 'Cannot delete artist with existing stickers. Remove their stickers first.' });
-		}
-
-		// avatar_credits.artist_id is a non-cascading FK too; name the cause instead of
-		// leaving it to the generic backstop below.
-		const avatarCreditRow = await db
-			.select({ count: sql<number>`COUNT(*)` })
-			.from(avatarCredits)
-			.where(eq(avatarCredits.artistId, id))
-			.get();
-		if (avatarCreditRow && avatarCreditRow.count > 0) {
-			return fail(400, { error: 'Cannot delete artist credited on VR avatars. Remove their credit from each avatar first.' });
-		}
-
-		// A pack can list this artist as its manager with 0 stickers (e.g. a Telegram
-		// import where every download failed), so it slips past the checks above. The
-		// sticker_packs.manager_artist_id FK is non-cascading, so deleting would fail.
-		const managedPackRow = await db
-			.select({ count: sql<number>`COUNT(*)` })
-			.from(stickerPacks)
-			.where(eq(stickerPacks.managerArtistId, id))
-			.get();
-		if (managedPackRow && managedPackRow.count > 0) {
-			return fail(400, {
-				error: `Cannot delete artist who manages ${managedPackRow.count} sticker pack${managedPackRow.count === 1 ? '' : 's'}. Reassign or remove those packs first.`
-			});
-		}
-
-		// commissions.artist_id is non-cascading too: a private ledger entry keeps its artist.
-		const commissionRow = await db
-			.select({ count: sql<number>`COUNT(*)` })
-			.from(commissions)
-			.where(eq(commissions.artistId, id))
-			.get();
-		if (commissionRow && commissionRow.count > 0) {
-			return fail(400, {
-				error: `Cannot delete artist with ${commissionRow.count} commission ledger entr${commissionRow.count === 1 ? 'y' : 'ies'}. Delete those entries first.`
-			});
-		}
+		const blocked = blockers && artistDeleteBlockedError(blockers);
+		if (blocked) return fail(400, { error: blocked });
 
 		// Backstop: any remaining FK reference would otherwise surface as an uncaught 500.
 		try {
