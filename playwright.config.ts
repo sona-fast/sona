@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { shardProjects } from './scripts/e2e-shards';
 import {
 	E2E_PLATFORM_PERSIST,
 	E2E_PLATFORM_PERSIST_RECOVERY,
@@ -315,6 +316,132 @@ const webServer = (port: number, env: Record<string, string>) => ({
 	timeout: 120_000
 });
 
+const allProjects = [
+	{
+		name: 'chromium',
+		testIgnore: [
+			RECOVERY_SPEC,
+			...UT_SPECS,
+			...UPLOAD_SPECS,
+			TAG_SUGGESTION_SPEC,
+			SUGGEST_TAGS_SPEC,
+			THEME_SPEC,
+			STICKERS_SPEC,
+			...REGISTRY_SPECS,
+			PASSPORT_SPEC,
+			CONVENTIONS_EVENT_SPEC,
+			...COMMISSIONS_SPECS,
+			COMMISSIONS_GATED_SPEC
+		],
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
+	},
+	{
+		name: 'tag-suggestions',
+		testMatch: TAG_SUGGESTION_SPEC,
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${TAGS_PORT}` }
+	},
+	{
+		name: 'suggest-tags',
+		testMatch: SUGGEST_TAGS_SPEC,
+		// Its saves count and empty the same list from test to test, so the
+		// order the file lays out is the order they have to run in.
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${SUGGEST_TAGS_PORT}` }
+	},
+	{
+		name: 'stickers-content',
+		testMatch: STICKERS_SPEC,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${STICKERS_PORT}` }
+	},
+	{
+		name: 'passport',
+		testMatch: PASSPORT_SPEC,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PASSPORT_PORT}` }
+	},
+	{
+		name: 'passport-empty',
+		testMatch: PASSPORT_SPEC,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PASSPORT_EMPTY_PORT}` }
+	},
+	{
+		name: 'conventions-event',
+		testMatch: CONVENTIONS_EVENT_SPEC,
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${CONVENTIONS_EVENT_PORT}` }
+	},
+	{
+		name: 'commissions',
+		testMatch: COMMISSIONS_SPECS,
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${COMMISSIONS_PORT}` }
+	},
+	{
+		name: 'commissions-gated',
+		testMatch: COMMISSIONS_GATED_SPEC,
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${COMMISSIONS_GATED_PORT}` }
+	},
+	{
+		name: 'theme-picker',
+		testMatch: THEME_SPEC,
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${THEME_PORT}` }
+	},
+	{
+		name: 'registry-sync',
+		testMatch: REGISTRY_SPECS,
+		// One scenario file steers the whole server, so the tests take turns.
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${REGISTRY_PORT}` }
+	},
+	{
+		name: 'recovery',
+		testMatch: RECOVERY_SPEC,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${RECOVERY_PORT}` }
+	},
+	{
+		name: 'ut-stat',
+		testMatch: UT_SPECS,
+		// Both specs mutate the shared seeded DB's storage provider — one
+		// worker keeps the two files from racing each other's saves.
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UT_PORT}` }
+	},
+	{
+		name: 'upload',
+		testMatch: UPLOAD_SPECS,
+		// The upload tests share one seeded dev server and an admin
+		// session flow that flakes under parallel load — run them serially.
+		workers: 1,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UPLOAD_PORT}` }
+	}
+];
+
+// Each project's own seeded dev server.
+const servers: Record<string, ReturnType<typeof webServer>> = {
+	chromium: webServer(PORT, sharedServerEnv),
+	recovery: webServer(RECOVERY_PORT, recoveryServerEnv),
+	'ut-stat': webServer(UT_PORT, utServerEnv),
+	upload: webServer(UPLOAD_PORT, uploadServerEnv),
+	'tag-suggestions': webServer(TAGS_PORT, tagsServerEnv),
+	'suggest-tags': webServer(SUGGEST_TAGS_PORT, suggestServerEnv),
+	'theme-picker': webServer(THEME_PORT, themeServerEnv),
+	'stickers-content': webServer(STICKERS_PORT, stickersServerEnv),
+	'registry-sync': webServer(REGISTRY_PORT, registryServerEnv),
+	passport: webServer(PASSPORT_PORT, passportServerEnv),
+	'passport-empty': webServer(PASSPORT_EMPTY_PORT, passportEmptyServerEnv),
+	'conventions-event': webServer(CONVENTIONS_EVENT_PORT, conventionsEventServerEnv),
+	commissions: webServer(COMMISSIONS_PORT, commissionsServerEnv),
+	'commissions-gated': webServer(COMMISSIONS_GATED_PORT, commissionsGatedServerEnv)
+};
+
+// CI runs one group of projects per job (scripts/e2e-shards.ts); unset runs all.
+const selected = shardProjects(
+	process.env.SONA_E2E_SHARD,
+	allProjects.map((p) => p.name)
+);
+
 export default defineConfig({
 	testDir: 'tests/e2e',
 	// Convention: playwright e2e specs are *.spec.ts; *.test.ts is vitest
@@ -339,121 +466,6 @@ export default defineConfig({
 		// pair is safe across versions). Harmless for the non-WebGL specs.
 		launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
 	},
-	projects: [
-		{
-			name: 'chromium',
-			testIgnore: [
-				RECOVERY_SPEC,
-				...UT_SPECS,
-				...UPLOAD_SPECS,
-				TAG_SUGGESTION_SPEC,
-				SUGGEST_TAGS_SPEC,
-				THEME_SPEC,
-				STICKERS_SPEC,
-				...REGISTRY_SPECS,
-				PASSPORT_SPEC,
-				CONVENTIONS_EVENT_SPEC,
-				...COMMISSIONS_SPECS,
-				COMMISSIONS_GATED_SPEC
-			],
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
-		},
-		{
-			name: 'tag-suggestions',
-			testMatch: TAG_SUGGESTION_SPEC,
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${TAGS_PORT}` }
-		},
-		{
-			name: 'suggest-tags',
-			testMatch: SUGGEST_TAGS_SPEC,
-			// Its saves count and empty the same list from test to test, so the
-			// order the file lays out is the order they have to run in.
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${SUGGEST_TAGS_PORT}` }
-		},
-		{
-			name: 'stickers-content',
-			testMatch: STICKERS_SPEC,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${STICKERS_PORT}` }
-		},
-		{
-			name: 'passport',
-			testMatch: PASSPORT_SPEC,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PASSPORT_PORT}` }
-		},
-		{
-			name: 'passport-empty',
-			testMatch: PASSPORT_SPEC,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PASSPORT_EMPTY_PORT}` }
-		},
-		{
-			name: 'conventions-event',
-			testMatch: CONVENTIONS_EVENT_SPEC,
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${CONVENTIONS_EVENT_PORT}` }
-		},
-		{
-			name: 'commissions',
-			testMatch: COMMISSIONS_SPECS,
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${COMMISSIONS_PORT}` }
-		},
-		{
-			name: 'commissions-gated',
-			testMatch: COMMISSIONS_GATED_SPEC,
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${COMMISSIONS_GATED_PORT}` }
-		},
-		{
-			name: 'theme-picker',
-			testMatch: THEME_SPEC,
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${THEME_PORT}` }
-		},
-		{
-			name: 'registry-sync',
-			testMatch: REGISTRY_SPECS,
-			// One scenario file steers the whole server, so the tests take turns.
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${REGISTRY_PORT}` }
-		},
-		{
-			name: 'recovery',
-			testMatch: RECOVERY_SPEC,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${RECOVERY_PORT}` }
-		},
-		{
-			name: 'ut-stat',
-			testMatch: UT_SPECS,
-			// Both specs mutate the shared seeded DB's storage provider — one
-			// worker keeps the two files from racing each other's saves.
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UT_PORT}` }
-		},
-		{
-			name: 'upload',
-			testMatch: UPLOAD_SPECS,
-			// The upload tests share one seeded dev server and an admin
-			// session flow that flakes under parallel load — run them serially.
-			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UPLOAD_PORT}` }
-		}
-	],
-	webServer: [
-		webServer(PORT, sharedServerEnv),
-		webServer(RECOVERY_PORT, recoveryServerEnv),
-		webServer(UT_PORT, utServerEnv),
-		webServer(UPLOAD_PORT, uploadServerEnv),
-		webServer(TAGS_PORT, tagsServerEnv),
-		webServer(SUGGEST_TAGS_PORT, suggestServerEnv),
-		webServer(THEME_PORT, themeServerEnv),
-		webServer(STICKERS_PORT, stickersServerEnv),
-		webServer(REGISTRY_PORT, registryServerEnv),
-		webServer(PASSPORT_PORT, passportServerEnv),
-		webServer(PASSPORT_EMPTY_PORT, passportEmptyServerEnv),
-		webServer(CONVENTIONS_EVENT_PORT, conventionsEventServerEnv),
-		webServer(COMMISSIONS_PORT, commissionsServerEnv),
-		webServer(COMMISSIONS_GATED_PORT, commissionsGatedServerEnv)
-	]
+	projects: allProjects.filter((p) => selected.includes(p.name)),
+	webServer: selected.map((name) => servers[name])
 });

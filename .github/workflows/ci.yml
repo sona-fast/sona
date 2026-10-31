@@ -90,11 +90,24 @@ jobs:
   # Browser E2E (playwright). Separate from the unit suite so `npm test` stays
   # fast; gated to the canonical repo like `check`, and skipped on forks (their
   # deploy.yml already runs check/test/build).
-  e2e:
+  #
+  # Split across four runners by project group (scripts/e2e-shards.ts), so each
+  # boots only its own dev servers. The count in SONA_E2E_SHARD must match
+  # E2E_SHARDS; playwright.config.ts refuses to start when it doesn't.
+  e2e-shard:
     runs-on: ubuntu-latest
     if: github.repository == 'sona-fast/sona'
+    # The slowest shard took about 20 minutes; a hang fails here, not at
+    # GitHub's six-hour default.
+    timeout-minutes: 40
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      SONA_E2E_SHARD: ${{ matrix.shard }}/4
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,3 +131,13 @@ jobs:
       - run: npx playwright install --with-deps chromium
 
       - run: npm run test:e2e
+
+  # The required status check. Branch protection names `e2e`, so this job keeps
+  # that name and passes only when every shard did.
+  e2e:
+    runs-on: ubuntu-latest
+    if: always() && github.repository == 'sona-fast/sona'
+    needs: e2e-shard
+    permissions: {}
+    steps:
+      - run: test "${{ needs.e2e-shard.result }}" = success
