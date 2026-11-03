@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -6,6 +6,17 @@ import * as schema from '$lib/server/db/schema';
 import { artists, images } from '$lib/server/db/schema';
 import { load } from './+page.server';
 import { makeD1 } from '$lib/server/test/d1';
+
+// SONA-179: lets one case make the neighbor read hang, as a stalled D1 would.
+const stall = vi.hoisted(() => ({ neighbors: false }));
+vi.mock('$lib/server/gallery-order', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/server/gallery-order')>();
+	return {
+		...actual,
+		galleryNeighbors: (...args: Parameters<typeof actual.galleryNeighbors>) =>
+			stall.neighbors ? new Promise<never>(() => {}) : actual.galleryNeighbors(...args)
+	};
+});
 
 // SONA-167 receipts: the /ai trust page claims drafts are excluded by the
 // database query itself on every public route and return a plain 404. This
@@ -116,5 +127,25 @@ describe('/gallery/[slug] load', () => {
 		const slugs = data.variants.map((v) => v.slug);
 		expect(slugs).toContain('v1');
 		expect(slugs).not.toContain('v2-draft');
+	});
+
+	afterEach(() => {
+		stall.neighbors = false;
+		vi.useRealTimers();
+	});
+
+	it('serves the page without a pager when the neighbor read never answers', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, [{ slug: 'pub', published: true }]);
+		stall.neighbors = true;
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		const pending = load(loadEvent(platform, 'pub')) as Promise<{
+			image: { slug: string };
+			neighbors: { prev: unknown; next: unknown };
+		}>;
+		await vi.advanceTimersByTimeAsync(10_000);
+		const data = await pending;
+		expect(data.image.slug).toBe('pub');
+		expect(data.neighbors).toEqual({ prev: null, next: null });
 	});
 });

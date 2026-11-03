@@ -6,7 +6,11 @@ import { parseAliases } from '$lib/server/registry';
 import { getSettings } from '$lib/server/settings';
 import { galleryNeighbors } from '$lib/server/gallery-order';
 import { galleryContextFromParams, resolveGallerySort } from '$lib/gallery';
+import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
+
+// The pager is optional: a slow or failing D1 drops it instead of holding the page.
+const NEIGHBORS_TIMEOUT_MS = 2000;
 
 export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// read replica (eventually consistent); admin writes use the primary
@@ -110,14 +114,20 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// sort, the same grid /gallery shows. The grid only shows group parents,
 	// so a variant pages from its parent's place.
 	const context = galleryContextFromParams(url.searchParams);
-	const settings = await getSettings(db);
-	const sort = resolveGallerySort(context.sort, settings.galleryDefaultSort);
 	let anchor = { id: image.id, createdAt: image.createdAt, commissionedAt: image.commissionedAt };
 	if (image.parentImageId !== null) {
 		const parent = siblings.find((s) => s.id === image.parentImageId);
 		if (parent) anchor = { id: parent.id, createdAt: parent.createdAt, commissionedAt: parent.commissionedAt };
 	}
-	const neighbors = await galleryNeighbors(db, context.filters, sort, anchor);
+	const neighbors = await withTimeout(
+		(async () => {
+			const settings = await getSettings(db);
+			const sort = resolveGallerySort(context.sort, settings.galleryDefaultSort);
+			return galleryNeighbors(db, context.filters, sort, anchor);
+		})(),
+		NEIGHBORS_TIMEOUT_MS,
+		{ prev: null, next: null }
+	);
 
 	return {
 		image,

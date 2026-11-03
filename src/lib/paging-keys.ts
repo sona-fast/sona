@@ -3,7 +3,8 @@
 // Arrows already mean something in a text field, a select, a media player, a
 // slider or a menu, so the shortcut stands down whenever focus is in one of
 // those, and whenever a modifier is held (Alt+Left is browser Back, Shift+arrow
-// extends a selection).
+// extends a selection). A held arrow's auto-repeat is ignored too, so holding
+// it steps once instead of racing through the set and downloading every hop.
 
 const KEY_CONSUMERS = [
 	'input',
@@ -33,14 +34,14 @@ function consumesArrows(target: EventTarget | null): boolean {
 
 /**
  * The paging step a keydown asks for: -1 for ArrowLeft, 1 for ArrowRight, or
- * null when the key isn't a bare arrow, something else already handled it,
- * or focus is somewhere arrows already do something.
+ * null when the key isn't a bare arrow, is an auto-repeat, something else
+ * already handled it, or focus is somewhere arrows already do something.
  */
 export function pagingStep(
-	e: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'defaultPrevented' | 'isComposing' | 'target'>
+	e: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'defaultPrevented' | 'isComposing' | 'repeat' | 'target'>
 ): -1 | 1 | null {
 	if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return null;
-	if (e.defaultPrevented || e.isComposing) return null;
+	if (e.defaultPrevented || e.isComposing || e.repeat) return null;
 	if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
 	if (consumesArrows(e.target)) return null;
 	return e.key === 'ArrowLeft' ? -1 : 1;

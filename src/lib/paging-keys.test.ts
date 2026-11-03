@@ -22,6 +22,7 @@ function key(overrides: Partial<Parameters<typeof pagingStep>[0]> = {}) {
 		shiftKey: false,
 		defaultPrevented: false,
 		isComposing: false,
+		repeat: false,
 		target: target([]) as unknown as EventTarget,
 		...overrides
 	};
@@ -46,6 +47,11 @@ describe('pagingStep', () => {
 	it('stands down when something else already handled the key, or mid-IME composition', () => {
 		expect(pagingStep(key({ defaultPrevented: true }))).toBeNull();
 		expect(pagingStep(key({ isComposing: true }))).toBeNull();
+	});
+
+	it('stands down on auto-repeat, so a held arrow pages once instead of racing through the set', () => {
+		expect(pagingStep(key({ repeat: true }))).toBeNull();
+		expect(pagingStep(key({ key: 'ArrowLeft', repeat: true }))).toBeNull();
 	});
 
 	it('stands down while focus is in a field, player, or arrow-driven widget', () => {

@@ -133,6 +133,17 @@ test.describe('art detail paging', () => {
 		await expect(nextLink(page)).toHaveCount(0);
 	});
 
+	test('a variant tile keeps the grid context, and pages from its parent', async ({ page }) => {
+		await open(page, '/gallery?sort=oldest');
+		await page.getByRole('link', { name: /Parent Piece SFW/ }).first().click();
+		await expect(page).toHaveURL(/\/gallery\/parent-piece\?sort=oldest$/);
+		await page.locator('a.variant-tile[href^="/gallery/variant-piece"]').click();
+		await expect(page).toHaveURL(/\/gallery\/variant-piece\?sort=oldest$/);
+		// Still the oldest-first grid, where the parent is the first card.
+		await expect(nextLink(page)).toHaveAccessibleName('Next: Ref Sheet');
+		await expect(prevLink(page)).toHaveCount(0);
+	});
+
 	test('a filtered grid of one piece has nothing to page to', async ({ page }) => {
 		await open(page, '/gallery?tag=reference');
 		await page.getByRole('link', { name: /Ref Sheet/ }).first().click();
@@ -171,8 +182,8 @@ test.describe('art detail paging', () => {
 });
 
 test.describe('VR looks paging', () => {
-	// The 3D stage is never opened here, but VR pages stay serial and small
-	// like the other VR specs: SwiftShader starves parallel workers.
+	// VR pages stay serial and small like the other VR specs: SwiftShader
+	// starves parallel workers.
 	test.describe.configure({ mode: 'serial' });
 	test.use({ viewport: { width: 900, height: 800 } });
 
@@ -252,4 +263,49 @@ test.describe('VR looks paging', () => {
 		await expect(page.locator('.media-frame video')).toHaveAttribute('src', /vr-media-posterless-clip/);
 		await expect(prevBtn(page)).toBeDisabled();
 	});
+
+	test('arrows stand down while the 3D stage is up, and page again after it closes', async ({ page }) => {
+		// e2e-avatar's model is a stub that fails to parse, which would drop the
+		// stage straight back to the poster. Holding the model download open
+		// keeps the viewer active (loading) for as long as the test needs.
+		await page.route('**/vr/e2e-avatar/model', () => new Promise<void>(() => {}));
+		await open(page, '/vr/e2e-avatar');
+		await expect(position(page)).toHaveText('1 of 3');
+
+		await page.getByRole('button', { name: 'View in 3D' }).click();
+		await expect(page.locator('.loading-panel')).toBeVisible();
+		await expect(prevBtn(page)).toHaveAttribute('aria-disabled', 'true');
+		await expect(nextBtn(page)).toHaveAttribute('aria-disabled', 'true');
+		// Focus sits on Exit 3D, a plain button, so only the page's own guard
+		// can keep this arrow from paging.
+		await page.keyboard.press('ArrowRight');
+		await expect(position(page)).toHaveText('1 of 3');
+		// Playwright won't click an aria-disabled control; a pointer user still can.
+		await nextBtn(page).click({ force: true });
+		await expect(position(page)).toHaveText('1 of 3');
+
+		await page.getByRole('button', { name: 'Exit 3D' }).click();
+		await expect(page.locator('.loading-panel')).toHaveCount(0);
+		await expect(nextBtn(page)).toHaveAttribute('aria-disabled', 'false');
+		await blurFocus(page);
+		await page.keyboard.press('ArrowRight');
+		await expect(position(page)).toHaveText('2 of 3');
+		await page.unrouteAll({ behavior: 'ignoreErrors' });
+	});
+
+	for (const locale of ['en', 'ja'] as const) {
+		test(`each pager button's accessible name contains its visible label (${locale})`, async ({ page }, testInfo) => {
+			// WCAG 2.5.3: a voice user says what they see.
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: testInfo.project.use.baseURL! }]);
+			await open(page, '/vr/e2e-avatar');
+			await expect(page.locator('html')).toHaveAttribute('lang', locale);
+			const buttons = page.locator('.look-pager').getByRole('button');
+			await expect(buttons).toHaveCount(2);
+			for (const button of await buttons.all()) {
+				const visible = (await button.innerText()).trim();
+				expect(visible).not.toBe('');
+				await expect(button).toHaveAccessibleName(new RegExp(visible.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+			}
+		});
+	}
 });
