@@ -2,10 +2,10 @@
 	import { tick } from 'svelte';
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
-	import { onNavigate } from '$app/navigation';
-	import { Download, Share2, ExternalLink } from 'lucide-svelte';
+	import { goto, onNavigate } from '$app/navigation';
+	import { Download, Share2, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import { formatDate } from '$lib';
-	import { heroSrc, heroSrcset, heroSizes, variantThumbSrc, rawFallback } from './hero-image';
+	import { heroSrc, heroSrcset, heroSizes, nextHeroPreload, variantThumbSrc, rawFallback } from './hero-image';
 	import Meta from '$lib/components/Meta.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
@@ -15,6 +15,7 @@
 	import DeviantArtIcon from '$lib/components/icons/DeviantArtIcon.svelte';
 	import PatreonIcon from '$lib/components/icons/PatreonIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
+	import { pagingStep } from '$lib/paging-keys';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -52,6 +53,24 @@
 		if (variant.variantLabel) return variant.variantLabel;
 		const n = data.variants.filter((v) => v.parentImageId !== null).indexOf(variant) + 1;
 		return m.gallery_variant_n({ n });
+	}
+
+	// Previous/next through the grid the visitor came from (SONA-179). The links
+	// keep the grid context (data.contextQuery), so it survives every hop.
+	const prev = $derived(data.neighbors.prev);
+	const next = $derived(data.neighbors.next);
+	const prevHref = $derived(prev ? `/gallery/${prev.slug}${data.contextQuery}` : null);
+	const nextHref = $derived(next ? `/gallery/${next.slug}${data.contextQuery}` : null);
+	const nextPreload = $derived(next ? nextHeroPreload(next.imageUrl) : null);
+
+	// Left/Right arrows follow the same links; pagingStep stands down while
+	// focus is in a field or a modifier is held.
+	function onPagingKey(e: KeyboardEvent) {
+		const step = pagingStep(e);
+		const href = step === -1 ? prevHref : step === 1 ? nextHref : null;
+		if (!href) return;
+		e.preventDefault();
+		void goto(href);
 	}
 
 	// Fire-and-forget beacon so the admin dashboard can count download presses. The
@@ -117,6 +136,26 @@
 	{oembedUrl}
 />
 
+<svelte:window onkeydown={onPagingKey} />
+
+<!-- Warm the cache with the next piece's hero, and only that one: further ahead
+     turns browsing into a bulk download on a phone plan. nextHeroPreload uses
+     the same helpers the hero uses, so the browser picks the exact candidate
+     the next page will request, and skips animated pieces, whose hero is the
+     raw original. Low priority, so it never competes with this page's own hero. -->
+<svelte:head>
+	{#if nextPreload}
+		<link
+			rel="preload"
+			as="image"
+			href={nextPreload.href}
+			imagesrcset={nextPreload.srcset}
+			imagesizes={nextPreload.sizes}
+			fetchpriority="low"
+		/>
+	{/if}
+</svelte:head>
+
 <div class="container image-page">
 	<nav class="breadcrumb">
 		<a href="/gallery">{m.nav_gallery()}</a>
@@ -129,23 +168,43 @@
 	</nav>
 
 	<div class="image-layout">
-		<div class="image-preview">
-			<!-- Always-mounted status region for the reveal announcement (a region
-			     inserted with its first content is often not announced). -->
-			<p class="sr-only" role="status">{revealAnnouncement}</p>
-			{#if image.nsfw && !revealed}
-				<div class="nsfw-overlay">
-					<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} class="blurred" />
-					<button class="reveal-btn" onclick={reveal}>
-						<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
-						<span>{m.gallery_click_reveal()}</span>
-					</button>
-				</div>
-			{:else}
-				<!-- tabindex="-1": the reveal handler lands focus here after its
-				     button unmounts — never a tab stop. -->
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-				<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} tabindex="-1" bind:this={revealedHero} />
+		<div class="image-column">
+			<div class="image-preview">
+				<!-- Always-mounted status region for the reveal announcement (a region
+				     inserted with its first content is often not announced). -->
+				<p class="sr-only" role="status">{revealAnnouncement}</p>
+				{#if image.nsfw && !revealed}
+					<div class="nsfw-overlay">
+						<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} class="blurred" />
+						<button class="reveal-btn" onclick={reveal}>
+							<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
+							<span>{m.gallery_click_reveal()}</span>
+						</button>
+					</div>
+				{:else}
+					<!-- tabindex="-1": the reveal handler lands focus here after its
+					     button unmounts — never a tab stop. -->
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} tabindex="-1" bind:this={revealedHero} />
+				{/if}
+			</div>
+
+			{#if prev || next}
+				<!-- Visible controls for the arrow keys, so nobody has to guess they
+				     work. At either end of the grid that side is left out rather than
+				     shown dead; the other keeps its place. -->
+				<nav class="pager" aria-label={m.gallery_pager_label()}>
+					{#if prev}
+						<a href={prevHref} class="btn btn-outline" rel="prev" aria-label={m.gallery_previous_piece({ title: prev.title })} aria-keyshortcuts="ArrowLeft">
+							<ChevronLeft size={16} aria-hidden="true" /> {m.gallery_previous()}
+						</a>
+					{/if}
+					{#if next}
+						<a href={nextHref} class="btn btn-outline pager-next" rel="next" aria-label={m.gallery_next_piece({ title: next.title })} aria-keyshortcuts="ArrowRight">
+							{m.gallery_next()} <ChevronRight size={16} aria-hidden="true" />
+						</a>
+					{/if}
+				</nav>
 			{/if}
 		</div>
 
@@ -251,7 +310,7 @@
 					<div class="variant-strip">
 						{#each data.variants as variant}
 							<a
-								href="/gallery/{variant.slug}"
+								href="/gallery/{variant.slug}{data.contextQuery}"
 								class="variant-tile"
 								class:current={variant.slug === image.slug}
 								aria-current={variant.slug === image.slug ? 'page' : undefined}
@@ -324,6 +383,25 @@
 		   when CSS scales the width. */
 		height: auto;
 		display: block;
+	}
+
+	.image-column {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		/* A grid item's min-width is auto; 0 keeps a wide hero from forcing
+		   sideways scroll, as the bare .image-preview item did before. */
+		min-width: 0;
+	}
+
+	.pager {
+		display: flex;
+		gap: 12px;
+	}
+
+	/* Next keeps the right edge even when there is no previous piece. */
+	.pager-next {
+		margin-inline-start: auto;
 	}
 
 	.nsfw-overlay {

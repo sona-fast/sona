@@ -13,6 +13,9 @@
 		/** The title's heading level: h2 where the card sits directly under the
 		 *  page h1 (the gallery, a collection), so the outline skips no level. */
 		headingLevel?: 'h2' | 'h3';
+		/** Overrides the plain /gallery/{slug} link, e.g. to carry the grid's
+		 *  filters to the detail page's previous/next links (SONA-179). */
+		href?: string;
 		/** The image's stored dimensions; without both there is no srcset. */
 		width?: number | null;
 		height?: number | null;
@@ -20,13 +23,13 @@
 		mobileColumns?: 1 | 2;
 	}
 
-	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', width, height, mobileColumns = 1 }: Props = $props();
+	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', href, width, height, mobileColumns = 1 }: Props = $props();
 
 	let revealed = $state(false);
 	const card = $derived(cardImage(width, height, mobileColumns));
 </script>
 
-<a href="/gallery/{slug}" class="card">
+<a href={href ?? `/gallery/${slug}`} class="card">
 	<div class="image-wrapper">
 		<img
 			src={cdnImage(imageUrl, 800)}

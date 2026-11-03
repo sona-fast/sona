@@ -11,6 +11,7 @@ import { clearVrTabCache } from '$lib/server/vr-gate';
 import { clearFursuitPhotosCache } from '$lib/server/fursuit-import';
 
 import { load } from './+page.server';
+import { MAX_FILTER_LENGTH } from '$lib/gallery';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -85,7 +86,7 @@ function loadEvent(platform: App.Platform, query = '') {
 type GalleryData = {
 	artists: { name: string; formerly?: string[] }[];
 	formerName: { searched: string; current: string } | null;
-	filters: { artist: string };
+	filters: { search: string; tag: string; artist: string; character: string };
 	images: unknown[];
 	view: 'artwork' | 'fursuit';
 	degraded: boolean;
@@ -137,6 +138,38 @@ describe('gallery load — a junk ?page= serves page 1', () => {
 		expect(data.degraded).toBe(false);
 		expect(data.images).toEqual([expect.objectContaining({ slug })]);
 		expect(data.page).toBe(1);
+	});
+});
+
+describe('gallery load — filter params are length-capped', () => {
+	// r2-02: each filter feeds an unindexed LIKE scan; an unbounded ?q= lets one
+	// request make D1 scan with a megabyte pattern. The grid caps at the same
+	// length as the detail page's context, so a card link round-trips.
+	it('truncates q, tag, artist and character to MAX_FILTER_LENGTH', async () => {
+		const { platform } = makeDb();
+		const huge = 'z'.repeat(MAX_FILTER_LENGTH + 50);
+		const data = await loadData(
+			platform,
+			`?q=${huge}&tag=${huge}&artist=${huge}&character=${huge}`
+		);
+		const capped = 'z'.repeat(MAX_FILTER_LENGTH);
+		expect(data.degraded).toBe(false);
+		expect(data.filters).toMatchObject({ search: capped, tag: capped, artist: capped, character: capped });
+	});
+
+	// The cap must not cut a real name: the admin accepts artist names up to
+	// 200 characters and the artist filter matches exactly.
+	it('still filters by an artist whose name is 150 characters long', async () => {
+		const { db, platform } = makeDb();
+		const longName = 'L'.repeat(150);
+		const [{ id: longId }] = await addArtist(db, longName);
+		const [{ id: otherId }] = await addArtist(db, 'Short');
+		await addImage(db, { artistId: longId });
+		await addImage(db, { artistId: otherId });
+		const data = await loadData(platform, `?artist=${encodeURIComponent(longName)}`);
+		expect(data.filters.artist).toBe(longName);
+		expect(data.formerName).toBeNull();
+		expect(data.images).toHaveLength(1);
 	});
 });
 
