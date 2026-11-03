@@ -9,9 +9,14 @@
 	import FursuitPhotoCard from '$lib/components/FursuitPhotoCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate, cdnImage, rawFallback } from '$lib';
+	import { galleryContextQuery } from '$lib/gallery';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
+
+	// Card links carry the grid's filters and explicit sort, so the detail
+	// page's previous/next follow this grid's order (SONA-179).
+	const detailQuery = $derived(galleryContextQuery(data.filters, pageState.url.searchParams.get('sort')));
 
 	const isFursuit = $derived(data.view === 'fursuit');
 
@@ -427,9 +432,10 @@
 					tag={image.tag}
 					nsfw={image.nsfw}
 					headingLevel="h2"
+					href="/gallery/{image.slug}{detailQuery}"
 				/>
 			{:else}
-				<a href="/gallery/{image.slug}" class="list-item">
+				<a href="/gallery/{image.slug}{detailQuery}" class="list-item">
 					<div class="list-thumb" class:nsfw-thumb={image.nsfw}>
 						<img src={cdnImage(image.thumbnailUrl || image.imageUrl, 200)} alt={image.title} loading="lazy" use:rawFallback={image.thumbnailUrl || image.imageUrl} />
 					</div>

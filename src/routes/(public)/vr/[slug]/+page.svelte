@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
-	import { Box, Download, ExternalLink, Play } from 'lucide-svelte';
+	import { Box, ChevronLeft, ChevronRight, Download, ExternalLink, Play } from 'lucide-svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import VrViewer from '$lib/components/VrViewer.svelte';
@@ -16,6 +16,7 @@
 	import { cdnImage, rawFallback, responsiveSrc, responsiveSrcset, responsiveSizes } from '$lib/img';
 	import type { ResponsiveImage } from '$lib/img';
 	import { creditRoleLabel, formatBytes, licenseLabel, modelFormatLabel, platformLabel } from '$lib/vr';
+	import { pagingStep } from '$lib/paging-keys';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -95,6 +96,29 @@
 		viewerActive = false;
 		durations = {};
 	});
+	// Previous/next through the looks in strip order (SONA-179): the poster
+	// first when there is one, then each media item. A posterless avatar opens
+	// on its fallback item, so paging starts from there.
+	const looks = $derived<(number | null)[]>([
+		...(avatar.posterUrl ? [null] : []),
+		...data.media.map((_, i) => i)
+	]);
+	const lookIndex = $derived(looks.indexOf(avatar.posterUrl ? selected : effectiveSelected));
+	const canPrev = $derived(!viewerActive && lookIndex > 0);
+	const canNext = $derived(!viewerActive && lookIndex < looks.length - 1);
+	function stepLook(step: -1 | 1): boolean {
+		if (step === -1 ? !canPrev : !canNext) return false;
+		selected = looks[lookIndex + step];
+		return true;
+	}
+	// Left/Right arrows do the same. The 3D stage has its own arrow bindings
+	// (camera orbit), and the strip is disabled while it's up, so they stand
+	// down then; pagingStep covers fields, players and modifiers.
+	function onPagingKey(e: KeyboardEvent) {
+		const step = pagingStep(e);
+		if (step !== null && stepLook(step)) e.preventDefault();
+	}
+
 	function noteDuration(i: number, el: HTMLVideoElement) {
 		if (Number.isFinite(el.duration)) durations = { ...durations, [i]: el.duration };
 	}
@@ -254,6 +278,8 @@
 	{/if}
 {/snippet}
 
+<svelte:window onkeydown={onPagingKey} />
+
 <div class="container avatar-page">
 	<nav class="breadcrumb" aria-label={m.vr_breadcrumb_label()}>
 		<a href="/vr">{m.vr_title()}</a>
@@ -290,6 +316,37 @@
 			{:else}
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<div class="media-frame" tabindex="-1" bind:this={mediaFrame}>{@render mainMedia()}</div>
+			{/if}
+
+			{#if looks.length > 1}
+				<!-- Visible controls for the arrow keys. aria-disabled rather than
+				     disabled at the ends, so a button that just ran out keeps focus
+				     instead of dropping it to the page. -->
+				<div class="look-pager" role="group" aria-label={m.vr_media_pager_label()}>
+					<button
+						type="button"
+						class="btn btn-outline look-step"
+						aria-label={m.vr_media_previous()}
+						aria-keyshortcuts="ArrowLeft"
+						aria-disabled={!canPrev}
+						onclick={() => stepLook(-1)}
+					>
+						<ChevronLeft size={16} aria-hidden="true" /> {m.gallery_previous()}
+					</button>
+					<span class="look-position" role="status">
+						{#if lookIndex >= 0}{m.vr_media_position({ n: lookIndex + 1, total: looks.length })}{/if}
+					</span>
+					<button
+						type="button"
+						class="btn btn-outline look-step"
+						aria-label={m.vr_media_next()}
+						aria-keyshortcuts="ArrowRight"
+						aria-disabled={!canNext}
+						onclick={() => stepLook(1)}
+					>
+						{m.gallery_next()} <ChevronRight size={16} aria-hidden="true" />
+					</button>
+				</div>
 			{/if}
 
 			{#if data.media.length > 0}
@@ -562,6 +619,35 @@
 	.mature-label {
 		font-weight: 600;
 		font-size: 16px;
+	}
+
+	/* Equal outer columns keep the "n of total" label centred whatever the
+	   two button labels measure. */
+	.look-pager {
+		display: grid;
+		grid-template-columns: 1fr auto 1fr;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.look-step:first-child {
+		justify-self: start;
+	}
+
+	.look-step:last-child {
+		justify-self: end;
+	}
+
+	.look-step[aria-disabled='true'] {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.look-position {
+		text-align: center;
+		font-size: 13px;
+		color: var(--muted-foreground);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.media-strip {

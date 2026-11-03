@@ -30,7 +30,7 @@ describe('/gallery/[slug] for a piece linked to a commission entry', () => {
 			.prepare("UPDATE commissions SET image_id = 7, kind = 'LEDGER-KIND', source_url = 'https://example.com/LEDGER-LINK/1' WHERE id = ?")
 			.run(id);
 
-		const data = await load({ platform, params: { slug: 'snowfall' } } as never);
+		const data = await load({ platform, params: { slug: 'snowfall' }, url: new URL('https://e2e.test/gallery/snowfall') } as never);
 		const text = JSON.stringify(data);
 		// The page did load the piece, so the absence below is not an empty page.
 		expect(text).toContain('Snowfall');
