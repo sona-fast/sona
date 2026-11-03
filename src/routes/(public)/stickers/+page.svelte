@@ -15,6 +15,8 @@
 	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
 	const ownerName = $derived(data.settings?.ownerName || data.settings?.siteName || APP_NAME);
 
+	// Filter changes stay on the page: noScroll and keepFocus stop SvelteKit from
+	// scrolling to the top and dropping focus, which reads as a full reload.
 	function updateFilter(key: string, value: string) {
 		const params = new URLSearchParams($page.url.searchParams);
 		if (value) {
@@ -25,11 +27,11 @@
 		// When picking a chip, clear free-text query and vice versa.
 		if (key === 'emoji') params.delete('q');
 		if (key === 'q') params.delete('emoji');
-		goto(`?${params.toString()}`, { replaceState: true });
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	function clearFilters() {
-		goto('/stickers', { replaceState: true });
+		goto('/stickers', { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	// Derive active emoji label for display in summary.
@@ -135,7 +137,7 @@
 
 		{#if data.stickers.length > 0}
 			<div class="sticker-grid">
-				{#each data.stickers as sticker}
+				{#each data.stickers as sticker (sticker.id)}
 					<StickerCard {sticker} packSlug={data.packSlugById[sticker.packId] ?? String(sticker.packId)} showArtist />
 				{/each}
 			</div>

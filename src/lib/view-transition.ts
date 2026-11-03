@@ -45,3 +45,12 @@ export function startNavigationTransition(
 		}
 	});
 }
+
+type NavigationEnd = { url: URL } | null;
+
+/** False when only the query string changes (gallery and sticker filters, sort,
+ *  pagination): the page updates in place, and fading the whole document out
+ *  and back in makes it look like a full reload. */
+export function wantsNavigationTransition(from: NavigationEnd, to: NavigationEnd): boolean {
+	return !from || !to || from.url.pathname !== to.url.pathname;
+}

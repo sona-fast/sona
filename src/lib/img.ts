@@ -88,7 +88,8 @@ export function cdnImage(src: string | null | undefined, width = 800, quality = 
 
 /**
  * The width every gallery-row thumbnail is transformed at — the public gallery
- * grid, the admin image list, and the VR/collections pickers all request it.
+ * list view, the admin image list, and the VR/collections pickers all request
+ * it, and it is the smallest step of the artwork card ladder below.
  *
  * Sharing ONE width is what keeps this affordable: a transform URL is its own
  * cache key, so every surface asking for 200 reuses the variant the first one
@@ -97,6 +98,27 @@ export function cdnImage(src: string | null | undefined, width = 800, quality = 
  * thumbnail call sites should use this rather than a hand-picked number.
  */
 export const THUMB_WIDTH = 200;
+
+/**
+ * Artwork cards (gallery grid, home "recent", a collection) sit in a
+ * `minmax(240px, 1fr)` grid in the 1280px container: about 290px wide on a wide
+ * desktop, at most ~370px just above the 768px breakpoint, and two columns of
+ * just under half the viewport on mobile. `sizes` rounds those up, so the
+ * browser never picks a candidate narrower than the card.
+ *
+ * Three steps, and two of them already exist for every gallery image: 200 is
+ * THUMB_WIDTH, and 800 is the one width cards requested before this ladder (it
+ * stays the `src`, so a browser without srcset reuses that variant). 400 is the
+ * one new step, and it is what a 1x desktop and a 2x phone pick; collections
+ * request it too, for their cover mosaics. Don't add steps without counting
+ * the transformations they cost.
+ */
+export const CARD_IMAGE: ResponsiveImage = {
+	widths: [THUMB_WIDTH, 400, 800],
+	sizes: '(max-width: 768px) 50vw, 370px',
+	quality: 75,
+	srcWidth: 800
+};
 
 /**
  * Everything that differs between one responsive image and the next: the CDN

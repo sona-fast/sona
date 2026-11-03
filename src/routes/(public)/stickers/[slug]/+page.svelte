@@ -65,6 +65,8 @@
 			.map(([emoji]) => emoji);
 	});
 
+	// Filter changes stay on the page: noScroll and keepFocus stop SvelteKit from
+	// scrolling to the top and dropping focus, which reads as a full reload.
 	function updateFilter(key: string, value: string) {
 		const params = new URLSearchParams($page.url.searchParams);
 		if (value) {
@@ -74,7 +76,7 @@
 		}
 		if (key === 'emoji') params.delete('q');
 		if (key === 'q') params.delete('emoji');
-		goto(`?${params.toString()}`, { replaceState: true });
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	// Toggle one artist group (an artist id or the `unassigned` sentinel) in/out of
@@ -87,11 +89,11 @@
 			? current.filter((v) => v !== value)
 			: [...current, value];
 		for (const v of next) params.append('artist', v);
-		goto(`?${params.toString()}`, { replaceState: true });
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	function clearFilters() {
-		goto(`/stickers/${data.pack.slug}`, { replaceState: true });
+		goto(`/stickers/${data.pack.slug}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	const activeEmoji = $derived(data.filters.emoji || data.filters.q);
@@ -253,7 +255,7 @@
 
 		{#if data.stickers.length > 0}
 			<div class="sticker-grid">
-				{#each data.stickers as sticker}
+				{#each data.stickers as sticker (sticker.id)}
 					<StickerCard {sticker} packSlug={pack.slug} showArtist={pack.shape === 'multi'} />
 				{/each}
 			</div>

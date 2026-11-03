@@ -48,7 +48,10 @@
 			params.delete(key);
 		}
 		params.delete('page');
-		goto(`?${params.toString()}`, { replaceState: true });
+		// A filter change re-runs the load in place; it is not a new page. Without
+		// noScroll and keepFocus, SvelteKit treats it like one: it scrolls to the
+		// top and moves focus to the body, which reads as a full reload.
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	// Artist filter as a type-to-filter combobox. A native <select> only does
@@ -210,7 +213,7 @@
 				<p class="fursuit-cap">{m.gallery_fursuit_capped()}</p>
 			{/if}
 			<div class="grid">
-				{#each pagedFursuit as photo}
+				{#each pagedFursuit as photo (photo.id)}
 					<FursuitPhotoCard {photo} />
 				{/each}
 			</div>
@@ -417,7 +420,9 @@
 	</div>
 
 	<div class={view === 'grid' ? 'grid' : 'list'}>
-		{#each data.images as image}
+		<!-- Keyed, so a card that survives a filter change keeps its element (and
+		     its NSFW reveal) instead of the slot swapping in another image. -->
+		{#each data.images as image (image.id)}
 			{#if view === 'grid'}
 				<ArtworkCard
 					slug={image.slug}

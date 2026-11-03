@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { startNavigationTransition } from './view-transition';
+import { startNavigationTransition, wantsNavigationTransition } from './view-transition';
 
 // Collects unhandled rejections for the length of a test, so a test fails when
 // the helper leaves one of the transition's promises without a handler.
@@ -73,5 +73,26 @@ describe('startNavigationTransition', () => {
 			}
 		};
 		await expect(startNavigationTransition(doc, Promise.resolve())).resolves.toBeUndefined();
+	});
+});
+
+describe('wantsNavigationTransition', () => {
+	const at = (href: string) => ({ url: new URL(href, 'https://sona.test') });
+
+	it('skips a query-only change, so a filter or sort does not fade the whole page', () => {
+		expect(wantsNavigationTransition(at('/gallery'), at('/gallery?sort=oldest'))).toBe(false);
+		expect(wantsNavigationTransition(at('/gallery?tag=a'), at('/gallery?tag=b&page=2'))).toBe(false);
+		expect(wantsNavigationTransition(at('/stickers/pack'), at('/stickers/pack?emoji=x'))).toBe(false);
+	});
+
+	it('keeps the transition between pages, including two pieces on the same route', () => {
+		expect(wantsNavigationTransition(at('/gallery'), at('/gallery/parent-piece'))).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery/parent-piece'), at('/gallery/variant-piece'))).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery?tag=a'), at('/'))).toBe(true);
+	});
+
+	it('keeps it when either end is unknown', () => {
+		expect(wantsNavigationTransition(null, at('/gallery'))).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery'), null)).toBe(true);
 	});
 });

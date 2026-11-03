@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { cdnImage, rawFallback } from '$lib';
+	import { rawFallback } from '$lib';
+	import { CARD_IMAGE, responsiveSrc, responsiveSrcset, responsiveSizes } from '$lib/img';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
@@ -21,7 +22,15 @@
 
 <a href="/gallery/{slug}" class="card">
 	<div class="image-wrapper">
-		<img src={cdnImage(imageUrl, 800)} alt={title} loading="lazy" class:blurred={nsfw && !revealed} use:rawFallback={imageUrl} />
+		<img
+			src={responsiveSrc(imageUrl, CARD_IMAGE)}
+			srcset={responsiveSrcset(imageUrl, CARD_IMAGE)}
+			sizes={responsiveSizes(imageUrl, CARD_IMAGE)}
+			alt={title}
+			loading="lazy"
+			class:blurred={nsfw && !revealed}
+			use:rawFallback={imageUrl}
+		/>
 		{#if nsfw && !revealed}
 			<button
 				class="nsfw-overlay"
