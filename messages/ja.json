@@ -107,6 +107,7 @@
 	"gallery_filter_no_artists": "一致するアーティストはいません",
 	"gallery_status_filter": "{label}：{value}",
 	"gallery_status_search": "検索",
+	"gallery_status_unavailable": "ギャラリーを読み込めませんでした。しばらくしてからもう一度お試しください。",
 	"status_list_separator": "、",
 	"gallery_previous": "前へ",
 	"gallery_next": "次へ",
@@ -223,7 +224,20 @@
 	"stickers_dl_caption_before": "ステッカーは、変換版を選ばないかぎり元の形式でダウンロードされます。セット全体が欲しい場合は、",
 	"stickers_dl_caption_link": "セットページ",
 	"stickers_dl_caption_after": "からTelegramに追加してください。",
-	"stickers_across_packs": "{packs}セットにわたって",
+	"stickers_across_packs": [
+		{
+			"declarations": [
+				"input packs"
+			],
+			"selectors": [
+				"packs"
+			],
+			"match": {
+				"packs=1": "{packs}セット内",
+				"packs=*": "{packs}セットにわたって"
+			}
+		}
+	],
 	"stickers_empty_subtext": "この絵文字でタグ付けされたステッカーはまだありません。別のリアクションを試すか、フィルターをクリアしてすべてのセットを表示してください。",
 	"stickers_reset_filters": "フィルターをリセット",
 	"stickers_pack_count": "ステッカーセット {count}件",

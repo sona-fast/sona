@@ -53,6 +53,16 @@ describe('galleryStatus', () => {
 			'着ぐるみ写真 5件、撮影者：Bob、イベント：FWA'
 		);
 	});
+
+	it('announces a failed load instead of an empty result when degraded', () => {
+		const failed = "The gallery couldn't load. Try again in a moment.";
+		expect(galleryStatus({ ...artwork, count: 0, tag: 'reference', degraded: true }, en)).toBe(failed);
+		expect(galleryStatus({ ...fursuit, count: 0, degraded: true }, en)).toBe(failed);
+		expect(galleryStatus({ ...artwork, count: 0, degraded: true }, ja)).toBe(
+			'ギャラリーを読み込めませんでした。しばらくしてからもう一度お試しください。'
+		);
+		expect(galleryStatus({ ...artwork, count: 0, degraded: false }, en)).toBe('0 artworks, Sort by: Newest upload');
+	});
 });
 
 describe('stickersStatus', () => {
@@ -88,6 +98,15 @@ describe('stickersStatus', () => {
 			'ステッカー 3件、絵文字：🦊、アーティスト：Alice、2セットにわたって'
 		);
 	});
+
+	it('reads a single pack correctly in Japanese', () => {
+		expect(stickersStatus({ filtered: true, stickers: 1, emoji: '🦊', artist: '', packs: 1 }, ja)).toBe(
+			'ステッカー 1件、絵文字：🦊、1セット内'
+		);
+		expect(stickersStatus({ filtered: true, stickers: 4, emoji: '🦊', artist: '', packs: 2 }, ja)).toBe(
+			'ステッカー 4件、絵文字：🦊、2セットにわたって'
+		);
+	});
 });
 
 describe('packStatus', () => {
@@ -102,14 +121,24 @@ describe('packStatus', () => {
 	it('names one artist, two artists, and the Unassigned group', () => {
 		expect(packStatus({ stickers: 2, emoji: '', artists: ['Alice'] }, en)).toBe('2 stickers, Artist: Alice');
 		expect(packStatus({ stickers: 4, emoji: '', artists: ['Alice', 'Bob'] }, en)).toBe(
-			'4 stickers, Artist: Alice and Bob'
+			'4 stickers, Artist: Alice / Bob'
 		);
 		expect(packStatus({ stickers: 1, emoji: '', artists: [null] }, en)).toBe('1 sticker, Artist: Unassigned');
 	});
 
 	it('localizes Unassigned in Japanese', () => {
 		expect(packStatus({ stickers: 3, emoji: '🦊', artists: ['Alice', null] }, ja)).toBe(
-			'ステッカー 3件、絵文字：🦊、アーティスト：Alice、未割り当て'
+			'ステッカー 3件、絵文字：🦊、アーティスト：Alice / 未割り当て'
+		);
+	});
+
+	it('keeps three artists in one value, after the emoji', () => {
+		const artists = ['Alice', 'Bob', 'Carol'];
+		expect(packStatus({ stickers: 5, emoji: '🦊', artists }, en)).toBe(
+			'5 stickers, Emoji: 🦊, Artist: Alice / Bob / Carol'
+		);
+		expect(packStatus({ stickers: 5, emoji: '🦊', artists }, ja)).toBe(
+			'ステッカー 5件、絵文字：🦊、アーティスト：Alice / Bob / Carol'
 		);
 	});
 });

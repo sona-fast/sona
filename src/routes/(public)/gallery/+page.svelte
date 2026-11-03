@@ -11,6 +11,7 @@
 	import { formatDate, cdnImage, rawFallback } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 	import { galleryStatus } from '$lib/result-status';
+	import { galleryPageHref } from '$lib/gallery';
 
 	let { data } = $props();
 
@@ -32,9 +33,17 @@
 	// What the status region reads out; see $lib/result-status.
 	const resultStatus = $derived(
 		isFursuit
-			? galleryStatus({ view: 'fursuit', count: data.fursuitPhotos.length, ...data.fursuitFilters })
-			: galleryStatus({ view: 'artwork', count: data.total, ...data.filters })
+			? galleryStatus({
+					view: 'fursuit',
+					count: data.fursuitPhotos.length,
+					...data.fursuitFilters,
+					degraded: data.degraded
+				})
+			: galleryStatus({ view: 'artwork', count: data.total, ...data.filters, degraded: data.degraded })
 	);
+
+	// Pagination links keep the active search, filters, and sort.
+	const pageHref = (p: number) => galleryPageHref(pageState.url.pathname, pageState.url.searchParams, p);
 
 	const siteName = data.settings?.siteName ?? APP_NAME;
 	const metaTitle = m.gallery_meta_title({ siteName });
@@ -475,17 +484,17 @@
 	{#if data.totalPages > 1}
 		<nav class="pagination">
 			{#if data.page > 1}
-				<a href="?page={data.page - 1}" class="btn btn-secondary">{m.gallery_previous()}</a>
+				<a href={pageHref(data.page - 1)} class="btn btn-secondary">{m.gallery_previous()}</a>
 			{/if}
 			{#each Array.from({ length: data.totalPages }, (_, i) => i + 1) as p}
 				<a
-					href="?page={p}"
+					href={pageHref(p)}
 					class="page-link"
 					class:active={p === data.page}
 				>{p}</a>
 			{/each}
 			{#if data.page < data.totalPages}
-				<a href="?page={data.page + 1}" class="btn btn-secondary">{m.gallery_next()}</a>
+				<a href={pageHref(data.page + 1)} class="btn btn-secondary">{m.gallery_next()}</a>
 			{/if}
 		</nav>
 	{/if}
