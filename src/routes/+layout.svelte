@@ -17,7 +17,7 @@
 	// Browsers without the API just navigate instantly (graceful fallback).
 	// Query-only changes (filters, sort, pagination) skip it: see the helper.
 	onNavigate((navigation) => {
-		if (!wantsNavigationTransition(navigation.from, navigation.to)) return;
+		if (!wantsNavigationTransition(navigation.from, navigation.to, navigation.type)) return;
 		return startNavigationTransition(document, navigation.complete);
 	});
 </script>

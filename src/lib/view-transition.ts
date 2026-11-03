@@ -48,9 +48,18 @@ export function startNavigationTransition(
 
 type NavigationEnd = { url: URL } | null;
 
-/** False when only the query string changes (gallery and sticker filters, sort,
- *  pagination): the page updates in place, and fading the whole document out
- *  and back in makes it look like a full reload. */
-export function wantsNavigationTransition(from: NavigationEnd, to: NavigationEnd): boolean {
-	return !from || !to || from.url.pathname !== to.url.pathname;
+/** False for an in-place update: a `goto` or link that changes only the query
+ *  string (gallery and sticker filters, sort, pagination). The page updates in
+ *  place there, and fading the whole document out and back in makes it look
+ *  like a full reload. Every other navigation keeps the transition, including
+ *  Back and Forward and a navigation to the same URL: when Back lands mid
+ *  navigation, SvelteKit runs a popstate from a URL to itself, and the admin
+ *  ledger pages stopped responding when that one skipped it. */
+export function wantsNavigationTransition(
+	from: NavigationEnd,
+	to: NavigationEnd,
+	type: string
+): boolean {
+	if (!from || !to || (type !== 'goto' && type !== 'link')) return true;
+	return from.url.pathname !== to.url.pathname || from.url.search === to.url.search;
 }

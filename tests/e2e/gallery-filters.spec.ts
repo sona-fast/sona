@@ -22,6 +22,9 @@ failOnPageErrors();
 
 const sortSelect = (page: Page) => page.getByRole('combobox', { name: 'Sort by' });
 const cardLinks = (page: Page) => page.locator('.grid a.card');
+// Card links carry the grid's filters and sort as a query (SONA-179), so match
+// the piece by path.
+const cardHref = (slug: string) => new RegExp(`^/gallery/${slug}(\\?|$)`);
 
 // In `vite dev`, a change made before hydration does nothing, and rewriting
 // srcset before it makes Svelte log hydration_attribute_changed. The search
@@ -54,7 +57,7 @@ test.describe('gallery filter change', () => {
 	test('updates in place: no reload, no fade, same scroll, same focus, same cards', async ({ page }) => {
 		await countViewTransitions(page);
 		await gotoHydrated(page);
-		await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/mature-ref-sheet');
+		await expect(cardLinks(page).first()).toHaveAttribute('href', cardHref('mature-ref-sheet'));
 
 		// Tag the window, and remember each card's img element by the piece it shows.
 		await markWindow(page);
@@ -63,7 +66,7 @@ test.describe('gallery filter change', () => {
 			w.__imgs = {};
 			for (const a of document.querySelectorAll('.grid a.card')) {
 				const img = a.querySelector('img')!;
-				w.__imgs[a.getAttribute('href')!] = [img, img.getAttribute('src')!];
+				w.__imgs[new URL((a as HTMLAnchorElement).href).pathname] = [img, img.getAttribute('src')!];
 			}
 		});
 		const before = await page.evaluate(() => Object.keys((window as unknown as { __imgs: object }).__imgs));
@@ -79,7 +82,7 @@ test.describe('gallery filter change', () => {
 
 		await sortSelect(page).selectOption('oldest');
 		await expect(page).toHaveURL(/[?&]sort=oldest(&|$)/);
-		await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/parent-piece');
+		await expect(cardLinks(page).first()).toHaveAttribute('href', cardHref('parent-piece'));
 
 		// (a) No document load: the window is the same one, and no HTML was
 		// fetched. No whole-page fade either.
@@ -95,7 +98,7 @@ test.describe('gallery filter change', () => {
 			const w = window as unknown as { __imgs: Record<string, [Element, string]> };
 			return Object.fromEntries(
 				[...document.querySelectorAll('.grid a.card')].map((a) => {
-					const href = a.getAttribute('href')!;
+					const href = new URL((a as HTMLAnchorElement).href).pathname;
 					const img = a.querySelector('img')!;
 					const [was, src] = w.__imgs[href] ?? [];
 					return [href, { sameElement: img === was, sameSrc: img.getAttribute('src') === src }];
@@ -113,12 +116,12 @@ test.describe('gallery filter change', () => {
 
 	test('an NSFW reveal stays with its image when the sort moves it', async ({ page }) => {
 		await gotoHydrated(page);
-		const hrefs = () => cardLinks(page).evaluateAll((as) => as.map((a) => a.getAttribute('href')!));
+		const hrefs = () => cardLinks(page).evaluateAll((as) => as.map((a) => new URL((a as HTMLAnchorElement).href).pathname));
 		const blurredHrefs = () =>
 			cardLinks(page).evaluateAll((as) =>
-				as.filter((a) => a.querySelector('img.blurred')).map((a) => a.getAttribute('href')!)
+				as.filter((a) => a.querySelector('img.blurred')).map((a) => new URL((a as HTMLAnchorElement).href).pathname)
 			);
-		const mature = page.locator('.grid a.card[href="/gallery/mature-ref-sheet"]');
+		const mature = page.locator('.grid a.card[href^="/gallery/mature-ref-sheet"]');
 
 		expect(await hrefs()).toHaveLength(3);
 		expect((await hrefs())[0]).toBe('/gallery/mature-ref-sheet');
@@ -131,7 +134,7 @@ test.describe('gallery filter change', () => {
 
 		await sortSelect(page).selectOption('oldest');
 		await expect(page).toHaveURL(/[?&]sort=oldest(&|$)/);
-		await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/parent-piece');
+		await expect(cardLinks(page).first()).toHaveAttribute('href', cardHref('parent-piece'));
 
 		// The revealed card moved, and is still revealed.
 		expect((await hrefs()).indexOf('/gallery/mature-ref-sheet')).toBeGreaterThan(0);
@@ -198,7 +201,7 @@ async function pickedCardWidth(page: Page, path: '/gallery' | '/') {
 		await page.goto(path);
 		await waitForHydration(page);
 	}
-	await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/mature-ref-sheet');
+	await expect(cardLinks(page).first()).toHaveAttribute('href', cardHref('mature-ref-sheet'));
 	const img = page.locator('.grid a.card img').first();
 	await expect(img).toHaveAttribute('sizes', /\S/);
 	const srcset = (await img.getAttribute('srcset')) ?? '';
