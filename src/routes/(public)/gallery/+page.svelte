@@ -10,8 +10,7 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate, cdnImage, rawFallback } from '$lib';
 	import * as m from '$lib/paraglide/messages';
-	import { getLocale } from '$lib/paraglide/runtime';
-	import type { GallerySort } from '$lib/gallery';
+	import { galleryStatus } from '$lib/result-status';
 
 	let { data } = $props();
 
@@ -30,33 +29,12 @@
 		fursuitPage = 1;
 	});
 
-	const sortLabels: Record<GallerySort, () => string> = {
-		newest: m.gallery_sort_newest,
-		oldest: m.gallery_sort_oldest,
-		'commissioned-newest': m.gallery_sort_commissioned_newest,
-		'commissioned-oldest': m.gallery_sort_commissioned_oldest
-	};
-
-	// What the status region reads out: the count, then each active filter, then
-	// the sort (artwork view only; the fursuit view has no sort).
-	const resultStatus = $derived.by(() => {
-		const pair = (label: string, value: string) => (value ? [m.gallery_status_filter({ label, value })] : []);
-		const parts = isFursuit
-			? [
-					m.gallery_count_fursuit({ count: data.fursuitPhotos.length }),
-					...pair(m.gallery_filter_photographer(), data.fursuitFilters.photographer),
-					...pair(m.gallery_filter_event(), data.fursuitFilters.event)
-				]
-			: [
-					m.gallery_count_artwork({ count: data.total }),
-					...pair(m.gallery_filter_search(), data.filters.search),
-					...pair(m.gallery_filter_tag(), data.filters.tag),
-					...pair(m.gallery_filter_artist(), data.filters.artist),
-					...pair(m.gallery_filter_character(), data.filters.character),
-					m.gallery_status_filter({ label: m.gallery_filter_sort(), value: sortLabels[data.filters.sort]() })
-				];
-		return new Intl.ListFormat(getLocale(), { style: 'short', type: 'unit' }).format(parts);
-	});
+	// What the status region reads out; see $lib/result-status.
+	const resultStatus = $derived(
+		isFursuit
+			? galleryStatus({ view: 'fursuit', count: data.fursuitPhotos.length, ...data.fursuitFilters })
+			: galleryStatus({ view: 'artwork', count: data.total, ...data.filters })
+	);
 
 	const siteName = data.settings?.siteName ?? APP_NAME;
 	const metaTitle = m.gallery_meta_title({ siteName });

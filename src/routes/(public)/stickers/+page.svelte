@@ -9,7 +9,7 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
-	import { getLocale } from '$lib/paraglide/runtime';
+	import { stickersStatus } from '$lib/result-status';
 
 	let { data } = $props();
 
@@ -38,20 +38,18 @@
 	// Derive active emoji label for display in summary.
 	const activeEmoji = $derived(data.filters.emoji || data.filters.q);
 
-	// What the status region reads out. Unfiltered, the number of packs;
-	// filtered, the result count with the emoji and artist that produced it, so
-	// a change that keeps the count still changes the text.
-	const resultStatus = $derived.by(() => {
-		if (data.mode !== 'filtered') return m.stickers_pack_count({ count: data.packs.length });
-		const artist = data.artists.find((a) => String(a.id) === data.filters.artist)?.name;
-		const parts = [
-			m.stickers_count({ count: data.stickers.length }),
-			...(activeEmoji ? [activeEmoji] : []),
-			...(artist ? [m.gallery_status_filter({ label: m.stickers_artist_label(), value: artist })] : []),
-			m.stickers_across_packs({ packs: data.packCount })
-		];
-		return new Intl.ListFormat(getLocale(), { style: 'short', type: 'unit' }).format(parts);
-	});
+	// What the status region reads out; see $lib/result-status.
+	const resultStatus = $derived(
+		data.mode === 'filtered'
+			? stickersStatus({
+					filtered: true,
+					stickers: data.stickers.length,
+					emoji: activeEmoji,
+					artist: data.artists.find((a) => String(a.id) === data.filters.artist)?.name ?? '',
+					packs: data.packCount
+				})
+			: stickersStatus({ filtered: false, packs: data.packs.length })
+	);
 </script>
 
 <Meta

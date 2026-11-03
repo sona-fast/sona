@@ -16,7 +16,7 @@
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
-	import { getLocale } from '$lib/paraglide/runtime';
+	import { packStatus } from '$lib/result-status';
 
 	let { data } = $props();
 
@@ -99,22 +99,17 @@
 
 	const activeEmoji = $derived(data.filters.emoji || data.filters.q);
 
-	// What the status region reads out: the sticker count, plus the emoji and
-	// artists that produced it when filtered, so switching artist with the same
-	// count still changes the text. "Unassigned" matches its chip's label.
-	const resultStatus = $derived.by(() => {
-		const artists = data.filters.artist
-			.map((id) => (id === 'unassigned' ? 'Unassigned' : distinctArtists.find((a) => String(a.id) === id)?.name))
-			.filter((name): name is string => !!name);
-		const parts = [
-			m.stickers_count({ count: data.stickers.length }),
-			...(activeEmoji ? [activeEmoji] : []),
-			...(artists.length > 0
-				? [m.gallery_status_filter({ label: m.stickers_artist_label(), value: new Intl.ListFormat(getLocale()).format(artists) })]
-				: [])
-		];
-		return new Intl.ListFormat(getLocale(), { style: 'short', type: 'unit' }).format(parts);
-	});
+	// What the status region reads out; see $lib/result-status. `null` is the
+	// Unassigned group; an id with no matching artist drops out.
+	const resultStatus = $derived(
+		packStatus({
+			stickers: data.stickers.length,
+			emoji: activeEmoji,
+			artists: data.filters.artist
+				.map((id) => (id === 'unassigned' ? null : distinctArtists.find((a) => String(a.id) === id)?.name))
+				.filter((name): name is string | null => name !== undefined)
+		})
+	);
 </script>
 
 <Meta
@@ -228,10 +223,10 @@
 						class="contrib-chip"
 						class:active={selectedArtists.has('unassigned')}
 						aria-pressed={selectedArtists.has('unassigned')}
-						title="Unassigned"
+						title={m.stickers_artist_unassigned()}
 						onclick={() => toggleArtist('unassigned')}
 					>
-						Unassigned
+						{m.stickers_artist_unassigned()}
 					</button>
 				{/if}
 			</div>

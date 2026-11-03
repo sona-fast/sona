@@ -285,7 +285,7 @@ test.describe('sticker filters', () => {
 		await clickChipInPlace(page, '🎉');
 		await expect(page.locator('.sticker-grid .card')).toHaveCount(1);
 		expect(await second.evaluate((el) => el === (window as unknown as { __card: Element }).__card)).toBe(true);
-		await expect(status).toHaveText('1 sticker, 🎉');
+		await expect(status).toHaveText('1 sticker, Emoji: 🎉');
 
 		await page.getByRole('button', { name: 'Clear filters' }).click();
 		await expect(page).not.toHaveURL(/[?&]emoji=/);
@@ -299,7 +299,7 @@ test.describe('sticker filters', () => {
 		await expect(status).toHaveText('1 sticker pack');
 		await clickChipInPlace(page, '🦊');
 		await expect(page.locator('.sticker-grid .card')).toHaveCount(1);
-		await expect(status).toHaveText(/^1 sticker, 🦊, across 1 packs?$/);
+		await expect(status).toHaveText('1 sticker, Emoji: 🦊, in 1 pack');
 
 		await page.getByRole('button', { name: 'Clear filters' }).click();
 		await expect(page).not.toHaveURL(/[?&]emoji=/);
