@@ -274,12 +274,13 @@ test.describe('VR looks paging', () => {
 
 		await page.getByRole('button', { name: 'View in 3D' }).click();
 		await expect(page.locator('.loading-panel')).toBeVisible();
-		await expect(prevBtn(page)).toHaveAttribute('aria-disabled', 'true');
-		await expect(nextBtn(page)).toHaveAttribute('aria-disabled', 'true');
-		// Focus sits on Exit 3D, a plain button, so only the page's own guard
-		// can keep this arrow from paging.
+		// The arrow goes first, before any assertion on the buttons, so this
+		// check alone fails if the guard is gone. Focus sits on Exit 3D, a plain
+		// button, so only the page's own guard can keep the arrow from paging.
 		await page.keyboard.press('ArrowRight');
 		await expect(position(page)).toHaveText('1 of 3');
+		await expect(prevBtn(page)).toHaveAttribute('aria-disabled', 'true');
+		await expect(nextBtn(page)).toHaveAttribute('aria-disabled', 'true');
 		// Playwright won't click an aria-disabled control; a pointer user still can.
 		await nextBtn(page).click({ force: true });
 		await expect(position(page)).toHaveText('1 of 3');

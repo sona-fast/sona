@@ -50,6 +50,19 @@ export default defineConfig({
 			ignored: ['**/.wrangler-e2e*/**', '**/playwright-report/**', '**/playwright/.cache/**']
 		}
 	},
+	// The 3D viewer imports three and three-vrm only when "View in 3D" is
+	// clicked, so a cold dev server discovers them mid-session, re-bundles,
+	// and full-reloads every open page. Under Playwright that reload lands on
+	// whichever spec is mid-navigation in another worker and sends it back to
+	// the URL it started from. Pre-bundling them at startup avoids the reload.
+	optimizeDeps: {
+		include: [
+			'three',
+			'three/addons/controls/OrbitControls.js',
+			'three/addons/loaders/GLTFLoader.js',
+			'@pixiv/three-vrm'
+		]
+	},
 	plugins: [
 		sveltekit(),
 		paraglideVitePlugin({
