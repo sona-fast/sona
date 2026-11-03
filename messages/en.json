@@ -1839,7 +1839,7 @@
 	"vr_show_avatar": "Show avatar",
 	"vr_media_poster": "Poster",
 	"vr_media_item": "{name} — media {n}",
-	"vr_media_pager_label": "Browse the media",
+	"vr_media_pager_label": "Avatar media",
 	"vr_media_previous": "Previous media",
 	"vr_media_next": "Next media",
 	"vr_media_position": "{n} of {total}",

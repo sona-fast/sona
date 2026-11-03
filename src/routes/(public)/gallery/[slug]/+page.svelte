@@ -189,17 +189,17 @@
 				{/if}
 			</div>
 
-			{#if prevHref || nextHref}
+			{#if prev || next}
 				<!-- Visible controls for the arrow keys, so nobody has to guess they
 				     work. At either end of the grid that side is left out rather than
 				     shown dead; the other keeps its place. -->
 				<nav class="pager" aria-label={m.gallery_pager_label()}>
-					{#if prev && prevHref}
+					{#if prev}
 						<a href={prevHref} class="btn btn-outline" rel="prev" aria-label={m.gallery_previous_piece({ title: prev.title })} aria-keyshortcuts="ArrowLeft">
 							<ChevronLeft size={16} aria-hidden="true" /> {m.gallery_previous()}
 						</a>
 					{/if}
-					{#if next && nextHref}
+					{#if next}
 						<a href={nextHref} class="btn btn-outline pager-next" rel="next" aria-label={m.gallery_next_piece({ title: next.title })} aria-keyshortcuts="ArrowRight">
 							{m.gallery_next()} <ChevronRight size={16} aria-hidden="true" />
 						</a>

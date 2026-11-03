@@ -56,13 +56,15 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 		error(404, 'Image not found');
 	}
 
-	const imageTags_ = await db
+	// Tags, characters, and the siblings-then-neighbors chain don't depend on
+	// each other, so they run side by side.
+	const tagsQuery = db
 		.select({ name: tags.name })
 		.from(imageTags)
 		.innerJoin(tags, eq(imageTags.tagId, tags.id))
 		.where(eq(imageTags.imageId, image.id));
 
-	const imageChars = await db
+	const charactersQuery = db
 		.select({
 			name: characters.name,
 			ownerName: characters.ownerName,
@@ -87,7 +89,7 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// Direct links to a variant's slug resolve like any image, so the strip is
 	// anchored on whichever group this image belongs to.
 	const groupParentId = image.parentImageId ?? image.id;
-	const siblings = await db
+	const siblingsQuery = db
 		.select({
 			id: images.id,
 			slug: images.slug,
@@ -114,20 +116,30 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// sort, the same grid /gallery shows. The grid only shows group parents,
 	// so a variant pages from its parent's place.
 	const context = galleryContextFromParams(url.searchParams);
-	let anchor = { id: image.id, createdAt: image.createdAt, commissionedAt: image.commissionedAt };
-	if (image.parentImageId !== null) {
-		const parent = siblings.find((s) => s.id === image.parentImageId);
-		if (parent) anchor = { id: parent.id, createdAt: parent.createdAt, commissionedAt: parent.commissionedAt };
-	}
-	const neighbors = await withTimeout(
-		(async () => {
-			const settings = await getSettings(db);
-			const sort = resolveGallerySort(context.sort, settings.galleryDefaultSort);
-			return galleryNeighbors(db, context.filters, sort, anchor);
-		})(),
-		NEIGHBORS_TIMEOUT_MS,
-		{ prev: null, next: null }
-	);
+	const siblingsAndNeighbors = (async () => {
+		const siblings = await siblingsQuery;
+		let anchor = { id: image.id, createdAt: image.createdAt, commissionedAt: image.commissionedAt };
+		if (image.parentImageId !== null) {
+			const parent = siblings.find((s) => s.id === image.parentImageId);
+			if (parent) anchor = { id: parent.id, createdAt: parent.createdAt, commissionedAt: parent.commissionedAt };
+		}
+		const neighbors = await withTimeout(
+			(async () => {
+				const settings = await getSettings(db);
+				const sort = resolveGallerySort(context.sort, settings.galleryDefaultSort);
+				return galleryNeighbors(db, context.filters, sort, anchor);
+			})(),
+			NEIGHBORS_TIMEOUT_MS,
+			{ prev: null, next: null }
+		);
+		return { siblings, neighbors };
+	})();
+
+	const [imageTags_, imageChars, { siblings, neighbors }] = await Promise.all([
+		tagsQuery,
+		charactersQuery,
+		siblingsAndNeighbors
+	]);
 
 	return {
 		image,

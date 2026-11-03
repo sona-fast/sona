@@ -1,8 +1,8 @@
 // Left/Right arrow paging for the detail pages (SONA-179): the art detail page
 // steps through its grid, the VR detail page through one avatar's looks.
 // Arrows already mean something in a text field, a select, a media player, a
-// slider or a menu, so the shortcut stands down whenever focus is in one of
-// those, and whenever a modifier is held (Alt+Left is browser Back, Shift+arrow
+// slider, a menu, a grid, a tree or a toolbar, so the shortcut stands down
+// whenever focus is in one of those, and whenever a modifier is held (Alt+Left is browser Back, Shift+arrow
 // extends a selection). A held arrow's auto-repeat is ignored too, so holding
 // it steps once instead of racing through the set and downloading every hop.
 
@@ -22,6 +22,11 @@ const KEY_CONSUMERS = [
 	'[role="menubar"]',
 	'[role="tablist"]',
 	'[role="radiogroup"]',
+	'[role="grid"]',
+	'[role="treegrid"]',
+	'[role="tree"]',
+	'[role="toolbar"]',
+	'[role="application"]',
 	'[role="dialog"]',
 	'dialog'
 ].join(', ');

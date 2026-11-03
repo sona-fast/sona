@@ -1,21 +1,12 @@
 import { and, asc, desc, eq, isNull, like, sql, type SQL } from 'drizzle-orm';
 import { artists, images } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
-import type { GallerySort } from '$lib/gallery';
+import type { GalleryFilters, GallerySort } from '$lib/gallery';
 
 // The gallery grid's filter and order, in one place, so the grid
 // ((public)/gallery/+page.server.ts) and the detail page's previous/next
 // links ((public)/gallery/[slug]) can't disagree about which piece comes next
 // (SONA-179).
-
-/** The grid filters a detail page can carry. `artist` is the resolved current
- *  name: the grid resolves a former name before it filters. */
-export interface GalleryFilters {
-	search: string;
-	tag: string;
-	artist: string;
-	character: string;
-}
 
 /**
  * WHERE conditions for the artwork grid: published, non-variant (a variant
@@ -62,7 +53,12 @@ function sortSpec(sort: GallerySort): { key: SQL; descending: boolean } {
  */
 export function galleryOrderBy(sort: GallerySort): SQL[] {
 	const { key, descending } = sortSpec(sort);
-	return descending ? [sql`${key} DESC`, desc(images.id)] : [sql`${key} ASC`, asc(images.id)];
+	return orderIn(key, !descending);
+}
+
+/** The sort key, then the id as tiebreaker, both in one direction. */
+function orderIn(key: SQL, ascending: boolean): SQL[] {
+	return ascending ? [sql`${key} ASC`, asc(images.id)] : [sql`${key} DESC`, desc(images.id)];
 }
 
 /** One end of the detail page's previous/next pair. */
@@ -88,27 +84,27 @@ export async function galleryNeighbors(
 	const value = sort.startsWith('commissioned-') ? (anchor.commissionedAt ?? anchor.createdAt) : anchor.createdAt;
 	const conditions = galleryConditions(filters);
 
-	// "Later in the grid" is smaller for a descending sort, larger for an
-	// ascending one; the id settles ties the same way galleryOrderBy does.
-	const later = descending
-		? sql`(${key} < ${value} OR (${key} = ${value} AND ${images.id} < ${anchor.id}))`
-		: sql`(${key} > ${value} OR (${key} = ${value} AND ${images.id} > ${anchor.id}))`;
-	const earlier = descending
-		? sql`(${key} > ${value} OR (${key} = ${value} AND ${images.id} > ${anchor.id}))`
-		: sql`(${key} < ${value} OR (${key} = ${value} AND ${images.id} < ${anchor.id}))`;
-	const forward = galleryOrderBy(sort);
-	const backward = descending ? [sql`${key} ASC`, asc(images.id)] : [sql`${key} DESC`, desc(images.id)];
-
-	const pick = (where: SQL, order: SQL[]) =>
-		db
+	// The nearest piece past the anchor walking the order one way: rows with a
+	// larger (ascending) or smaller key, the id settling ties the same way
+	// galleryOrderBy does. "Next in the grid" walks the grid's own direction,
+	// "previous" the opposite one.
+	const pick = (ascending: boolean) => {
+		const op = sql.raw(ascending ? '>' : '<');
+		return db
 			.select({ slug: images.slug, title: images.title, imageUrl: images.imageUrl })
 			.from(images)
 			.leftJoin(artists, eq(images.artistId, artists.id))
-			.where(and(...conditions, where))
-			.orderBy(...order)
+			.where(
+				and(
+					...conditions,
+					sql`(${key} ${op} ${value} OR (${key} = ${value} AND ${images.id} ${op} ${anchor.id}))`
+				)
+			)
+			.orderBy(...orderIn(key, ascending))
 			.limit(1)
 			.get();
+	};
 
-	const [prev, next] = await Promise.all([pick(earlier, backward), pick(later, forward)]);
+	const [prev, next] = await Promise.all([pick(descending), pick(!descending)]);
 	return { prev: prev ?? null, next: next ?? null };
 }

@@ -1438,7 +1438,7 @@
 	"vr_show_avatar": "アバターを表示",
 	"vr_media_poster": "ポスター",
 	"vr_media_item": "{name} — メディア {n}",
-	"vr_media_pager_label": "メディアを順に見る",
+	"vr_media_pager_label": "アバターのメディア",
 	"vr_media_previous": "メディアを前へ",
 	"vr_media_next": "メディアを次へ",
 	"vr_media_position": "{n} / {total}",

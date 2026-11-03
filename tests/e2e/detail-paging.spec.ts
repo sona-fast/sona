@@ -133,6 +133,22 @@ test.describe('art detail paging', () => {
 		await expect(nextLink(page)).toHaveCount(0);
 	});
 
+	test('the list layout links carry the grid context too', async ({ page }) => {
+		await open(page, '/gallery?sort=oldest');
+		await page.getByRole('button', { name: 'List view' }).click();
+		const rows = page.locator('.list').getByRole('link');
+		await expect(rows).toHaveCount(3);
+		for (const href of await rows.evaluateAll((els) => els.map((el) => el.getAttribute('href')))) {
+			expect(href).toMatch(/\?sort=oldest$/);
+		}
+
+		await rows.filter({ hasText: 'Ref Sheet' }).filter({ hasNotText: 'Mature' }).click();
+		await expect(h1(page)).toHaveText('Ref Sheet');
+		await expect(page).toHaveURL(/\/gallery\/ref-sheet\?sort=oldest$/);
+		// Oldest first, so the list's context puts Parent Piece SFW before it.
+		await expect(prevLink(page)).toHaveAccessibleName('Previous: Parent Piece SFW');
+	});
+
 	test('a variant tile keeps the grid context, and pages from its parent', async ({ page }) => {
 		await open(page, '/gallery?sort=oldest');
 		await page.getByRole('link', { name: /Parent Piece SFW/ }).first().click();
@@ -187,7 +203,7 @@ test.describe('VR looks paging', () => {
 	test.describe.configure({ mode: 'serial' });
 	test.use({ viewport: { width: 900, height: 800 } });
 
-	const looksPager = (page: Page) => page.getByRole('group', { name: 'Browse the media' });
+	const looksPager = (page: Page) => page.getByRole('group', { name: 'Avatar media' });
 	const prevBtn = (page: Page) => looksPager(page).getByRole('button', { name: 'Previous media' });
 	const nextBtn = (page: Page) => looksPager(page).getByRole('button', { name: 'Next media' });
 	const position = (page: Page) => looksPager(page).getByRole('status');

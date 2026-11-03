@@ -44,9 +44,7 @@ export function heroSizes(url: string): string | undefined {
  * Null for animated sources: their hero is the raw original (up to 64MB), too
  * big to fetch on a guess.
  */
-export function nextHeroPreload(
-	url: string
-): { href: string; srcset: string | undefined; sizes: string | undefined } | null {
+export function nextHeroPreload(url: string) {
 	if (isAnimatedSource(url)) return null;
 	return { href: heroSrc(url), srcset: heroSrcset(url), sizes: heroSizes(url) };
 }

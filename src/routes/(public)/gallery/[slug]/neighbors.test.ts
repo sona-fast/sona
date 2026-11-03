@@ -8,6 +8,7 @@ import { clearVrTabCache } from '$lib/server/vr-gate';
 import { clearFursuitPhotosCache } from '$lib/server/fursuit-import';
 import { load as gridLoad } from '../+page.server';
 import { load as detailLoad } from './+page.server';
+import { galleryContextQuery, type GalleryFilters } from '$lib/gallery';
 
 // SONA-179: the detail page's previous/next must walk the same order the grid
 // shows, under the same filters and sort, across the grid's page breaks. The
@@ -186,6 +187,25 @@ describe('detail previous/next follows the grid it came from', () => {
 	it('ignores an unknown sort the same way the grid does', async () => {
 		const order = await grid(db.platform, '?sort=bogus');
 		expect(await walk(db.platform, order[0], '?sort=bogus', 'next')).toEqual(order);
+	});
+
+	it("links a grid filtered by an artist's former name with the current name, so the detail page can page it", async () => {
+		db.sqlite.exec(`UPDATE artists SET aliases = '[{"displayName":"OldWren","socials":{}}]' WHERE id = 2`);
+		clearStickerTabCache();
+		clearVrTabCache();
+		clearFursuitPhotosCache();
+		const url = new URL('http://localhost/gallery?artist=OldWren&sort=oldest');
+		const data = (await gridLoad({ platform: db.platform, url } as never)) as { filters: GalleryFilters };
+		expect(data.filters.artist).toBe('Wren');
+
+		// The card links the grid page builds from data.filters.
+		const query = galleryContextQuery(data.filters, 'oldest');
+		expect(query).toBe('?artist=Wren&sort=oldest');
+		const order = await grid(db.platform, '?artist=OldWren&sort=oldest');
+		expect(order).toEqual(await grid(db.platform, query));
+		expect(await walk(db.platform, order[0], query, 'next')).toEqual(order);
+		// The detail page matches the artist exactly, so a former name there would page to nothing.
+		expect((await detail(db.platform, order[0], '?artist=OldWren&sort=oldest')).neighbors.next).toBeNull();
 	});
 
 	it('hands the context on to the next links, minus anything that is not grid context', async () => {

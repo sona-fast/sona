@@ -69,6 +69,18 @@ describe('pagingStep', () => {
 		}
 	});
 
+	it('stands down inside composite widgets that move focus with arrows (grid, tree, toolbar, application)', () => {
+		for (const sel of [
+			'[role="grid"]',
+			'[role="treegrid"]',
+			'[role="tree"]',
+			'[role="toolbar"]',
+			'[role="application"]'
+		]) {
+			expect(pagingStep(key({ target: target([sel]) as unknown as EventTarget })), sel).toBeNull();
+		}
+	});
+
 	it('pages when the target is a plain element, or not an element at all (window)', () => {
 		expect(pagingStep(key({ target: target(['a']) as unknown as EventTarget }))).toBe(1);
 		expect(pagingStep(key({ target: {} as EventTarget }))).toBe(1);

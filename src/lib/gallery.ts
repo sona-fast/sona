@@ -1,6 +1,6 @@
-// The gallery's sort modes. All four are implemented by the gallery load's
-// orderBy (see (public)/gallery/+page.server.ts); `galleryDefaultSort` (a site
-// setting) picks which one applies when a request carries no explicit ?sort=.
+// The gallery's sort modes. All four are implemented by galleryOrderBy (see
+// $lib/server/gallery-order.ts); `galleryDefaultSort` (a site setting) picks
+// which one applies when a request carries no explicit ?sort=.
 export const GALLERY_SORTS = [
 	'newest',
 	'oldest',
@@ -55,8 +55,17 @@ export function galleryFilterParam(params: URLSearchParams, name: string): strin
 	return (params.get(name) || '').slice(0, MAX_FILTER_LENGTH);
 }
 
+/** The grid filters a detail page can carry. On the server, `artist` is the
+ *  resolved current name: the grid resolves a former name before it filters. */
+export interface GalleryFilters {
+	search: string;
+	tag: string;
+	artist: string;
+	character: string;
+}
+
 export interface GalleryContext {
-	filters: { search: string; tag: string; artist: string; character: string };
+	filters: GalleryFilters;
 	/** The explicit sort, or null for the site's default. */
 	sort: string | null;
 	/** The context as a query string with its leading '?', or '' for none. */
@@ -70,7 +79,7 @@ export interface GalleryContext {
  * setting if it changes.
  */
 export function galleryContextQuery(
-	filters: Partial<GalleryContext['filters']>,
+	filters: Partial<GalleryFilters>,
 	sort: string | null
 ): string {
 	const params = new URLSearchParams();

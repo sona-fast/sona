@@ -621,10 +621,21 @@
 		font-size: 16px;
 	}
 
+	/* Equal outer columns keep the "n of total" label centred whatever the
+	   two button labels measure. */
 	.look-pager {
-		display: flex;
+		display: grid;
+		grid-template-columns: 1fr auto 1fr;
 		align-items: center;
 		gap: 12px;
+	}
+
+	.look-step:first-child {
+		justify-self: start;
+	}
+
+	.look-step:last-child {
+		justify-self: end;
 	}
 
 	.look-step[aria-disabled='true'] {
@@ -633,7 +644,6 @@
 	}
 
 	.look-position {
-		flex: 1;
 		text-align: center;
 		font-size: 13px;
 		color: var(--muted-foreground);
