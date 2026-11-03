@@ -91,10 +91,9 @@ describe('gallery context query', () => {
 
 describe('galleryFilterParam', () => {
 	it('reads a param, empty when absent, and truncates past the cap', () => {
-		expect(MAX_FILTER_LENGTH).toBe(100);
-		const params = new URLSearchParams({ q: 'fox', tag: 'y'.repeat(150) });
+		const params = new URLSearchParams({ q: 'fox', tag: 'y'.repeat(MAX_FILTER_LENGTH + 50) });
 		expect(galleryFilterParam(params, 'q')).toBe('fox');
 		expect(galleryFilterParam(params, 'artist')).toBe('');
-		expect(galleryFilterParam(params, 'tag')).toBe('y'.repeat(100));
+		expect(galleryFilterParam(params, 'tag')).toBe('y'.repeat(MAX_FILTER_LENGTH));
 	});
 });

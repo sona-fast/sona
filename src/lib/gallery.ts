@@ -41,11 +41,14 @@ const CONTEXT_PARAMS = {
 	character: 'character'
 } as const;
 
-// Every filter feeds an unindexed LIKE scan, so a filter longer than any real
-// title, tag or name is cut here rather than handed to D1 (r2-02). The grid and
-// the detail page both read through galleryFilterParam, so a capped card link
-// still round-trips.
-export const MAX_FILTER_LENGTH = 100;
+// Every filter feeds an unindexed scan, so a filter longer than any real title,
+// tag or name is cut here rather than handed to D1. 200 is the longest value
+// the site stores: the admin forms and the registry import cap titles and
+// artist and character names at 200, and the artist and character filters
+// match exactly, so a shorter cap would break links to a long name. The grid
+// and the detail page both read through galleryFilterParam, so a card link
+// round-trips.
+export const MAX_FILTER_LENGTH = 200;
 
 /** A filter param from the URL, '' when absent, cut to MAX_FILTER_LENGTH. */
 export function galleryFilterParam(params: URLSearchParams, name: string): string {

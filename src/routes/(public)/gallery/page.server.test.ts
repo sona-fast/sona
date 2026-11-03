@@ -156,6 +156,21 @@ describe('gallery load — filter params are length-capped', () => {
 		expect(data.degraded).toBe(false);
 		expect(data.filters).toMatchObject({ search: capped, tag: capped, artist: capped, character: capped });
 	});
+
+	// The cap must not cut a real name: the admin accepts artist names up to
+	// 200 characters and the artist filter matches exactly.
+	it('still filters by an artist whose name is 150 characters long', async () => {
+		const { db, platform } = makeDb();
+		const longName = 'L'.repeat(150);
+		const [{ id: longId }] = await addArtist(db, longName);
+		const [{ id: otherId }] = await addArtist(db, 'Short');
+		await addImage(db, { artistId: longId });
+		await addImage(db, { artistId: otherId });
+		const data = await loadData(platform, `?artist=${encodeURIComponent(longName)}`);
+		expect(data.filters.artist).toBe(longName);
+		expect(data.formerName).toBeNull();
+		expect(data.images).toHaveLength(1);
+	});
 });
 
 describe('gallery load — artist combobox lists only live artists', () => {
