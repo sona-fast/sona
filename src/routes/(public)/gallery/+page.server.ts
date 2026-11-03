@@ -149,6 +149,8 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 				imageUrl: images.imageUrl,
 				thumbnailUrl: images.thumbnailUrl,
 				nsfw: images.nsfw,
+				width: images.width,
+				height: images.height,
 				commissionedAt: images.commissionedAt,
 				createdAt: images.createdAt,
 				artistName: artists.name

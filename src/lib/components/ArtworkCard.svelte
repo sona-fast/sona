@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { rawFallback } from '$lib';
-	import { CARD_IMAGE, responsiveSrc, responsiveSrcset, responsiveSizes } from '$lib/img';
+	import { cdnImage, rawFallback } from '$lib';
+	import { cardImage, responsiveSrcset, responsiveSizes } from '$lib/img';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
@@ -13,19 +13,26 @@
 		/** The title's heading level: h2 where the card sits directly under the
 		 *  page h1 (the gallery, a collection), so the outline skips no level. */
 		headingLevel?: 'h2' | 'h3';
+		/** The image's stored dimensions; without both there is no srcset. */
+		width?: number | null;
+		height?: number | null;
 	}
 
-	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3' }: Props = $props();
+	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', width, height }: Props = $props();
 
-	let revealed = $state(false);
+	// The reveal belongs to one image: if this component is handed another slug,
+	// that image starts blurred again.
+	let revealedSlug = $state<string | null>(null);
+	const revealed = $derived(revealedSlug === slug);
+	const card = $derived(cardImage(width, height));
 </script>
 
 <a href="/gallery/{slug}" class="card">
 	<div class="image-wrapper">
 		<img
-			src={responsiveSrc(imageUrl, CARD_IMAGE)}
-			srcset={responsiveSrcset(imageUrl, CARD_IMAGE)}
-			sizes={responsiveSizes(imageUrl, CARD_IMAGE)}
+			src={cdnImage(imageUrl, 800)}
+			srcset={card ? responsiveSrcset(imageUrl, card) : undefined}
+			sizes={card ? responsiveSizes(imageUrl, card) : undefined}
 			alt={title}
 			loading="lazy"
 			class:blurred={nsfw && !revealed}
@@ -34,7 +41,7 @@
 		{#if nsfw && !revealed}
 			<button
 				class="nsfw-overlay"
-				onclick={(e) => { e.preventDefault(); revealed = true; }}
+				onclick={(e) => { e.preventDefault(); revealedSlug = slug; }}
 			>
 				<span>NSFW</span>
 				<span class="reveal-text">{m.card_click_reveal()}</span>

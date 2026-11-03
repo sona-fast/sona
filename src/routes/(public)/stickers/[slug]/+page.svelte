@@ -246,6 +246,14 @@
 			</div>
 		</div>
 
+		<!-- Always in the markup, so a screen reader hears the result count when a
+		     filter changes (focus stays on the control). Empty when unfiltered. -->
+		<p class="sr-only" role="status">
+			{#if data.hasFilter}
+				{m.stickers_pack_filter_summary({ count: data.stickers.length })}{#if activeEmoji}{' '}{activeEmoji}{/if}
+			{/if}
+		</p>
+
 		{#if data.hasFilter}
 			<p class="filter-summary">
 				{m.stickers_pack_filter_summary({ count: data.stickers.length })}

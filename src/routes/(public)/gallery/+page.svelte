@@ -137,7 +137,9 @@
 <div class="container gallery-page">
 	<div class="page-header">
 		<h1>{m.gallery_title()}</h1>
-		<p class="count">
+		<!-- role="status": filter changes keep focus on the control, so this live
+		     region is how a screen reader hears that the results changed. -->
+		<p class="count" role="status">
 			{isFursuit ? m.gallery_count_fursuit({ count: data.fursuitPhotos.length }) : m.gallery_count_artwork({ count: data.total })}
 		</p>
 	</div>
@@ -432,6 +434,8 @@
 					tag={image.tag}
 					nsfw={image.nsfw}
 					headingLevel="h2"
+					width={image.width}
+					height={image.height}
 				/>
 			{:else}
 				<a href="/gallery/{image.slug}" class="list-item">

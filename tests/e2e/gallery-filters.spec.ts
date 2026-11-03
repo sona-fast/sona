@@ -12,7 +12,9 @@ import { failOnPageErrors } from './page-errors';
 //      src, so every card flashed to a different image.
 // The card test covers the second report: a ~290px card downloaded the
 // 800px transform. Seed: tests/e2e/fixtures/seed.sql, which publishes three
-// top-level images (parent-piece, ref-sheet, mature-ref-sheet), newest first.
+// top-level images (parent-piece, ref-sheet, mature-ref-sheet), newest first;
+// mature-ref-sheet is the one NSFW card, and only ref-sheet is tagged
+// 'reference'.
 
 failOnPageErrors();
 
@@ -114,11 +116,85 @@ test.describe('gallery filter change', () => {
 		// settledShot: the footer badge's ember animation loops forever.)
 		await page.screenshot({ path: test.info().outputPath('gallery-after-sort.png') });
 	});
+
+	test('an NSFW reveal stays with its image when the sort moves it', async ({ page }) => {
+		await openHydrated(page);
+		const hrefs = () => cardLinks(page).evaluateAll((as) => as.map((a) => a.getAttribute('href')!));
+		const blurredHrefs = () =>
+			cardLinks(page).evaluateAll((as) =>
+				as.filter((a) => a.querySelector('img.blurred')).map((a) => a.getAttribute('href')!)
+			);
+		const mature = page.locator('.grid a.card[href="/gallery/mature-ref-sheet"]');
+
+		expect(await hrefs()).toHaveLength(3);
+		expect((await hrefs())[0]).toBe('/gallery/mature-ref-sheet');
+		const nsfwBefore = await blurredHrefs();
+		expect(nsfwBefore).toContain('/gallery/mature-ref-sheet');
+
+		await mature.locator('.nsfw-overlay').click();
+		await expect(page).toHaveURL(/\/gallery(\?|$)/);
+		await expect(mature.locator('img')).not.toHaveClass(/\bblurred\b/);
+
+		await sortSelect(page).selectOption('oldest');
+		await expect(page).toHaveURL(/[?&]sort=oldest(&|$)/);
+		await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/parent-piece');
+
+		// The revealed card moved, and is still revealed.
+		expect((await hrefs()).indexOf('/gallery/mature-ref-sheet')).toBeGreaterThan(0);
+		await expect(mature.locator('img')).not.toHaveClass(/\bblurred\b/);
+		await expect(mature.locator('.nsfw-overlay')).toHaveCount(0);
+		// And no other NSFW card took the reveal: every one still blurred.
+		expect((await blurredHrefs()).sort()).toEqual(
+			nsfwBefore.filter((h) => h !== '/gallery/mature-ref-sheet').sort()
+		);
+
+		await page.screenshot({ path: test.info().outputPath('gallery-reveal-after-sort.png') });
+	});
+
+	test('announces the new result count, since focus stays on the filter', async ({ page }) => {
+		await openHydrated(page);
+		const status = page.locator('p.count[role="status"]');
+		await expect(status).toHaveText('3 artworks');
+
+		const tagSelect = page.getByRole('combobox', { name: 'Tag', exact: true });
+		await tagSelect.focus();
+		await tagSelect.selectOption('reference');
+		await expect(page).toHaveURL(/[?&]tag=reference(&|$)/);
+		await expect(tagSelect).toBeFocused();
+		await expect(status).toHaveText('1 artwork');
+	});
 });
 
-// The widths every gallery image is already transformed at, so the card adds
-// at most one new transform per image (see CARD_IMAGE in src/lib/img.ts).
-const CARD_WIDTHS = [200, 400, 800];
+// The card's srcset candidates (see cardImage in src/lib/img.ts).
+const CARD_WIDTHS = [400, 800];
+
+// The first card is the newest published piece, mature-ref-sheet, seeded at
+// 1200x900 in tests/e2e/fixtures/seed.sql. Its square cover slot paints it at
+// the slot height times this aspect, so that is the width it needs.
+const FIRST_CARD_ASPECT = 1200 / 900;
+
+// Rewriting srcset before hydration makes Svelte log
+// hydration_attribute_changed and may put the SSR value back, so wait for
+// hydration first. The artist combobox probe needs the filter selects, which
+// are hidden below 768px; the search box shows at every width. Before
+// hydration a change there does nothing (there is no form); after it, the
+// change navigates to ?q=. Each attempt types a new value, so a retry still
+// fires `change`. Clearing it again brings back the full grid.
+async function gotoHydrated(page: Page) {
+	await page.goto('/gallery');
+	const search = page.locator('input[type="search"]');
+	let attempt = 0;
+	await expect(async () => {
+		attempt++;
+		await search.fill(`e2e-probe-${attempt}`);
+		await search.press('Enter');
+		await expect(page).toHaveURL(new RegExp(`[?&]q=e2e-probe-${attempt}(&|$)`), { timeout: 1500 });
+	}).toPass({ timeout: 45_000 });
+	await search.fill('');
+	await search.press('Enter');
+	await expect(page).not.toHaveURL(/[?&]q=/);
+	await expect(cardLinks(page)).toHaveCount(3);
+}
 
 // cdnImage hands back the raw URL in dev, so every srcset candidate here is the
 // same file and currentSrc can't show which one the browser chose. Swap the
@@ -128,6 +204,8 @@ async function pickedCardWidth(page: Page) {
 	await page.route('**/e2e-card-w*.png', (route) =>
 		route.fulfill({ path: 'tests/e2e/fixtures/e2e-thumb.png', contentType: 'image/png' })
 	);
+	await gotoHydrated(page);
+	await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/mature-ref-sheet');
 	const img = page.locator('.grid a.card img').first();
 	await expect(img).toHaveAttribute('sizes', /\S/);
 	const srcset = (await img.getAttribute('srcset')) ?? '';
@@ -138,34 +216,38 @@ async function pickedCardWidth(page: Page) {
 		el.srcset = ws.map((w) => `/e2e-card-w${w}.png ${w}w`).join(', ');
 	}, widths);
 	await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.currentSrc)).toMatch(/e2e-card-w\d+\.png/);
-	return img.evaluate((el: HTMLImageElement) => ({
-		picked: Number(/e2e-card-w(\d+)\.png/.exec(el.currentSrc)![1]),
-		needed: el.getBoundingClientRect().width * devicePixelRatio
-	}));
+	return img.evaluate(
+		(el: HTMLImageElement, aspect: number) => ({
+			picked: Number(/e2e-card-w(\d+)\.png/.exec(el.currentSrc)![1]),
+			needed: el.getBoundingClientRect().width * Math.max(1, aspect) * devicePixelRatio
+		}),
+		FIRST_CARD_ASPECT
+	);
 }
 
 test.describe('artwork card image size', () => {
-	test.describe('desktop', () => {
-		test.use({ viewport: { width: 1280, height: 900 } });
+	test.beforeEach(() => test.slow());
 
-		test('a ~290px card downloads the 400 variant, not 800', async ({ page }) => {
-			await page.goto('/gallery');
+	test.describe('desktop, 1x', () => {
+		test.use({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+
+		test('a ~293px card downloads the 400 variant, not 800', async ({ page }) => {
 			const { picked, needed } = await pickedCardWidth(page);
-			expect(needed).toBeGreaterThan(200);
-			expect(needed).toBeLessThanOrEqual(400);
+			expect(picked).toBeGreaterThanOrEqual(needed);
 			expect(picked).toBe(400);
+			await page.screenshot({ path: test.info().outputPath('gallery-desktop-1x.png') });
 		});
 	});
 
-	test.describe('phone', () => {
-		test.use({ viewport: { width: 390, height: 844 } });
+	for (const deviceScaleFactor of [2, 3]) {
+		test.describe(`phone, ${deviceScaleFactor}x`, () => {
+			test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor });
 
-		test('a two-column phone card downloads the 200 variant', async ({ page }) => {
-			await page.goto('/gallery');
-			const { picked, needed } = await pickedCardWidth(page);
-			expect(needed).toBeLessThanOrEqual(200);
-			expect(picked).toBe(200);
-			await page.screenshot({ path: test.info().outputPath('gallery-phone.png') });
+			test('a phone card never downloads a variant narrower than it paints', async ({ page }) => {
+				const { picked, needed } = await pickedCardWidth(page);
+				expect(picked).toBeGreaterThanOrEqual(needed);
+				await page.screenshot({ path: test.info().outputPath(`gallery-phone-${deviceScaleFactor}x.png`) });
+			});
 		});
-	});
+	}
 });

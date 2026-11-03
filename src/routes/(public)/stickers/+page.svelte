@@ -121,6 +121,14 @@
 		</div>
 	</div>
 
+	<!-- Always in the markup, so a screen reader hears the result count when a
+	     filter changes (focus stays on the control). Empty when unfiltered. -->
+	<p class="sr-only" role="status">
+		{#if data.mode === 'filtered'}
+			{m.stickers_count({ count: data.stickers.length })}{#if activeEmoji}{' · '}{activeEmoji}{/if}{' · '}{m.stickers_across_packs({ packs: data.packCount })}
+		{/if}
+	</p>
+
 	<!-- Filtered sticker grid -->
 	{#if data.mode === 'filtered'}
 		<div class="filter-summary">
