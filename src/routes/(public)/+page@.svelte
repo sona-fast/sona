@@ -163,6 +163,7 @@
 							nsfw={image.nsfw}
 							width={image.width}
 							height={image.height}
+							mobileColumns={2}
 						/>
 					{:else}
 						<p class="empty">{m.home_empty()}</p>

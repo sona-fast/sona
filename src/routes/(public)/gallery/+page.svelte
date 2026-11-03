@@ -436,6 +436,7 @@
 					headingLevel="h2"
 					width={image.width}
 					height={image.height}
+					mobileColumns={2}
 				/>
 			{:else}
 				<a href="/gallery/{image.slug}" class="list-item">

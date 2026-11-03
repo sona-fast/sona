@@ -109,8 +109,9 @@ export const THUMB_WIDTH = 200;
  * smallest candidate at least as wide as `sizes`, so 300px × 1.34 = 402px sends
  * a 4:3 desktop card to 800 for a slot that needs 391px. The middle step ends
  * at 1279px for the same reason: at 1280px the slot is already 293px. Mobile
- * says 100vw rather than 50vw so a one-column phone never upscales; a
- * two-column phone over-fetches instead.
+ * defaults to 100vw, so a one-column phone never upscales. A surface whose
+ * phone grid is two columns passes `mobileColumns` 2 for 50vw, which still
+ * covers the real slot (half the viewport minus padding and gap).
  *
  * The slot is a square drawn with `object-fit: cover`, so a landscape image is
  * painted at the slot height times its aspect ratio. Each slot width is scaled
@@ -127,13 +128,18 @@ export const THUMB_WIDTH = 200;
  * displayed image per month on each fork. Don't add steps without counting the
  * transformations they cost.
  */
-export function cardImage(width?: number | null, height?: number | null): ResponsiveImage | null {
+export function cardImage(
+	width?: number | null,
+	height?: number | null,
+	mobileColumns: 1 | 2 = 1
+): ResponsiveImage | null {
 	if (!width || !height || width <= 0 || height <= 0) return null;
 	// Integer hundredths, so 370 × 1.1 is exactly 407, not 407.00000000000006,
 	// which the ceil would turn into a whole extra pixel.
 	const f100 = Math.max(100, Math.ceil((width * 100) / height));
 	const scale = (px: number) => Math.ceil((px * f100) / 100);
-	const mobile = f100 === 100 ? '100vw' : `calc(100vw * ${f100 / 100})`;
+	const vw = mobileColumns === 2 ? '50vw' : '100vw';
+	const mobile = f100 === 100 ? vw : `calc(${vw} * ${f100 / 100})`;
 	return {
 		widths: [400, 800],
 		sizes: `(max-width: 768px) ${mobile}, (max-width: 1279px) ${scale(370)}px, ${scale(293)}px`,

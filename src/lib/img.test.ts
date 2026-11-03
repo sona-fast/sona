@@ -233,4 +233,26 @@ describe('cardImage', () => {
 			'(max-width: 768px) calc(100vw * 1.1), (max-width: 1279px) 407px, 323px'
 		);
 	});
+
+	it('defaults the mobile slot to the full viewport (one column)', () => {
+		expect(cardImage(1000, 1000)!.sizes).toMatch(/^\(max-width: 768px\) 100vw, /);
+		expect(cardImage(1200, 900)!.sizes).toMatch(/^\(max-width: 768px\) calc\(100vw \* 1\.34\), /);
+		expect(cardImage(1000, 1000, 1)!.sizes).toBe(cardImage(1000, 1000)!.sizes);
+	});
+
+	it('halves the mobile slot for a two-column phone grid', () => {
+		expect(cardImage(1000, 1000, 2)!.sizes).toBe(
+			'(max-width: 768px) 50vw, (max-width: 1279px) 370px, 293px'
+		);
+		expect(cardImage(1200, 900, 2)!.sizes).toBe(
+			'(max-width: 768px) calc(50vw * 1.34), (max-width: 1279px) 496px, 393px'
+		);
+	});
+
+	it('leaves the desktop steps unchanged by mobileColumns', () => {
+		const desktop = (s: string) => s.slice(s.indexOf(', ') + 2);
+		for (const [w, h] of [[1000, 1000], [900, 1200], [1200, 900], [1600, 800]]) {
+			expect(desktop(cardImage(w, h, 2)!.sizes)).toBe(desktop(cardImage(w, h)!.sizes));
+		}
+	});
 });

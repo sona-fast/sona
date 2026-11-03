@@ -16,15 +16,17 @@
 		/** The image's stored dimensions; without both there is no srcset. */
 		width?: number | null;
 		height?: number | null;
+		/** Columns the grid has on phones (max-width 768px); 2 requests 50vw images. */
+		mobileColumns?: 1 | 2;
 	}
 
-	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', width, height }: Props = $props();
+	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', width, height, mobileColumns = 1 }: Props = $props();
 
 	// The reveal belongs to one image: if this component is handed another slug,
 	// that image starts blurred again.
 	let revealedSlug = $state<string | null>(null);
 	const revealed = $derived(revealedSlug === slug);
-	const card = $derived(cardImage(width, height));
+	const card = $derived(cardImage(width, height, mobileColumns));
 </script>
 
 <a href="/gallery/{slug}" class="card">
