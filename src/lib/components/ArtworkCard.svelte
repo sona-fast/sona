@@ -16,16 +16,13 @@
 		/** The image's stored dimensions; without both there is no srcset. */
 		width?: number | null;
 		height?: number | null;
-		/** Columns the grid has on phones (max-width 768px); 2 requests 50vw images. */
+		/** Columns the grid has on phones (max-width 768px); 2 sizes images for half the viewport. */
 		mobileColumns?: 1 | 2;
 	}
 
 	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', width, height, mobileColumns = 1 }: Props = $props();
 
-	// The reveal belongs to one image: if this component is handed another slug,
-	// that image starts blurred again.
-	let revealedSlug = $state<string | null>(null);
-	const revealed = $derived(revealedSlug === slug);
+	let revealed = $state(false);
 	const card = $derived(cardImage(width, height, mobileColumns));
 </script>
 
@@ -43,7 +40,7 @@
 		{#if nsfw && !revealed}
 			<button
 				class="nsfw-overlay"
-				onclick={(e) => { e.preventDefault(); revealedSlug = slug; }}
+				onclick={(e) => { e.preventDefault(); revealed = true; }}
 			>
 				<span>NSFW</span>
 				<span class="reveal-text">{m.card_click_reveal()}</span>

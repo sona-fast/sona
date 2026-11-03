@@ -133,6 +133,7 @@
 	"gallery_filter_search": "Search artworks",
 	"gallery_filter_artist": "Artist",
 	"gallery_filter_no_artists": "No matching artists",
+	"gallery_status_filter": "{label}: {value}",
 	"gallery_previous": "Previous",
 	"gallery_next": "Next",
 	"gallery_fursuit_capped": "Showing the most recent photos — older ones aren't loaded yet.",
@@ -278,6 +279,21 @@
 	"stickers_across_packs": "across {packs} packs",
 	"stickers_empty_subtext": "Nobody's tagged a sticker with this emoji so far. Try another reaction or clear your filters to see every pack.",
 	"stickers_reset_filters": "Reset filters",
+	"stickers_pack_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} sticker pack",
+				"countPlural=other": "{count} sticker packs"
+			}
+		}
+	],
 	"admin_badge": "Admin Panel",
 	"admin_logout": "Logout",
 	"admin_nav_upload": "Upload",

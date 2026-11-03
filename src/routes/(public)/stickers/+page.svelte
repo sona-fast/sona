@@ -9,6 +9,7 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
+	import { getLocale } from '$lib/paraglide/runtime';
 
 	let { data } = $props();
 
@@ -36,6 +37,21 @@
 
 	// Derive active emoji label for display in summary.
 	const activeEmoji = $derived(data.filters.emoji || data.filters.q);
+
+	// What the status region reads out. Unfiltered, the number of packs;
+	// filtered, the result count with the emoji and artist that produced it, so
+	// a change that keeps the count still changes the text.
+	const resultStatus = $derived.by(() => {
+		if (data.mode !== 'filtered') return m.stickers_pack_count({ count: data.packs.length });
+		const artist = data.artists.find((a) => String(a.id) === data.filters.artist)?.name;
+		const parts = [
+			m.stickers_count({ count: data.stickers.length }),
+			...(activeEmoji ? [activeEmoji] : []),
+			...(artist ? [m.gallery_status_filter({ label: m.stickers_artist_label(), value: artist })] : []),
+			m.stickers_across_packs({ packs: data.packCount })
+		];
+		return new Intl.ListFormat(getLocale(), { style: 'short', type: 'unit' }).format(parts);
+	});
 </script>
 
 <Meta
@@ -121,13 +137,9 @@
 		</div>
 	</div>
 
-	<!-- Always in the markup, so a screen reader hears the result count when a
-	     filter changes (focus stays on the control). Empty when unfiltered. -->
-	<p class="sr-only" role="status">
-		{#if data.mode === 'filtered'}
-			{m.stickers_count({ count: data.stickers.length })}{#if activeEmoji}{' · '}{activeEmoji}{/if}{' · '}{m.stickers_across_packs({ packs: data.packCount })}
-		{/if}
-	</p>
+	<!-- Always in the markup, so a screen reader hears the results change when a
+	     filter changes or clears (focus stays on the control). -->
+	<p class="sr-only" role="status">{resultStatus}</p>
 
 	<!-- Filtered sticker grid -->
 	{#if data.mode === 'filtered'}

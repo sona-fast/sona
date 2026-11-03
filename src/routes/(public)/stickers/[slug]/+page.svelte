@@ -16,6 +16,7 @@
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
+	import { getLocale } from '$lib/paraglide/runtime';
 
 	let { data } = $props();
 
@@ -97,6 +98,23 @@
 	}
 
 	const activeEmoji = $derived(data.filters.emoji || data.filters.q);
+
+	// What the status region reads out: the sticker count, plus the emoji and
+	// artists that produced it when filtered, so switching artist with the same
+	// count still changes the text. "Unassigned" matches its chip's label.
+	const resultStatus = $derived.by(() => {
+		const artists = data.filters.artist
+			.map((id) => (id === 'unassigned' ? 'Unassigned' : distinctArtists.find((a) => String(a.id) === id)?.name))
+			.filter((name): name is string => !!name);
+		const parts = [
+			m.stickers_count({ count: data.stickers.length }),
+			...(activeEmoji ? [activeEmoji] : []),
+			...(artists.length > 0
+				? [m.gallery_status_filter({ label: m.stickers_artist_label(), value: new Intl.ListFormat(getLocale()).format(artists) })]
+				: [])
+		];
+		return new Intl.ListFormat(getLocale(), { style: 'short', type: 'unit' }).format(parts);
+	});
 </script>
 
 <Meta
@@ -246,13 +264,9 @@
 			</div>
 		</div>
 
-		<!-- Always in the markup, so a screen reader hears the result count when a
-		     filter changes (focus stays on the control). Empty when unfiltered. -->
-		<p class="sr-only" role="status">
-			{#if data.hasFilter}
-				{m.stickers_pack_filter_summary({ count: data.stickers.length })}{#if activeEmoji}{' '}{activeEmoji}{/if}
-			{/if}
-		</p>
+		<!-- Always in the markup, so a screen reader hears the results change when
+		     a filter changes or clears (focus stays on the control). -->
+		<p class="sr-only" role="status">{resultStatus}</p>
 
 		{#if data.hasFilter}
 			<p class="filter-summary">

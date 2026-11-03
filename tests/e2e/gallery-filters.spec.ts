@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { failOnPageErrors } from './page-errors';
+import { countViewTransitions, inPlaceState, markWindow } from './in-place';
+import { waitForHydration } from './admin-login';
 
 // A gallery filter change has to feel like the page updating in place, not a
 // reload. A visitor reported "the page refreshes on many of the dropdowns".
@@ -20,23 +22,27 @@ failOnPageErrors();
 
 const sortSelect = (page: Page) => page.getByRole('combobox', { name: 'Sort by' });
 const cardLinks = (page: Page) => page.locator('.grid a.card');
-const comboInput = (page: Page) => page.locator('input.combobox-input');
 
-// In `vite dev`, a change made before hydration does nothing. The artist
-// combobox answers ArrowDown only once Svelte has attached its handlers, so
-// keep pressing until it does (the same probe gallery-artist-combobox uses),
-// then close the list again.
-async function openHydrated(page: Page) {
+// In `vite dev`, a change made before hydration does nothing, and rewriting
+// srcset before it makes Svelte log hydration_attribute_changed. The search
+// box shows at every width (the filter selects hide below 768px). Before
+// hydration a change there does nothing (there is no form); after it, the
+// change navigates to ?q=. Each attempt types a new value, so a retry still
+// fires `change`. Clearing it again brings back the full grid.
+async function gotoHydrated(page: Page) {
 	await page.goto('/gallery');
+	const search = page.locator('input[type="search"]');
+	let attempt = 0;
 	await expect(async () => {
-		await comboInput(page).focus();
-		await comboInput(page).press('ArrowDown');
-		await expect(comboInput(page)).toHaveAttribute('aria-activedescendant', 'artist-combobox-opt-0', {
-			timeout: 1500
-		});
+		attempt++;
+		await search.fill(`e2e-probe-${attempt}`);
+		await search.press('Enter');
+		await expect(page).toHaveURL(new RegExp(`[?&]q=e2e-probe-${attempt}(&|$)`), { timeout: 1500 });
 	}).toPass({ timeout: 45_000 });
-	await comboInput(page).press('Escape');
-	await comboInput(page).blur();
+	await search.fill('');
+	await search.press('Enter');
+	await expect(page).not.toHaveURL(/[?&]q=/);
+	await expect(cardLinks(page)).toHaveCount(3);
 }
 
 test.describe('gallery filter change', () => {
@@ -46,25 +52,14 @@ test.describe('gallery filter change', () => {
 	test.beforeEach(() => test.slow());
 
 	test('updates in place: no reload, no fade, same scroll, same focus, same cards', async ({ page }) => {
-		// Count whole-page View Transitions from the first script on.
-		await page.addInitScript(() => {
-			const w = window as unknown as { __transitions: number };
-			w.__transitions = 0;
-			const start = document.startViewTransition?.bind(document);
-			if (start) {
-				document.startViewTransition = ((cb: never) => {
-					w.__transitions++;
-					return start(cb);
-				}) as typeof document.startViewTransition;
-			}
-		});
-		await openHydrated(page);
+		await countViewTransitions(page);
+		await gotoHydrated(page);
 		await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/mature-ref-sheet');
 
 		// Tag the window, and remember each card's img element by the piece it shows.
+		await markWindow(page);
 		await page.evaluate(() => {
-			const w = window as unknown as { __marker: string; __imgs: Record<string, [Element, string]> };
-			w.__marker = 'still here';
+			const w = window as unknown as { __imgs: Record<string, [Element, string]> };
 			w.__imgs = {};
 			for (const a of document.querySelectorAll('.grid a.card')) {
 				const img = a.querySelector('img')!;
@@ -86,11 +81,10 @@ test.describe('gallery filter change', () => {
 		await expect(page).toHaveURL(/[?&]sort=oldest(&|$)/);
 		await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/parent-piece');
 
-		// (a) No document load: the window is the same one, and no HTML was fetched.
-		expect(await page.evaluate(() => (window as unknown as { __marker?: string }).__marker)).toBe('still here');
+		// (a) No document load: the window is the same one, and no HTML was
+		// fetched. No whole-page fade either.
+		expect(await inPlaceState(page)).toEqual({ sameWindow: true, transitions: 0 });
 		expect(documents).toEqual([]);
-		// No whole-page fade either.
-		expect(await page.evaluate(() => (window as unknown as { __transitions: number }).__transitions)).toBe(0);
 		// (b) The page stays where the visitor scrolled it.
 		expect(await page.evaluate(() => window.scrollY)).toBe(150);
 		// (c) Focus stays on the select they just changed.
@@ -118,7 +112,7 @@ test.describe('gallery filter change', () => {
 	});
 
 	test('an NSFW reveal stays with its image when the sort moves it', async ({ page }) => {
-		await openHydrated(page);
+		await gotoHydrated(page);
 		const hrefs = () => cardLinks(page).evaluateAll((as) => as.map((a) => a.getAttribute('href')!));
 		const blurredHrefs = () =>
 			cardLinks(page).evaluateAll((as) =>
@@ -151,60 +145,59 @@ test.describe('gallery filter change', () => {
 		await page.screenshot({ path: test.info().outputPath('gallery-reveal-after-sort.png') });
 	});
 
-	test('announces the new result count, since focus stays on the filter', async ({ page }) => {
-		await openHydrated(page);
-		const status = page.locator('p.count[role="status"]');
-		await expect(status).toHaveText('3 artworks');
+	// Focus stays on the filter, so a screen reader hears the change from a
+	// status region. It names the sort and the filters as well as the count,
+	// so a change that keeps the count (a sort) still changes what it says.
+	test('announces the results, the filters, and the sort, since focus stays on the filter', async ({ page }) => {
+		await gotoHydrated(page);
+		const status = page.locator('[role="status"].sr-only');
+		await expect(status).toHaveText(/^3 artworks, Sort by: /);
+		const before = await status.textContent();
+
+		await sortSelect(page).focus();
+		await sortSelect(page).selectOption('oldest');
+		await expect(page).toHaveURL(/[?&]sort=oldest(&|$)/);
+		await expect(status).toHaveText('3 artworks, Sort by: Oldest upload');
+		expect(await status.textContent()).not.toBe(before);
 
 		const tagSelect = page.getByRole('combobox', { name: 'Tag', exact: true });
 		await tagSelect.focus();
 		await tagSelect.selectOption('reference');
 		await expect(page).toHaveURL(/[?&]tag=reference(&|$)/);
 		await expect(tagSelect).toBeFocused();
-		await expect(status).toHaveText('1 artwork');
+		await expect(status).toHaveText('1 artwork, Tag: reference, Sort by: Oldest upload');
+		// The visible count is plain text, not a second live region.
+		await expect(page.locator('p.count')).toHaveText('1 artwork');
+		await expect(page.locator('p.count')).not.toHaveAttribute('role');
 	});
 });
 
 // The card's srcset candidates (see cardImage in src/lib/img.ts).
 const CARD_WIDTHS = [400, 800];
 
-// The first card is the newest published piece, mature-ref-sheet, seeded at
-// 1200x900 in tests/e2e/fixtures/seed.sql. Its square cover slot paints it at
-// the slot height times this aspect, so that is the width it needs.
+// On both /gallery and the home page's recent grid, the first card is the
+// newest published top-level piece, mature-ref-sheet, seeded at 1200x900 in
+// tests/e2e/fixtures/seed.sql. Its square cover slot paints it at the slot
+// height times this aspect, so that is the width it needs.
 const FIRST_CARD_ASPECT = 1200 / 900;
-
-// Rewriting srcset before hydration makes Svelte log
-// hydration_attribute_changed and may put the SSR value back, so wait for
-// hydration first. The artist combobox probe needs the filter selects, which
-// are hidden below 768px; the search box shows at every width. Before
-// hydration a change there does nothing (there is no form); after it, the
-// change navigates to ?q=. Each attempt types a new value, so a retry still
-// fires `change`. Clearing it again brings back the full grid.
-async function gotoHydrated(page: Page) {
-	await page.goto('/gallery');
-	const search = page.locator('input[type="search"]');
-	let attempt = 0;
-	await expect(async () => {
-		attempt++;
-		await search.fill(`e2e-probe-${attempt}`);
-		await search.press('Enter');
-		await expect(page).toHaveURL(new RegExp(`[?&]q=e2e-probe-${attempt}(&|$)`), { timeout: 1500 });
-	}).toPass({ timeout: 45_000 });
-	await search.fill('');
-	await search.press('Enter');
-	await expect(page).not.toHaveURL(/[?&]q=/);
-	await expect(cardLinks(page)).toHaveCount(3);
-}
 
 // cdnImage hands back the raw URL in dev, so every srcset candidate here is the
 // same file and currentSrc can't show which one the browser chose. Swap the
 // candidates for distinct URLs, keep the card's own `sizes`, and let the
 // browser pick: that is the width a real visitor's browser would download.
-async function pickedCardWidth(page: Page) {
+//
+// The home page has no search box to probe, so it waits on the bottom nav's
+// hydration signal instead (see waitForHydration).
+async function pickedCardWidth(page: Page, path: '/gallery' | '/') {
 	await page.route('**/e2e-card-w*.png', (route) =>
 		route.fulfill({ path: 'tests/e2e/fixtures/e2e-thumb.png', contentType: 'image/png' })
 	);
-	await gotoHydrated(page);
+	if (path === '/gallery') {
+		await gotoHydrated(page);
+	} else {
+		await page.goto(path);
+		await waitForHydration(page);
+	}
 	await expect(cardLinks(page).first()).toHaveAttribute('href', '/gallery/mature-ref-sheet');
 	const img = page.locator('.grid a.card img').first();
 	await expect(img).toHaveAttribute('sizes', /\S/);
@@ -215,6 +208,8 @@ async function pickedCardWidth(page: Page) {
 	await img.evaluate((el: HTMLImageElement, ws: number[]) => {
 		el.srcset = ws.map((w) => `/e2e-card-w${w}.png ${w}w`).join(', ');
 	}, widths);
+	// The cards are lazy, and the home grid sits below the banner.
+	await img.scrollIntoViewIfNeeded();
 	await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.currentSrc)).toMatch(/e2e-card-w\d+\.png/);
 	return img.evaluate(
 		(el: HTMLImageElement, aspect: number) => ({
@@ -232,7 +227,7 @@ test.describe('artwork card image size', () => {
 		test.use({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
 
 		test('a ~293px card downloads the 400 variant, not 800', async ({ page }) => {
-			const { picked, needed } = await pickedCardWidth(page);
+			const { picked, needed } = await pickedCardWidth(page, '/gallery');
 			expect(picked).toBeGreaterThanOrEqual(needed);
 			expect(picked).toBe(400);
 			await page.screenshot({ path: test.info().outputPath('gallery-desktop-1x.png') });
@@ -244,10 +239,27 @@ test.describe('artwork card image size', () => {
 			test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor });
 
 			test('a phone card never downloads a variant narrower than it paints', async ({ page }) => {
-				const { picked, needed } = await pickedCardWidth(page);
+				const { picked, needed } = await pickedCardWidth(page, '/gallery');
 				expect(picked).toBeGreaterThanOrEqual(needed);
 				await page.screenshot({ path: test.info().outputPath(`gallery-phone-${deviceScaleFactor}x.png`) });
 			});
 		});
 	}
+
+	// At 1x a two-column phone card needs about 233px, so it should get 400.
+	// Sized as one column (100vw × 1.34, about 523px) it would get 800, which
+	// the 2x and 3x phones above pick either way. Gallery slot: (390 − 32 − 10)
+	// / 2 = 174px; home: (390 − 32 − 12) / 2 = 173px.
+	test.describe('phone, 1x, two columns', () => {
+		test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
+
+		for (const [name, path] of [['the gallery', '/gallery'], ['the home page', '/']] as const) {
+			test(`a card on ${name} downloads the 400 variant`, async ({ page }) => {
+				const { picked, needed } = await pickedCardWidth(page, path);
+				expect(picked).toBeGreaterThanOrEqual(needed);
+				expect(picked).toBe(400);
+				await page.screenshot({ path: test.info().outputPath(`card-phone-1x-${path === '/' ? 'home' : 'gallery'}.png`) });
+			});
+		}
+	});
 });

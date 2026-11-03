@@ -10,6 +10,8 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate, cdnImage, rawFallback } from '$lib';
 	import * as m from '$lib/paraglide/messages';
+	import { getLocale } from '$lib/paraglide/runtime';
+	import type { GallerySort } from '$lib/gallery';
 
 	let { data } = $props();
 
@@ -26,6 +28,34 @@
 	$effect(() => {
 		data.fursuitPhotos;
 		fursuitPage = 1;
+	});
+
+	const sortLabels: Record<GallerySort, () => string> = {
+		newest: m.gallery_sort_newest,
+		oldest: m.gallery_sort_oldest,
+		'commissioned-newest': m.gallery_sort_commissioned_newest,
+		'commissioned-oldest': m.gallery_sort_commissioned_oldest
+	};
+
+	// What the status region reads out: the count, then each active filter, then
+	// the sort (artwork view only; the fursuit view has no sort).
+	const resultStatus = $derived.by(() => {
+		const pair = (label: string, value: string) => (value ? [m.gallery_status_filter({ label, value })] : []);
+		const parts = isFursuit
+			? [
+					m.gallery_count_fursuit({ count: data.fursuitPhotos.length }),
+					...pair(m.gallery_filter_photographer(), data.fursuitFilters.photographer),
+					...pair(m.gallery_filter_event(), data.fursuitFilters.event)
+				]
+			: [
+					m.gallery_count_artwork({ count: data.total }),
+					...pair(m.gallery_filter_search(), data.filters.search),
+					...pair(m.gallery_filter_tag(), data.filters.tag),
+					...pair(m.gallery_filter_artist(), data.filters.artist),
+					...pair(m.gallery_filter_character(), data.filters.character),
+					m.gallery_status_filter({ label: m.gallery_filter_sort(), value: sortLabels[data.filters.sort]() })
+				];
+		return new Intl.ListFormat(getLocale(), { style: 'short', type: 'unit' }).format(parts);
 	});
 
 	const siteName = data.settings?.siteName ?? APP_NAME;
@@ -137,12 +167,15 @@
 <div class="container gallery-page">
 	<div class="page-header">
 		<h1>{m.gallery_title()}</h1>
-		<!-- role="status": filter changes keep focus on the control, so this live
-		     region is how a screen reader hears that the results changed. -->
-		<p class="count" role="status">
+		<p class="count">
 			{isFursuit ? m.gallery_count_fursuit({ count: data.fursuitPhotos.length }) : m.gallery_count_artwork({ count: data.total })}
 		</p>
 	</div>
+
+	<!-- Filter changes keep focus on the control, so this live region is how a
+	     screen reader hears that the results changed. It names the filters and
+	     the sort too, so a change that keeps the count still changes the text. -->
+	<p class="sr-only" role="status">{resultStatus}</p>
 
 	<!-- Suppressed when only Artwork would show (fresh fork, every other section
 	     gated off): a lone-pill segmented control reads as broken, and there is
