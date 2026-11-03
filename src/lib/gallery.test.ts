@@ -4,7 +4,9 @@ import {
 	isValidGallerySort,
 	DEFAULT_GALLERY_SORT,
 	galleryContextQuery,
-	galleryContextFromParams
+	galleryContextFromParams,
+	galleryFilterParam,
+	MAX_FILTER_LENGTH
 } from './gallery';
 
 // resolveGallerySort is the fallback chain the gallery load relies on: an
@@ -73,5 +75,26 @@ describe('gallery context query', () => {
 	it('ignores params that are not grid context (page, view, utm tags)', () => {
 		const back = galleryContextFromParams(new URLSearchParams('page=3&view=fursuit&utm_source=x&artist=A'));
 		expect(back.query).toBe('?artist=A');
+	});
+
+	// r2-02: every filter reaches an unindexed LIKE scan, so a huge ?q= on a
+	// detail URL must not ride into the query (or back out onto the links).
+	it('caps each filter at MAX_FILTER_LENGTH characters', () => {
+		const huge = 'x'.repeat(MAX_FILTER_LENGTH + 500);
+		const params = new URLSearchParams({ q: huge, tag: huge, artist: huge, character: huge });
+		const back = galleryContextFromParams(params);
+		const capped = 'x'.repeat(MAX_FILTER_LENGTH);
+		expect(back.filters).toEqual({ search: capped, tag: capped, artist: capped, character: capped });
+		expect(back.query).toBe(galleryContextQuery(back.filters, null));
+	});
+});
+
+describe('galleryFilterParam', () => {
+	it('reads a param, empty when absent, and truncates past the cap', () => {
+		expect(MAX_FILTER_LENGTH).toBe(100);
+		const params = new URLSearchParams({ q: 'fox', tag: 'y'.repeat(150) });
+		expect(galleryFilterParam(params, 'q')).toBe('fox');
+		expect(galleryFilterParam(params, 'artist')).toBe('');
+		expect(galleryFilterParam(params, 'tag')).toBe('y'.repeat(100));
 	});
 });

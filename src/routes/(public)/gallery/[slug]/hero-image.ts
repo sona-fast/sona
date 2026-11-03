@@ -38,6 +38,19 @@ export function heroSizes(url: string): string | undefined {
 	return responsiveSizes(url, HERO);
 }
 
+/**
+ * The `<link rel="preload">` for the next piece's hero, built from the same
+ * helpers as the hero so the browser fetches the candidate the next page uses.
+ * Null for animated sources: their hero is the raw original (up to 64MB), too
+ * big to fetch on a guess.
+ */
+export function nextHeroPreload(
+	url: string
+): { href: string; srcset: string | undefined; sizes: string | undefined } | null {
+	if (isAnimatedSource(url)) return null;
+	return { href: heroSrc(url), srcset: heroSrcset(url), sizes: heroSizes(url) };
+}
+
 /** 84px variant-strip tile (168 = 2x for DPR), with the same animated bypass. */
 export function variantThumbSrc(url: string): string {
 	return isAnimatedSource(url) ? url : cdnImage(url, 168);

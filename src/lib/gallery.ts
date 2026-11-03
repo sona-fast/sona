@@ -41,6 +41,17 @@ const CONTEXT_PARAMS = {
 	character: 'character'
 } as const;
 
+// Every filter feeds an unindexed LIKE scan, so a filter longer than any real
+// title, tag or name is cut here rather than handed to D1 (r2-02). The grid and
+// the detail page both read through galleryFilterParam, so a capped card link
+// still round-trips.
+export const MAX_FILTER_LENGTH = 100;
+
+/** A filter param from the URL, '' when absent, cut to MAX_FILTER_LENGTH. */
+export function galleryFilterParam(params: URLSearchParams, name: string): string {
+	return (params.get(name) || '').slice(0, MAX_FILTER_LENGTH);
+}
+
 export interface GalleryContext {
 	filters: { search: string; tag: string; artist: string; character: string };
 	/** The explicit sort, or null for the site's default. */
@@ -72,10 +83,10 @@ export function galleryContextQuery(
 /** Reads a detail page's grid context back out of its URL. */
 export function galleryContextFromParams(params: URLSearchParams): GalleryContext {
 	const filters = {
-		search: params.get(CONTEXT_PARAMS.search) || '',
-		tag: params.get(CONTEXT_PARAMS.tag) || '',
-		artist: params.get(CONTEXT_PARAMS.artist) || '',
-		character: params.get(CONTEXT_PARAMS.character) || ''
+		search: galleryFilterParam(params, CONTEXT_PARAMS.search),
+		tag: galleryFilterParam(params, CONTEXT_PARAMS.tag),
+		artist: galleryFilterParam(params, CONTEXT_PARAMS.artist),
+		character: galleryFilterParam(params, CONTEXT_PARAMS.character)
 	};
 	const sortParam = params.get('sort');
 	const sort = sortParam && isValidGallerySort(sortParam) ? sortParam : null;

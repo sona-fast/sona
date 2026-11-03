@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { cdnImage } from '$lib';
-import { heroSrc, heroSrcset, heroSizes, isAnimatedSource, variantThumbSrc, rawFallback } from './hero-image';
+import {
+	heroSrc,
+	heroSrcset,
+	heroSizes,
+	isAnimatedSource,
+	nextHeroPreload,
+	variantThumbSrc,
+	rawFallback
+} from './hero-image';
 
 // Guards the sona#97 LCP fix: the gallery detail page must request the CDN
 // transform — never the raw multi-MB original — as its DEFAULT preview src,
@@ -82,6 +90,19 @@ describe('hero src selection', () => {
 		expect(heroSrc(gif)).toBe(gif);
 		expect(heroSrcset(gif)).toBeUndefined();
 		expect(heroSizes(gif)).toBeUndefined();
+	});
+
+	// SONA-179 r2-01: the next piece's hero is preloaded. For a GIF the hero is
+	// the raw original (up to 64MB), so preloading it would download the whole
+	// file on every view of the piece before it.
+	it('preloads the next hero with the exact candidates the hero uses, and skips animated sources', () => {
+		expect(nextHeroPreload(png)).toEqual({
+			href: heroSrc(png),
+			srcset: heroSrcset(png),
+			sizes: heroSizes(png)
+		});
+		expect(nextHeroPreload(gif)).toBeNull();
+		expect(nextHeroPreload(`${gif}?v=2`)).toBeNull();
 	});
 
 	it('variant tiles get the 168px transform, with the same GIF bypass', () => {

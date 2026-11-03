@@ -5,7 +5,7 @@
 	import { goto, onNavigate } from '$app/navigation';
 	import { Download, Share2, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import { formatDate } from '$lib';
-	import { heroSrc, heroSrcset, heroSizes, variantThumbSrc, rawFallback } from './hero-image';
+	import { heroSrc, heroSrcset, heroSizes, nextHeroPreload, variantThumbSrc, rawFallback } from './hero-image';
 	import Meta from '$lib/components/Meta.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
@@ -61,6 +61,7 @@
 	const next = $derived(data.neighbors.next);
 	const prevHref = $derived(prev ? `/gallery/${prev.slug}${data.contextQuery}` : null);
 	const nextHref = $derived(next ? `/gallery/${next.slug}${data.contextQuery}` : null);
+	const nextPreload = $derived(next ? nextHeroPreload(next.imageUrl) : null);
 
 	// Left/Right arrows follow the same links; pagingStep stands down while
 	// focus is in a field or a modifier is held.
@@ -138,18 +139,18 @@
 <svelte:window onkeydown={onPagingKey} />
 
 <!-- Warm the cache with the next piece's hero, and only that one: further ahead
-     turns browsing into a bulk download on a phone plan. src, srcset and sizes
-     come from the same helpers the hero uses, so the browser picks the exact
-     candidate the next page will request. Low priority, so it never competes
-     with this page's own hero. -->
+     turns browsing into a bulk download on a phone plan. nextHeroPreload uses
+     the same helpers the hero uses, so the browser picks the exact candidate
+     the next page will request, and skips animated pieces, whose hero is the
+     raw original. Low priority, so it never competes with this page's own hero. -->
 <svelte:head>
-	{#if next}
+	{#if nextPreload}
 		<link
 			rel="preload"
 			as="image"
-			href={heroSrc(next.imageUrl)}
-			imagesrcset={heroSrcset(next.imageUrl)}
-			imagesizes={heroSizes(next.imageUrl)}
+			href={nextPreload.href}
+			imagesrcset={nextPreload.srcset}
+			imagesizes={nextPreload.sizes}
 			fetchpriority="low"
 		/>
 	{/if}

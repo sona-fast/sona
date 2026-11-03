@@ -11,7 +11,7 @@ import { fursuitPhotoFromRow, fursuitPhotosExist } from '$lib/server/fursuit-imp
 import { getMode } from '$lib/server/furtrack';
 import { parseAliases } from '$lib/server/registry';
 import { getSettings } from '$lib/server/settings';
-import { resolveGallerySort } from '$lib/gallery';
+import { resolveGallerySort, galleryFilterParam } from '$lib/gallery';
 import { withTimeout } from '$lib/server/timeout';
 import type { FursuitPhoto } from '$lib/furtrack/types';
 import type { PageServerLoad } from './$types';
@@ -26,10 +26,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// read replica (eventually consistent); admin writes use the primary
 	const db = getReadDb(platform!.env.DB);
 
-	const search = url.searchParams.get('q') || '';
-	const tagFilter = url.searchParams.get('tag') || '';
-	const artistFilter = url.searchParams.get('artist') || '';
-	const characterFilter = url.searchParams.get('character') || '';
+	const search = galleryFilterParam(url.searchParams, 'q');
+	const tagFilter = galleryFilterParam(url.searchParams, 'tag');
+	const artistFilter = galleryFilterParam(url.searchParams, 'artist');
+	const characterFilter = galleryFilterParam(url.searchParams, 'character');
 	// An explicit ?sort= wins (keeps shared links stable); otherwise fall back to
 	// the site's configured default gallery sort.
 	const settings = await getSettings(db);
