@@ -3,9 +3,12 @@ import { getReadDb } from '$lib/server/db';
 import { images, artists, collections, imageTags, tags, characters, imageCharacters } from '$lib/server/db/schema';
 import { eq, and, or, asc } from 'drizzle-orm';
 import { parseAliases } from '$lib/server/registry';
+import { getSettings } from '$lib/server/settings';
+import { galleryNeighbors } from '$lib/server/gallery-order';
+import { galleryContextFromParams, resolveGallerySort } from '$lib/gallery';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, platform }) => {
+export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// read replica (eventually consistent); admin writes use the primary
 	const db = getReadDb(platform!.env.DB);
 
@@ -88,7 +91,9 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 			thumbnailUrl: images.thumbnailUrl,
 			variantLabel: images.variantLabel,
 			parentImageId: images.parentImageId,
-			nsfw: images.nsfw
+			nsfw: images.nsfw,
+			createdAt: images.createdAt,
+			commissionedAt: images.commissionedAt
 		})
 		.from(images)
 		.where(
@@ -99,12 +104,32 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		)
 		.orderBy(asc(images.id));
 
+	// Previous/next in the order of the grid the visitor came from (SONA-179).
+	// The grid's links carry its filters and an explicit sort in the query
+	// string; with none, this is the unfiltered gallery in the site's default
+	// sort, the same grid /gallery shows. The grid only shows group parents,
+	// so a variant pages from its parent's place.
+	const context = galleryContextFromParams(url.searchParams);
+	const settings = await getSettings(db);
+	const sort = resolveGallerySort(context.sort, settings.galleryDefaultSort);
+	let anchor = { id: image.id, createdAt: image.createdAt, commissionedAt: image.commissionedAt };
+	if (image.parentImageId !== null) {
+		const parent = siblings.find((s) => s.id === image.parentImageId);
+		if (parent) anchor = { id: parent.id, createdAt: parent.createdAt, commissionedAt: parent.commissionedAt };
+	}
+	const neighbors = await galleryNeighbors(db, context.filters, sort, anchor);
+
 	return {
 		image,
 		tags: imageTags_.map((t) => t.name),
 		characters: imageChars,
 		formerNames,
 		// Only meaningful when the group has more than one member.
-		variants: siblings.length > 1 ? siblings : []
+		// The sort dates were only for the anchor above; the strip doesn't use them.
+		variants: siblings.length > 1 ? siblings.map(({ createdAt: _c, commissionedAt: _d, ...v }) => v) : [],
+		neighbors,
+		// Appended to the previous/next and variant links so the context
+		// survives every hop. Empty when the visitor came from no grid.
+		contextQuery: context.query
 	};
 };

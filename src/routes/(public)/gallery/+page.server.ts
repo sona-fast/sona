@@ -3,7 +3,8 @@ import { images, artists, imageTags, tags, fursuitPhotos as fursuitPhotosTable }
 import { vrTabEnabled } from '$lib/server/vr-gate';
 import { stickerTabEnabled } from '$lib/server/stickers';
 import { PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
-import { eq, desc, asc, like, sql, and, inArray, isNull, not, type SQL } from 'drizzle-orm';
+import { eq, desc, sql, and, inArray, not } from 'drizzle-orm';
+import { galleryConditions, galleryOrderBy } from '$lib/server/gallery-order';
 import { artistIsLedgerOnly } from '$lib/server/artist-visibility';
 import { listPublicCharacterNames } from '$lib/server/characters';
 import { fursuitPhotoFromRow, fursuitPhotosExist } from '$lib/server/fursuit-import';
@@ -110,36 +111,16 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			}
 		}
 
-		// Build where conditions
-		// Variants never appear as standalone gallery cards — only their parent does.
-		const conditions: SQL[] = [eq(images.published, true), isNull(images.parentImageId)];
-		if (search) {
-			conditions.push(like(images.title, `%${search}%`));
-		}
-		if (effectiveArtist) {
-			conditions.push(eq(artists.name, effectiveArtist));
-		}
-		if (tagFilter) {
-			conditions.push(
-				sql`${images.id} IN (SELECT image_id FROM image_tags INNER JOIN tags ON tags.id = image_tags.tag_id WHERE tags.name = ${tagFilter})`
-			);
-		}
-		if (characterFilter) {
-			conditions.push(
-				sql`${images.id} IN (SELECT image_id FROM image_characters INNER JOIN characters ON characters.id = image_characters.character_id WHERE characters.name = ${characterFilter})`
-			);
-		}
-
-		const whereClause = and(...conditions);
-		const commissionedSortKey = sql`COALESCE(${images.commissionedAt}, ${images.createdAt})`;
-		const orderBy =
-			sort === 'oldest'
-				? asc(images.createdAt)
-				: sort === 'commissioned-newest'
-				? sql`${commissionedSortKey} DESC`
-				: sort === 'commissioned-oldest'
-				? sql`${commissionedSortKey} ASC`
-				: desc(images.createdAt);
+		// The grid's filters and order live in $lib/server/gallery-order, shared
+		// with the detail page's previous/next links (SONA-179).
+		const whereClause = and(
+			...galleryConditions({
+				search,
+				tag: tagFilter,
+				artist: effectiveArtist,
+				character: characterFilter
+			})
+		);
 
 		const allImages = await db
 			.select({
@@ -156,7 +137,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			.from(images)
 			.leftJoin(artists, eq(images.artistId, artists.id))
 			.where(whereClause)
-			.orderBy(orderBy)
+			.orderBy(...galleryOrderBy(sort))
 			.limit(perPage)
 			.offset((page - 1) * perPage);
 

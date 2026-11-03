@@ -28,3 +28,56 @@ export function resolveGallerySort(param: string | null, settingDefault: string)
 	if (isValidGallerySort(settingDefault)) return settingDefault;
 	return DEFAULT_GALLERY_SORT;
 }
+
+// The grid context a detail page pages through (SONA-179): the grid's filters
+// and, when the visitor picked one, its sort. The grid writes it into each
+// card's link as query params; the detail page reads it back to find its
+// previous and next pieces in that same order. Same param names as /gallery,
+// so the query string reads like the grid URL it came from.
+const CONTEXT_PARAMS = {
+	search: 'q',
+	tag: 'tag',
+	artist: 'artist',
+	character: 'character'
+} as const;
+
+export interface GalleryContext {
+	filters: { search: string; tag: string; artist: string; character: string };
+	/** The explicit sort, or null for the site's default. */
+	sort: string | null;
+	/** The context as a query string with its leading '?', or '' for none. */
+	query: string;
+}
+
+/**
+ * The query string a grid card links to its detail page with: each non-empty
+ * filter, and the sort only when the grid URL named one. A grid on the default
+ * sort stays on the default, so the links stay short and follow the site
+ * setting if it changes.
+ */
+export function galleryContextQuery(
+	filters: Partial<GalleryContext['filters']>,
+	sort: string | null
+): string {
+	const params = new URLSearchParams();
+	for (const [key, param] of Object.entries(CONTEXT_PARAMS)) {
+		const value = filters[key as keyof typeof CONTEXT_PARAMS];
+		if (value) params.set(param, value);
+	}
+	if (sort && isValidGallerySort(sort)) params.set('sort', sort);
+	const query = params.toString();
+	return query ? `?${query}` : '';
+}
+
+/** Reads a detail page's grid context back out of its URL. */
+export function galleryContextFromParams(params: URLSearchParams): GalleryContext {
+	const filters = {
+		search: params.get(CONTEXT_PARAMS.search) || '',
+		tag: params.get(CONTEXT_PARAMS.tag) || '',
+		artist: params.get(CONTEXT_PARAMS.artist) || '',
+		character: params.get(CONTEXT_PARAMS.character) || ''
+	};
+	const sortParam = params.get('sort');
+	const sort = sortParam && isValidGallerySort(sortParam) ? sortParam : null;
+	return { filters, sort, query: galleryContextQuery(filters, sort) };
+}

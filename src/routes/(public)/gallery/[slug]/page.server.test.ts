@@ -16,6 +16,7 @@ import { makeD1 } from '$lib/server/test/d1';
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
+		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE artists (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
 			twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
@@ -77,7 +78,7 @@ async function seed(
 }
 
 function loadEvent(platform: App.Platform, slug: string) {
-	return { platform, params: { slug } } as never;
+	return { platform, params: { slug }, url: new URL(`https://e2e.test/gallery/${slug}`) } as never;
 }
 
 describe('/gallery/[slug] load', () => {

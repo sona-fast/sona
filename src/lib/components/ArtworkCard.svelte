@@ -12,14 +12,17 @@
 		/** The title's heading level: h2 where the card sits directly under the
 		 *  page h1 (the gallery, a collection), so the outline skips no level. */
 		headingLevel?: 'h2' | 'h3';
+		/** Overrides the plain /gallery/{slug} link, e.g. to carry the grid's
+		 *  filters to the detail page's previous/next links (SONA-179). */
+		href?: string;
 	}
 
-	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3' }: Props = $props();
+	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', href }: Props = $props();
 
 	let revealed = $state(false);
 </script>
 
-<a href="/gallery/{slug}" class="card">
+<a href={href ?? `/gallery/${slug}`} class="card">
 	<div class="image-wrapper">
 		<img src={cdnImage(imageUrl, 800)} alt={title} loading="lazy" class:blurred={nsfw && !revealed} use:rawFallback={imageUrl} />
 		{#if nsfw && !revealed}
