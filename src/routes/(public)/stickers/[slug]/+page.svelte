@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
-	import { goto } from '$app/navigation';
+	import { goto, pushState, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
 	import { Send, Server, ArrowLeft, X } from 'lucide-svelte';
 	import StickerCard from '$lib/components/StickerCard.svelte';
+	import StickerModal from '$lib/components/StickerModal.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
@@ -110,6 +111,80 @@
 				.filter((name): name is string | null => name !== undefined)
 		})
 	);
+
+	// ── Sticker modal (shallow routing) ─────────────────────────────────────
+	// A card click pushes /stickers/<pack>/<id> with the sticker id in
+	// page.state, and the modal opens over the grid. Paging replaces that entry,
+	// so one Back press closes the modal however far the visitor paged. A direct
+	// visit, a reload or a new tab gets the full detail page instead.
+	const modalId = $derived(pageState.state.sticker);
+
+	// Paging walks the grid as filtered. If the history entry names a sticker
+	// the current filter hides (Forward into an entry after the filter changed),
+	// fall back to the whole pack rather than showing nothing. The fallback
+	// holds until the modal closes, so paging on to a sticker the filter shows
+	// doesn't swap lists and counts mid-way.
+	let wholePack = false;
+	const pagingList = $derived.by(() => {
+		if (modalId === undefined) wholePack = false;
+		else if (!data.stickers.some((s) => s.id === modalId)) wholePack = true;
+		return wholePack ? pack.stickers : data.stickers;
+	});
+	const modalIndex = $derived(modalId === undefined ? -1 : pagingList.findIndex((s) => s.id === modalId));
+
+	// A Forward entry can name a sticker the pack no longer has (unpublished
+	// since the visit). No modal can show it, so put the URL back to the grid
+	// the page is showing instead of leaving it naming a missing sticker.
+	$effect(() => {
+		if (modalId === undefined || pack.stickers.some((s) => s.id === modalId)) return;
+		const params = new URLSearchParams();
+		if (data.filters.emoji) params.set('emoji', data.filters.emoji);
+		if (data.filters.q) params.set('q', data.filters.q);
+		for (const a of data.filters.artist) params.append('artist', a);
+		const query = params.toString();
+		replaceState(`/stickers/${pack.slug}${query ? `?${query}` : ''}`, {});
+	});
+
+	function openSticker(e: MouseEvent, id: number) {
+		// Leave new-tab and new-window clicks to the browser.
+		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+		e.preventDefault();
+		pushState(`/stickers/${pack.slug}/${id}`, { sticker: id });
+	}
+
+	function stepSticker(step: -1 | 1) {
+		const next = pagingList[modalIndex + step];
+		if (!next) return;
+		replaceState(`/stickers/${pack.slug}/${next.id}`, { sticker: next.id });
+	}
+
+	// One history.back() per close. A double-click on Close or the backdrop
+	// asks twice before the first pop lands, and a second pop would leave the
+	// pack page. The flag clears once the page state has lost its sticker.
+	let closing = false;
+	$effect(() => {
+		if (modalId === undefined) closing = false;
+	});
+
+	function closeSticker() {
+		if (closing) return;
+		closing = true;
+		history.back();
+	}
+
+	// Focus goes back to the card of the sticker that was showing last. If
+	// paging moved past the visible rows, that card scrolls into view first.
+	// After the whole-pack fallback that sticker may have no card in the
+	// filtered grid; the first card stands in, so focus still lands in the grid.
+	function returnFocus(id: number) {
+		const card =
+			document.querySelector<HTMLElement>(`.sticker-grid [data-sticker-id="${id}"]`) ??
+			document.querySelector<HTMLElement>('.sticker-grid [data-sticker-id]');
+		if (!card) return;
+		const rect = card.getBoundingClientRect();
+		if (rect.top < 0 || rect.bottom > window.innerHeight) card.scrollIntoView({ block: 'center' });
+		card.focus({ preventScroll: true });
+	}
 </script>
 
 <Meta
@@ -273,7 +348,12 @@
 		{#if data.stickers.length > 0}
 			<div class="sticker-grid">
 				{#each data.stickers as sticker (sticker.id)}
-					<StickerCard {sticker} packSlug={pack.slug} showArtist={pack.shape === 'multi'} />
+					<StickerCard
+						{sticker}
+						packSlug={pack.slug}
+						showArtist={pack.shape === 'multi'}
+						onopen={(e) => openSticker(e, sticker.id)}
+					/>
 				{/each}
 			</div>
 		{:else}
@@ -288,6 +368,16 @@
 		{/if}
 	</div>
 </div>
+
+<StickerModal
+	pack={{ slug: pack.slug, name: pack.name }}
+	stickers={pagingList}
+	index={modalIndex}
+	filterEmoji={pagingList === data.stickers ? activeEmoji : ''}
+	onstep={stepSticker}
+	onrequestclose={closeSticker}
+	onclosed={returnFocus}
+/>
 
 <style>
 	.pack-page {
@@ -426,17 +516,17 @@
 		border-radius: var(--radius-s);
 		overflow: hidden;
 		background-image:
-			linear-gradient(45deg, var(--secondary) 25%, transparent 25%),
-			linear-gradient(-45deg, var(--secondary) 25%, transparent 25%),
-			linear-gradient(45deg, transparent 75%, var(--secondary) 75%),
-			linear-gradient(-45deg, transparent 75%, var(--secondary) 75%);
+			linear-gradient(45deg, var(--checker-square) 25%, transparent 25%),
+			linear-gradient(-45deg, var(--checker-square) 25%, transparent 25%),
+			linear-gradient(45deg, transparent 75%, var(--checker-square) 75%),
+			linear-gradient(-45deg, transparent 75%, var(--checker-square) 75%);
 		background-size: 18px 18px;
 		background-position:
 			0 0,
 			0 9px,
 			9px -9px,
 			-9px 0px;
-		background-color: var(--background);
+		background-color: var(--checker-base);
 	}
 
 	.mosaic {

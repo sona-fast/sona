@@ -85,7 +85,9 @@ const light: PartialThemeTokens = {
 	sidebar: '#F2E2E9',
 	sidebarAccent: '#E4CFD9',
 	sidebarForeground: '#221820',
-	sidebarBorder: '#E4CFD9'
+	sidebarBorder: '#E4CFD9',
+	// 70/30 mix of this block's --border and --input (see default.theme.ts).
+	checkerSquare: '#C9B6BF'
 };
 
 export const petalTheme: ThemeDefinition = {

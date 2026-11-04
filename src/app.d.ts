@@ -39,7 +39,14 @@ declare global {
 			errorSampled?: boolean;
 		}
 		// interface PageData {}
-		// interface PageState {}
+		interface PageState {
+			/**
+			 * The sticker open in the pack page's modal (shallow routing). Set by a
+			 * card click with pushState, kept by replaceState while paging; absent
+			 * when the modal is closed.
+			 */
+			sticker?: number;
+		}
 		interface Platform {
 			/**
 			 * The request's execution context — used to run work past the response

@@ -106,6 +106,15 @@ export const E2E_STICKERS_OVERLAY = path.join(here, 'fixtures', 'stickers.sql');
 export const E2E_PERSIST_TO_STICKERS = path.join(persistRoot, '.wrangler-e2e-stickers');
 export const E2E_PLATFORM_PERSIST_STICKERS = path.join(E2E_PERSIST_TO_STICKERS, 'v3');
 
+// The sticker-modal spec pages through a pack of six stickers (two NSFW, four
+// sharing an emoji). Growing the stickers-content pack would change the counts
+// that spec asserts, so this server seeds the shared fixture and layers
+// fixtures/sticker-modal.sql on top instead. Shared wrangler config; the spec
+// only reads. See playwright.config.ts.
+export const E2E_STICKER_MODAL_OVERLAY = path.join(here, 'fixtures', 'sticker-modal.sql');
+export const E2E_PERSIST_TO_STICKER_MODAL = path.join(persistRoot, '.wrangler-e2e-sticker-modal');
+export const E2E_PLATFORM_PERSIST_STICKER_MODAL = path.join(E2E_PERSIST_TO_STICKER_MODAL, 'v3');
+
 // The passport spec needs the homepage on landingLayout = 'passport', which
 // would change what every other spec sees at / on the shared server, and it
 // needs two databases: the shared fixture (a live convention, an NSFW

@@ -76,7 +76,9 @@ const light: PartialThemeTokens = {
 	sidebar: '#E1E5E9',
 	sidebarAccent: '#C8CED4',
 	sidebarForeground: '#1B1F23',
-	sidebarBorder: '#C8CED4'
+	sidebarBorder: '#C8CED4',
+	// 70/30 mix of this block's --border and --input (see default.theme.ts).
+	checkerSquare: '#B0B7BE'
 };
 
 export const pewterTheme: ThemeDefinition = {

@@ -44,7 +44,9 @@ const dark: ThemeTokens = {
 	sidebar: '#18181b',
 	sidebarAccent: '#2a2a30',
 	sidebarForeground: '#fafafa',
-	sidebarBorder: 'rgba(255, 255, 255, 0.1)'
+	sidebarBorder: 'rgba(255, 255, 255, 0.1)',
+	checkerBase: { ref: 'background' },
+	checkerSquare: { ref: 'secondary' }
 };
 
 const light: ThemeTokens = {
@@ -86,7 +88,14 @@ const light: ThemeTokens = {
 	sidebar: '#E7E8E5',
 	sidebarAccent: '#CBCCC9',
 	sidebarForeground: '#18181b',
-	sidebarBorder: '#CBCCC9'
+	sidebarBorder: '#CBCCC9',
+	// The light board used to be --background and --secondary (#F2F3F0 and
+	// #E7E8E5), which white art and the white card disappeared into (1.11:1).
+	// --border is 1.61:1 against white; the square is the 70/30 mix of --border
+	// and --input (#797B76), 2.09:1. The alternate light themes alias the base
+	// through this block and carry their own square.
+	checkerBase: { ref: 'border' },
+	checkerSquare: '#B2B4B0'
 };
 
 export const defaultTheme: ThemeDefinition = {

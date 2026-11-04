@@ -9,14 +9,16 @@
 		packSlug: string;
 		/** Show artist credit under the sticker — used in multi-artist pack grids. */
 		showArtist?: boolean;
+		/** The pack page opens the sticker in a modal instead of navigating. */
+		onopen?: (e: MouseEvent) => void;
 	}
 
-	let { sticker, packSlug, showArtist = false }: Props = $props();
+	let { sticker, packSlug, showArtist = false, onopen }: Props = $props();
 
 	let revealed = $state(false);
 </script>
 
-<a href="/stickers/{packSlug}/{sticker.id}" class="card">
+<a href="/stickers/{packSlug}/{sticker.id}" class="card" data-sticker-id={sticker.id} onclick={onopen}>
 	<div class="tile">
 		<div class="media" class:blurred={sticker.nsfw && !revealed}>
 			<StickerMedia
@@ -31,7 +33,7 @@
 				onclick={(e) => { e.preventDefault(); e.stopPropagation(); revealed = true; }}
 			>
 				<span>NSFW</span>
-				<span class="reveal-text">{m.card_click_reveal()}</span>
+				<span class="reveal-text">{m.card_reveal()}</span>
 			</button>
 		{/if}
 	</div>
@@ -84,17 +86,17 @@
 		padding: var(--tile-pad);
 		border-bottom: 1px solid var(--border);
 		background-image:
-			linear-gradient(45deg, var(--secondary) 25%, transparent 25%),
-			linear-gradient(-45deg, var(--secondary) 25%, transparent 25%),
-			linear-gradient(45deg, transparent 75%, var(--secondary) 75%),
-			linear-gradient(-45deg, transparent 75%, var(--secondary) 75%);
+			linear-gradient(45deg, var(--checker-square) 25%, transparent 25%),
+			linear-gradient(-45deg, var(--checker-square) 25%, transparent 25%),
+			linear-gradient(45deg, transparent 75%, var(--checker-square) 75%),
+			linear-gradient(-45deg, transparent 75%, var(--checker-square) 75%);
 		background-size: 16px 16px;
 		background-position:
 			0 0,
 			0 8px,
 			8px -8px,
 			-8px 0px;
-		background-color: var(--background);
+		background-color: var(--checker-base);
 	}
 
 	/* On small phone cards the landscape (19/15) tile + fixed 18px padding shrinks a
@@ -133,7 +135,9 @@
 		align-items: center;
 		justify-content: center;
 		gap: 4px;
-		background: rgba(0, 0, 0, 0.5);
+		/* 60%, with the text at full white: over white art, a 50% scrim or
+		   faded text falls under 4.5:1. */
+		background: rgba(0, 0, 0, 0.6);
 		border: none;
 		color: white;
 		cursor: pointer;
@@ -147,7 +151,6 @@
 
 	.reveal-text {
 		font-size: 12px;
-		opacity: 0.7;
 	}
 
 	.card-body {

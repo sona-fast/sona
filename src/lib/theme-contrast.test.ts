@@ -2118,7 +2118,7 @@ describe('no text rule paints with raw --primary (SONA-126)', () => {
 			]
 		],
 		[
-			'/routes/(public)/stickers/[slug]/[id]/+page.svelte',
+			'/lib/components/StickerDetail.svelte',
 			['.pack-link-arrow — the arrow glyph after the link, which uses --primary-text']
 		]
 	]);
@@ -2682,5 +2682,24 @@ describe('commission ledger: --destructive on --background, every theme × mode'
 		it(`${name}: --destructive on --background meets 4.5:1`, () => {
 			expect(contrast(blockToken(sel, 'destructive'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(4.5);
 		});
+	}
+});
+
+// The checkerboard behind sticker art (grid tiles, the detail card and modal,
+// the pack cover mosaic). On the old light board (--background and --secondary)
+// white art and the white card measured 1.11:1 and 1.23:1 and vanished into it.
+// Every light theme's card is white, so one floor covers both: white against
+// each square holds at 1.4:1 or more, and a later theme edit that lightens
+// --border or the square fails here. Dark boards are dark-on-dark by design and
+// stay on their old pair.
+describe('light checkerboard: white art stands off both squares, every light theme', () => {
+	for (const { name, sel, mode } of THEME_BLOCKS) {
+		if (mode !== 'light') continue;
+		for (const square of ['checker-base', 'checker-square'] as const) {
+			it(`${name}: white on --${square} meets 1.4:1`, () => {
+				const ratio = contrast('#FFFFFF', blockToken(sel, square));
+				expect(ratio, `white on --${square} measures ${ratio.toFixed(2)}:1 on ${name}`).toBeGreaterThanOrEqual(1.4);
+			});
+		}
 	}
 });

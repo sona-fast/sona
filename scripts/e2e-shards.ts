@@ -1,7 +1,8 @@
 // CI runs the Playwright suite as one job per group below: ci.yml's e2e-shard
 // matrix sets SONA_E2E_SHARD=<i>/<n>, and playwright.config.ts keeps only that
-// group's projects and boots only their dev servers. Booting all fourteen
-// servers on one runner took about seven minutes before the first test ran.
+// group's projects and boots only their dev servers. Booting every server
+// on one runner (fourteen of them when this was measured) took about seven
+// minutes before the first test ran.
 //
 // Grouped by measured run time on CI (summed test time, October 2026): upload
 // (~16 min, one worker) is the longest and runs alone; commissions (~11) and
@@ -18,7 +19,7 @@ export const E2E_SHARDS: string[][] = [
 		'passport-empty',
 		'recovery'
 	],
-	['registry-sync', 'conventions-event', 'ut-stat', 'theme-picker']
+	['registry-sync', 'conventions-event', 'ut-stat', 'theme-picker', 'sticker-modal']
 ];
 
 /** The projects to run for SONA_E2E_SHARD (`<i>/<n>`), or every project when

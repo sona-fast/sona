@@ -484,17 +484,17 @@
 		overflow: hidden;
 		border-bottom: 1px solid var(--border);
 		background-image:
-			linear-gradient(45deg, var(--secondary) 25%, transparent 25%),
-			linear-gradient(-45deg, var(--secondary) 25%, transparent 25%),
-			linear-gradient(45deg, transparent 75%, var(--secondary) 75%),
-			linear-gradient(-45deg, transparent 75%, var(--secondary) 75%);
+			linear-gradient(45deg, var(--checker-square) 25%, transparent 25%),
+			linear-gradient(-45deg, var(--checker-square) 25%, transparent 25%),
+			linear-gradient(45deg, transparent 75%, var(--checker-square) 75%),
+			linear-gradient(-45deg, transparent 75%, var(--checker-square) 75%);
 		background-size: 18px 18px;
 		background-position:
 			0 0,
 			0 9px,
 			9px -9px,
 			-9px 0px;
-		background-color: var(--background);
+		background-color: var(--checker-base);
 	}
 
 	.pack-cover img {

@@ -1,3 +1,5 @@
+import type { Page } from '@playwright/test';
+
 // WCAG contrast between two computed CSS colors, for specs that check what the
 // browser actually painted. Takes the rgb()/rgba() strings getComputedStyle
 // returns; an alpha below 1 is refused, because the ratio of a translucent
@@ -22,4 +24,22 @@ function luminance(color: string): number {
 export function contrastRatio(a: string, b: string): number {
 	const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
 	return (hi + 0.05) / (lo + 0.05);
+}
+
+/** The overlay's scrim composited over white (the worst case, white art) and
+ * each text line's colour as drawn, opacity included. */
+export async function overlayColors(page: Page, selector: string) {
+	return page.locator(selector).first().evaluate((overlay) => {
+		const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+		const over = (fg: number[], alpha: number, bg: number[]) => fg.slice(0, 3).map((c, i) => c * alpha + bg[i] * (1 - alpha));
+		const [r, g, b, a = 1] = parse(getComputedStyle(overlay).backgroundColor);
+		const scrim = over([r, g, b], a, [255, 255, 255]);
+		const texts = [...overlay.querySelectorAll('span')].map((span) => {
+			let alpha = 1;
+			for (let el: Element | null = span; el && el !== overlay; el = el.parentElement) alpha *= Number(getComputedStyle(el).opacity);
+			const [tr, tg, tb, ta = 1] = parse(getComputedStyle(span).color);
+			return { text: span.textContent?.trim() ?? '', rgb: `rgb(${over([tr, tg, tb], ta * alpha, scrim).join(', ')})` };
+		});
+		return { scrim: `rgb(${scrim.join(', ')})`, texts };
+	});
 }

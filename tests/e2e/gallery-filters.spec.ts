@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { failOnPageErrors } from './page-errors';
 import { countViewTransitions, inPlaceState, markWindow } from './in-place';
 import { waitForHydration } from './admin-login';
+import { contrastRatio, overlayColors } from './contrast';
 
 // A gallery filter change has to feel like the page updating in place, not a
 // reload. A visitor reported "the page refreshes on many of the dropdowns".
@@ -173,6 +174,17 @@ test.describe('gallery filter change', () => {
 		await expect(page.locator('p.count')).toHaveText('1 artwork');
 		await expect(page.locator('p.count')).not.toHaveAttribute('role');
 	});
+});
+
+// The worst case for the NSFW card's overlay is white art under the 60% scrim:
+// both lines have to read at 4.5:1 there, so neither may be faded.
+test('the NSFW card overlay text reads at 4.5:1 over white art', async ({ page }) => {
+	await page.goto('/gallery');
+	const { scrim, texts } = await overlayColors(page, '.grid a.card[href^="/gallery/mature-ref-sheet"] .nsfw-overlay');
+	expect(texts.map((t) => t.text)).toEqual(['NSFW', 'Show anyway']);
+	for (const { text, rgb } of texts) {
+		expect(contrastRatio(rgb, scrim), `"${text}" on the scrim over white`).toBeGreaterThanOrEqual(4.5);
+	}
 });
 
 // The card's srcset candidates (see cardImage in src/lib/img.ts).
