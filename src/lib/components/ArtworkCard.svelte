@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { cdnImage, rawFallback } from '$lib';
+	import { cardImage, responsiveSrcset, responsiveSizes } from '$lib/img';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
@@ -15,16 +16,30 @@
 		/** Overrides the plain /gallery/{slug} link, e.g. to carry the grid's
 		 *  filters to the detail page's previous/next links (SONA-179). */
 		href?: string;
+		/** The image's stored dimensions; without both there is no srcset. */
+		width?: number | null;
+		height?: number | null;
+		/** Columns the grid has on phones (max-width 768px); 2 sizes images for half the viewport. */
+		mobileColumns?: 1 | 2;
 	}
 
-	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', href }: Props = $props();
+	let { slug, title, artistName, imageUrl, tag, nsfw = false, headingLevel = 'h3', href, width, height, mobileColumns = 1 }: Props = $props();
 
 	let revealed = $state(false);
+	const card = $derived(cardImage(width, height, mobileColumns));
 </script>
 
 <a href={href ?? `/gallery/${slug}`} class="card">
 	<div class="image-wrapper">
-		<img src={cdnImage(imageUrl, 800)} alt={title} loading="lazy" class:blurred={nsfw && !revealed} use:rawFallback={imageUrl} />
+		<img
+			src={cdnImage(imageUrl, 800)}
+			srcset={card ? responsiveSrcset(imageUrl, card) : undefined}
+			sizes={card ? responsiveSizes(imageUrl, card) : undefined}
+			alt={title}
+			loading="lazy"
+			class:blurred={nsfw && !revealed}
+			use:rawFallback={imageUrl}
+		/>
 		{#if nsfw && !revealed}
 			<button
 				class="nsfw-overlay"

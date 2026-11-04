@@ -9,12 +9,15 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
+	import { stickersStatus } from '$lib/result-status';
 
 	let { data } = $props();
 
 	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
 	const ownerName = $derived(data.settings?.ownerName || data.settings?.siteName || APP_NAME);
 
+	// Filter changes stay on the page: noScroll and keepFocus stop SvelteKit from
+	// scrolling to the top and dropping focus, which reads as a full reload.
 	function updateFilter(key: string, value: string) {
 		const params = new URLSearchParams($page.url.searchParams);
 		if (value) {
@@ -25,15 +28,28 @@
 		// When picking a chip, clear free-text query and vice versa.
 		if (key === 'emoji') params.delete('q');
 		if (key === 'q') params.delete('emoji');
-		goto(`?${params.toString()}`, { replaceState: true });
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	function clearFilters() {
-		goto('/stickers', { replaceState: true });
+		goto('/stickers', { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	// Derive active emoji label for display in summary.
 	const activeEmoji = $derived(data.filters.emoji || data.filters.q);
+
+	// What the status region reads out; see $lib/result-status.
+	const resultStatus = $derived(
+		data.mode === 'filtered'
+			? stickersStatus({
+					filtered: true,
+					stickers: data.stickers.length,
+					emoji: activeEmoji,
+					artist: data.artists.find((a) => String(a.id) === data.filters.artist)?.name ?? '',
+					packs: data.packCount
+				})
+			: stickersStatus({ filtered: false, packs: data.packs.length })
+	);
 </script>
 
 <Meta
@@ -119,6 +135,10 @@
 		</div>
 	</div>
 
+	<!-- Always in the markup, so a screen reader hears the results change when a
+	     filter changes or clears (focus stays on the control). -->
+	<p class="sr-only" role="status">{resultStatus}</p>
+
 	<!-- Filtered sticker grid -->
 	{#if data.mode === 'filtered'}
 		<div class="filter-summary">
@@ -135,7 +155,7 @@
 
 		{#if data.stickers.length > 0}
 			<div class="sticker-grid">
-				{#each data.stickers as sticker}
+				{#each data.stickers as sticker (sticker.id)}
 					<StickerCard {sticker} packSlug={data.packSlugById[sticker.packId] ?? String(sticker.packId)} showArtist />
 				{/each}
 			</div>

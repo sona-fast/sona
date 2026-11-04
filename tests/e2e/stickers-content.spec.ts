@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { navRowCount, serveScaled, waitForNavHeight } from './site-chrome-helpers';
+import { countViewTransitions, inPlaceState, markWindow } from './in-place';
 
 // The ungated half of the nav content-gating rule, and the only end-to-end proof
 // that a sticker pack renders at all.
@@ -235,4 +236,74 @@ test.describe('with JavaScript off', () => {
 			expect(navTop - lastBottom, `${last} ends too close to the bar`).toBeGreaterThanOrEqual(20);
 		});
 	}
+});
+
+// Sticker filters update the page in place, like the gallery's
+// (gallery-filters.spec.ts): no reload, no whole-page fade, no jump to the
+// top, focus stays on the chip, and on the pack page a card that survives the
+// filter keeps its element. Clicking before hydration does nothing, so each
+// click retries until the URL takes the filter. Because focus stays on the
+// chip, a screen reader learns about the results from a status region: the
+// unfiltered summary, then the result count with the active filter, then the
+// unfiltered summary again once the filters clear.
+test.describe('sticker filters', () => {
+	test.use({ viewport: { width: 1280, height: 360 } });
+	test.beforeEach(async ({ page }) => {
+		test.slow();
+		await countViewTransitions(page);
+	});
+
+	async function clickChipInPlace(page: Page, emoji: string) {
+		const chip = page.locator('button.emoji-chip', { hasText: emoji });
+		let y = 0;
+		await expect(async () => {
+			// Scrolled down, with the chip still 100px into the viewport so the
+			// click itself doesn't have to scroll.
+			await markWindow(page);
+			y = await chip.evaluate((el) => {
+				scrollTo(0, Math.max(40, el.getBoundingClientRect().top + scrollY - 100));
+				return scrollY;
+			});
+			expect(y).toBeGreaterThan(0);
+			await chip.click();
+			await expect(page).toHaveURL(/[?&]emoji=/, { timeout: 10_000 });
+		}).toPass({ timeout: 60_000 });
+		await expect(chip).toHaveClass(/\bactive\b/);
+		expect(await inPlaceState(page)).toEqual({ sameWindow: true, transitions: 0 });
+		expect(await page.evaluate(() => scrollY)).toBe(y);
+		await expect(chip).toBeFocused();
+	}
+
+	test('the pack page emoji filter keeps scroll, focus, and the surviving card', async ({ page }) => {
+		await page.goto(`/stickers/${PACK_SLUG}`);
+		const second = page.locator(`.sticker-grid a[href="/stickers/${PACK_SLUG}/2"]`);
+		const status = page.locator('[role="status"].sr-only');
+		await expect(page.locator('.sticker-grid .card')).toHaveCount(2);
+		await expect(status).toHaveText('2 stickers');
+		await second.evaluate((el) => ((window as unknown as { __card: Element }).__card = el));
+
+		await clickChipInPlace(page, '🎉');
+		await expect(page.locator('.sticker-grid .card')).toHaveCount(1);
+		expect(await second.evaluate((el) => el === (window as unknown as { __card: Element }).__card)).toBe(true);
+		await expect(status).toHaveText('1 sticker, Emoji: 🎉');
+
+		await page.getByRole('button', { name: 'Clear filters' }).click();
+		await expect(page).not.toHaveURL(/[?&]emoji=/);
+		await expect(page.locator('.sticker-grid .card')).toHaveCount(2);
+		await expect(status).toHaveText('2 stickers');
+	});
+
+	test('the /stickers emoji filter keeps scroll and focus', async ({ page }) => {
+		await page.goto('/stickers');
+		const status = page.locator('[role="status"].sr-only');
+		await expect(status).toHaveText('1 sticker pack');
+		await clickChipInPlace(page, '🦊');
+		await expect(page.locator('.sticker-grid .card')).toHaveCount(1);
+		await expect(status).toHaveText('1 sticker, Emoji: 🦊, in 1 pack');
+
+		await page.getByRole('button', { name: 'Clear filters' }).click();
+		await expect(page).not.toHaveURL(/[?&]emoji=/);
+		await expect(page.locator('.pack-grid .pack-card')).toHaveCount(1);
+		await expect(status).toHaveText('1 sticker pack');
+	});
 });

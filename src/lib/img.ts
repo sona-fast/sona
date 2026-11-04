@@ -88,7 +88,8 @@ export function cdnImage(src: string | null | undefined, width = 800, quality = 
 
 /**
  * The width every gallery-row thumbnail is transformed at — the public gallery
- * grid, the admin image list, and the VR/collections pickers all request it.
+ * list view, the admin image list, and the VR/collections pickers all request
+ * it.
  *
  * Sharing ONE width is what keeps this affordable: a transform URL is its own
  * cache key, so every surface asking for 200 reuses the variant the first one
@@ -97,6 +98,60 @@ export function cdnImage(src: string | null | undefined, width = 800, quality = 
  * thumbnail call sites should use this rather than a hand-picked number.
  */
 export const THUMB_WIDTH = 200;
+
+/**
+ * Artwork cards (gallery grid, home "recent", a collection) sit in a
+ * `minmax(240px, 1fr)` grid with a 20px gap in the 1280px container (24px side
+ * padding): exactly 293px wide once the viewport reaches 1280px, at most ~370px
+ * between 769px and 1279px, and up to the full viewport on mobile (a collection
+ * drops to one column below ~548px). `sizes` says 293px, 370px, and 100vw. The
+ * top step is the exact slot, not a rounder 300px: Chromium at 1x takes the
+ * smallest candidate at least as wide as `sizes`, so 300px × 1.34 = 402px sends
+ * a 4:3 desktop card to 800 for a slot that needs 391px. The middle step ends
+ * at 1279px for the same reason: at 1280px the slot is already 293px. Mobile
+ * defaults to 100vw, so a one-column phone never upscales. A surface whose
+ * phone grid is two columns passes `mobileColumns` 2 for `calc(50vw - 21px)`:
+ * on the gallery, two 16px side paddings and a 10px gap split across two
+ * columns. The home grid's 12px gap makes its slot 50vw - 22px, so the same
+ * value covers it too and is never narrower than the real slot.
+ *
+ * The slot is a square drawn with `object-fit: cover`, so a landscape image is
+ * painted at the slot height times its aspect ratio. Each slot width is scaled
+ * by f = max(1, width / height), rounded up to two decimals; a portrait image
+ * fills the width and needs no scaling. A very wide image can need more than
+ * 800px on a 2x or 3x screen, and the ladder still stops at 800, which is what
+ * every card requested before this ladder existed.
+ *
+ * Two steps. 800 is the width cards always requested, and it stays the `src`,
+ * so a browser without srcset, and a card whose image has no stored
+ * dimensions (null here: no srcset at all), reuse that variant. 400 is a NEW
+ * transform for almost every image: only a few collection mosaic tiles
+ * request 400 on image_url. It costs up to one extra Image Transformation per
+ * displayed image per month on each fork. Don't add steps without counting the
+ * transformations they cost.
+ */
+export function cardImage(
+	width?: number | null,
+	height?: number | null,
+	mobileColumns: 1 | 2 = 1
+): ResponsiveImage | null {
+	if (!width || !height || width <= 0 || height <= 0) return null;
+	// Integer hundredths, so 370 × 1.1 is exactly 407, not 407.00000000000006,
+	// which the ceil would turn into a whole extra pixel.
+	const f100 = Math.max(100, Math.ceil((width * 100) / height));
+	const scale = (px: number) => Math.ceil((px * f100) / 100);
+	const f = f100 / 100;
+	const mobile =
+		mobileColumns === 2
+			? f100 === 100 ? 'calc(50vw - 21px)' : `calc((50vw - 21px) * ${f})`
+			: f100 === 100 ? '100vw' : `calc(100vw * ${f})`;
+	return {
+		widths: [400, 800],
+		sizes: `(max-width: 768px) ${mobile}, (max-width: 1279px) ${scale(370)}px, ${scale(293)}px`,
+		quality: 75,
+		srcWidth: 800
+	};
+}
 
 /**
  * Everything that differs between one responsive image and the next: the CDN

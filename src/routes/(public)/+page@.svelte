@@ -153,7 +153,7 @@
 					<a href="/gallery">{m.home_see_more()} &rarr;</a>
 				</div>
 				<div class="grid">
-					{#each data.recentImages as image}
+					{#each data.recentImages as image (image.id)}
 						<ArtworkCard
 							slug={image.slug}
 							title={image.title}
@@ -161,6 +161,9 @@
 							imageUrl={image.thumbnailUrl || image.imageUrl}
 							tag={image.tag}
 							nsfw={image.nsfw}
+							width={image.width}
+							height={image.height}
+							mobileColumns={2}
 						/>
 					{:else}
 						<p class="empty">{m.home_empty()}</p>

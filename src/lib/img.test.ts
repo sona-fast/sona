@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cdnImage, isAnimatedSource, rawFallback } from '$lib';
-import { isUploadThingHost, isSameZoneImageHost } from '$lib/img';
+import { cardImage, isUploadThingHost, isSameZoneImageHost } from '$lib/img';
 
 // Guards the GIF regression (sona#97 follow-up): GIFs are served raw everywhere
 // cdnImage is used (grid, cards, collections, admin, detail) because off-zone
@@ -186,5 +186,69 @@ describe('isSameZoneImageHost', () => {
 		// Last-two-labels compares `co.uk` with `example.co.uk`: no match, so the
 		// source is served raw. The failing-safe direction — raw always resolves.
 		expect(isSameZoneImageHost('cdn.example.co.uk', 'example.co.uk')).toBe(false);
+	});
+});
+
+// The card slot is a square with object-fit: cover, so a landscape image is
+// drawn at the slot's height times its aspect ratio. `sizes` has to describe
+// that drawn width, or a 2x/3x screen picks a candidate narrower than what it
+// paints and upscales it.
+describe('cardImage', () => {
+	it('returns null when a dimension is missing or not positive', () => {
+		expect(cardImage(null, 900)).toBeNull();
+		expect(cardImage(1200, undefined)).toBeNull();
+		expect(cardImage(undefined, undefined)).toBeNull();
+		expect(cardImage(0, 900)).toBeNull();
+		expect(cardImage(1200, 0)).toBeNull();
+		expect(cardImage(-5, 900)).toBeNull();
+	});
+
+	it('offers exactly 400 and 800, with 800 as the src', () => {
+		const spec = cardImage(800, 800)!;
+		expect(spec.widths).toEqual([400, 800]);
+		expect(spec.srcWidth).toBe(800);
+		expect(spec.quality).toBe(75);
+	});
+
+	it('sizes a square image to the slot', () => {
+		expect(cardImage(1000, 1000)!.sizes).toBe('(max-width: 768px) 100vw, (max-width: 1279px) 370px, 293px');
+	});
+
+	it('sizes a portrait image like a square, since cover fills the width', () => {
+		expect(cardImage(900, 1200)!.sizes).toBe(cardImage(1000, 1000)!.sizes);
+	});
+
+	it('scales a landscape image by its aspect, rounded up', () => {
+		// 1200x900 → 1.333… → 1.34; 370 × 1.34 = 495.8 → 496; 293 × 1.34 = 392.62 → 393,
+		// which keeps a 4:3 desktop card on the 400 candidate.
+		expect(cardImage(1200, 900)!.sizes).toBe(
+			'(max-width: 768px) calc(100vw * 1.34), (max-width: 1279px) 496px, 393px'
+		);
+		// Whole-number products stay whole: 370 × 2 is 740, not 741.
+		expect(cardImage(1600, 800)!.sizes).toBe(
+			'(max-width: 768px) calc(100vw * 2), (max-width: 1279px) 740px, 586px'
+		);
+		// In float, 370 × 1.1 is 407.00000000000006; it must still come out 407.
+		expect(cardImage(1100, 1000)!.sizes).toBe(
+			'(max-width: 768px) calc(100vw * 1.1), (max-width: 1279px) 407px, 323px'
+		);
+	});
+
+	it('sizes the phone slot by mobileColumns: full viewport by default, half minus padding for two', () => {
+		expect(cardImage(1000, 1000)!.sizes).toBe('(max-width: 768px) 100vw, (max-width: 1279px) 370px, 293px');
+		expect(cardImage(1000, 1000, 1)!.sizes).toBe('(max-width: 768px) 100vw, (max-width: 1279px) 370px, 293px');
+		expect(cardImage(1000, 1000, 2)!.sizes).toBe(
+			'(max-width: 768px) calc(50vw - 21px), (max-width: 1279px) 370px, 293px'
+		);
+		expect(cardImage(1200, 900, 2)!.sizes).toBe(
+			'(max-width: 768px) calc((50vw - 21px) * 1.34), (max-width: 1279px) 496px, 393px'
+		);
+	});
+
+	it('leaves the desktop steps unchanged by mobileColumns', () => {
+		const desktop = (s: string) => s.slice(s.indexOf(', ') + 2);
+		for (const [w, h] of [[1000, 1000], [900, 1200], [1200, 900], [1600, 800]]) {
+			expect(desktop(cardImage(w, h, 2)!.sizes)).toBe(desktop(cardImage(w, h)!.sizes));
+		}
 	});
 });

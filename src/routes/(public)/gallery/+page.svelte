@@ -9,8 +9,9 @@
 	import FursuitPhotoCard from '$lib/components/FursuitPhotoCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate, cdnImage, rawFallback } from '$lib';
-	import { galleryContextQuery } from '$lib/gallery';
+	import { galleryContextQuery, galleryPageHref } from '$lib/gallery';
 	import * as m from '$lib/paraglide/messages';
+	import { galleryStatus } from '$lib/result-status';
 
 	let { data } = $props();
 
@@ -33,6 +34,21 @@
 		fursuitPage = 1;
 	});
 
+	// What the status region reads out; see $lib/result-status.
+	const resultStatus = $derived(
+		isFursuit
+			? galleryStatus({
+					view: 'fursuit',
+					count: data.fursuitPhotos.length,
+					...data.fursuitFilters,
+					degraded: data.degraded
+				})
+			: galleryStatus({ view: 'artwork', count: data.total, ...data.filters, degraded: data.degraded })
+	);
+
+	// Pagination links keep the active search, filters, and sort.
+	const pageHref = (p: number) => galleryPageHref(pageState.url.pathname, pageState.url.searchParams, p);
+
 	const siteName = data.settings?.siteName ?? APP_NAME;
 	const metaTitle = m.gallery_meta_title({ siteName });
 	const metaDescription = m.gallery_meta_description({ count: data.total, siteName });
@@ -53,7 +69,10 @@
 			params.delete(key);
 		}
 		params.delete('page');
-		goto(`?${params.toString()}`, { replaceState: true });
+		// A filter change re-runs the load in place; it is not a new page. Without
+		// noScroll and keepFocus, SvelteKit treats it like one: it scrolls to the
+		// top and moves focus to the body, which reads as a full reload.
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	// Artist filter as a type-to-filter combobox. A native <select> only does
@@ -144,6 +163,11 @@
 		</p>
 	</div>
 
+	<!-- Filter changes keep focus on the control, so this live region is how a
+	     screen reader hears that the results changed. It names the filters and
+	     the sort too, so a change that keeps the count still changes the text. -->
+	<p class="sr-only" role="status">{resultStatus}</p>
+
 	<!-- Suppressed when only Artwork would show (fresh fork, every other section
 	     gated off): a lone-pill segmented control reads as broken, and there is
 	     nothing to switch to. Not a tablist: Stickers and VR are links to other
@@ -215,7 +239,7 @@
 				<p class="fursuit-cap">{m.gallery_fursuit_capped()}</p>
 			{/if}
 			<div class="grid">
-				{#each pagedFursuit as photo}
+				{#each pagedFursuit as photo (photo.id)}
 					<FursuitPhotoCard {photo} />
 				{/each}
 			</div>
@@ -422,7 +446,9 @@
 	</div>
 
 	<div class={view === 'grid' ? 'grid' : 'list'}>
-		{#each data.images as image}
+		<!-- Keyed, so a card that survives a filter change keeps its element (and
+		     its NSFW reveal) instead of the slot swapping in another image. -->
+		{#each data.images as image (image.id)}
 			{#if view === 'grid'}
 				<ArtworkCard
 					slug={image.slug}
@@ -433,6 +459,9 @@
 					nsfw={image.nsfw}
 					headingLevel="h2"
 					href="/gallery/{image.slug}{detailQuery}"
+					width={image.width}
+					height={image.height}
+					mobileColumns={2}
 				/>
 			{:else}
 				<a href="/gallery/{image.slug}{detailQuery}" class="list-item">
@@ -460,17 +489,17 @@
 	{#if data.totalPages > 1}
 		<nav class="pagination">
 			{#if data.page > 1}
-				<a href="?page={data.page - 1}" class="btn btn-secondary">{m.gallery_previous()}</a>
+				<a href={pageHref(data.page - 1)} class="btn btn-secondary">{m.gallery_previous()}</a>
 			{/if}
 			{#each Array.from({ length: data.totalPages }, (_, i) => i + 1) as p}
 				<a
-					href="?page={p}"
+					href={pageHref(p)}
 					class="page-link"
 					class:active={p === data.page}
 				>{p}</a>
 			{/each}
 			{#if data.page < data.totalPages}
-				<a href="?page={data.page + 1}" class="btn btn-secondary">{m.gallery_next()}</a>
+				<a href={pageHref(data.page + 1)} class="btn btn-secondary">{m.gallery_next()}</a>
 			{/if}
 		</nav>
 	{/if}

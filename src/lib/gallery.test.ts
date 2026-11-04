@@ -6,7 +6,8 @@ import {
 	galleryContextQuery,
 	galleryContextFromParams,
 	galleryFilterParam,
-	MAX_FILTER_LENGTH
+	MAX_FILTER_LENGTH,
+	galleryPageHref
 } from './gallery';
 
 // resolveGallerySort is the fallback chain the gallery load relies on: an
@@ -95,5 +96,32 @@ describe('galleryFilterParam', () => {
 		expect(galleryFilterParam(params, 'q')).toBe('fox');
 		expect(galleryFilterParam(params, 'artist')).toBe('');
 		expect(galleryFilterParam(params, 'tag')).toBe('y'.repeat(MAX_FILTER_LENGTH));
+	});
+});
+
+// The pagination links must carry the active filters: a link built from
+// scratch ("?page=2") silently drops the search, tag, artist, character, and sort.
+describe('galleryPageHref', () => {
+	it('keeps every filter and replaces the page', () => {
+		const params = new URLSearchParams('q=fox&tag=reference&artist=alice&character=sparky&sort=oldest&page=2');
+		expect(galleryPageHref('/gallery', params, 3)).toBe('/gallery?q=fox&tag=reference&artist=alice&character=sparky&sort=oldest&page=3');
+	});
+
+	it('drops the page param for page 1', () => {
+		expect(galleryPageHref('/gallery', new URLSearchParams('tag=reference&page=2'), 1)).toBe('/gallery?tag=reference');
+	});
+
+	it('returns the bare path when page 1 has no filters', () => {
+		expect(galleryPageHref('/gallery', new URLSearchParams('page=4'), 1)).toBe('/gallery');
+	});
+
+	it('preserves repeated params', () => {
+		expect(galleryPageHref('/gallery', new URLSearchParams('tag=a&tag=b'), 2)).toBe('/gallery?tag=a&tag=b&page=2');
+	});
+
+	it('does not change the params it was given', () => {
+		const params = new URLSearchParams('q=fox&page=2');
+		galleryPageHref('/gallery', params, 5);
+		expect(params.toString()).toBe('q=fox&page=2');
 	});
 });

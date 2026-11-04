@@ -104,3 +104,15 @@ export function galleryContextFromParams(params: URLSearchParams): GalleryContex
 	const sort = sortParam && isValidGallerySort(sortParam) ? sortParam : null;
 	return { filters, sort, query: galleryContextQuery(filters, sort) };
 }
+
+/**
+ * A pagination link that keeps the current query (search, filters, sort) and
+ * replaces only `page`. Page 1 drops the param so it matches the unpaged URL.
+ */
+export function galleryPageHref(pathname: string, params: URLSearchParams, page: number): string {
+	const next = new URLSearchParams(params);
+	if (page > 1) next.set('page', String(page));
+	else next.delete('page');
+	const query = next.toString();
+	return query ? `${pathname}?${query}` : pathname;
+}

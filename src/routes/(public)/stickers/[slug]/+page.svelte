@@ -16,6 +16,7 @@
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
+	import { packStatus } from '$lib/result-status';
 
 	let { data } = $props();
 
@@ -65,6 +66,8 @@
 			.map(([emoji]) => emoji);
 	});
 
+	// Filter changes stay on the page: noScroll and keepFocus stop SvelteKit from
+	// scrolling to the top and dropping focus, which reads as a full reload.
 	function updateFilter(key: string, value: string) {
 		const params = new URLSearchParams($page.url.searchParams);
 		if (value) {
@@ -74,7 +77,7 @@
 		}
 		if (key === 'emoji') params.delete('q');
 		if (key === 'q') params.delete('emoji');
-		goto(`?${params.toString()}`, { replaceState: true });
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	// Toggle one artist group (an artist id or the `unassigned` sentinel) in/out of
@@ -87,14 +90,26 @@
 			? current.filter((v) => v !== value)
 			: [...current, value];
 		for (const v of next) params.append('artist', v);
-		goto(`?${params.toString()}`, { replaceState: true });
+		goto(`?${params.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	function clearFilters() {
-		goto(`/stickers/${data.pack.slug}`, { replaceState: true });
+		goto(`/stickers/${data.pack.slug}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	const activeEmoji = $derived(data.filters.emoji || data.filters.q);
+
+	// What the status region reads out; see $lib/result-status. `null` is the
+	// Unassigned group; an id with no matching artist drops out.
+	const resultStatus = $derived(
+		packStatus({
+			stickers: data.stickers.length,
+			emoji: activeEmoji,
+			artists: data.filters.artist
+				.map((id) => (id === 'unassigned' ? null : distinctArtists.find((a) => String(a.id) === id)?.name))
+				.filter((name): name is string | null => name !== undefined)
+		})
+	);
 </script>
 
 <Meta
@@ -208,10 +223,10 @@
 						class="contrib-chip"
 						class:active={selectedArtists.has('unassigned')}
 						aria-pressed={selectedArtists.has('unassigned')}
-						title="Unassigned"
+						title={m.stickers_artist_unassigned()}
 						onclick={() => toggleArtist('unassigned')}
 					>
-						Unassigned
+						{m.stickers_artist_unassigned()}
 					</button>
 				{/if}
 			</div>
@@ -244,6 +259,10 @@
 			</div>
 		</div>
 
+		<!-- Always in the markup, so a screen reader hears the results change when
+		     a filter changes or clears (focus stays on the control). -->
+		<p class="sr-only" role="status">{resultStatus}</p>
+
 		{#if data.hasFilter}
 			<p class="filter-summary">
 				{m.stickers_pack_filter_summary({ count: data.stickers.length })}
@@ -253,7 +272,7 @@
 
 		{#if data.stickers.length > 0}
 			<div class="sticker-grid">
-				{#each data.stickers as sticker}
+				{#each data.stickers as sticker (sticker.id)}
 					<StickerCard {sticker} packSlug={pack.slug} showArtist={pack.shape === 'multi'} />
 				{/each}
 			</div>

@@ -40,7 +40,7 @@
 	</div>
 
 	<div class="grid">
-		{#each data.images as image}
+		{#each data.images as image (image.id)}
 			<ArtworkCard
 				slug={image.slug}
 				title={image.title}
@@ -49,6 +49,8 @@
 				tag={image.tag}
 				nsfw={image.nsfw}
 				headingLevel="h2"
+				width={image.width}
+				height={image.height}
 			/>
 		{:else}
 			<p class="empty">{m.collection_empty()}</p>

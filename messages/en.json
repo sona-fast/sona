@@ -133,6 +133,10 @@
 	"gallery_filter_search": "Search artworks",
 	"gallery_filter_artist": "Artist",
 	"gallery_filter_no_artists": "No matching artists",
+	"gallery_status_filter": "{label}: {value}",
+	"gallery_status_search": "Search",
+	"gallery_status_unavailable": "The gallery couldn't load. Try again in a moment.",
+	"status_list_separator": ", ",
 	"gallery_previous": "Previous",
 	"gallery_next": "Next",
 	"gallery_pager_label": "Browse the gallery",
@@ -255,6 +259,7 @@
 	"stickers_emojis_label": "Emoji",
 	"stickers_pack_label": "Pack",
 	"stickers_artist_label": "Artist",
+	"stickers_artist_unassigned": "Unassigned",
 	"stickers_sticker_label": "Sticker",
 	"stickers_back_to_packs": "Back to all packs",
 	"stickers_artist_role": "Artist",
@@ -278,9 +283,38 @@
 	"stickers_dl_caption_before": "Stickers download in their original format unless you pick a converted one. Want the whole set? Add the pack to Telegram from the ",
 	"stickers_dl_caption_link": "pack page",
 	"stickers_dl_caption_after": ".",
-	"stickers_across_packs": "across {packs} packs",
+	"stickers_across_packs": [
+		{
+			"declarations": [
+				"input packs",
+				"local packsPlural = packs: plural"
+			],
+			"selectors": [
+				"packsPlural"
+			],
+			"match": {
+				"packsPlural=one": "in {packs} pack",
+				"packsPlural=other": "across {packs} packs"
+			}
+		}
+	],
 	"stickers_empty_subtext": "Nobody's tagged a sticker with this emoji so far. Try another reaction or clear your filters to see every pack.",
 	"stickers_reset_filters": "Reset filters",
+	"stickers_pack_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} sticker pack",
+				"countPlural=other": "{count} sticker packs"
+			}
+		}
+	],
 	"admin_badge": "Admin Panel",
 	"admin_logout": "Logout",
 	"admin_nav_upload": "Upload",

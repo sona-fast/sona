@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { startNavigationTransition } from './view-transition';
+import { startNavigationTransition, wantsNavigationTransition } from './view-transition';
 
 // Collects unhandled rejections for the length of a test, so a test fails when
 // the helper leaves one of the transition's promises without a handler.
@@ -73,5 +73,33 @@ describe('startNavigationTransition', () => {
 			}
 		};
 		await expect(startNavigationTransition(doc, Promise.resolve())).resolves.toBeUndefined();
+	});
+});
+
+describe('wantsNavigationTransition', () => {
+	const at = (href: string) => ({ url: new URL(href, 'https://sona.test') });
+
+	it('skips a goto or link that changes only the query, so a filter or sort does not fade the whole page', () => {
+		expect(wantsNavigationTransition(at('/gallery'), at('/gallery?sort=oldest'), 'goto')).toBe(false);
+		expect(wantsNavigationTransition(at('/gallery?tag=a'), at('/gallery?tag=b&page=2'), 'link')).toBe(false);
+		expect(wantsNavigationTransition(at('/stickers/pack'), at('/stickers/pack?emoji=x'), 'goto')).toBe(false);
+	});
+
+	it('keeps the transition between pages, including two pieces on the same route', () => {
+		expect(wantsNavigationTransition(at('/gallery'), at('/gallery/parent-piece'), 'link')).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery/parent-piece'), at('/gallery/variant-piece'), 'goto')).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery?tag=a'), at('/'), 'link')).toBe(true);
+	});
+
+	it('keeps it for Back, Forward, and a navigation to the same URL', () => {
+		// Back landing mid navigation runs a popstate from a URL to itself.
+		expect(wantsNavigationTransition(at('/admin/commissions/new'), at('/admin/commissions/new'), 'popstate')).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery?tag=a'), at('/gallery?tag=b'), 'popstate')).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery?tag=a'), at('/gallery?tag=a'), 'goto')).toBe(true);
+	});
+
+	it('keeps it when either end is unknown', () => {
+		expect(wantsNavigationTransition(null, at('/gallery'), 'goto')).toBe(true);
+		expect(wantsNavigationTransition(at('/gallery'), null, 'goto')).toBe(true);
 	});
 });
