@@ -46,7 +46,7 @@
 				onclick={(e) => { e.preventDefault(); revealed = true; }}
 			>
 				<span>NSFW</span>
-				<span class="reveal-text">{m.card_click_reveal()}</span>
+				<span class="reveal-text">{m.card_reveal()}</span>
 			</button>
 		{/if}
 	</div>
@@ -117,7 +117,6 @@
 
 	.reveal-text {
 		font-size: 12px;
-		opacity: 0.7;
 	}
 
 	.card-body {

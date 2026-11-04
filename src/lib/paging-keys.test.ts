@@ -87,3 +87,47 @@ describe('pagingStep', () => {
 		expect(pagingStep(key({ target: null }))).toBe(1);
 	});
 });
+
+// The sticker modal pages from inside its own <dialog>, which is on the
+// consumer list. With the dialog passed as the scope, a plain control inside it
+// pages; a text field or a menu inside it still keeps its arrows.
+describe('pagingStep with a scope', () => {
+	// A tiny tree: dialog > (button, input, menu). closest() walks up from the
+	// node and returns the first one whose kind the selector names.
+	type Node = { kind: string; parent: Node | null };
+	const dialog: Node = { kind: 'dialog', parent: null };
+	const node = (kind: string): Node => ({ kind, parent: dialog });
+	const SELECTOR_FOR: Record<string, string> = { dialog: 'dialog', input: 'input', menu: '[role="menu"]' };
+	function at(n: Node) {
+		return {
+			closest(selector: string) {
+				const wanted = selector.split(', ');
+				for (let cur: Node | null = n; cur; cur = cur.parent) {
+					if (SELECTOR_FOR[cur.kind] && wanted.includes(SELECTOR_FOR[cur.kind])) return cur;
+				}
+				return null;
+			}
+		} as unknown as EventTarget;
+	}
+	const scope = dialog as unknown as Element;
+
+	it('pages from a button inside the scoped dialog', () => {
+		expect(pagingStep(key({ target: at(node('button')) }), scope)).toBe(1);
+		expect(pagingStep(key({ key: 'ArrowLeft', target: at(node('button')) }), scope)).toBe(-1);
+	});
+
+	it('still stands down without the scope, as the detail pages expect', () => {
+		expect(pagingStep(key({ target: at(node('button')) }))).toBeNull();
+	});
+
+	it('stands down in a text field or a menu inside the scoped dialog', () => {
+		expect(pagingStep(key({ target: at(node('input')) }), scope)).toBeNull();
+		expect(pagingStep(key({ target: at(node('menu')) }), scope)).toBeNull();
+	});
+
+	it('stands down in a dialog other than the scope', () => {
+		const other: Node = { kind: 'dialog', parent: null };
+		const inOther: Node = { kind: 'button', parent: other };
+		expect(pagingStep(key({ target: at(inOther) }), scope)).toBeNull();
+	});
+});

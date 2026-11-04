@@ -61,7 +61,15 @@ export const TOKEN_CSS_NAMES = {
 	sidebar: '--sidebar',
 	sidebarAccent: '--sidebar-accent',
 	sidebarForeground: '--sidebar-foreground',
-	sidebarBorder: '--sidebar-border'
+	sidebarBorder: '--sidebar-border',
+	// The two squares of the checkerboard behind sticker art (grid tiles, the
+	// detail card, the pack cover mosaic). Dark blocks alias today's pair
+	// (--background, --secondary). Light blocks use --border for the base and a
+	// 70/30 mix of --border and --input for the other square, so white art and
+	// the white card both stand off the board; theme-contrast.test.ts holds white
+	// against both squares at 1.4:1 or more in every light theme.
+	checkerBase: '--checker-base',
+	checkerSquare: '--checker-square'
 } as const;
 
 export type TokenKey = keyof typeof TOKEN_CSS_NAMES;

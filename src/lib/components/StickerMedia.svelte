@@ -10,9 +10,12 @@
 		 * Transformations so grids don't pull multi-MB originals. Ignored for video
 		 * and animated (Lottie), which must keep their original source. */
 		width?: number;
+		/** The art is the page's main image (the sticker detail card), so load
+		 * it at once and ahead of other images instead of lazily. */
+		eager?: boolean;
 	}
 
-	let { format, imageUrl, alt = '', width = 360 }: Props = $props();
+	let { format, imageUrl, alt = '', width = 360, eager = false }: Props = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 	let video: HTMLVideoElement | undefined = $state();
@@ -102,7 +105,13 @@
 {:else if format === 'animated'}
 	<div bind:this={container} class="media lottie-container" aria-label={alt}></div>
 {:else}
-	<img src={cdnImage(imageUrl, width)} {alt} loading="lazy" class="media" />
+	<img
+		src={cdnImage(imageUrl, width)}
+		{alt}
+		loading={eager ? 'eager' : 'lazy'}
+		fetchpriority={eager ? 'high' : undefined}
+		class="media"
+	/>
 {/if}
 
 <style>

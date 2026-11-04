@@ -85,7 +85,7 @@
 				/>
 				<button class="reveal-btn" onclick={reveal}>
 					<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
-					<span>{m.gallery_click_reveal()}</span>
+					<span>{m.gallery_reveal()}</span>
 				</button>
 			</div>
 		{:else}

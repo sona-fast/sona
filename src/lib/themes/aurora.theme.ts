@@ -75,7 +75,9 @@ const light: PartialThemeTokens = {
 	sidebar: '#ececfa',
 	sidebarAccent: '#d8d8ee',
 	sidebarForeground: '#16172a',
-	sidebarBorder: '#d8d8ee'
+	sidebarBorder: '#d8d8ee',
+	// 70/30 mix of this block's --border and --input (see default.theme.ts).
+	checkerSquare: '#BDBDDA'
 };
 
 export const auroraTheme: ThemeDefinition = {

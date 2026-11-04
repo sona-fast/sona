@@ -22,6 +22,9 @@ import {
 	E2E_PLATFORM_PERSIST_STICKERS,
 	E2E_PERSIST_TO_STICKERS,
 	E2E_STICKERS_OVERLAY,
+	E2E_PLATFORM_PERSIST_STICKER_MODAL,
+	E2E_PERSIST_TO_STICKER_MODAL,
+	E2E_STICKER_MODAL_OVERLAY,
 	E2E_WRANGLER_CONFIG_REGISTRY,
 	E2E_PLATFORM_PERSIST_REGISTRY,
 	E2E_PERSIST_TO_REGISTRY,
@@ -56,12 +59,13 @@ import {
 // serial tag-suggestions and suggest-tags specs, and one for the registry-sync
 // spec (registry features on, registry interceptor preloaded), two for the
 // passport homepage spec (populated and fresh-site), one for the admin
-// conventions FurTrack event spec, and two for the commission ledger specs
-// (writable, and gate closed) — see below.
+// conventions FurTrack event spec, two for the commission ledger specs
+// (writable, and gate closed), and one for the sticker-modal spec (a six-sticker
+// pack) — see below.
 //
-// The fourteen ports are derived from one base so a concurrent run can take a
-// private block: set SONA_E2E_BASE_PORT and this run binds base..base+13 instead
-// of 4179-4192. Without it, every checkout and every agent binds the same fourteen
+// The fifteen ports are derived from one base so a concurrent run can take a
+// private block: set SONA_E2E_BASE_PORT and this run binds base..base+14 instead
+// of 4179-4193. Without it, every checkout and every agent binds the same fifteen
 // ports, and a second run either dies on --strictPort or (worse) gets its
 // servers killed by whoever assumes the listener is their own stray (SONA-164).
 // `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
@@ -69,9 +73,9 @@ import {
 // explicitly invalid port still trips the check below rather than silently
 // falling back.)
 const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
-if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_522) {
+if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_521) {
 	throw new Error(
-		`SONA_E2E_BASE_PORT must be an integer in 1024-65522 (needs 14 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
+		`SONA_E2E_BASE_PORT must be an integer in 1024-65521 (needs 15 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
 	);
 }
 const PORT = BASE_PORT;
@@ -88,6 +92,7 @@ const PASSPORT_EMPTY_PORT = BASE_PORT + 10;
 const CONVENTIONS_EVENT_PORT = BASE_PORT + 11;
 const COMMISSIONS_PORT = BASE_PORT + 12;
 const COMMISSIONS_GATED_PORT = BASE_PORT + 13;
+const STICKER_MODAL_PORT = BASE_PORT + 14;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -183,6 +188,19 @@ const stickersServerEnv = {
 	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_STICKERS,
 	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_STICKERS,
 	SONA_E2E_SEED_OVERLAY: E2E_STICKERS_OVERLAY
+};
+
+// The sticker-modal spec pages through a pack of six stickers. The
+// stickers-content pack has two, and growing it would change the counts that
+// spec asserts, so this one gets its own DB + server, seeded with
+// fixtures/sticker-modal.sql on the shared fixture. Read-only, default workers.
+const STICKER_MODAL_SPEC = '**/sticker-modal.spec.ts';
+
+const stickerModalServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_STICKER_MODAL,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_STICKER_MODAL,
+	SONA_E2E_SEED_OVERLAY: E2E_STICKER_MODAL_OVERLAY
 };
 
 // The registry-sync spec turns the shared registry ON for its server (key + URL
@@ -327,6 +345,7 @@ const allProjects = [
 			SUGGEST_TAGS_SPEC,
 			THEME_SPEC,
 			STICKERS_SPEC,
+			STICKER_MODAL_SPEC,
 			...REGISTRY_SPECS,
 			PASSPORT_SPEC,
 			CONVENTIONS_EVENT_SPEC,
@@ -353,6 +372,11 @@ const allProjects = [
 		name: 'stickers-content',
 		testMatch: STICKERS_SPEC,
 		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${STICKERS_PORT}` }
+	},
+	{
+		name: 'sticker-modal',
+		testMatch: STICKER_MODAL_SPEC,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${STICKER_MODAL_PORT}` }
 	},
 	{
 		name: 'passport',
@@ -428,6 +452,7 @@ const servers: Record<string, ReturnType<typeof webServer>> = {
 	'suggest-tags': webServer(SUGGEST_TAGS_PORT, suggestServerEnv),
 	'theme-picker': webServer(THEME_PORT, themeServerEnv),
 	'stickers-content': webServer(STICKERS_PORT, stickersServerEnv),
+	'sticker-modal': webServer(STICKER_MODAL_PORT, stickerModalServerEnv),
 	'registry-sync': webServer(REGISTRY_PORT, registryServerEnv),
 	passport: webServer(PASSPORT_PORT, passportServerEnv),
 	'passport-empty': webServer(PASSPORT_EMPTY_PORT, passportEmptyServerEnv),

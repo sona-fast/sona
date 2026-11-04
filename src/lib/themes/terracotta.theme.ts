@@ -92,7 +92,9 @@ const light: PartialThemeTokens = {
 	sidebar: '#DDD0C6',
 	sidebarAccent: '#CBBEB3',
 	sidebarForeground: '#1E1E1E',
-	sidebarBorder: '#CBBEB3'
+	sidebarBorder: '#CBBEB3',
+	// 70/30 mix of this block's --border and --input (see default.theme.ts).
+	checkerSquare: '#B4A89D'
 };
 
 export const terracottaTheme: ThemeDefinition = {

@@ -32,22 +32,41 @@ const KEY_CONSUMERS = [
 ].join(', ');
 
 /** Duck-typed so it runs under the node test environment too. */
-function consumesArrows(target: EventTarget | null): boolean {
+interface Containing {
+	contains?: (other: unknown) => boolean;
+}
+
+/**
+ * The nearest arrow consumer around the focus target, unless it is the scope
+ * (or an ancestor of it): a paging dialog is itself a `dialog`, and focus on a
+ * button inside it should still page. A nearer consumer inside the scope, such
+ * as a text field or a menu in the dialog, still blocks.
+ */
+function consumesArrows(target: EventTarget | null, scope?: unknown): boolean {
 	const el = target as { closest?: (selector: string) => unknown } | null;
-	return typeof el?.closest === 'function' && el.closest(KEY_CONSUMERS) !== null;
+	if (typeof el?.closest !== 'function') return false;
+	const hit = el.closest(KEY_CONSUMERS) as Containing | null;
+	if (hit === null) return false;
+	if (scope !== undefined && (hit === scope || hit.contains?.(scope) === true)) return false;
+	return true;
 }
 
 /**
  * The paging step a keydown asks for: -1 for ArrowLeft, 1 for ArrowRight, or
  * null when the key isn't a bare arrow, is an auto-repeat, something else
  * already handled it, or focus is somewhere arrows already do something.
+ *
+ * `scope` is the element that does the paging when that element is itself an
+ * arrow consumer, like the sticker modal's `<dialog>`. Without it, focus
+ * anywhere in a dialog stands the shortcut down.
  */
 export function pagingStep(
-	e: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'defaultPrevented' | 'isComposing' | 'repeat' | 'target'>
+	e: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'defaultPrevented' | 'isComposing' | 'repeat' | 'target'>,
+	scope?: Element
 ): -1 | 1 | null {
 	if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return null;
 	if (e.defaultPrevented || e.isComposing || e.repeat) return null;
 	if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
-	if (consumesArrows(e.target)) return null;
+	if (consumesArrows(e.target, scope)) return null;
 	return e.key === 'ArrowLeft' ? -1 : 1;
 }
