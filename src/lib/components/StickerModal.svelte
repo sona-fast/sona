@@ -53,6 +53,7 @@
 	});
 
 	let savedOverflow = '';
+	let savedGutter = '';
 	// Its own flag rather than dialog.open: when the browser closes the dialog
 	// itself, dialog.open is already false by the time the page state follows,
 	// and the scroll lock and focus return still have to be undone.
@@ -63,16 +64,23 @@
 		if (open && !dialog.open) {
 			dialog.showModal();
 			// showModal makes the page inert and traps Tab, but not scroll.
-			savedOverflow = document.documentElement.style.overflow;
-			document.documentElement.style.overflow = 'hidden';
+			const root = document.documentElement;
+			savedOverflow = root.style.overflow;
+			savedGutter = root.style.scrollbarGutter;
+			// Hiding the overflow removes a classic (Windows, Linux) scrollbar,
+			// and the page would shift sideways into its place. Keep the gutter,
+			// but only when a scrollbar takes space now: on a page that doesn't
+			// scroll, or with overlay scrollbars, a stable gutter would shift it
+			// the other way.
+			if (window.innerWidth > root.clientWidth) root.style.scrollbarGutter = 'stable';
+			root.style.overflow = 'hidden';
 			locked = true;
 			// Close is the one control that is always there.
 			void tick().then(() => closeButton?.focus());
 		} else if (!open && locked) {
 			const id = lastView?.sticker.id;
 			if (dialog.open) dialog.close();
-			document.documentElement.style.overflow = savedOverflow;
-			locked = false;
+			unlockScroll();
 			if (id !== undefined) onclosed(id);
 		}
 	});
@@ -80,8 +88,14 @@
 	// Leaving the page with the modal open (a pack or emoji link inside it):
 	// put the page's scroll back.
 	$effect(() => () => {
-		if (locked) document.documentElement.style.overflow = savedOverflow;
+		if (locked) unlockScroll();
 	});
+
+	function unlockScroll() {
+		document.documentElement.style.overflow = savedOverflow;
+		document.documentElement.style.scrollbarGutter = savedGutter;
+		locked = false;
+	}
 
 	// Escape fires cancel. Route it through the page's history like every other
 	// close, instead of letting the dialog close under a URL that still names
