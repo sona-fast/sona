@@ -24,6 +24,7 @@ import { stdin, stdout, env, cwd } from 'node:process';
 import { basename, join } from 'node:path';
 import {
 	buildMigrationSql,
+	parseAppliedMigrations,
 	buildSeedSql,
 	sanitizeProjectName,
 	askResourceName,
@@ -669,19 +670,44 @@ async function main() {
 	//    step treats as already-applied (a clean no-op on the first CI deploy).
 	//    stdin is ignored so wrangler's interactive "Ok to proceed?" never fires
 	//    (the same reason CI, which has no TTY, is never prompted).
-	const migFiles = readdirSync('drizzle')
-		.filter((f) => f.endsWith('.sql'))
-		.sort();
-	const combinedSql = buildMigrationSql(
-		migFiles.map((name) => ({ name, sql: readFileSync(join('drizzle', name), 'utf8') }))
+	//    Files already recorded in schema_migrations are left out, as the deploy
+	//    workflow does: a re-run otherwise replays 0000 against a populated
+	//    database, dies on "table already exists", and never reaches the secrets.
+	const applied = new Set(
+		parseAppliedMigrations(
+			runArgs(
+				'npx',
+				[
+					'wrangler',
+					'd1',
+					'execute',
+					dbName,
+					'--remote',
+					'--json',
+					'--command',
+					'CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL); SELECT name FROM schema_migrations;'
+				],
+				{ capture: true }
+			)
+		)
 	);
-	const migrations = writePrivateTempSql(combinedSql, 'sona-migrations-');
-	try {
-		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${migrations.path}`], {
-			stdin: 'ignore'
-		});
-	} finally {
-		removeTempSqlDir(migrations.dir);
+	const migFiles = readdirSync('drizzle')
+		.filter((f) => f.endsWith('.sql') && !applied.has(f))
+		.sort();
+	if (migFiles.length === 0) {
+		console.log('✔ D1 migrations already applied — nothing to run.');
+	} else {
+		const combinedSql = buildMigrationSql(
+			migFiles.map((name) => ({ name, sql: readFileSync(join('drizzle', name), 'utf8') }))
+		);
+		const migrations = writePrivateTempSql(combinedSql, 'sona-migrations-');
+		try {
+			runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${migrations.path}`], {
+				stdin: 'ignore'
+			});
+		} finally {
+			removeTempSqlDir(migrations.dir);
+		}
 	}
 
 	// 6. Seed the storage provider so the app boots with the chosen backend (the
