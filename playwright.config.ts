@@ -25,6 +25,9 @@ import {
 	E2E_PLATFORM_PERSIST_STICKER_MODAL,
 	E2E_PERSIST_TO_STICKER_MODAL,
 	E2E_STICKER_MODAL_OVERLAY,
+	E2E_PLATFORM_PERSIST_COLLECTION_PAGING,
+	E2E_PERSIST_TO_COLLECTION_PAGING,
+	E2E_COLLECTION_PAGING_OVERLAY,
 	E2E_WRANGLER_CONFIG_REGISTRY,
 	E2E_PLATFORM_PERSIST_REGISTRY,
 	E2E_PERSIST_TO_REGISTRY,
@@ -60,12 +63,13 @@ import {
 // spec (registry features on, registry interceptor preloaded), two for the
 // passport homepage spec (populated and fresh-site), one for the admin
 // conventions FurTrack event spec, two for the commission ledger specs
-// (writable, and gate closed), and one for the sticker-modal spec (a six-sticker
-// pack) — see below.
+// (writable, and gate closed), one for the sticker-modal spec (a six-sticker
+// pack), and one for the collection-paging spec (a seeded collection) — see
+// below.
 //
-// The fifteen ports are derived from one base so a concurrent run can take a
-// private block: set SONA_E2E_BASE_PORT and this run binds base..base+14 instead
-// of 4179-4193. Without it, every checkout and every agent binds the same fifteen
+// The sixteen ports are derived from one base so a concurrent run can take a
+// private block: set SONA_E2E_BASE_PORT and this run binds base..base+15 instead
+// of 4179-4194. Without it, every checkout and every agent binds the same sixteen
 // ports, and a second run either dies on --strictPort or (worse) gets its
 // servers killed by whoever assumes the listener is their own stray (SONA-164).
 // `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
@@ -73,9 +77,9 @@ import {
 // explicitly invalid port still trips the check below rather than silently
 // falling back.)
 const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
-if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_521) {
+if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_520) {
 	throw new Error(
-		`SONA_E2E_BASE_PORT must be an integer in 1024-65521 (needs 15 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
+		`SONA_E2E_BASE_PORT must be an integer in 1024-65520 (needs 16 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
 	);
 }
 const PORT = BASE_PORT;
@@ -93,6 +97,7 @@ const CONVENTIONS_EVENT_PORT = BASE_PORT + 11;
 const COMMISSIONS_PORT = BASE_PORT + 12;
 const COMMISSIONS_GATED_PORT = BASE_PORT + 13;
 const STICKER_MODAL_PORT = BASE_PORT + 14;
+const COLLECTION_PAGING_PORT = BASE_PORT + 15;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -201,6 +206,20 @@ const stickerModalServerEnv = {
 	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_STICKER_MODAL,
 	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_STICKER_MODAL,
 	SONA_E2E_SEED_OVERLAY: E2E_STICKER_MODAL_OVERLAY
+};
+
+// The collection-paging spec pages through a collection (SONA-179). The shared
+// fixture has no collections, and nav-gating.spec.ts asserts the Collections
+// link stays hidden there, so this spec gets its own DB + server, seeded with
+// fixtures/collection-paging.sql on the shared fixture. Read-only, default
+// workers.
+const COLLECTION_PAGING_SPEC = '**/collection-paging.spec.ts';
+
+const collectionPagingServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_COLLECTION_PAGING,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_COLLECTION_PAGING,
+	SONA_E2E_SEED_OVERLAY: E2E_COLLECTION_PAGING_OVERLAY
 };
 
 // The registry-sync spec turns the shared registry ON for its server (key + URL
@@ -346,6 +365,7 @@ const allProjects = [
 			THEME_SPEC,
 			STICKERS_SPEC,
 			STICKER_MODAL_SPEC,
+			COLLECTION_PAGING_SPEC,
 			...REGISTRY_SPECS,
 			PASSPORT_SPEC,
 			CONVENTIONS_EVENT_SPEC,
@@ -377,6 +397,11 @@ const allProjects = [
 		name: 'sticker-modal',
 		testMatch: STICKER_MODAL_SPEC,
 		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${STICKER_MODAL_PORT}` }
+	},
+	{
+		name: 'collection-paging',
+		testMatch: COLLECTION_PAGING_SPEC,
+		use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${COLLECTION_PAGING_PORT}` }
 	},
 	{
 		name: 'passport',
@@ -453,6 +478,7 @@ const servers: Record<string, ReturnType<typeof webServer>> = {
 	'theme-picker': webServer(THEME_PORT, themeServerEnv),
 	'stickers-content': webServer(STICKERS_PORT, stickersServerEnv),
 	'sticker-modal': webServer(STICKER_MODAL_PORT, stickerModalServerEnv),
+	'collection-paging': webServer(COLLECTION_PAGING_PORT, collectionPagingServerEnv),
 	'registry-sync': webServer(REGISTRY_PORT, registryServerEnv),
 	passport: webServer(PASSPORT_PORT, passportServerEnv),
 	'passport-empty': webServer(PASSPORT_EMPTY_PORT, passportEmptyServerEnv),

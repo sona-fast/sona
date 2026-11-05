@@ -81,4 +81,28 @@ describe('/collections/[slug] load', () => {
 		};
 		expect(data.images.map((i) => i.slug)).toEqual(['pub']);
 	});
+
+	// SONA-179: a piece opened from here pages in this order, so it has to be
+	// total. Pieces uploaded in the same instant fall back to the id, newest
+	// (highest) first, the same tiebreak the gallery grid uses.
+	it('lists newest first and settles same-instant uploads by id', async () => {
+		const { db, platform } = makeDb();
+		const [{ id: artistId }] = await db
+			.insert(artists)
+			.values({ name: 'Arty', createdAt: NOW })
+			.returning({ id: artists.id });
+		const [{ id: collectionId }] = await db
+			.insert(collections)
+			.values({ name: 'Con badges', slug: 'con-badges', createdAt: NOW })
+			.returning({ id: collections.id });
+		const base = { imageUrl: 'https://example.com/i.png', artistId, collectionId };
+		await db.insert(images).values([
+			{ ...base, title: 'a', slug: 'a', createdAt: '2026-02-01T00:00:00.000Z' },
+			{ ...base, title: 'b', slug: 'b', createdAt: '2026-03-01T00:00:00.000Z' },
+			{ ...base, title: 'c', slug: 'c', createdAt: '2026-02-01T00:00:00.000Z' },
+			{ ...base, title: 'd', slug: 'd', createdAt: '2026-02-01T00:00:00.000Z' }
+		]);
+		const data = (await load(loadEvent(platform, 'con-badges'))) as { images: { slug: string }[] };
+		expect(data.images.map((i) => i.slug)).toEqual(['b', 'd', 'c', 'a']);
+	});
 });

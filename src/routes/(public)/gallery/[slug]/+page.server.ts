@@ -4,7 +4,7 @@ import { images, artists, collections, imageTags, tags, characters, imageCharact
 import { eq, and, or, asc } from 'drizzle-orm';
 import { parseAliases } from '$lib/server/registry';
 import { getSettings } from '$lib/server/settings';
-import { galleryNeighbors } from '$lib/server/gallery-order';
+import { collectionNeighbors, galleryNeighbors, type GalleryNeighbors } from '$lib/server/gallery-order';
 import { galleryContextFromParams, resolveGallerySort } from '$lib/gallery';
 import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
@@ -99,9 +99,12 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			parentImageId: images.parentImageId,
 			nsfw: images.nsfw,
 			createdAt: images.createdAt,
-			commissionedAt: images.commissionedAt
+			commissionedAt: images.commissionedAt,
+			collectionId: images.collectionId,
+			collectionSlug: collections.slug
 		})
 		.from(images)
+		.leftJoin(collections, eq(images.collectionId, collections.id))
 		.where(
 			and(
 				or(eq(images.id, groupParentId), eq(images.parentImageId, groupParentId)),
@@ -115,27 +118,56 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// string; with none, this is the unfiltered gallery in the site's default
 	// sort, the same grid /gallery shows. The grid only shows group parents,
 	// so a variant pages from its parent's place.
+	//
+	// A collection's links carry ?collection=<slug> instead. The piece then
+	// pages through that collection, in the collection page's order, but only
+	// when the collection exists and its grid lists this piece (or, for a
+	// variant, its parent). Anything else, a forged or stale slug included,
+	// falls back to the unfiltered gallery and drops the param from the links,
+	// the same way whether the slug names no collection or another one.
 	const context = galleryContextFromParams(url.searchParams);
 	const siblingsAndNeighbors = (async () => {
 		const siblings = await siblingsQuery;
-		let anchor = { id: image.id, createdAt: image.createdAt, commissionedAt: image.commissionedAt };
-		if (image.parentImageId !== null) {
-			const parent = siblings.find((s) => s.id === image.parentImageId);
-			if (parent) anchor = { id: parent.id, createdAt: parent.createdAt, commissionedAt: parent.commissionedAt };
-		}
-		const neighbors = await withTimeout(
-			(async () => {
+		// The grid piece this page pages from: the image itself, or for a
+		// variant its published parent. A variant whose parent is unpublished
+		// has no card in any grid: it keeps its own row and never pages a
+		// collection.
+		const parent = image.parentImageId === null ? undefined : siblings.find((s) => s.id === image.parentImageId);
+		const anchorIsCard = image.parentImageId === null || parent !== undefined;
+		const { id, createdAt, commissionedAt, collectionId, collectionSlug } = parent ?? image;
+		const anchor = { id, createdAt, commissionedAt };
+		// The anchor's collection came back with its row, so membership needs
+		// no lookup of its own, and is settled before the neighbor walk starts.
+		const inCollection =
+			context.collection !== null && anchorIsCard && collectionId !== null && collectionSlug === context.collection;
+		// The links keep a gallery context, or a confirmed collection, and
+		// drop an unconfirmed collection slug.
+		const keptQuery = context.collection === null || inCollection ? context.query : '';
+		const paging = await withTimeout(
+			(async (): Promise<{ neighbors: GalleryNeighbors; contextQuery: string }> => {
+				if (inCollection && collectionId !== null) {
+					return {
+						neighbors: await collectionNeighbors(db, collectionId, anchor),
+						contextQuery: keptQuery
+					};
+				}
+				// A collection context carries no gallery filters or sort, so a
+				// fallback from one lands on the unfiltered gallery.
 				const settings = await getSettings(db);
 				const sort = resolveGallerySort(context.sort, settings.galleryDefaultSort);
-				return galleryNeighbors(db, context.filters, sort, anchor);
+				return {
+					neighbors: await galleryNeighbors(db, context.filters, sort, anchor),
+					contextQuery: keptQuery
+				};
 			})(),
 			NEIGHBORS_TIMEOUT_MS,
-			{ prev: null, next: null }
+			// A slow walk drops the pager, but not a context that held.
+			{ neighbors: { prev: null, next: null }, contextQuery: keptQuery }
 		);
-		return { siblings, neighbors };
+		return { siblings, ...paging };
 	})();
 
-	const [imageTags_, imageChars, { siblings, neighbors }] = await Promise.all([
+	const [imageTags_, imageChars, { siblings, neighbors, contextQuery }] = await Promise.all([
 		tagsQuery,
 		charactersQuery,
 		siblingsAndNeighbors
@@ -147,11 +179,15 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 		characters: imageChars,
 		formerNames,
 		// Only meaningful when the group has more than one member.
-		// The sort dates were only for the anchor above; the strip doesn't use them.
-		variants: siblings.length > 1 ? siblings.map(({ createdAt: _c, commissionedAt: _d, ...v }) => v) : [],
+		// The sort dates and collection were only for the anchor above; the strip doesn't use them.
+		variants:
+			siblings.length > 1
+				? siblings.map(({ createdAt: _c, commissionedAt: _d, collectionId: _e, collectionSlug: _f, ...v }) => v)
+				: [],
 		neighbors,
 		// Appended to the previous/next and variant links so the context
-		// survives every hop. Empty when the visitor came from no grid.
-		contextQuery: context.query
+		// survives every hop. Empty when the visitor came from no grid, or from
+		// a collection this piece isn't in.
+		contextQuery
 	};
 };
