@@ -30,7 +30,7 @@
 	</main>
 </div>
 
-<MobileNav stickersEnabled={data.stickersEnabled} />
+<MobileNav />
 
 <style>
 	.paths-shell {

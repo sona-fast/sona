@@ -2189,18 +2189,16 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		expect(hoverBorderMix('.btn-outline:hover').base).toBe('input');
 	});
 
-	// The same segmented control is hand-written in three routes. When only one of
-	// them carried the boundary, the outline appeared and disappeared as a visitor
-	// clicked between the tabs of one switch, so every copy is pinned here
-	// along with the view toggle that sits in the gallery's filter row.
+	// The gallery tab bar (one component on /gallery, /stickers and /vr) is
+	// pinned here along with the view toggle that sits in the gallery's filter
+	// row. When the bar was hand-written per route and only one copy carried the
+	// boundary, the outline appeared and disappeared between its tabs.
 	// The VR form's file-picker buttons are a control edge too: the same size and
 	// fill as .btn-compact, kept local because one of them is a drop target
 	// (SONA-209 r2).
 	const componentRules: Array<{ file: string; selector: string }> = [
-		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.tabs' },
+		{ file: './components/GalleryTabs.svelte', selector: '.tabs' },
 		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.view-toggle' },
-		{ file: '../routes/(public)/stickers/+page.svelte', selector: '.tabs' },
-		{ file: '../routes/(public)/vr/+page.svelte', selector: '.tabs' },
 		{ file: './components/VrAvatarForm.svelte', selector: '.file-btn' }
 	];
 

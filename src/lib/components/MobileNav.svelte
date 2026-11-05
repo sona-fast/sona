@@ -1,21 +1,17 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { Home, LayoutGrid, Sticker, User } from 'lucide-svelte';
+	import { Home, LayoutGrid, User } from 'lucide-svelte';
+	import { navCurrent } from '$lib/nav';
 	import * as m from '$lib/paraglide/messages';
 
-	let { stickersEnabled = true }: { stickersEnabled?: boolean } = $props();
-
 	// The bar holds destinations only. The theme and language toggles live in
-	// the site header, which the layouts show on phones too.
-	// The Stickers tab is content-gated like the header's link: hidden while no
-	// published pack exists. The default fails OPEN so a caller passing no flag
-	// (e.g. the admin shell) keeps every tab.
-	const tabs = $derived([
+	// the site header, which the layouts show on phones too. Stickers and VR
+	// avatars are tabs of the gallery (GalleryTabs), so they sit under Gallery.
+	const tabs = [
 		{ href: '/', label: m.nav_home, icon: Home },
 		{ href: '/gallery', label: m.nav_gallery, icon: LayoutGrid },
-		...(stickersEnabled ? [{ href: '/stickers', label: m.nav_stickers, icon: Sticker }] : []),
 		{ href: '/about', label: m.nav_about, icon: User }
-	]);
+	];
 
 	// Publish the bar's height so the layouts' bottom gap (--mobile-nav-clearance
 	// in app.css) grows with it. Enlarged text wraps the tabs onto a second row,
@@ -35,24 +31,15 @@
 		observer.observe(el, { box: 'border-box' });
 		return () => observer.disconnect();
 	});
-
-	function isActive(href: string, pathname: string): boolean {
-		if (href === '/') return pathname === '/';
-		return pathname.startsWith(href);
-	}
 </script>
 
 <nav class="mobile-nav" aria-label={m.nav_main_label()} bind:this={navEl}>
 	{#each tabs as tab (tab.href)}
-		{@const active = isActive(tab.href, $page.url.pathname)}
-		<!-- "page" only on the section's own page: a piece under /gallery is in
-		     the Gallery section ("true") but is not the Gallery page. -->
-		<a
-			href={tab.href}
-			class="tab"
-			class:active
-			aria-current={$page.url.pathname === tab.href ? 'page' : active ? 'true' : undefined}
-		>
+		{@const current = navCurrent(tab.href, $page.url.pathname)}
+		<!-- "page" only on the section's own page: a piece under /gallery, or
+		     /stickers, is in the Gallery section ("true") but is not the Gallery
+		     page. -->
+		<a href={tab.href} class="tab" class:active={!!current} aria-current={current}>
 			<tab.icon size={20} />
 			<span>{tab.label()}</span>
 		</a>
@@ -100,9 +87,10 @@
 		   tabs wrap. Before that height is set, or with JavaScript off, the
 		   6.5rem fallback plus the home-indicator inset stands in for it. It
 		   matches the clearance floor in app.css and is in rem so it grows with
-		   the text: it has to cover a four-tab bar wrapped onto two rows at 200%
-		   text on any fallback font (CI's Japanese font made that bar 183px, more
-		   than the 150px an older 4.5rem fallback gave). The extra 6px keeps a
+		   the text: it has to cover the bar wrapped onto two rows (the Japanese
+		   tabs at 300% text) on any fallback font (CI's Japanese font once made
+		   a wrapped bar 183px, more than the 150px an older 4.5rem fallback
+		   gave). The extra 6px keeps a
 		   focused control's ring (2px offset, 2px wide) above the bar after
 		   whole-pixel scrolling. */
 		:global(html) {
@@ -116,8 +104,8 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 2px;
-		/* 2px sides: four English tabs then fit a 320px screen at 200% text with
-		   room to spare. The tabs are flex: 1, so each keeps an equal share of the bar. */
+		/* 2px sides: the English tabs then fit one row on a 320px screen at
+		   300% text. The tabs are flex: 1, so each keeps an equal share of the bar. */
 		padding: 4px 2px;
 		min-height: 44px;
 		border-radius: var(--radius-s);
@@ -170,25 +158,11 @@
 		outline-offset: -2px;
 	}
 
-	/* Too narrow for the labels in one row: two tabs per row, so no tab ends
-	   up alone on a row. Only with four tabs; three wrap on their own. */
-	@container mobile-nav (max-width: 14em) {
-		.tab:first-child:nth-last-child(4),
-		.tab:first-child:nth-last-child(4) ~ .tab {
-			flex: 1 1 40%;
-		}
-	}
-
-	/* The Japanese labels are wider, so they reach that point sooner. A label
-	   that still does not fit its half may break at a phrase boundary instead
-	   of spilling out of the tab (Chromium only; elsewhere it breaks between
-	   any two characters). */
+	/* The Japanese labels are wider. On a narrow bar, a label that does not
+	   fit its tab may break at a phrase boundary instead of spilling out of
+	   the tab (Chromium only; elsewhere it breaks between any two
+	   characters). */
 	@container mobile-nav (max-width: 21.5em) {
-		.tab:lang(ja):first-child:nth-last-child(4),
-		.tab:lang(ja):first-child:nth-last-child(4) ~ .tab {
-			flex: 1 1 40%;
-		}
-
 		.tab:lang(ja) span {
 			white-space: normal;
 			word-break: auto-phrase;

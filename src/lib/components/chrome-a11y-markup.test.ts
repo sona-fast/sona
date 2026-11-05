@@ -1,37 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// Source pins for the shared chrome's accessibility attributes. The unit suite
-// renders no Svelte components, and a dropped attribute fails silently: the
-// page still looks right, but a screen reader loses which page is current or
-// which nav is which. The rendered aria-current states are asserted end to end
-// in tests/e2e/passport.spec.ts, 'marks the Gallery nav links as the current
-// page or the current section', and the nav names in tests/e2e/site-chrome.spec.ts.
+// Source pins for the shared chrome's accessibility attributes. Which nav link
+// is current is not pinned here: navCurrent's values are tested in
+// $lib/nav.test.ts, and the rendered aria-current states on the header and
+// mobile nav in tests/e2e/passport.spec.ts, 'marks the Gallery nav links as
+// the current page or the current section'. The nav names are checked in
+// tests/e2e/site-chrome.spec.ts.
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 const headerSrc = read('./Header.svelte');
-const mobileNavSrc = read('./MobileNav.svelte');
 const langSrc = read('./LanguageToggle.svelte');
 
 describe('shared chrome accessibility markup', () => {
-	it('marks the current page with aria-current on the mobile tab, the header logo and the header links', () => {
-		// "page" only on an exact match; a page further down the section (a piece
-		// under /gallery) gets "true", so it is not announced as the Gallery page.
-		expect(mobileNavSrc).toMatch(
-			/aria-current=\{\$page\.url\.pathname\s*===\s*tab\.href\s*\?\s*'page'\s*:\s*active\s*\?\s*'true'\s*:\s*undefined\}/
-		);
-		expect(mobileNavSrc).toMatch(/\{@const\s+active\s*=\s*isActive\(tab\.href,\s*\$page\.url\.pathname\)\}/);
+	it('marks the home page with aria-current on the header logo', () => {
 		expect(headerSrc).toMatch(
 			/<a\s+href="\/"\s+class="logo"\s+aria-current=\{\$page\.url\.pathname\s*===\s*'\/'\s*\?\s*'page'\s*:\s*undefined\}\s*>/
 		);
-		expect(headerSrc).toMatch(/\{@const\s+active\s*=\s*\$page\.url\.pathname\.startsWith\(item\.href\)\}/);
-		expect(headerSrc).toMatch(
-			/<a\s+href=\{item\.href\}\s+class="nav-link"\s+class:active\s+aria-current=\{\$page\.url\.pathname\s*===\s*item\.href\s*\?\s*'page'\s*:\s*active\s*\?\s*'true'\s*:\s*undefined\}/
-		);
-		// No link may claim "page" from a prefix match alone.
-		expect(headerSrc).not.toMatch(/aria-current=\{active\s*\?\s*'page'/);
-		expect(mobileNavSrc).not.toMatch(/aria-current=\{active\s*\?\s*'page'/);
 	});
 
 	// Source-level only; tests/e2e/passport.spec.ts ("rings a keyboard-focused

@@ -7,6 +7,7 @@
 	import StickerCard from '$lib/components/StickerCard.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import Meta from '$lib/components/Meta.svelte';
+	import GalleryTabs from '$lib/components/GalleryTabs.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 	import { stickersStatus } from '$lib/result-status';
@@ -73,20 +74,18 @@
 <div class="container stickers-page">
 	<div class="page-header">
 		<h1>{m.stickers_title()}</h1>
-		<p class="subtitle">{m.stickers_subtitle({ ownerName })}</p>
 	</div>
 
-	<!-- Tab bar — pill segmented control; Stickers is active here -->
-	<div class="tabs">
-		<a href="/gallery" class="tab">{m.gallery_view_artwork()}</a>
-		{#if data.fursuitEnabled}
-			<a href="/gallery?view=fursuit" class="tab">{m.gallery_view_fursuit()}</a>
-		{/if}
-		<span class="tab active" aria-current="page">{m.gallery_view_stickers()}</span>
-		{#if data.vrEnabled}
-			<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
-		{/if}
-	</div>
+	<GalleryTabs
+		current="stickers"
+		fursuitEnabled={data.fursuitEnabled}
+		stickersEnabled
+		vrEnabled={data.vrEnabled}
+	/>
+
+	<!-- Under the bar, not in the header: it wraps on narrow phones, and in
+	     the header it would push the bar below where /gallery and /vr put it. -->
+	<p class="subtitle">{m.stickers_subtitle({ ownerName })}</p>
 
 	<!-- Filter bar: emoji rail on the left, search + artist on the right -->
 	<div class="filter-bar">
@@ -257,7 +256,7 @@
 	}
 
 	.page-header {
-		margin-bottom: 24px;
+		margin-bottom: 16px;
 	}
 
 	.page-header h1 {
@@ -266,49 +265,11 @@
 		font-family: var(--font-primary);
 	}
 
+	/* The same spacing as /gallery's and /vr's count line. */
 	.subtitle {
+		margin-bottom: 16px;
 		font-size: 14px;
 		color: var(--muted-foreground);
-		margin-top: 6px;
-	}
-
-	/* Tab bar — pill segmented control */
-	.tabs {
-		display: inline-flex;
-		gap: 8px;
-		margin-bottom: 24px;
-		padding: 4px;
-		border: 1px solid var(--input);
-		border-radius: var(--radius-pill);
-		background: var(--secondary);
-	}
-
-	.tab {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 6px 12px;
-		border-radius: var(--radius-pill);
-		border: none;
-		background: none;
-		font-family: var(--font-secondary);
-		font-size: 14px;
-		font-weight: 500;
-		color: var(--muted-foreground);
-		cursor: pointer;
-		transition: color 0.15s, background 0.15s;
-		text-decoration: none;
-	}
-
-	.tab:hover {
-		color: var(--foreground);
-		text-decoration: none;
-	}
-
-	.tab.active {
-		color: var(--foreground);
-		background: var(--background);
-		box-shadow: 0 1px 3.5px rgba(0, 0, 0, 0.06);
 	}
 
 	/* Filter bar — emoji rail left, controls right */
