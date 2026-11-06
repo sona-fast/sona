@@ -19,7 +19,7 @@ export const E2E_SHARDS: string[][] = [
 		'passport-empty',
 		'recovery'
 	],
-	['registry-sync', 'conventions-event', 'ut-stat', 'theme-picker', 'sticker-modal']
+	['registry-sync', 'conventions-event', 'ut-stat', 'theme-picker', 'sticker-modal', 'collection-paging']
 ];
 
 /** The projects to run for SONA_E2E_SHARD (`<i>/<n>`), or every project when

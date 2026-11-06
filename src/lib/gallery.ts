@@ -68,8 +68,33 @@ export interface GalleryContext {
 	filters: GalleryFilters;
 	/** The explicit sort, or null for the site's default. */
 	sort: string | null;
+	/** The slug of the collection the piece was opened from, or null. When
+	 *  set, the filters and sort are empty: a collection has its own order. */
+	collection: string | null;
 	/** The context as a query string with its leading '?', or '' for none. */
 	query: string;
+}
+
+// A piece opened from /collections/[slug] pages through that collection
+// instead of the gallery (SONA-179). Its links carry ?collection=<slug>.
+const COLLECTION_PARAM = 'collection';
+
+// The shape the admin form's slugify gives a collection slug: lowercase ASCII
+// letters and digits in hyphen-separated runs. The detail page only matches
+// a slug, or echoes it onto the next page's links, when it has this shape and
+// fits MAX_FILTER_LENGTH; membership is still checked against a real
+// collection.
+const COLLECTION_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Whether `value` can be a collection slug the context may carry. */
+export function isValidCollectionSlug(value: string): boolean {
+	return value.length <= MAX_FILTER_LENGTH && COLLECTION_SLUG.test(value);
+}
+
+/** The query string a collection card links to its detail page with. */
+export function collectionContextQuery(slug: string): string {
+	if (!isValidCollectionSlug(slug)) return '';
+	return `?${new URLSearchParams({ [COLLECTION_PARAM]: slug })}`;
 }
 
 /**
@@ -92,8 +117,19 @@ export function galleryContextQuery(
 	return query ? `?${query}` : '';
 }
 
-/** Reads a detail page's grid context back out of its URL. */
+/** Reads a detail page's grid context back out of its URL. A valid
+ *  collection slug wins over any gallery filters or sort beside it; an invalid
+ *  one is dropped, and the gallery context is read as if it were absent. */
 export function galleryContextFromParams(params: URLSearchParams): GalleryContext {
+	const collection = params.get(COLLECTION_PARAM);
+	if (collection && isValidCollectionSlug(collection)) {
+		return {
+			filters: { search: '', tag: '', artist: '', character: '' },
+			sort: null,
+			collection,
+			query: collectionContextQuery(collection)
+		};
+	}
 	const filters = {
 		search: galleryFilterParam(params, CONTEXT_PARAMS.search),
 		tag: galleryFilterParam(params, CONTEXT_PARAMS.tag),
@@ -102,7 +138,7 @@ export function galleryContextFromParams(params: URLSearchParams): GalleryContex
 	};
 	const sortParam = params.get('sort');
 	const sort = sortParam && isValidGallerySort(sortParam) ? sortParam : null;
-	return { filters, sort, query: galleryContextQuery(filters, sort) };
+	return { filters, sort, collection: null, query: galleryContextQuery(filters, sort) };
 }
 
 /**

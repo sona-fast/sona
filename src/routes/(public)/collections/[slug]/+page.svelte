@@ -3,10 +3,14 @@
 	import { page } from '$app/state';
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
+	import { collectionContextQuery } from '$lib/gallery';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
+	// Each card carries the collection, so the detail page pages through this
+	// collection in this order rather than the whole gallery (SONA-179).
+	const detailQuery = $derived(collectionContextQuery(data.collection.slug));
 	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
 	const metaImage = $derived(data.collection.coverImageUrl || data.images[0]?.imageUrl || null);
 	const metaDescription = $derived(
@@ -43,6 +47,7 @@
 		{#each data.images as image (image.id)}
 			<ArtworkCard
 				slug={image.slug}
+				href="/gallery/{image.slug}{detailQuery}"
 				title={image.title}
 				artistName={image.artistName || m.common_unknown()}
 				imageUrl={image.thumbnailUrl || image.imageUrl}

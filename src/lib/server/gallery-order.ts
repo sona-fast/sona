@@ -6,7 +6,8 @@ import type { GalleryFilters, GallerySort } from '$lib/gallery';
 // The gallery grid's filter and order, in one place, so the grid
 // ((public)/gallery/+page.server.ts) and the detail page's previous/next
 // links ((public)/gallery/[slug]) can't disagree about which piece comes next
-// (SONA-179).
+// (SONA-179). The same goes for a collection's grid
+// ((public)/collections/[slug]) and a piece opened from it.
 
 /**
  * WHERE conditions for the artwork grid: published, non-variant (a variant
@@ -78,11 +79,61 @@ export async function galleryNeighbors(
 	db: Database,
 	filters: GalleryFilters,
 	sort: GallerySort,
-	anchor: { id: number; createdAt: string; commissionedAt: string | null }
-): Promise<{ prev: GalleryNeighbor | null; next: GalleryNeighbor | null }> {
+	anchor: NeighborAnchor
+): Promise<GalleryNeighbors> {
+	return neighborsWhere(db, galleryConditions(filters), sort, anchor);
+}
+
+/**
+ * WHERE conditions for a collection's grid ((public)/collections/[slug]):
+ * its published, non-variant pieces. No other visibility rule applies there;
+ * NSFW pieces are listed and blurred by the card.
+ */
+export function collectionConditions(collectionId: number): SQL[] {
+	return [eq(images.collectionId, collectionId), eq(images.published, true), isNull(images.parentImageId)];
+}
+
+// A collection lists newest upload first, with no sort picker of its own.
+const COLLECTION_SORT: GallerySort = 'newest';
+
+/** ORDER BY for a collection's grid: newest first, the id settling ties. */
+export function collectionOrderBy(): SQL[] {
+	return galleryOrderBy(COLLECTION_SORT);
+}
+
+/**
+ * The collection's pieces either side of `anchor`, in the order the
+ * collection page lays them out. Null at either end. The caller checks that
+ * `anchor` belongs to the collection; this only walks the order.
+ */
+export async function collectionNeighbors(
+	db: Database,
+	collectionId: number,
+	anchor: NeighborAnchor
+): Promise<GalleryNeighbors> {
+	return neighborsWhere(db, collectionConditions(collectionId), COLLECTION_SORT, anchor);
+}
+
+/** The grid piece a detail page pages from, with the dates the sorts read. */
+export interface NeighborAnchor {
+	id: number;
+	createdAt: string;
+	commissionedAt: string | null;
+}
+
+export interface GalleryNeighbors {
+	prev: GalleryNeighbor | null;
+	next: GalleryNeighbor | null;
+}
+
+async function neighborsWhere(
+	db: Database,
+	conditions: SQL[],
+	sort: GallerySort,
+	anchor: NeighborAnchor
+): Promise<GalleryNeighbors> {
 	const { key, descending } = sortSpec(sort);
 	const value = sort.startsWith('commissioned-') ? (anchor.commissionedAt ?? anchor.createdAt) : anchor.createdAt;
-	const conditions = galleryConditions(filters);
 
 	// The nearest piece past the anchor walking the order one way: rows with a
 	// larger (ascending) or smaller key, the id settling ties the same way

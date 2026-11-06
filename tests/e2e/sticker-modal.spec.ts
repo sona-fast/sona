@@ -1,4 +1,4 @@
-import { test, expect, type Page, type TestInfo } from '@playwright/test';
+import { test, expect, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
 import { waitForHydration } from './admin-login';
 import { overlayColors } from './contrast';
 
@@ -792,4 +792,98 @@ test('in the light theme, white art stands off both checkerboard squares whereve
 		expect(contrast('rgb(255, 255, 255)', base), `${where}: white on the base square`).toBeGreaterThanOrEqual(1.4);
 		expect(contrast('rgb(255, 255, 255)', square), `${where}: white on the other square`).toBeGreaterThanOrEqual(1.4);
 	}
+});
+
+test.describe('with classic scrollbars', () => {
+	// Headless Chromium hides scrollbars by default (--hide-scrollbars), which
+	// is what macOS overlay scrollbars look like to layout. Windows and Linux
+	// draw classic ones that take width, so these tests launch their own
+	// browser without the flag. (launchOptions can't be set per describe.)
+	let classic: Browser;
+	test.beforeAll(async ({ playwright }) => {
+		classic = await playwright.chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
+	});
+	test.afterAll(async () => {
+		await classic?.close();
+	});
+	// Each test's context closes even when an assertion fails part way.
+	let context: BrowserContext | undefined;
+	test.afterEach(async () => {
+		await context?.close();
+		context = undefined;
+	});
+
+	async function classicPage(height: number, testInfo: TestInfo) {
+		context = await classic.newContext({
+			baseURL: testInfo.project.use.baseURL,
+			// Wider than the 1280px container, so the page content is centred
+			// and moves when the width it is centred in changes.
+			viewport: { width: 1600, height }
+		});
+		return context.newPage();
+	}
+
+	// Where the page's content sits across: the centred pack header and grid,
+	// and the header's right-hand controls.
+	const lefts = (page: Page) =>
+		page.evaluate(() =>
+			['.pack-header', '.sticker-grid', 'header nav'].map((s) => {
+				const r = document.querySelector(s)!.getBoundingClientRect();
+				return [r.left, r.right];
+			})
+		);
+	const rootStyle = (page: Page) =>
+		page.evaluate(() => ({
+			overflow: document.documentElement.style.overflow,
+			scrollbarGutter: document.documentElement.style.scrollbarGutter
+		}));
+	const scrollbarWidth = (page: Page) => page.evaluate(() => window.innerWidth - document.documentElement.clientWidth);
+
+	test('opening and closing the modal does not shift the page sideways', async ({}, testInfo) => {
+		// Short enough that the pack page scrolls, so it has a scrollbar to lose.
+		const page = await classicPage(400, testInfo);
+		await openPack(page);
+		expect(await scrollbarWidth(page), 'the page shows a classic scrollbar, or this test proves nothing').toBeGreaterThan(0);
+		const before = await lefts(page);
+		const styleBefore = await rootStyle(page);
+
+		await openSticker(page, 3);
+		expect(await rootOverflow(page)).toBe('hidden');
+		expect(await lefts(page)).toEqual(before);
+		await shot(page, testInfo, 'classic-scrollbar-open');
+
+		await page.keyboard.press('Escape');
+		await expect(dialog(page)).toBeHidden();
+		// The root's inline style is exactly what it was before the modal.
+		expect(await rootStyle(page)).toEqual(styleBefore);
+		expect(await lefts(page)).toEqual(before);
+	});
+
+	test('on a page too short to scroll, opening the modal adds no gutter', async ({}, testInfo) => {
+		const page = await classicPage(4000, testInfo);
+		await openPack(page);
+		expect(await scrollbarWidth(page)).toBe(0);
+		const before = await lefts(page);
+
+		await openSticker(page, 3);
+		expect(await lefts(page)).toEqual(before);
+		expect((await rootStyle(page)).scrollbarGutter).toBe('');
+	});
+
+	test('an emoji link inside the modal leaves the root style as it found it on the next page', async ({}, testInfo) => {
+		// Short enough that the pack page scrolls, so the modal adds a gutter.
+		const page = await classicPage(400, testInfo);
+		await openPack(page);
+		const styleBefore = await rootStyle(page);
+
+		await openSticker(page, 3);
+		expect(await rootOverflow(page)).toBe('hidden');
+		// The lock did set a gutter, so the restore below has something to undo.
+		expect((await rootStyle(page)).scrollbarGutter).toBe('stable');
+		await dialog(page).locator('.emoji-chip').first().click();
+
+		await expect(page).toHaveURL(/\/stickers\?emoji=/);
+		await expect(dialog(page)).toHaveCount(0);
+		expect(await rootStyle(page)).toEqual(styleBefore);
+	});
 });

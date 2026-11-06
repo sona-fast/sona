@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
@@ -8,7 +8,24 @@ import { clearVrTabCache } from '$lib/server/vr-gate';
 import { clearFursuitPhotosCache } from '$lib/server/fursuit-import';
 import { load as gridLoad } from '../+page.server';
 import { load as detailLoad } from './+page.server';
-import { galleryContextQuery, type GalleryFilters } from '$lib/gallery';
+import { load as collectionLoad } from '../../collections/[slug]/+page.server';
+import { collectionContextQuery, galleryContextQuery, type GalleryFilters } from '$lib/gallery';
+
+// The real neighbor walks, unless a test sets `stall.on` to make them hang
+// the way a slow D1 read does, so the detail page's timeout path runs.
+const stall = vi.hoisted(() => ({ on: false }));
+vi.mock('$lib/server/gallery-order', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/server/gallery-order')>();
+	const stallable =
+		<A extends unknown[], R>(fn: (...args: A) => Promise<R>) =>
+		(...args: A): Promise<R> =>
+			stall.on ? new Promise<R>(() => {}) : fn(...args);
+	return {
+		...actual,
+		galleryNeighbors: stallable(actual.galleryNeighbors),
+		collectionNeighbors: stallable(actual.collectionNeighbors)
+	};
+});
 
 // SONA-179: the detail page's previous/next must walk the same order the grid
 // shows, under the same filters and sort, across the grid's page breaks. The
@@ -212,5 +229,179 @@ describe('detail previous/next follows the grid it came from', () => {
 		const d = await detail(db.platform, 'p1', '?tag=ych&sort=oldest&utm_source=x');
 		expect(d.contextQuery).toBe('?tag=ych&sort=oldest');
 		expect((await detail(db.platform, 'p1', '')).contextQuery).toBe('');
+	});
+});
+
+// A piece opened from /collections/[slug] pages through that collection, in
+// the order the collection page shows, and nowhere else. Anything that isn't
+// a real collection holding the piece falls back to the unfiltered gallery.
+describe('detail previous/next follows the collection it came from', () => {
+	/**
+	 * Collection 1 ('badges') holds every odd piece from 1 to 25, which repeats
+	 * upload dates in threes, so the id has ties to settle; piece 7 is NSFW
+	 * (listed and blurred, so it pages too). Also in it: piece 5's variant,
+	 * which never gets a card, and a draft. Piece 2 sits in collection 2.
+	 */
+	function seedCollections() {
+		db.sqlite.exec(`
+			INSERT INTO collections (id, name, slug, created_at) VALUES
+				(1, 'Badges', 'badges', '2026-01-01'), (2, 'Other', 'other', '2026-01-01');
+			UPDATE images SET collection_id = 1 WHERE id % 2 = 1 AND id <= 25;
+			UPDATE images SET collection_id = 1 WHERE id IN (100, 101);
+			UPDATE images SET collection_id = 2 WHERE id = 2;
+			UPDATE images SET nsfw = 1 WHERE id = 7;
+		`);
+	}
+
+	async function collectionGrid(slug: string): Promise<string[]> {
+		const data = (await collectionLoad({ platform: db.platform, params: { slug } } as never)) as {
+			images: { slug: string }[];
+		};
+		return data.images.map((i) => i.slug);
+	}
+
+	const inBadges = collectionContextQuery('badges');
+
+	it('walks the same order as the collection page, both ways, and stops at its ends', async () => {
+		seedCollections();
+		const order = await collectionGrid('badges');
+		expect(order).toHaveLength(13);
+		expect(order).not.toContain('p5-alt');
+		expect(order).not.toContain('draft');
+		expect(order).toContain('p7');
+
+		expect(await walk(db.platform, order[0], inBadges, 'next')).toEqual(order);
+		expect(await walk(db.platform, order[order.length - 1], inBadges, 'prev')).toEqual([...order].reverse());
+		expect((await detail(db.platform, order[0], inBadges)).neighbors.prev).toBeNull();
+		expect((await detail(db.platform, order[order.length - 1], inBadges)).neighbors.next).toBeNull();
+	});
+
+	it('is not the gallery order', async () => {
+		seedCollections();
+		const order = await collectionGrid('badges');
+		const gallery = await grid(db.platform, '');
+		const first = await detail(db.platform, order[0], inBadges);
+		const inGallery = await detail(db.platform, order[0], '');
+		expect(first.neighbors.next?.slug).toBe(order[1]);
+		expect(inGallery.neighbors.next?.slug).toBe(gallery[gallery.indexOf(order[0]) + 1]);
+		expect(first.neighbors.next?.slug).not.toBe(inGallery.neighbors.next?.slug);
+	});
+
+	it('keeps the collection on the next links', async () => {
+		seedCollections();
+		expect((await detail(db.platform, 'p1', inBadges)).contextQuery).toBe('?collection=badges');
+	});
+
+	it("pages a variant from its parent's place in the collection", async () => {
+		seedCollections();
+		const parent = await detail(db.platform, 'p5', inBadges);
+		const variant = await detail(db.platform, 'p5-alt', inBadges);
+		expect(variant.neighbors).toEqual(parent.neighbors);
+		expect(variant.contextQuery).toBe('?collection=badges');
+	});
+
+	// Membership is the published parent's, not the variant's own column.
+	for (const [label, value] of [
+		['another collection', '2'],
+		['no collection', 'NULL']
+	] as const) {
+		it(`pages a variant through its parent's collection even when the variant itself is in ${label}`, async () => {
+			seedCollections();
+			db.sqlite.exec(`UPDATE images SET collection_id = ${value} WHERE id = 100`);
+			const parent = await detail(db.platform, 'p5', inBadges);
+			const variant = await detail(db.platform, 'p5-alt', inBadges);
+			expect(parent.contextQuery).toBe('?collection=badges');
+			expect(parent.neighbors.prev).not.toBeNull();
+			expect(parent.neighbors.next).not.toBeNull();
+			expect(variant.neighbors).toEqual(parent.neighbors);
+			expect(variant.contextQuery).toBe('?collection=badges');
+		});
+
+		it(`falls back for a variant in the collection whose parent is in ${label}`, async () => {
+			seedCollections();
+			db.sqlite.exec(`UPDATE images SET collection_id = ${value} WHERE id = 5`);
+			const d = await detail(db.platform, 'p5-alt', inBadges);
+			const inGallery = await detail(db.platform, 'p5-alt', '');
+			expect(inGallery.neighbors.next).not.toBeNull();
+			expect(d.neighbors).toEqual(inGallery.neighbors);
+			expect(d.contextQuery).toBe('');
+		});
+	}
+
+	const fallbacks: [string, string, string][] = [
+		['an unknown collection', 'p1', collectionContextQuery('nope')],
+		['a collection the piece is not in', 'p2', inBadges],
+		['another collection than the piece is in', 'p1', collectionContextQuery('other')],
+		['a piece in no collection', 'p26', inBadges],
+		['a forged slug', 'p1', '?collection=../badges'],
+		['a collection with gallery filters forged beside it', 'p2', '?collection=badges&tag=ych&sort=oldest']
+	];
+	for (const [name, slug, query] of fallbacks) {
+		it(`falls back to the unfiltered gallery for ${name}, and drops the context`, async () => {
+			seedCollections();
+			const d = await detail(db.platform, slug, query);
+			expect(d.neighbors).toEqual((await detail(db.platform, slug, '')).neighbors);
+			expect(d.contextQuery).toBe('');
+		});
+	}
+
+	it('falls back for a variant whose parent is unpublished, even if the variant names the collection', async () => {
+		seedCollections();
+		db.sqlite.exec(`UPDATE images SET published = 0 WHERE id = 5`);
+		const d = await detail(db.platform, 'p5-alt', inBadges);
+		expect(d.neighbors).toEqual((await detail(db.platform, 'p5-alt', '')).neighbors);
+		expect(d.contextQuery).toBe('');
+	});
+
+	it('treats a draft as no member, so the draft never becomes reachable by its context', async () => {
+		seedCollections();
+		const order = await collectionGrid('badges');
+		for (const slug of order) {
+			const d = await detail(db.platform, slug, inBadges);
+			expect(d.neighbors.prev?.slug).not.toBe('draft');
+			expect(d.neighbors.next?.slug).not.toBe('draft');
+		}
+	});
+});
+
+// The pager gives up after a couple of seconds so a slow D1 can't hold the
+// page. The links it leaves keep a confirmed collection and must not carry
+// one the piece isn't in.
+describe('detail previous/next when the neighbor read times out', () => {
+	beforeEach(() => {
+		db.sqlite.exec(`
+			INSERT INTO collections (id, name, slug, created_at) VALUES (1, 'Badges', 'badges', '2026-01-01');
+			UPDATE images SET collection_id = 1 WHERE id % 2 = 1;
+		`);
+	});
+	afterEach(() => {
+		stall.on = false;
+		vi.useRealTimers();
+	});
+
+	async function timedOut(slug: string, query: string): Promise<DetailData> {
+		vi.useFakeTimers();
+		stall.on = true;
+		const pending = detail(db.platform, slug, query);
+		await vi.advanceTimersByTimeAsync(2000);
+		return pending;
+	}
+
+	it('renders without a pager and keeps the collection the piece is in', async () => {
+		const d = await timedOut('p1', collectionContextQuery('badges'));
+		expect(d.neighbors).toEqual({ prev: null, next: null });
+		expect(d.contextQuery).toBe('?collection=badges');
+	});
+
+	it('drops a collection context the piece is not in', async () => {
+		const d = await timedOut('p2', collectionContextQuery('badges'));
+		expect(d.neighbors).toEqual({ prev: null, next: null });
+		expect(d.contextQuery).toBe('');
+	});
+
+	it('keeps a gallery context, which needs no confirming', async () => {
+		const d = await timedOut('p1', '?tag=ych');
+		expect(d.neighbors).toEqual({ prev: null, next: null });
+		expect(d.contextQuery).toBe('?tag=ych');
 	});
 });

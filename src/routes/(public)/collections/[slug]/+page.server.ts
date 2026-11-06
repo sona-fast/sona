@@ -1,7 +1,8 @@
 import { error } from '@sveltejs/kit';
 import { getReadDb } from '$lib/server/db';
 import { collections, images, artists, imageTags, tags } from '$lib/server/db/schema';
-import { eq, desc, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { collectionConditions, collectionOrderBy } from '$lib/server/gallery-order';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -30,8 +31,10 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		})
 		.from(images)
 		.leftJoin(artists, eq(images.artistId, artists.id))
-		.where(and(eq(images.collectionId, collection.id), eq(images.published, true), isNull(images.parentImageId)))
-		.orderBy(desc(images.createdAt));
+		// Shared with the detail page's previous/next links (SONA-179), so a
+		// piece opened from here pages in exactly this order.
+		.where(and(...collectionConditions(collection.id)))
+		.orderBy(...collectionOrderBy());
 
 	// Get first tag per image
 	let firstTagByImage: Record<number, string> = {};

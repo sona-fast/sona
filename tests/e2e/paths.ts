@@ -115,6 +115,15 @@ export const E2E_STICKER_MODAL_OVERLAY = path.join(here, 'fixtures', 'sticker-mo
 export const E2E_PERSIST_TO_STICKER_MODAL = path.join(persistRoot, '.wrangler-e2e-sticker-modal');
 export const E2E_PLATFORM_PERSIST_STICKER_MODAL = path.join(E2E_PERSIST_TO_STICKER_MODAL, 'v3');
 
+// The collection-paging spec opens pieces from a seeded collection (SONA-179).
+// The shared fixture has no collections on purpose (nav-gating.spec.ts), so
+// this server seeds the shared fixture and layers
+// fixtures/collection-paging.sql on top. Shared wrangler config; the spec only
+// reads. See playwright.config.ts.
+export const E2E_COLLECTION_PAGING_OVERLAY = path.join(here, 'fixtures', 'collection-paging.sql');
+export const E2E_PERSIST_TO_COLLECTION_PAGING = path.join(persistRoot, '.wrangler-e2e-collection-paging');
+export const E2E_PLATFORM_PERSIST_COLLECTION_PAGING = path.join(E2E_PERSIST_TO_COLLECTION_PAGING, 'v3');
+
 // The passport spec needs the homepage on landingLayout = 'passport', which
 // would change what every other spec sees at / on the shared server, and it
 // needs two databases: the shared fixture (a live convention, an NSFW
