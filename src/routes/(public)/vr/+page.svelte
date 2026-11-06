@@ -3,6 +3,7 @@
 	import { page as pageState } from '$app/state';
 	import { Box, ExternalLink } from 'lucide-svelte';
 	import Meta from '$lib/components/Meta.svelte';
+	import GalleryTabs from '$lib/components/GalleryTabs.svelte';
 	import { cdnImage, rawFallback } from '$lib';
 	import { platformLabel } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
@@ -23,23 +24,21 @@
 <div class="container vr-page">
 	<div class="page-header">
 		<h1>{m.vr_title()}</h1>
-		{#if data.total > 0}
-			<!-- Suppressed at zero: "0 avatars" above the empty state says it twice. -->
-			<p class="count">{m.vr_count({ count: data.total })}</p>
-		{/if}
 	</div>
 
-	<!-- Tab bar — pill segmented control; VR avatars is active here -->
-	<div class="tabs">
-		<a href="/gallery" class="tab">{m.gallery_view_artwork()}</a>
-		{#if data.fursuitEnabled}
-			<a href="/gallery?view=fursuit" class="tab">{m.gallery_view_fursuit()}</a>
-		{/if}
-		{#if data.stickersEnabled}
-			<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
-		{/if}
-		<span class="tab active" aria-current="page">{m.gallery_view_vr()}</span>
-	</div>
+	<GalleryTabs
+		current="vr"
+		fursuitEnabled={data.fursuitEnabled}
+		stickersEnabled={data.stickersEnabled}
+		vrEnabled
+	/>
+
+	<!-- Under the bar, so the header is the h1 alone and the bar sits where
+	     /gallery and /stickers put it, count or no count. Suppressed at zero:
+	     "0 avatars" above the empty state says it twice. -->
+	{#if data.total > 0}
+		<p class="count">{m.vr_count({ count: data.total })}</p>
+	{/if}
 
 	{#if data.avatars.length > 0}
 		<div class="grid">
@@ -98,7 +97,7 @@
 	}
 
 	.page-header {
-		margin-bottom: 24px;
+		margin-bottom: 16px;
 	}
 
 	.page-header h1 {
@@ -106,47 +105,9 @@
 	}
 
 	.count {
+		margin-bottom: 16px;
 		font-size: 14px;
 		color: var(--muted-foreground);
-	}
-
-	/* Pill segmented control — matches the /gallery and /stickers tab bars. */
-	.tabs {
-		display: inline-flex;
-		gap: 8px;
-		margin-bottom: 24px;
-		padding: 4px;
-		border: 1px solid var(--input);
-		border-radius: var(--radius-pill);
-		background: var(--secondary);
-	}
-
-	.tab {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 6px 12px;
-		border-radius: var(--radius-pill);
-		border: none;
-		background: none;
-		font-family: var(--font-secondary);
-		font-size: 14px;
-		font-weight: 500;
-		color: var(--muted-foreground);
-		cursor: pointer;
-		transition: color 0.15s, background 0.15s;
-		text-decoration: none;
-	}
-
-	.tab:hover {
-		color: var(--foreground);
-		text-decoration: none;
-	}
-
-	.tab.active {
-		color: var(--foreground);
-		background: var(--background);
-		box-shadow: 0 1px 3.5px rgba(0, 0, 0, 0.06);
 	}
 
 	.grid {

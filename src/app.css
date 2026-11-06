@@ -36,9 +36,10 @@
 	   text is enlarged, so a fixed gap would let it cover the page's last lines.
 	   The floor is 6.5rem (104px at 16px text) so it grows with the root font
 	   size too: before hydration or with JavaScript off the height is never
-	   published, and the floor alone has to clear a four-tab bar wrapped onto
-	   two rows at 200% text on any fallback font. CI's Japanese fallback font
-	   made that bar 183px, past the 176px an older 5.5rem floor gave. At
+	   published, and the floor alone has to clear the bar wrapped onto two
+	   rows (the Japanese tabs at 300% text) on any fallback font. CI's
+	   Japanese fallback font once made a wrapped bar 183px, past the 176px an
+	   older 5.5rem floor gave. At
 	   normal size the floor also beats a one-row bar's own 67px + 32px, so the
 	   clearance there is 104px rather than 99px. The html rule below
 	   pins the root at 16px, so a browser's default font-size setting does not

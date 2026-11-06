@@ -40,7 +40,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			now: new Date(),
 			timeoutMs: READ_TIMEOUT_MS
 		});
-		const [stickersEnabled, collectionsEnabled] = await navFlags;
+		const { collectionsEnabled } = await navFlags;
 		return {
 			settings: toPublicSettings(settings),
 			recentImages: [],
@@ -49,7 +49,6 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			// The passport renders no path cards; true keeps the type uniform.
 			pathPresence: { art: true, share: true },
 			passport,
-			stickersEnabled,
 			collectionsEnabled
 		};
 	}
@@ -67,14 +66,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			withTimeout(probeArtContent(db), READ_TIMEOUT_MS, true),
 			withTimeout(shareHasContent(db), READ_TIMEOUT_MS, true)
 		]);
-		const [stickersEnabled, collectionsEnabled] = await navFlags;
+		const { collectionsEnabled } = await navFlags;
 		return {
 			settings: toPublicSettings(settings),
 			recentImages: [],
 			mosaicImageUrls: [],
 			host: url.host,
 			pathPresence: { art, share },
-			stickersEnabled,
 			collectionsEnabled
 		};
 	}
@@ -173,7 +171,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		...randomMosaic.map((img) => img.imageUrl)
 	];
 
-	const [stickersEnabled, collectionsEnabled] = await navFlags;
+	const { collectionsEnabled } = await navFlags;
 
 	return {
 		recentImages: imagesWithTags,
@@ -182,7 +180,6 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		host: url.host,
 		// The mosaic branch renders no path cards; true keeps the type uniform.
 		pathPresence: { art: true, share: true },
-		stickersEnabled,
 		collectionsEnabled
 	};
 };

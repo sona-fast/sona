@@ -45,7 +45,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// The VR/Stickers/Fursuit pill probes run OUTSIDE the gallery cap (started
 	// here, so they overlap build()'s reads): cheap SELECT-1s, cached
 	// per-isolate, so even the degraded fallback below keeps the REAL tab bar
-	// of a healthy-content fork — the .tabs suppression then only fires on
+	// of a healthy-content fork — galleryTabs()'s suppression then only fires on
 	// genuine zero-content forks. VR/Stickers fail OPEN like the nav's; the
 	// fursuit probe fails CLOSED (fallback false) on purpose: a fail-open true
 	// would show a Fursuit tab pointing at a view the degraded page can't

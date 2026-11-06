@@ -3,21 +3,20 @@
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { APP_NAME } from '$lib/config';
+	import { navCurrent } from '$lib/nav';
 	import * as m from '$lib/paraglide/messages';
 
 	let {
 		siteName = APP_NAME,
-		stickersEnabled = true,
 		collectionsEnabled = true
-	}: { siteName?: string; stickersEnabled?: boolean; collectionsEnabled?: boolean } = $props();
+	}: { siteName?: string; collectionsEnabled?: boolean } = $props();
 
-	// Stickers and Collections are content-gated like the tab-bar pills: the
-	// link drops out while its section has no published content (About/Gallery
-	// always show). The defaults fail OPEN so a caller passing no flags keeps
-	// every link.
+	// Collections is content-gated: the link drops out while no collection
+	// exists (About/Gallery always show). The default fails OPEN so a caller
+	// passing no flag keeps every link. Stickers and VR avatars are tabs of the
+	// gallery (GalleryTabs), so they sit under Gallery rather than here.
 	const navItems = $derived([
 		{ href: '/gallery', label: m.nav_gallery },
-		...(stickersEnabled ? [{ href: '/stickers', label: m.nav_stickers }] : []),
 		...(collectionsEnabled ? [{ href: '/collections', label: m.nav_collections }] : []),
 		{ href: '/about', label: m.nav_about }
 	]);
@@ -32,15 +31,11 @@
 			     settings. -->
 			<nav aria-label={m.nav_main_label()}>
 				{#each navItems as item (item.href)}
-					{@const active = $page.url.pathname.startsWith(item.href)}
-					<!-- "page" only on the section's own page: a piece under /gallery is in
-					     the Gallery section ("true") but is not the Gallery page. -->
-					<a
-						href={item.href}
-						class="nav-link"
-						class:active
-						aria-current={$page.url.pathname === item.href ? 'page' : active ? 'true' : undefined}
-					>
+					{@const current = navCurrent(item.href, $page.url.pathname)}
+					<!-- "page" only on the section's own page: a piece under /gallery, or
+					     /stickers, is in the Gallery section ("true") but is not the
+					     Gallery page. -->
+					<a href={item.href} class="nav-link" class:active={!!current} aria-current={current}>
 						{item.label()}
 					</a>
 				{/each}

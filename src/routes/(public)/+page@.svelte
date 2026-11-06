@@ -76,7 +76,6 @@
 	<div class="landing">
 		<Header
 			siteName={data.settings.siteName}
-			stickersEnabled={data.stickersEnabled}
 			collectionsEnabled={data.collectionsEnabled}
 		/>
 
@@ -115,13 +114,12 @@
 		</main>
 	</div>
 
-	<MobileNav stickersEnabled={data.stickersEnabled} />
+	<MobileNav />
 {:else if passport}
 	<!-- The passport composes the same chrome as the mosaic branch below. -->
 	<div class="public-layout">
 		<Header
 			siteName={data.settings.siteName}
-			stickersEnabled={data.stickersEnabled}
 			collectionsEnabled={data.collectionsEnabled}
 		/>
 		<main id="main-content" tabindex="-1" class="passport container">
@@ -131,13 +129,12 @@
 			<Footer settings={data.settings} host={data.host} />
 		</div>
 		<MobileCredit settings={data.settings} host={data.host} />
-		<MobileNav stickersEnabled={data.stickersEnabled} />
+		<MobileNav />
 	</div>
 {:else}
 	<div class="public-layout">
 		<Header
 			siteName={data.settings.siteName}
-			stickersEnabled={data.stickersEnabled}
 			collectionsEnabled={data.collectionsEnabled}
 		/>
 		<main id="main-content" tabindex="-1">
@@ -175,7 +172,7 @@
 			<Footer settings={data.settings} host={data.host} />
 		</div>
 		<MobileCredit settings={data.settings} host={data.host} />
-		<MobileNav stickersEnabled={data.stickersEnabled} />
+		<MobileNav />
 	</div>
 {/if}
 

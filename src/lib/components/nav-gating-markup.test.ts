@@ -1,59 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// Source-pins for the content-gating conditionals around the Stickers tab
-// pills, and for the stickers/collections flags reaching the nav components,
-// per the vr/[slug]/nsfw-markup.test.ts precedent:
-// nothing else executes these wrappers, and a deleted {#if} fails silently
-// (the link simply renders again on a fork with no content behind it). Each
-// pin is a minimal discriminator fragment — the flag next to the href it
-// gates — not a verbatim copy of the whole expression.
+// Source-pins for the Collections flag reaching the Header, per the
+// vr/[slug]/nsfw-markup.test.ts precedent: the Header's default fails OPEN,
+// so a dropped prop pass silently un-gates the link and nothing else would
+// notice. The gallery tab bar's gating lives in galleryTabs
+// ($lib/gallery-tabs.test.ts), and GalleryTabs takes every flag as a required
+// prop, so the type check catches a dropped one there.
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-const gallerySrc = read('../../routes/(public)/gallery/+page.svelte');
-const vrSrc = read('../../routes/(public)/vr/+page.svelte');
 const publicLayoutSrc = read('../../routes/(public)/+layout.svelte');
 const homeSrc = read('../../routes/(public)/+page@.svelte');
-const pathsLayoutSrc = read('../../routes/(paths)/+layout.svelte');
 
-describe('gallery tab bar gating markup', () => {
-	it('wraps the Stickers pill in the stickersEnabled conditional', () => {
-		expect(gallerySrc).toMatch(/\{#if data\.stickersEnabled\}\s*<a href="\/stickers"/);
-	});
-
-	it('suppresses the whole tab bar unless a second pill would show', () => {
-		expect(gallerySrc).toMatch(
-			/\{#if data\.fursuitEnabled \|\| data\.stickersEnabled \|\| data\.vrEnabled\}\s*<div class="tabs"/
-		);
-	});
-});
-
-describe('/vr tab bar gating markup', () => {
-	it('wraps the Stickers pill in the stickersEnabled conditional', () => {
-		expect(vrSrc).toMatch(/\{#if data\.stickersEnabled\}\s*<a href="\/stickers"/);
-	});
-});
-
-describe('the flags are actually plumbed into the nav components', () => {
-	// The component defaults fail OPEN, so a dropped prop pass silently
-	// un-gates the nav — pin each pass site. The Header pins are scoped to the
-	// <Header …> tag so the sibling MobileNav pass can't satisfy them.
-	it('(public) layout passes both flags to Header and the stickers flag to MobileNav', () => {
-		expect(publicLayoutSrc).toMatch(/<Header[^>]*stickersEnabled=\{data\.stickersEnabled\}/);
+describe('the Collections flag is plumbed into the Header', () => {
+	it('(public) layout passes it', () => {
 		expect(publicLayoutSrc).toMatch(/<Header[^>]*collectionsEnabled=\{data\.collectionsEnabled\}/);
-		expect(publicLayoutSrc).toContain('<MobileNav stickersEnabled={data.stickersEnabled} />');
 	});
 
-	it('the homepage (+page@ escapes that layout) passes them to EVERY branch', () => {
-		// threePath, passport and mosaic: 3 Headers + 3 MobileNavs carry the
-		// stickers flag; all three Headers carry the collections flag — a dropped
-		// pass anywhere lowers its count.
-		expect(homeSrc.match(/stickersEnabled=\{data\.stickersEnabled\}/g)).toHaveLength(6);
+	it('the homepage (+page@ escapes that layout) passes it to EVERY branch', () => {
+		// threePath, passport and mosaic each render a Header; a dropped pass
+		// anywhere lowers the count.
 		expect(homeSrc.match(/collectionsEnabled=\{data\.collectionsEnabled\}/g)).toHaveLength(3);
-	});
-
-	it('the (paths) layout passes the stickers flag to MobileNav', () => {
-		expect(pathsLayoutSrc).toContain('<MobileNav stickersEnabled={data.stickersEnabled} />');
 	});
 });

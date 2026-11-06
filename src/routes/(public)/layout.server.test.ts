@@ -4,18 +4,16 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import type { D1Database } from '@cloudflare/workers-types';
 import { clearSettingsCache } from '$lib/server/settings';
-import { clearStickerTabCache } from '$lib/server/stickers';
 import { clearCollectionsNavCache } from '$lib/server/collections';
 import { makeD1 } from '$lib/server/test/d1';
 
 import { load } from './+layout.server';
 
-// Only the tables the layout load touches: settings plus the two nav probes.
+// Only the tables the layout load touches: settings plus the Collections nav probe.
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
 		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 		CREATE TABLE collections (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL,
 			cover_image_url TEXT, created_at TEXT NOT NULL DEFAULT ''
@@ -25,13 +23,12 @@ function makeDb() {
 	return { sqlite, platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
 
-type LayoutData = { stickersEnabled: boolean; collectionsEnabled: boolean; host: string };
+type LayoutData = { collectionsEnabled: boolean; host: string };
 
 async function loadData(platform: App.Platform): Promise<LayoutData> {
-	// The probe caches are per-isolate; clear them so each load sees the current
+	// The probe cache is per-isolate; clear it so each load sees the current
 	// DB (the matrices below re-query after seeding). The caching behavior
 	// itself is pinned by the dedicated test at the bottom.
-	clearStickerTabCache();
 	clearCollectionsNavCache();
 	return (await load({ platform, url: new URL('http://example.ink/gallery') } as never)) as LayoutData;
 }
@@ -84,19 +81,10 @@ describe('(public) layout load — settings payload', () => {
 });
 
 describe('(public) layout load — nav content gating', () => {
-	it('hides both gated links on an empty fork', async () => {
+	it('hides the Collections link on an empty fork', async () => {
 		const { platform } = makeDb();
 		const data = await loadData(platform);
-		expect(data.stickersEnabled).toBe(false);
 		expect(data.collectionsEnabled).toBe(false);
-	});
-
-	it('shows the Stickers link only once a PUBLISHED pack exists (drafts stay hidden)', async () => {
-		const { sqlite, platform } = makeDb();
-		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (0)').run();
-		expect((await loadData(platform)).stickersEnabled).toBe(false);
-		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
-		expect((await loadData(platform)).stickersEnabled).toBe(true);
 	});
 
 	it('shows the Collections link on bare row existence — mirroring the /collections page, which lists a collection even with zero published images', async () => {
@@ -105,7 +93,7 @@ describe('(public) layout load — nav content gating', () => {
 		expect((await loadData(platform)).collectionsEnabled).toBe(true);
 	});
 
-	it('fails OPEN (links shown) when the probes hit a D1 failure', async () => {
+	it('fails OPEN (link shown) when the probe hits a D1 failure', async () => {
 		// Same posture as the settings read this load already caps: a dead link
 		// during a transient D1 blip beats hiding sections of a healthy site.
 		const failingD1 = {
@@ -116,32 +104,23 @@ describe('(public) layout load — nav content gating', () => {
 		const platform = { env: { DB: failingD1 } } as unknown as App.Platform;
 
 		const data = await loadData(platform);
-		expect(data.stickersEnabled).toBe(true);
 		expect(data.collectionsEnabled).toBe(true);
 	});
 
-	it('caches the probe results per-isolate (stale until cleared, like the settings cache)', async () => {
-		// These probes run on EVERY public request — a repeat load must not
+	it('caches the probe result per-isolate (stale until cleared, like the settings cache)', async () => {
+		// The probe runs on EVERY public request — a repeat load must not
 		// re-query D1. Prove it via staleness: seed content AFTER a load and the
-		// flags stay false until the caches are cleared.
+		// flag stays false until the cache is cleared.
 		const { sqlite, platform } = makeDb();
-		expect(await loadData(platform)).toMatchObject({
-			stickersEnabled: false,
-			collectionsEnabled: false
-		});
+		expect(await loadData(platform)).toMatchObject({ collectionsEnabled: false });
 
-		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
 		sqlite.prepare("INSERT INTO collections (name, slug) VALUES ('C', 'c')").run();
 		const stale = (await load({
 			platform,
 			url: new URL('http://example.ink/gallery')
 		} as never)) as LayoutData;
-		expect(stale.stickersEnabled).toBe(false);
 		expect(stale.collectionsEnabled).toBe(false);
 
-		expect(await loadData(platform)).toMatchObject({
-			stickersEnabled: true,
-			collectionsEnabled: true
-		});
+		expect(await loadData(platform)).toMatchObject({ collectionsEnabled: true });
 	});
 });

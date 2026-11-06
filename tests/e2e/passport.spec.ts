@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoRetrying } from './admin-login';
+import { gotoRetrying, waitForHydration } from './admin-login';
 import { expectHeaderTogglesWork, expectSkipLinkReachesMain, waitForNavHeight } from './site-chrome-helpers';
+import { countViewTransitions, inPlaceState, markWindow } from './in-place';
 
 // The passport homepage (landingLayout = 'passport'), end to end. This file runs
 // under two projects, each on its own seeded server (see playwright.config.ts):
@@ -294,9 +295,8 @@ test.describe('populated passport', () => {
 
 	// The header and the phone tab bar say which page this is ("page") on the
 	// Gallery itself, and only which section ("true") on a piece inside it. The
-	// root and an unrelated page (About) mark only their own links. This is the
-	// rendered check that the unit suite's source pins in
-	// chrome-a11y-markup.test.ts stand in for.
+	// root and an unrelated page (About) mark only their own links. navCurrent
+	// itself is unit-tested in src/lib/nav.test.ts.
 	test('marks the Gallery nav links as the current page or the current section', async ({ page }) => {
 		const links = () => [page.locator('header a.nav-link[href="/gallery"]'), page.locator('nav.mobile-nav a[href="/gallery"]')];
 		const aboutLinks = () => [page.locator('header a.nav-link[href="/about"]'), page.locator('nav.mobile-nav a[href="/about"]')];
@@ -315,6 +315,18 @@ test.describe('populated passport', () => {
 
 		await page.goto('/gallery/mature-ref-sheet');
 		for (const link of links()) await expect(link).toHaveAttribute('aria-current', 'true');
+
+		// Stickers and VR avatars are tabs of the gallery, so their pages sit in
+		// the Gallery section too. This server has fursuit photos, so their tab
+		// bars carry the Fursuit Photos tab as well.
+		for (const path of ['/stickers', '/vr']) {
+			await page.goto(path);
+			for (const link of links()) await expect(link, path).toHaveAttribute('aria-current', 'true');
+			const fursuitTab = page
+				.getByRole('navigation', { name: 'Gallery', exact: true })
+				.getByRole('link', { name: 'Fursuit Photos' });
+			await expect(fursuitTab, path).toHaveAttribute('href', '/gallery?view=fursuit');
+		}
 
 		await page.goto('/about');
 		for (const link of aboutLinks()) await expect(link).toHaveAttribute('aria-current', 'page');
@@ -350,8 +362,8 @@ test.describe('populated passport', () => {
 	});
 
 	// The gallery's filter row: every input and select has a name, the view toggle says
-	// which view is on without colour, and the view switch is plain buttons and
-	// links marked like the nav, not a tablist with no tabpanels.
+	// which view is on without colour, and the view switch is plain links marked
+	// like the nav, not a tablist with no tabpanels.
 	test('names the gallery filters and marks the current view and layout', async ({ page }) => {
 		await page.goto('/gallery');
 		for (const name of ['Tag', 'Artist', 'Character', 'Sort by']) {
@@ -383,13 +395,16 @@ test.describe('populated passport', () => {
 		}).toPass();
 		await expect(page.getByRole('button', { name: 'Grid view' })).toHaveAttribute('aria-pressed', 'false');
 
-		const tabs = page.locator('.tabs');
+		const tabs = page.getByRole('navigation', { name: 'Gallery', exact: true });
 		await expect(page.getByRole('tablist')).toHaveCount(0);
-		await expect(tabs.getByRole('button', { name: 'Artwork' })).toHaveAttribute('aria-current', 'page');
+		await expect(tabs.getByRole('link', { name: 'Artwork' })).toHaveAttribute('aria-current', 'page');
 		await expect(tabs.locator('[aria-current]')).toHaveCount(1);
 
+		// Fursuit Photos is a link like the rest, and keeps the active filters.
+		await page.goto('/gallery?q=zzz');
+		await expect(tabs.getByRole('link', { name: 'Fursuit Photos' })).toHaveAttribute('href', '/gallery?q=zzz&view=fursuit');
 		await page.goto('/gallery?view=fursuit');
-		await expect(tabs.getByRole('button', { name: 'Fursuit Photos' })).toHaveAttribute('aria-current', 'page');
+		await expect(tabs.getByRole('link', { name: 'Fursuit Photos' })).toHaveAttribute('aria-current', 'page');
 		await expect(tabs.locator('[aria-current]')).toHaveCount(1);
 		for (const name of ['Photographer', 'Event']) {
 			await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
@@ -399,6 +414,94 @@ test.describe('populated passport', () => {
 		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
 		await page.goto('/gallery');
 		await expectArtistEmptyState(page, 'アーティスト', '一致するアーティストはいません');
+	});
+
+	// The Artwork and Fursuit Photos tabs are links built from the current URL,
+	// so a filter changed in place (no new page load) has to reach their hrefs
+	// too. The switch happens in place and replaces the history entry.
+	test('carries a filter changed in place across the Artwork and Fursuit Photos tabs', async ({ page }) => {
+		await page.goto('/gallery');
+		await waitForHydration(page);
+		const tabs = page.getByRole('navigation', { name: 'Gallery', exact: true });
+		const fursuit = tabs.getByRole('link', { name: 'Fursuit Photos' });
+		const artwork = tabs.getByRole('link', { name: 'Artwork' });
+		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
+
+		const search = page.getByRole('searchbox', { name: 'Search artworks', exact: true });
+		await search.fill('sheet');
+		await search.press('Enter');
+		await expect(page).toHaveURL(/\/gallery\?q=sheet$/);
+		await expect(fursuit).toHaveAttribute('href', '/gallery?q=sheet&view=fursuit');
+
+		await fursuit.click();
+		await expect(page).toHaveURL(/\/gallery\?q=sheet&view=fursuit$/);
+		await expect(fursuit).toHaveAttribute('aria-current', 'page');
+		await expect(page.getByRole('combobox', { name: 'Photographer', exact: true })).toBeVisible();
+
+		await artwork.click();
+		await expect(page).toHaveURL(/\/gallery\?q=sheet$/);
+		await expect(artwork).toHaveAttribute('aria-current', 'page');
+
+		// The switch replaced the history entry rather than pushing one, as the
+		// filters do: Back leaves the views and the search behind together.
+		await page.goBack();
+		await expect(page).not.toHaveURL(/\/gallery/);
+	});
+
+	// The Artwork/Fursuit switch stays on /gallery, so it updates in place like
+	// a filter change (#515): no scroll to the top, focus stays on the tab, and
+	// no new history entry. Leaving for /vr is a new page.
+	test('switches Artwork and Fursuit Photos in place by keyboard, and leaves for VR normally', async ({
+		page
+	}, testInfo) => {
+		await page.setViewportSize({ width: 1280, height: 420 });
+		await countViewTransitions(page);
+		await page.goto('/gallery');
+		await waitForHydration(page);
+		await markWindow(page);
+		const tabs = page.getByRole('navigation', { name: 'Gallery', exact: true });
+		const fursuit = tabs.getByRole('link', { name: 'Fursuit Photos' });
+		const artwork = tabs.getByRole('link', { name: 'Artwork' });
+
+		// Scrolled a little, with the tab bar still on screen.
+		await page.evaluate(() => window.scrollTo(0, 40));
+		await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(40);
+		await expect(fursuit).toBeInViewport();
+		const historyBefore = await page.evaluate(() => history.length);
+		const activeTab = () =>
+			page.evaluate(() => {
+				const el = document.activeElement as HTMLAnchorElement | null;
+				return { tag: el?.tagName, text: el?.textContent?.trim(), href: el?.getAttribute('href') };
+			});
+
+		await fursuit.focus();
+		await page.keyboard.press('Enter');
+		await expect(page).toHaveURL(/\/gallery\?view=fursuit$/);
+		await expect(fursuit).toHaveAttribute('aria-current', 'page');
+		await expect(artwork).not.toHaveAttribute('aria-current');
+		await expect(page.getByRole('combobox', { name: 'Photographer', exact: true })).toBeVisible();
+		expect(await page.evaluate(() => window.scrollY)).toBe(40);
+		expect(await activeTab()).toEqual({ tag: 'A', text: 'Fursuit Photos', href: '/gallery?view=fursuit' });
+		expect(await page.evaluate(() => history.length)).toBe(historyBefore);
+		expect(await inPlaceState(page)).toEqual({ sameWindow: true, transitions: 0 });
+		await page.screenshot({ path: testInfo.outputPath('in-place-switch-fursuit.png') });
+
+		await artwork.focus();
+		await page.keyboard.press('Enter');
+		await expect(page).toHaveURL(/\/gallery$/);
+		await expect(artwork).toHaveAttribute('aria-current', 'page');
+		await expect(fursuit).not.toHaveAttribute('aria-current');
+		expect(await page.evaluate(() => window.scrollY)).toBe(40);
+		expect(await activeTab()).toEqual({ tag: 'A', text: 'Artwork', href: '/gallery' });
+		expect(await page.evaluate(() => history.length)).toBe(historyBefore);
+		expect(await inPlaceState(page)).toEqual({ sameWindow: true, transitions: 0 });
+
+		// VR is another page (this server has avatars, not stickers): it pushes
+		// history and starts at the top.
+		await tabs.getByRole('link', { name: 'VR Avatars' }).click();
+		await expect(page).toHaveURL(/\/vr$/);
+		expect(await page.evaluate(() => history.length)).toBe(historyBefore + 1);
+		await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
 	});
 
 	// Strict line-break gives way when a word cannot fit its box, so at 320px

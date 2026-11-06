@@ -54,15 +54,15 @@ test('the signed-in admin shell starts with a skip link that moves focus into th
 
 // WCAG 1.4.4 and 1.4.10 on the admin images page: the floating upload button
 // shows only on phones and sits above the bottom nav by the same clearance the
-// layouts use, so at 320px with 200% text it must still clear the taller bar.
-// Japanese, because at 200% the four English tabs fit one row.
-test('the admin upload button clears the wrapped bottom nav at 320px and 200% text', async ({ page }) => {
+// layouts use, so at 320px with enlarged text it must still clear the taller
+// bar. Japanese at 300%, the one size where the three tabs wrap.
+test('the admin upload button clears the wrapped bottom nav at 320px and 300% text', async ({ page }) => {
 	await loginRetrying(page, PASSWORD);
 	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
 	await page.setViewportSize({ width: 320, height: 800 });
 	await gotoAfterLogin(page, '/admin/images');
 	await expect(page.locator('.fab')).toBeVisible();
-	await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+	await page.addStyleTag({ content: 'html { font-size: 300% !important; }' });
 	await waitForNavHeight(page);
 
 	const rows = await navRowCount(page);

@@ -72,7 +72,6 @@ function loadSplash(platform: App.Platform) {
 	return load({ platform, url: new URL('http://example.ink/') } as never) as Promise<{
 		settings: { landingLayout: string };
 		pathPresence: { art: boolean; share: boolean };
-		stickersEnabled: boolean;
 		collectionsEnabled: boolean;
 	}>;
 }
@@ -219,37 +218,31 @@ describe('splash load — pathPresence card flags (#42)', () => {
 		expect(data.pathPresence).toEqual({ art: true, share: false });
 	});
 
-	it('returns the nav-gating flags for the Header/MobileNav this page renders itself', async () => {
+	it('returns the nav-gating flag for the Header this page renders itself', async () => {
 		// +page@ escapes the (public) layout, so ITS load must carry the same
 		// flags that layout plumbs on every other public page.
 		const { sqlite, db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: 'landingLayout', value: 'threePath' });
 
 		let data = await loadSplash(platform);
-		expect(data.stickersEnabled).toBe(false);
 		expect(data.collectionsEnabled).toBe(false);
 
-		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
 		sqlite.prepare("INSERT INTO collections (name, slug) VALUES ('C', 'c')").run();
 		data = await loadSplash(platform);
-		expect(data.stickersEnabled).toBe(true);
 		expect(data.collectionsEnabled).toBe(true);
 	});
 
 	it('returns the nav-gating flags on the mosaic branch too (landingLayout at its default)', async () => {
-		// No landingLayout row → the default 'mosaic' branch, whose Header/
-		// MobileNav renders take the same flags as the splash branch's.
+		// No landingLayout row → the default 'mosaic' branch, whose Header
+		// render takes the same flag as the splash branch's.
 		const { sqlite, platform } = makeDb();
 
 		let data = await loadSplash(platform);
 		expect(data.settings.landingLayout).toBe('mosaic');
-		expect(data.stickersEnabled).toBe(false);
 		expect(data.collectionsEnabled).toBe(false);
 
-		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
 		sqlite.prepare("INSERT INTO collections (name, slug) VALUES ('C', 'c')").run();
 		data = await loadSplash(platform);
-		expect(data.stickersEnabled).toBe(true);
 		expect(data.collectionsEnabled).toBe(true);
 	});
 

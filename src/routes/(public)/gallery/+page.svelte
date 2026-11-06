@@ -7,6 +7,7 @@
 	import { Search, ChevronDown, LayoutGrid, List, ImageOff, ArrowRight } from 'lucide-svelte';
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import FursuitPhotoCard from '$lib/components/FursuitPhotoCard.svelte';
+	import GalleryTabs from '$lib/components/GalleryTabs.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate, cdnImage, rawFallback } from '$lib';
 	import { galleryContextQuery, galleryPageHref } from '$lib/gallery';
@@ -158,9 +159,6 @@
 <div class="container gallery-page">
 	<div class="page-header">
 		<h1>{m.gallery_title()}</h1>
-		<p class="count">
-			{isFursuit ? m.gallery_count_fursuit({ count: data.fursuitPhotos.length }) : m.gallery_count_artwork({ count: data.total })}
-		</p>
 	</div>
 
 	<!-- Filter changes keep focus on the control, so this live region is how a
@@ -168,39 +166,19 @@
 	     the sort too, so a change that keeps the count still changes the text. -->
 	<p class="sr-only" role="status">{resultStatus}</p>
 
-	<!-- Suppressed when only Artwork would show (fresh fork, every other section
-	     gated off): a lone-pill segmented control reads as broken, and there is
-	     nothing to switch to. Not a tablist: Stickers and VR are links to other
-	     pages and there are no tabpanels, so the current view is marked the way
-	     the nav marks it. -->
-	{#if data.fursuitEnabled || data.stickersEnabled || data.vrEnabled}
-		<div class="tabs">
-			<button
-				class="tab"
-				class:active={!isFursuit}
-				aria-current={!isFursuit ? 'page' : undefined}
-				onclick={() => updateFilter('view', '')}
-			>
-				{m.gallery_view_artwork()}
-			</button>
-			{#if data.fursuitEnabled}
-				<button
-					class="tab"
-					class:active={isFursuit}
-					aria-current={isFursuit ? 'page' : undefined}
-					onclick={() => updateFilter('view', 'fursuit')}
-				>
-					{m.gallery_view_fursuit()}
-				</button>
-			{/if}
-			{#if data.stickersEnabled}
-				<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
-			{/if}
-			{#if data.vrEnabled}
-				<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
-			{/if}
-		</div>
-	{/if}
+	<GalleryTabs
+		current={isFursuit ? 'fursuit' : 'artwork'}
+		fursuitEnabled={data.fursuitEnabled}
+		stickersEnabled={data.stickersEnabled}
+		vrEnabled={data.vrEnabled}
+		galleryParams={pageState.url.searchParams}
+	/>
+
+	<!-- Under the bar, not in the header: the header is the h1 alone on all
+	     three pages, so a second line that wraps cannot move the bar. -->
+	<p class="count">
+		{isFursuit ? m.gallery_count_fursuit({ count: data.fursuitPhotos.length }) : m.gallery_count_artwork({ count: data.total })}
+	</p>
 
 	{#if isFursuit}
 		{#if data.fursuitPhotographers.length > 0 || data.fursuitEvents.length > 0}
@@ -512,7 +490,7 @@
 	}
 
 	.page-header {
-		margin-bottom: 24px;
+		margin-bottom: 16px;
 	}
 
 	.page-header h1 {
@@ -520,49 +498,9 @@
 	}
 
 	.count {
+		margin-bottom: 16px;
 		font-size: 14px;
 		color: var(--muted-foreground);
-	}
-
-	/* Pill segmented control, matching the tab bars on /stickers and /vr. Its
-	   --input boundary is the edge the selects and the view toggle in this row also
-	   carry, so the row reads as one family of controls (SONA-126). */
-	.tabs {
-		display: inline-flex;
-		gap: 8px;
-		margin-bottom: 24px;
-		padding: 4px;
-		border: 1px solid var(--input);
-		border-radius: var(--radius-pill);
-		background: var(--secondary);
-	}
-
-	.tab {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 6px 12px;
-		border-radius: var(--radius-pill);
-		border: none;
-		background: none;
-		font-family: var(--font-secondary);
-		font-size: 14px;
-		font-weight: 500;
-		color: var(--muted-foreground);
-		cursor: pointer;
-		transition: color 0.15s, background 0.15s;
-		text-decoration: none;
-	}
-
-	.tab:hover {
-		color: var(--foreground);
-		text-decoration: none;
-	}
-
-	.tab.active {
-		color: var(--foreground);
-		background: var(--background);
-		box-shadow: 0 1px 3.5px rgba(0, 0, 0, 0.06);
 	}
 
 	.fursuit-empty {

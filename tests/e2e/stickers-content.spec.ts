@@ -1,13 +1,14 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { navRowCount, serveScaled, waitForNavHeight } from './site-chrome-helpers';
 import { countViewTransitions, inPlaceState, markWindow } from './in-place';
+import { waitForHydration } from './admin-login';
 
 // The ungated half of the nav content-gating rule, and the only end-to-end proof
 // that a sticker pack renders at all.
 //
 // nav-gating.spec.ts covers the other half on the shared server, whose fixture
-// deliberately has ZERO packs: that is what makes the header, the bottom nav and
-// the gallery tab bar render their gated state. A published pack in that fixture
+// deliberately has ZERO packs: that is what makes the gallery tab bar render
+// its gated state. A published pack in that fixture
 // would delete the coverage, so this spec gets its own seeded database and dev
 // server, with tests/e2e/fixtures/stickers.sql layered on the shared fixture
 // (see tests/e2e/paths.ts). One published pack, two SFW stickers, both credited
@@ -45,32 +46,352 @@ test('the pack page shows both stickers', async ({ page }) => {
 	await expect(page.locator(`.sticker-grid a[href="/stickers/${PACK_SLUG}/2"]`)).toHaveCount(1);
 });
 
-test('the Stickers link is ungated once a published pack exists', async ({ page }) => {
-	await page.goto('/gallery');
+// Stickers and VR avatars are tabs of the gallery, not top-nav items. This is
+// the server where the Stickers tab shows, so the gallery's tab bar carries
+// Artwork, Stickers and VR Avatars (the shared fixture's published avatar),
+// and the same bar, with its own tab current, heads /stickers and /vr.
+// nav-gating.spec.ts covers the zero-pack half: no Stickers tab at all.
+const galleryTabBar = (page: Page) => page.getByRole('navigation', { name: 'Gallery', exact: true });
 
-	// The twin of nav-gating.spec.ts, which asserts these are absent on a fork
-	// with no packs. Same three places, opposite expectation.
-	await expect(page.locator('.header nav a[href="/stickers"]')).toBeVisible();
-	await expect(page.locator('.tabs a[href="/stickers"]')).toBeVisible();
+/** The bar's tab labels, the one marked current, and where it sits. */
+async function tabBarState(page: Page) {
+	const bar = galleryTabBar(page);
+	await expect(bar).toBeVisible();
+	return {
+		labels: await bar.getByRole('link').allTextContents().then((t) => t.map((l) => l.trim())),
+		current: (await bar.locator('a[aria-current="page"]').allTextContents()).map((l) => l.trim()),
+		box: await bar.boundingBox()
+	};
+}
 
-	await page.setViewportSize({ width: 390, height: 844 });
+test('the gallery tab bar takes a visitor to /stickers and /vr under the same bar', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.goto('/gallery');
-	await expect(page.locator('.mobile-nav a[href="/stickers"]')).toBeVisible();
+	const onGallery = await tabBarState(page);
+	expect(onGallery.labels).toEqual(['Artwork', 'Stickers', 'VR Avatars']);
+	expect(onGallery.current).toEqual(['Artwork']);
+	// Links that navigate, so not a tablist.
+	await expect(page.getByRole('tablist')).toHaveCount(0);
+
+	const header = page.locator('.header nav');
+	const galleryLink = header.getByRole('link', { name: 'Gallery', exact: true });
+	await expect(galleryLink).toHaveAttribute('aria-current', 'page');
+
+	await galleryTabBar(page).getByRole('link', { name: 'Stickers' }).click();
+	await expect(page).toHaveURL(/\/stickers$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Stickers' })).toBeVisible();
+	const onStickers = await tabBarState(page);
+	expect(onStickers.labels).toEqual(onGallery.labels);
+	expect(onStickers.current).toEqual(['Stickers']);
+	// The bar does not jump between its pages.
+	expect(onStickers.box).toEqual(onGallery.box);
+	// Gallery stays the current section in the header, and the header has no
+	// Stickers or VR link of its own.
+	await expect(galleryLink).toHaveAttribute('aria-current', 'true');
+	await expect(galleryLink).toHaveClass(/\bactive\b/);
+	await expect(header.locator('a[href="/stickers"], a[href="/vr"]')).toHaveCount(0);
+
+	await galleryTabBar(page).getByRole('link', { name: 'VR Avatars' }).click();
+	await expect(page).toHaveURL(/\/vr$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'VR avatars' })).toBeVisible();
+	const onVr = await tabBarState(page);
+	expect(onVr.labels).toEqual(onGallery.labels);
+	expect(onVr.current).toEqual(['VR Avatars']);
+	expect(onVr.box).toEqual(onGallery.box);
+	await expect(galleryLink).toHaveAttribute('aria-current', 'true');
+
+	await galleryTabBar(page).getByRole('link', { name: 'Artwork' }).click();
+	await expect(page).toHaveURL(/\/gallery$/);
+	expect((await tabBarState(page)).current).toEqual(['Artwork']);
 });
 
-// WCAG 1.4.4 and 1.4.10 on the bottom nav. This server is the one where the
-// Stickers tab shows, so the bar carries its widest set of four tabs. With
-// enlarged text the labels must actually grow (a px size ignores the reader's
-// setting), every tab and label must stay inside the viewport, no tab may sit
-// alone on a row, and the page's last line must still clear the bar. English
-// fits one row at 320px and 200%; Japanese, and English at 300%, go two per row.
+test('the current tab links to the page as it is, filter included', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.goto(`/stickers?emoji=${encodeURIComponent('🦊')}`);
+	const current = galleryTabBar(page).locator('a[aria-current="page"]');
+	await expect(current).toHaveText('Stickers');
+	const here = await page.evaluate(() => location.pathname + location.search);
+	expect(here).toContain('emoji=');
+	await expect(current).toHaveAttribute('href', here);
+
+	// Clicking it keeps the filter.
+	await current.click();
+	await expect(page).toHaveURL((url) => url.pathname + url.search === here);
+});
+
+test('the tab bar is reached with Tab in reading order, current tab included', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.goto('/stickers');
+	const links = galleryTabBar(page).getByRole('link');
+	await links.first().focus();
+	for (const name of ['Stickers', 'VR Avatars']) {
+		await page.keyboard.press('Tab');
+		await expect(galleryTabBar(page).getByRole('link', { name })).toBeFocused();
+	}
+});
+
+test('a sticker pack page keeps its back link and shows no tab bar, like a gallery piece', async ({ page }) => {
+	await page.goto(`/stickers/${PACK_SLUG}`);
+	await expect(page.locator('a.back-link[href="/stickers"]')).toBeVisible();
+	await expect(galleryTabBar(page)).toHaveCount(0);
+	await expect(page.locator('.header nav').getByRole('link', { name: 'Gallery', exact: true })).toHaveAttribute(
+		'aria-current',
+		'true'
+	);
+});
+
+test('the Japanese tab bar and nav name the sections in Japanese', async ({ page }) => {
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+	await page.goto('/stickers');
+	const bar = page.getByRole('navigation', { name: 'ギャラリー', exact: true });
+	await expect(bar.getByRole('link')).toHaveText(['イラスト', 'ステッカー', 'VRアバター']);
+	await expect(bar.locator('a[aria-current="page"]')).toHaveText('ステッカー');
+	await expect(page.locator('.header nav a[href="/stickers"]')).toHaveCount(0);
+});
+
+test('on a phone the bottom nav has no Stickers tab and marks Gallery on /stickers', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto('/gallery');
+	const onGallery = (await tabBarState(page)).box;
+	await page.goto('/stickers');
+	expect((await tabBarState(page)).box?.y, 'the bar moved between /gallery and /stickers').toBe(onGallery?.y);
+	const mobileNav = page.locator('nav.mobile-nav');
+	await expect(mobileNav.getByRole('link')).toHaveText(['Home', 'Gallery', 'About']);
+	await expect(mobileNav.getByRole('link', { name: 'Gallery' })).toHaveAttribute('aria-current', 'true');
+	// The gallery's tab bar stands in for the bottom nav's old Stickers tab,
+	// and fits the screen.
+	const box = (await tabBarState(page)).box!;
+	expect(box.x).toBeGreaterThanOrEqual(0);
+	expect(box.x + box.width).toBeLessThanOrEqual(390);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+const localTabBar = (page: Page, locale: string) =>
+	page.getByRole('navigation', { name: locale === 'ja' ? 'ギャラリー' : 'Gallery', exact: true });
+
+// On narrow phones the pages' second lines differ in length: /stickers'
+// subtitle wraps (Japanese at 320px), /gallery's and /vr's counts do not. The
+// bar sits above those lines, so it stays put when they wrap. The fixture's
+// owner name is a short 'E2E'; a real one, like the name swapped in below,
+// wraps the subtitle at 360px in Japanese and 320px in English too.
+const POSITION_CASES = [
+	{ locale: 'ja', width: 320 },
+	{ locale: 'ja', width: 360 },
+	{ locale: 'en', width: 320 }
+];
+for (const { locale, width } of POSITION_CASES) {
+	test(`the ${locale} gallery bar sits at the same height on /gallery, /stickers and /vr at ${width}px`, async ({
+		page
+	}) => {
+		await page.setViewportSize({ width, height: 800 });
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, domain: 'localhost', path: '/' }]);
+		const tops: Record<string, number | undefined> = {};
+		for (const url of ['/gallery', '/stickers', '/vr']) {
+			await page.goto(url);
+			const bar = localTabBar(page, locale);
+			await expect(bar).toBeVisible();
+			if (url === '/stickers') {
+				const subtitle = page.locator('main p', { hasText: 'Telegram' });
+				await subtitle.evaluate((p) => (p.textContent = p.textContent!.replace('E2E', 'Kestrel Moonfeather')));
+				await expect(subtitle).toContainText('Kestrel Moonfeather');
+			}
+			tops[url] = (await bar.boundingBox())?.y;
+		}
+		expect(tops['/stickers'], `the bar moved: ${JSON.stringify(tops)}`).toBe(tops['/gallery']);
+		expect(tops['/vr'], `the bar moved: ${JSON.stringify(tops)}`).toBe(tops['/gallery']);
+	});
+}
+
+/** Where each tab of the gallery bar sits, whether its label broke onto a
+ * second line or spilled out of the tab, and whether the page scrolls sideways. */
+async function measureTabBar(bar: Locator) {
+	return bar.evaluate((bar) => {
+		const tabs = [...bar.querySelectorAll<HTMLElement>('.tab')].map((tab) => {
+			const r = tab.getBoundingClientRect();
+			// One client rect per rendered line of the label.
+			const range = document.createRange();
+			range.selectNodeContents(tab);
+			const lines = new Set([...range.getClientRects()].map((l) => Math.round(l.top))).size;
+			const spills = tab.scrollWidth > tab.clientWidth;
+			return { left: r.left, right: r.right, top: Math.round(r.top), width: r.width, lines, spills };
+		});
+		const b = bar.getBoundingClientRect();
+		return { tabs, bar: { left: b.left, right: b.right }, docWidth: document.documentElement.scrollWidth, vw: innerWidth };
+	});
+}
+
+function expectTabBarFits(m: Awaited<ReturnType<typeof measureTabBar>>) {
+	expect(m.docWidth, 'the page scrolls sideways').toBeLessThanOrEqual(m.vw);
+	expect(m.bar.left).toBeGreaterThanOrEqual(0);
+	expect(m.bar.right).toBeLessThanOrEqual(m.vw);
+	for (const t of m.tabs) {
+		expect(t.left).toBeGreaterThanOrEqual(0);
+		expect(t.right).toBeLessThanOrEqual(m.vw);
+		expect(t.lines, 'a label breaks inside its tab').toBe(1);
+		expect(t.spills, 'a label spills out of its tab').toBe(false);
+	}
+}
+
+/** Rows of the bar, top to bottom, as the number of tabs on each. */
+const rowsOf = (m: Awaited<ReturnType<typeof measureTabBar>>) => {
+	const rows = new Map<number, number>();
+	for (const t of m.tabs) rows.set(t.top, (rows.get(t.top) ?? 0) + 1);
+	return [...rows.entries()].sort(([a], [b]) => a - b).map(([, n]) => n);
+};
+
+// With all four sections the bar is at its widest. This server has no
+// fursuit photos (FurTrack is off here, and only the passport server turns it
+// on, where a sticker pack would change the homepage's stamps), so the test
+// copies the real Stickers tab into a Fursuit Photos tab after Artwork. The
+// bar's own CSS lays it out, as it would a rendered fourth tab. On a phone the
+// four tabs do not fit one row, so they form an even two-by-two grid: no
+// label breaks, nothing leaves the screen, and no tab sits alone on a row.
+const FOUR_TAB_CASES = [
+	{ width: 320, rows: [2, 2] },
+	{ width: 360, rows: [2, 2] },
+	{ width: 390, rows: [2, 2] },
+	{ width: 1280, rows: [4] }
+];
+for (const locale of ['en', 'ja']) {
+	for (const { width, rows } of FOUR_TAB_CASES) {
+		test(`the ${locale} gallery bar with four tabs fits a ${width}px screen`, async ({ page }, testInfo) => {
+			await page.setViewportSize({ width, height: 800 });
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, domain: 'localhost', path: '/' }]);
+			await page.goto('/gallery');
+			await waitForHydration(page);
+			const bar = localTabBar(page, locale);
+			await bar.evaluate((el, label) => {
+				const fursuit = el.querySelector('a[href="/stickers"]')!.cloneNode(true) as HTMLElement;
+				fursuit.textContent = label;
+				fursuit.setAttribute('href', '/gallery?view=fursuit');
+				el.querySelector('.tab')!.after(fursuit);
+			}, locale === 'ja' ? '着ぐるみ写真' : 'Fursuit Photos');
+			await expect(bar.locator('.tab')).toHaveCount(4);
+
+			const m = await measureTabBar(bar);
+			expectTabBarFits(m);
+			expect(rowsOf(m)).toEqual(rows);
+			if (rows.length > 1) {
+				// Two even columns.
+				const widths = m.tabs.map((t) => Math.round(t.width));
+				expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
+			}
+			await bar.screenshot({ path: testInfo.outputPath(`gallery-tabs-4-${width}-${locale}.png`) });
+		});
+	}
+}
+
+// Three tabs (Artwork, Stickers, VR Avatars). At the narrowest screen: two
+// rows, the last tab across the second, with no label broken. From a 360px
+// phone up, one row.
+const THREE_TAB_CASES = [
+	{ width: 320, rows: [2, 1] },
+	{ width: 360, rows: [3] },
+	{ width: 390, rows: [3] },
+	{ width: 1280, rows: [3] }
+];
+for (const locale of ['en', 'ja']) {
+	for (const { width, rows } of THREE_TAB_CASES) {
+		test(`the ${locale} gallery bar with three tabs fits a ${width}px screen`, async ({ page }, testInfo) => {
+			await page.setViewportSize({ width, height: 800 });
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, domain: 'localhost', path: '/' }]);
+			await page.goto('/gallery');
+			const bar = localTabBar(page, locale);
+			await expect(bar.locator('.tab')).toHaveCount(3);
+			const m = await measureTabBar(bar);
+			expectTabBarFits(m);
+			expect(rowsOf(m)).toEqual(rows);
+			if (rows.length > 1) {
+				// The last tab spans the whole second row.
+				const [first, second, third] = m.tabs;
+				expect(third.left).toBeCloseTo(first.left, 0);
+				expect(third.right).toBeCloseTo(second.right, 0);
+			}
+			await bar.screenshot({ path: testInfo.outputPath(`gallery-tabs-3-${width}-${locale}.png`) });
+		});
+	}
+}
+
+// Two tabs, as on a site whose only other section is VR avatars: the test
+// takes the Stickers tab out of the bar. They keep one row while it fits,
+// and stack once the bar is narrower than 16em, here by narrowing the bar's
+// box rather than the screen.
+const TWO_TAB_CASES = [
+	{ barWidth: 240, rows: [2] },
+	{ barWidth: 220, rows: [1, 1] }
+];
+for (const locale of ['en', 'ja']) {
+	for (const { barWidth, rows } of TWO_TAB_CASES) {
+		test(`the ${locale} gallery bar with two tabs fits a ${barWidth}px box`, async ({ page }, testInfo) => {
+			await page.setViewportSize({ width: 320, height: 800 });
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, domain: 'localhost', path: '/' }]);
+			await page.goto('/gallery');
+			await waitForHydration(page);
+			const bar = localTabBar(page, locale);
+			await bar.evaluate((el, w) => {
+				el.querySelector('a[href="/stickers"]')!.remove();
+				(el.parentElement as HTMLElement).style.width = `${w}px`;
+			}, barWidth);
+			await expect(bar.locator('.tab')).toHaveCount(2);
+			const m = await measureTabBar(bar);
+			expectTabBarFits(m);
+			expect(m.bar.right - m.bar.left, 'the bar outgrows its box').toBeLessThanOrEqual(barWidth);
+			expect(rowsOf(m)).toEqual(rows);
+			await bar.screenshot({ path: testInfo.outputPath(`gallery-tabs-2-${barWidth}-${locale}.png`) });
+		});
+	}
+}
+
+// Text-only zoom (Firefox and Safari) scales px font sizes, so 200% text
+// turns the bar's 14px labels into 28px ones. The test sets that size on the
+// bar itself, which is what such zoom does to it. Two columns can't hold the
+// longest label at that size on a 320px screen, so every tab gets a row.
+for (const locale of ['en', 'ja']) {
+	for (const count of [3, 4]) {
+		test(`the ${locale} gallery bar with ${count} tabs fits a 320px screen at 200% text`, async ({
+			page
+		}, testInfo) => {
+			await page.setViewportSize({ width: 320, height: 800 });
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, domain: 'localhost', path: '/' }]);
+			await page.goto('/gallery');
+			await waitForHydration(page);
+			const bar = localTabBar(page, locale);
+			await bar.evaluate(
+				(el, { label, count }) => {
+					if (count === 4) {
+						const fursuit = el.querySelector('a[href="/stickers"]')!.cloneNode(true) as HTMLElement;
+						fursuit.textContent = label;
+						fursuit.setAttribute('href', '/gallery?view=fursuit');
+						el.querySelector('.tab')!.after(fursuit);
+					}
+					(el.parentElement as HTMLElement).style.fontSize = '28px';
+				},
+				{ label: locale === 'ja' ? '着ぐるみ写真' : 'Fursuit Photos', count }
+			);
+			await expect(bar.locator('.tab')).toHaveCount(count);
+			expect(await bar.locator('.tab').first().evaluate((el) => getComputedStyle(el).fontSize)).toBe('28px');
+			const m = await measureTabBar(bar);
+			expectTabBarFits(m);
+			expect(rowsOf(m)).toEqual(Array(count).fill(1));
+			await bar.screenshot({ path: testInfo.outputPath(`gallery-tabs-${count}-320-200pct-${locale}.png`) });
+		});
+	}
+}
+
+// WCAG 1.4.4 and 1.4.10 on the bottom nav, which holds three tabs: Home,
+// Gallery and About. With enlarged text the labels must actually grow (a px
+// size ignores the reader's setting), every tab and label must stay inside
+// the viewport, and the page's last line must still clear the bar. English
+// fits one row at 320px up to 300%; Japanese breaks its labels at 200% and
+// wraps the last tab onto a row of its own at 300%.
 const NAV_CASES = [
-	{ locale: 'en', stickers: 'Stickers', scale: 2, rows: 1, oneLineLabels: true },
-	{ locale: 'en', stickers: 'Stickers', scale: 3, rows: 2, oneLineLabels: true },
-	{ locale: 'ja', stickers: 'ステッカー', scale: 2, rows: 2, oneLineLabels: false }
+	{ locale: 'en', scale: 2, rows: 1, oneLineLabels: true },
+	{ locale: 'en', scale: 3, rows: 1, oneLineLabels: true },
+	{ locale: 'ja', scale: 2, rows: 1, oneLineLabels: false },
+	{ locale: 'ja', scale: 3, rows: 2, oneLineLabels: false }
 ];
 
-for (const { locale, stickers, scale, rows, oneLineLabels } of NAV_CASES) {
+for (const { locale, scale, rows, oneLineLabels } of NAV_CASES) {
 	test(`the ${locale} bottom nav fits a 320px screen at ${scale * 100}% text in ${rows === 1 ? 'one row' : 'two rows'}`, async ({
 		page
 	}, testInfo) => {
@@ -78,7 +399,7 @@ for (const { locale, stickers, scale, rows, oneLineLabels } of NAV_CASES) {
 		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, domain: 'localhost', path: '/' }]);
 		await page.goto('/gallery');
 		const nav = page.locator('nav.mobile-nav');
-		await expect(nav.getByRole('link', { name: stickers })).toBeVisible();
+		await expect(nav.locator('.tab')).toHaveCount(3);
 		const baseSize = await nav.locator('.tab span').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
 
 		await page.addStyleTag({ content: `html { font-size: ${scale * 100}% !important; }` });
@@ -106,7 +427,7 @@ for (const { locale, stickers, scale, rows, oneLineLabels } of NAV_CASES) {
 			const lowest = Math.max(...[...el.querySelectorAll('.tab')].map((t) => t.getBoundingClientRect().bottom));
 			return { tabs, docWidth: document.documentElement.scrollWidth, vw: innerWidth, edgeGap: innerHeight - lowest };
 		});
-		expect(m.tabs).toHaveLength(4);
+		expect(m.tabs).toHaveLength(3);
 		expect(m.docWidth).toBeLessThanOrEqual(m.vw);
 		// The last row, and the active mark in it, keeps clear of the screen's edge.
 		expect(m.edgeGap, 'space under the last row of tabs').toBeGreaterThanOrEqual(8);
@@ -123,7 +444,6 @@ for (const { locale, stickers, scale, rows, oneLineLabels } of NAV_CASES) {
 		const perRow = new Map<number, number>();
 		for (const { t } of m.tabs) perRow.set(Math.round(t.top), (perRow.get(Math.round(t.top)) ?? 0) + 1);
 		expect(perRow.size).toBe(rows);
-		for (const count of perRow.values()) expect(count, 'a tab sits alone on a row').toBeGreaterThan(1);
 
 		// The last line of the page still clears the bar.
 		await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -138,7 +458,7 @@ for (const { locale, stickers, scale, rows, oneLineLabels } of NAV_CASES) {
 	});
 }
 
-// At a normal text size on a common phone, the four tabs and the header both
+// At a normal text size on a common phone, the tabs and the header both
 // fit: one row of tabs, and the header's name and toggles on one line.
 for (const locale of ['en', 'ja']) {
 	test(`the ${locale} bottom nav is one row under a one-line header at 390px`, async ({ page }, testInfo) => {
@@ -178,13 +498,13 @@ async function lastContentAgainstNav(page: Page) {
 }
 
 // The (paths) layout clears the bar with the same variable as the gallery's
-// credit, so /connect's last line must clear the wrapped bar as well. Japanese,
-// because at 200% the four English tabs fit one row.
-test('the connect page clears the wrapped bottom nav at 320px and 200% text', async ({ page }) => {
+// credit, so /connect's last line must clear the wrapped bar as well. Japanese
+// at 300%, the one size where the three tabs wrap.
+test('the connect page clears the wrapped bottom nav at 320px and 300% text', async ({ page }) => {
 	await page.setViewportSize({ width: 320, height: 800 });
 	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
 	await page.goto('/connect');
-	await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+	await page.addStyleTag({ content: 'html { font-size: 300% !important; }' });
 	await waitForNavHeight(page);
 	const { lastBottom, last, navTop } = await lastContentAgainstNav(page);
 	expect(lastBottom).toBeGreaterThan(0);
@@ -200,11 +520,11 @@ test.describe('with JavaScript off', () => {
 	test.use({ javaScriptEnabled: false });
 
 	for (const url of ['/gallery', '/connect']) {
-		test(`${url} clears the wrapped bottom nav at 320px and 200% text`, async ({ page }) => {
+		test(`${url} clears the wrapped bottom nav at 320px and 300% text`, async ({ page }) => {
 			await page.setViewportSize({ width: 320, height: 800 });
-			// Japanese, because at 200% the four English tabs fit one row.
+			// Japanese at 300%, the one size where the three tabs wrap.
 			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
-			await serveScaled(page, url, 2);
+			await serveScaled(page, url, 3);
 			await page.goto(url);
 			const rows = await navRowCount(page);
 			expect(rows, 'the bar wraps at this size, or this test proves nothing').toBeGreaterThan(1);
