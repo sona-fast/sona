@@ -418,7 +418,7 @@ test.describe('populated passport', () => {
 
 	// The Artwork and Fursuit Photos tabs are links built from the current URL,
 	// so a filter changed in place (no new page load) has to reach their hrefs
-	// too. They navigate, so each switch is a history entry Back returns to.
+	// too. The switch happens in place and replaces the history entry.
 	test('carries a filter changed in place across the Artwork and Fursuit Photos tabs', async ({ page }) => {
 		await page.goto('/gallery');
 		await waitForHydration(page);
