@@ -166,7 +166,11 @@ jobs:
             echo "No memory samples were recorded."
           fi
           echo "Kernel out-of-memory and crash lines:"
-          sudo dmesg -T | grep -iE 'out of memory|oom-kill|killed process|segfault|workerd' || echo "None."
+          if kernel=$(sudo dmesg -T 2>&1); then
+            grep -iE 'out of memory|oom-kill|killed process|segfault|workerd' <<< "$kernel" || echo "None."
+          else
+            echo "Could not read the kernel log: $kernel"
+          fi
           # A healed workerd crash lets the shard pass, so raise each one as a
           # warning on the run's summary page instead of leaving it in the log.
           heals=$(grep -c '\[platform-proxy-heal\]' "$RUNNER_TEMP/e2e.log" 2>/dev/null || true)
