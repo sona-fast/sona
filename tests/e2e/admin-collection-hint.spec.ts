@@ -15,7 +15,7 @@ failOnPageErrors();
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
-const HINT = "Variants show in their parent's collection on the public site.";
+const HINT = "Variants show in their parent's collection on the public site while the parent is published.";
 
 const collection = (page: Page) => page.getByRole('combobox', { name: 'Collection', exact: true });
 const hint = (page: Page) => page.getByText(HINT);

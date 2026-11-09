@@ -223,7 +223,7 @@ test('the Collection note shows while the files are added as variants of an exis
 	// Variants show under their parent's collection on the public site. A new
 	// set gives its parent this collection too, so only the existing-piece mode
 	// gets the note, and the select names it through aria-describedby.
-	const HINT = "Variants show in their parent's collection on the public site.";
+	const HINT = "Variants show in their parent's collection on the public site while the parent is published.";
 	const collection = page.getByRole('combobox', { name: 'Collection', exact: true });
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/upload');
