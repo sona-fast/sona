@@ -130,7 +130,34 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
+      # Samples memory every 15 seconds while the tests run, so a shard that
+      # fails can be checked for memory pressure. A dev server's workerd that
+      # dies mid-run is rebuilt by scripts/platform-proxy-heal.js, which logs a
+      # [platform-proxy-heal] line; this shows whether memory was the cause.
+      - name: Start memory sampler
+        run: |
+          nohup bash -c 'while :; do
+            { date -u +%T; free -m | sed -n 2p; ps -eo rss=,comm= --sort=-rss | head -5; echo; } >> "$RUNNER_TEMP/memory.log"
+            sleep 15
+          done' > /dev/null 2>&1 &
+
       - run: npm run test:e2e
+
+      # Runs after a failure or the job timeout too. Prints the lowest available
+      # memory, the last samples, and any kernel out-of-memory or crash lines.
+      - name: Memory report
+        if: always()
+        run: |
+          log="$RUNNER_TEMP/memory.log"
+          if [ -f "$log" ]; then
+            echo "Lowest available memory (MB): $(awk '$1 == "Mem:" { print $7 }' "$log" | sort -n | head -1)"
+            echo "Last samples:"
+            tail -n 40 "$log"
+          else
+            echo "No memory samples were recorded."
+          fi
+          echo "Kernel out-of-memory and crash lines:"
+          sudo dmesg -T | grep -iE 'out of memory|oom-kill|killed process|segfault|workerd' || echo "None."
 
   # The required status check. Branch protection names `e2e`, so this job keeps
   # that name and passes only when every shard did.
