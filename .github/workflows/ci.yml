@@ -144,7 +144,10 @@ jobs:
       # The output is also kept in a file so the report below can find
       # [platform-proxy-heal] lines. shell: bash adds pipefail, so a test
       # failure still fails this step through the pipe.
+      # 35 of the job's 40 minutes: a hung run fails here, which leaves the
+      # memory report below time to print before the job limit cancels it.
       - name: Run e2e tests
+        timeout-minutes: 35
         shell: bash
         run: npm run test:e2e 2>&1 | tee "$RUNNER_TEMP/e2e.log"
 
