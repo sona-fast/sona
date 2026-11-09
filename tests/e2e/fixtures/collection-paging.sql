@@ -13,9 +13,15 @@
 -- collection must never show up. Artist 1 (Test Artist) comes from the base
 -- seed. The thumbnail key follows the '/img/e2e/<name>-thumb.png' pattern, so
 -- seed.ts puts the committed PNG under it.
+--
+-- Variant Piece NSFW (2), a version of Parent Piece SFW, is filed in a second
+-- collection on its own row. A version follows its original's collection, so
+-- its page must name E2E Collection, never E2E Other Collection. Collection
+-- grids list only originals, so the other collection's grid stays empty.
 INSERT OR REPLACE INTO collections (id, name, slug, cover_image_url, created_at)
 VALUES
-  (1, 'E2E Collection', 'e2e-collection', NULL, '2026-07-01T00:00:00.000Z');
+  (1, 'E2E Collection', 'e2e-collection', NULL, '2026-07-01T00:00:00.000Z'),
+  (2, 'E2E Other Collection', 'e2e-other-collection', NULL, '2026-07-02T00:00:00.000Z');
 
 INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, collection_id, created_at)
@@ -28,3 +34,4 @@ VALUES
    900, 700, 0, 0, 1, NULL, NULL, 1, '2026-07-02T00:00:00.000Z');
 
 UPDATE images SET collection_id = 1 WHERE id IN (1, 5);
+UPDATE images SET collection_id = 2 WHERE id = 2;
