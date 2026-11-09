@@ -143,6 +143,26 @@ describe('healingAdapter', () => {
 		expect(built).toHaveLength(1);
 	});
 
+	it('lets a later request retry when the first platform build fails', async () => {
+		let calls = 0;
+		const env = { DB: stub().proxy };
+		const adapter = {
+			name: 'flaky',
+			adapt: async () => {},
+			emulate: () => ({
+				platform: async () => {
+					calls += 1;
+					if (calls === 1) throw new Error('runtime not ready');
+					return { env };
+				}
+			})
+		};
+		const emulator = await healingAdapter(adapter as never, () => {}).emulate!();
+		await expect(emulator.platform(req as never)).rejects.toThrow('runtime not ready');
+		const p = await emulator.platform(req as never);
+		expect(p.env).toBe(env);
+	});
+
 	it('leaves an adapter without emulate as it is', () => {
 		const plain = { name: 'plain', adapt: async () => {} };
 		expect(healingAdapter(plain as never)).toBe(plain);

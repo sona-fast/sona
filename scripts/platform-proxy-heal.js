@@ -68,7 +68,11 @@ export function healingAdapter(adapter, log = (message) => console.error(message
 		return async (opts) => {
 			const e = await emulator;
 			if (!e.platform) return undefined;
-			built ??= Promise.resolve(e.platform({ ...opts, prerender: false }));
+			// A failed build is forgotten, so the next request tries again.
+			built ??= Promise.resolve(e.platform({ ...opts, prerender: false })).catch((error) => {
+				built = undefined;
+				throw error;
+			});
 			await built;
 			return e.platform(opts);
 		};

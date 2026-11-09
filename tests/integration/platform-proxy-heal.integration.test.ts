@@ -41,7 +41,8 @@ async function waitFor(check: () => boolean, ms = 15_000) {
 	}
 }
 
-describe('healingAdapter against a real workerd restart', () => {
+// pgrep finds the workerd children, so the test needs a Unix host.
+describe.skipIf(process.platform === 'win32')('healingAdapter against a real workerd restart', () => {
 	it('gives the next request working bindings after workerd is killed', async () => {
 		const base = adapter({
 			platformProxy: {
