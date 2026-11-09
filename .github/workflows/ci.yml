@@ -141,10 +141,16 @@ jobs:
             sleep 15
           done' > /dev/null 2>&1 &
 
-      - run: npm run test:e2e
+      # The output is also kept in a file so the report below can find
+      # [platform-proxy-heal] lines. shell: bash adds pipefail, so a test
+      # failure still fails this step through the pipe.
+      - name: Run e2e tests
+        shell: bash
+        run: npm run test:e2e 2>&1 | tee "$RUNNER_TEMP/e2e.log"
 
       # Runs after a failure or the job timeout too. Prints the lowest available
-      # memory, the last samples, and any kernel out-of-memory or crash lines.
+      # memory, the last samples, any kernel out-of-memory or crash lines, and
+      # how many dev servers were rebuilt after a workerd restart.
       - name: Memory report
         if: always()
         run: |
@@ -158,6 +164,13 @@ jobs:
           fi
           echo "Kernel out-of-memory and crash lines:"
           sudo dmesg -T | grep -iE 'out of memory|oom-kill|killed process|segfault|workerd' || echo "None."
+          # A healed workerd crash lets the shard pass, so raise each one as a
+          # warning on the run's summary page instead of leaving it in the log.
+          heals=$(grep -c '\[platform-proxy-heal\]' "$RUNNER_TEMP/e2e.log" 2>/dev/null || true)
+          echo "Dev servers rebuilt after a workerd restart: ${heals:-0}"
+          grep '\[platform-proxy-heal\]' "$RUNNER_TEMP/e2e.log" 2>/dev/null | while IFS= read -r line; do
+            echo "::warning title=workerd restarted under an e2e dev server::$line"
+          done || true
 
   # The required status check. Branch protection names `e2e`, so this job keeps
   # that name and passes only when every shard did.
