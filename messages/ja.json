@@ -112,6 +112,8 @@
 	"gallery_previous": "前へ",
 	"gallery_next": "次へ",
 	"gallery_pager_label": "ギャラリーを順に見る",
+	"gallery_pager_label_collection": "{collection}を順に見る",
+	"gallery_pager_position": "{collection}の{total}点中{position}点目",
 	"gallery_previous_piece": "前へ：{title}",
 	"gallery_next_piece": "次へ：{title}",
 	"gallery_fursuit_capped": "最新の写真を表示しています — 古い写真はまだ読み込まれていません。",

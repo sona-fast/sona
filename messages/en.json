@@ -140,6 +140,8 @@
 	"gallery_previous": "Previous",
 	"gallery_next": "Next",
 	"gallery_pager_label": "Browse the gallery",
+	"gallery_pager_label_collection": "Browse {collection}",
+	"gallery_pager_position": "{position} of {total} in {collection}",
 	"gallery_previous_piece": "Previous: {title}",
 	"gallery_next_piece": "Next: {title}",
 	"gallery_fursuit_capped": "Showing the most recent photos — older ones aren't loaded yet.",
