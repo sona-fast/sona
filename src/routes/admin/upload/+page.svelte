@@ -1798,15 +1798,28 @@
 		{/if}
 	</fieldset>
 
-	<label>
-		<span>{m.admin_field_collection()}</span>
-		<select class="input" name="collectionId">
-			<option value="">{m.admin_upload_no_collection()}</option>
-			{#each data.collections as collection}
-				<option value={collection.id}>{collection.name}</option>
-			{/each}
-		</select>
-	</label>
+	<!-- Added as variants of an existing piece (picked here, or fixed by a
+	     linked entry), every file shows under that piece's collection on the
+	     public site. A new set gives its parent this collection too, so it needs
+	     no note. Outside the label so it stays out of the select's name. -->
+	<div class="field">
+		<label>
+			<span>{m.admin_field_collection()}</span>
+			<select
+				class="input"
+				name="collectionId"
+				aria-describedby={groupMode === 'existing' ? 'collection-variant-hint' : undefined}
+			>
+				<option value="">{m.admin_upload_no_collection()}</option>
+				{#each data.collections as collection}
+					<option value={collection.id}>{collection.name}</option>
+				{/each}
+			</select>
+		</label>
+		{#if groupMode === 'existing'}
+			<small class="hint" id="collection-variant-hint">{m.admin_collection_variant_hint()}</small>
+		{/if}
+	</div>
 
 	<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
 	     beside the input and the accepted tags are readable without truncation.

@@ -217,6 +217,31 @@ test('the Tags hint says accepted tags cover the batch only while the batch has 
 	await expect(page.locator('#tags-hint')).toContainText('Suggestions come from entail.dev');
 });
 
+test('the Collection note shows while the files are added as variants of an existing piece', async ({
+	page
+}) => {
+	// Variants show under their parent's collection on the public site. A new
+	// set gives its parent this collection too, so only the existing-piece mode
+	// gets the note, and the select names it through aria-describedby.
+	const HINT = "Variants show in their parent's collection on the public site.";
+	const collection = page.getByRole('combobox', { name: 'Collection', exact: true });
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/upload');
+	await expect(page.getByText(HINT)).toHaveCount(0);
+	await expect(collection).not.toHaveAttribute('aria-describedby');
+
+	await stageFiles(page, [{ name: 'e2e-collection-hint.png', mimeType: 'image/png', buffer: PNG }], 1);
+	await expect(page.getByText(HINT)).toHaveCount(0);
+
+	await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+	await expect(page.getByText(HINT)).toBeVisible();
+	await expect(collection).toHaveAccessibleDescription(HINT);
+
+	await page.getByRole('radio', { name: 'New piece' }).check();
+	await expect(page.getByText(HINT)).toHaveCount(0);
+	await expect(collection).not.toHaveAttribute('aria-describedby');
+});
+
 test('the batch sentence stays off the hint while it refuses the source URL', async ({ page }) => {
 	// Appended to a refusal, the batch sentence would answer a link the site
 	// cannot look up with a note about where accepted tags go.

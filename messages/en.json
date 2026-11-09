@@ -511,6 +511,7 @@
 	"admin_upload_select_artist": "Select artist...",
 	"admin_upload_artist_name_placeholder": "Artist name...",
 	"admin_upload_no_collection": "No collection",
+	"admin_collection_variant_hint": "Variants show in their parent's collection on the public site.",
 	"admin_upload_tags_placeholder": "fox, nature, fantasy...",
 	"admin_upload_existing_tags": "Existing: {tags}",
 	"admin_upload_source_placeholder": "https://twitter.com/artist/status/... or furaffinity.net/view/...",
