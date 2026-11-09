@@ -41,6 +41,14 @@ const CONTEXT_PARAMS = {
 	character: 'character'
 } as const;
 
+// Each /gallery view's own filter params: the Artwork grid reads the context
+// params above plus `sort`, and the Fursuit Photos view reads `photographer`
+// and `event` (see the gallery's +page.server.ts). The two views share no
+// filter, so the Artwork and Fursuit tabs each drop the other view's params.
+// `page` and `view` are neither: the tabs handle those themselves.
+export const ARTWORK_FILTER_PARAMS: readonly string[] = [...Object.values(CONTEXT_PARAMS), 'sort'];
+export const FURSUIT_FILTER_PARAMS: readonly string[] = ['photographer', 'event'];
+
 // Every filter feeds an unindexed scan, so a filter longer than any real title,
 // tag or name is cut here rather than handed to D1. 200 is the longest value
 // the site stores: the admin forms and the registry import cap titles and

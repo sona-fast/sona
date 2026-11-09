@@ -442,6 +442,7 @@
 	"admin_upload_select_artist": "アーティストを選択...",
 	"admin_upload_artist_name_placeholder": "アーティスト名...",
 	"admin_upload_no_collection": "コレクションなし",
+	"admin_collection_variant_hint": "親が公開されている場合、バリエーションは公開サイトでは親のコレクションに表示されます。",
 	"admin_upload_tags_placeholder": "例: fox, nature, fantasy",
 	"admin_upload_existing_tags": "既存: {tags}",
 	"admin_upload_source_placeholder": "https://twitter.com/artist/status/... や furaffinity.net/view/... など",

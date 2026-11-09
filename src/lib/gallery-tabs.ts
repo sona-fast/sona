@@ -2,7 +2,7 @@
 // under the Gallery nav item, and every tab is a link to its section, so the
 // bar reads the same wherever it shows.
 
-import { galleryPageHref } from '$lib/gallery';
+import { ARTWORK_FILTER_PARAMS, FURSUIT_FILTER_PARAMS, galleryPageHref } from '$lib/gallery';
 
 export type GallerySection = 'artwork' | 'fursuit' | 'stickers' | 'vr';
 
@@ -22,8 +22,9 @@ export type GalleryTabsInput = {
 	fursuitEnabled: boolean;
 	stickersEnabled: boolean;
 	vrEnabled: boolean;
-	/** On /gallery, the URL's query: switching between Artwork and Fursuit
-	 * keeps the visitor's filters, as the in-page toggle always has. */
+	/** On /gallery, the URL's query. Switching between Artwork and Fursuit
+	 * keeps the target view's own filters and drops the other view's, which
+	 * would do nothing there. Params neither view reads ride along. */
 	galleryParams?: URLSearchParams;
 	/** The current URL's path and query. The current tab links here, so
 	 * clicking it keeps the page number and filters rather than resetting them. */
@@ -32,6 +33,9 @@ export type GalleryTabsInput = {
 
 function galleryHref(params: URLSearchParams | undefined, view: 'artwork' | 'fursuit'): string {
 	const next = new URLSearchParams(params);
+	// The views share no filter: a photographer means nothing to the Artwork
+	// grid, nor a search to Fursuit Photos.
+	for (const key of view === 'fursuit' ? ARTWORK_FILTER_PARAMS : FURSUIT_FILTER_PARAMS) next.delete(key);
 	if (view === 'fursuit') next.set('view', 'fursuit');
 	else next.delete('view');
 	// Page 1: a page number belongs to the view it was picked in.
