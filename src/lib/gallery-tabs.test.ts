@@ -60,20 +60,42 @@ describe('galleryTabs: links', () => {
 		expect(tabs.map((t) => t.href)).toEqual(['/gallery', '/gallery?view=fursuit', '/stickers', '/vr']);
 	});
 
-	it('keeps the gallery filters when switching between Artwork and Fursuit', () => {
-		const galleryParams = new URLSearchParams('q=fox&tag=sketch&page=3');
+	it("drops the Artwork filters from the Fursuit link: they do nothing there", () => {
+		const galleryParams = new URLSearchParams('q=fox&tag=sketch&artist=Ami&character=Kit&sort=oldest&page=3');
 		const onArtwork = galleryTabs({ current: 'artwork', ...all, galleryParams });
-		expect(href(onArtwork, 'fursuit')).toBe('/gallery?q=fox&tag=sketch&view=fursuit');
-		// The page number belongs to the view it was picked in.
-		expect(href(onArtwork, 'artwork')).toBe('/gallery?q=fox&tag=sketch');
+		expect(href(onArtwork, 'fursuit')).toBe('/gallery?view=fursuit');
+	});
+
+	it('drops the Fursuit filters from the Artwork link: they do nothing there', () => {
+		const galleryParams = new URLSearchParams('view=fursuit&photographer=Lens&event=Con');
+		const onFursuit = galleryTabs({ current: 'fursuit', ...all, galleryParams });
+		expect(href(onFursuit, 'artwork')).toBe('/gallery');
+	});
+
+	it("keeps each view's own filters on its own link, page reset to 1", () => {
+		// A stray filter from the other view (a hand-edited or old shared URL)
+		// drops; the view's own filters stay, and the page number does not.
+		const galleryParams = new URLSearchParams(
+			'q=fox&tag=sketch&artist=Ami&character=Kit&sort=oldest&photographer=Lens&event=Con&page=3'
+		);
+		const onArtwork = galleryTabs({ current: 'artwork', ...all, galleryParams });
+		expect(href(onArtwork, 'artwork')).toBe('/gallery?q=fox&tag=sketch&artist=Ami&character=Kit&sort=oldest');
+		expect(href(onArtwork, 'fursuit')).toBe('/gallery?photographer=Lens&event=Con&view=fursuit');
 
 		const onFursuit = galleryTabs({
 			current: 'fursuit',
 			...all,
-			galleryParams: new URLSearchParams('view=fursuit&photographer=Kit&q=fox')
+			galleryParams: new URLSearchParams(`view=fursuit&${galleryParams}`)
 		});
-		expect(href(onFursuit, 'artwork')).toBe('/gallery?photographer=Kit&q=fox');
-		expect(href(onFursuit, 'fursuit')).toBe('/gallery?view=fursuit&photographer=Kit&q=fox');
+		expect(href(onFursuit, 'fursuit')).toBe('/gallery?view=fursuit&photographer=Lens&event=Con');
+		expect(href(onFursuit, 'artwork')).toBe('/gallery?q=fox&tag=sketch&artist=Ami&character=Kit&sort=oldest');
+	});
+
+	it('keeps params neither view reads on both links', () => {
+		const galleryParams = new URLSearchParams('lang=ja&utm_source=bsky&q=fox&photographer=Lens');
+		const onArtwork = galleryTabs({ current: 'artwork', ...all, galleryParams });
+		expect(href(onArtwork, 'fursuit')).toBe('/gallery?lang=ja&utm_source=bsky&photographer=Lens&view=fursuit');
+		expect(href(onArtwork, 'artwork')).toBe('/gallery?lang=ja&utm_source=bsky&q=fox');
 	});
 
 	it('leaves the Stickers and VR links bare, whatever the gallery query', () => {
@@ -90,8 +112,19 @@ describe('galleryTabs: links', () => {
 			currentHref: '/gallery?q=fox&page=3'
 		});
 		expect(href(onArtwork, 'artwork')).toBe('/gallery?q=fox&page=3');
-		// The other view still starts at page 1.
-		expect(href(onArtwork, 'fursuit')).toBe('/gallery?q=fox&view=fursuit');
+		// The other view starts at page 1, without the Artwork search.
+		expect(href(onArtwork, 'fursuit')).toBe('/gallery?view=fursuit');
+	});
+
+	it('links the current Fursuit tab to the current URL, so clicking it keeps its filters', () => {
+		const onFursuit = galleryTabs({
+			current: 'fursuit',
+			...all,
+			galleryParams: new URLSearchParams('view=fursuit&photographer=Lens'),
+			currentHref: '/gallery?view=fursuit&photographer=Lens'
+		});
+		expect(href(onFursuit, 'fursuit')).toBe('/gallery?view=fursuit&photographer=Lens');
+		expect(href(onFursuit, 'artwork')).toBe('/gallery');
 	});
 
 	it('links the current Stickers tab to the filtered /stickers URL, not bare /stickers', () => {

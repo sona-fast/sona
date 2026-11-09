@@ -26,6 +26,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// read replica (eventually consistent); admin writes use the primary
 	const db = getReadDb(platform!.env.DB);
 
+	// A filter param added here belongs in ARTWORK_FILTER_PARAMS or
+	// FURSUIT_FILTER_PARAMS ($lib/gallery) too, so the view tabs drop it from
+	// the other view.
 	const search = galleryFilterParam(url.searchParams, 'q');
 	const tagFilter = galleryFilterParam(url.searchParams, 'tag');
 	const artistFilter = galleryFilterParam(url.searchParams, 'artist');
