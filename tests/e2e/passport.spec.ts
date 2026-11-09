@@ -400,9 +400,10 @@ test.describe('populated passport', () => {
 		await expect(tabs.getByRole('link', { name: 'Artwork' })).toHaveAttribute('aria-current', 'page');
 		await expect(tabs.locator('[aria-current]')).toHaveCount(1);
 
-		// Fursuit Photos is a link like the rest, and keeps the active filters.
+		// Fursuit Photos is a link like the rest. The artwork search does nothing
+		// there, so the link drops it.
 		await page.goto('/gallery?q=zzz');
-		await expect(tabs.getByRole('link', { name: 'Fursuit Photos' })).toHaveAttribute('href', '/gallery?q=zzz&view=fursuit');
+		await expect(tabs.getByRole('link', { name: 'Fursuit Photos' })).toHaveAttribute('href', '/gallery?view=fursuit');
 		await page.goto('/gallery?view=fursuit');
 		await expect(tabs.getByRole('link', { name: 'Fursuit Photos' })).toHaveAttribute('aria-current', 'page');
 		await expect(tabs.locator('[aria-current]')).toHaveCount(1);
@@ -418,32 +419,47 @@ test.describe('populated passport', () => {
 
 	// The Artwork and Fursuit Photos tabs are links built from the current URL,
 	// so a filter changed in place (no new page load) has to reach their hrefs
-	// too. The switch happens in place and replaces the history entry.
-	test('carries a filter changed in place across the Artwork and Fursuit Photos tabs', async ({ page }) => {
+	// too. Each tab keeps only its own view's filters: the views share none, so
+	// an artwork search stays off the Fursuit link and a photographer stays off
+	// the Artwork link. The switch happens in place and replaces the history
+	// entry.
+	test("keeps each view's own filters, changed in place, off the other view's tab", async ({ page }, testInfo) => {
 		await page.goto('/gallery');
 		await waitForHydration(page);
 		const tabs = page.getByRole('navigation', { name: 'Gallery', exact: true });
 		const fursuit = tabs.getByRole('link', { name: 'Fursuit Photos' });
 		const artwork = tabs.getByRole('link', { name: 'Artwork' });
 		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
+		const historyBefore = await page.evaluate(() => history.length);
 
 		const search = page.getByRole('searchbox', { name: 'Search artworks', exact: true });
 		await search.fill('sheet');
 		await search.press('Enter');
 		await expect(page).toHaveURL(/\/gallery\?q=sheet$/);
-		await expect(fursuit).toHaveAttribute('href', '/gallery?q=sheet&view=fursuit');
+		// The current tab keeps the search; the Fursuit link leaves it behind.
+		await expect(artwork).toHaveAttribute('href', '/gallery?q=sheet');
+		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit');
 
 		await fursuit.click();
-		await expect(page).toHaveURL(/\/gallery\?q=sheet&view=fursuit$/);
+		await expect(page).toHaveURL(/\/gallery\?view=fursuit$/);
 		await expect(fursuit).toHaveAttribute('aria-current', 'page');
-		await expect(page.getByRole('combobox', { name: 'Photographer', exact: true })).toBeVisible();
+		const photographer = page.getByRole('combobox', { name: 'Photographer', exact: true });
+		await expect(photographer).toBeVisible();
+
+		await photographer.selectOption('E2E Lens');
+		await expect(page).toHaveURL(/\/gallery\?view=fursuit&photographer=E2E\+Lens$/);
+		await expect(fursuit).toHaveAttribute('href', '/gallery?view=fursuit&photographer=E2E+Lens');
+		await expect(artwork).toHaveAttribute('href', '/gallery');
+		await page.screenshot({ path: testInfo.outputPath('fursuit-filter-off-artwork-tab.png') });
 
 		await artwork.click();
-		await expect(page).toHaveURL(/\/gallery\?q=sheet$/);
+		await expect(page).toHaveURL(/\/gallery$/);
 		await expect(artwork).toHaveAttribute('aria-current', 'page');
+		await expect(page.getByRole('searchbox', { name: 'Search artworks', exact: true })).toHaveValue('');
 
-		// The switch replaced the history entry rather than pushing one, as the
-		// filters do: Back leaves the views and the search behind together.
+		// Every step replaced the history entry rather than pushing one, as the
+		// filters do: Back leaves the views and the filters behind together.
+		expect(await page.evaluate(() => history.length)).toBe(historyBefore);
 		await page.goBack();
 		await expect(page).not.toHaveURL(/\/gallery/);
 	});
