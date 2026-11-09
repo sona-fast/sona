@@ -101,6 +101,7 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			createdAt: images.createdAt,
 			commissionedAt: images.commissionedAt,
 			collectionId: images.collectionId,
+			collectionName: collections.name,
 			collectionSlug: collections.slug
 		})
 		.from(images)
@@ -164,25 +165,37 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			// A slow walk drops the pager, but not a context that held.
 			{ neighbors: { prev: null, next: null }, contextQuery: keptQuery }
 		);
-		return { siblings, ...paging };
+		return { siblings, parent, ...paging };
 	})();
 
-	const [imageTags_, imageChars, { siblings, neighbors, contextQuery }] = await Promise.all([
+	const [imageTags_, imageChars, { siblings, parent, neighbors, contextQuery }] = await Promise.all([
 		tagsQuery,
 		charactersQuery,
 		siblingsAndNeighbors
 	]);
 
 	return {
-		image,
+		// A variant files under its published parent's collection, or none
+		// when the parent has none, whatever its own row says. A variant whose
+		// parent is unpublished keeps its own row, as it does for paging.
+		image: parent
+			? {
+					...image,
+					collectionId: parent.collectionId,
+					collectionName: parent.collectionName,
+					collectionSlug: parent.collectionSlug
+				}
+			: image,
 		tags: imageTags_.map((t) => t.name),
 		characters: imageChars,
 		formerNames,
 		// Only meaningful when the group has more than one member.
-		// The sort dates and collection were only for the anchor above; the strip doesn't use them.
+		// The sort dates and collection were only for the anchor and the image above; the strip doesn't use them.
 		variants:
 			siblings.length > 1
-				? siblings.map(({ createdAt: _c, commissionedAt: _d, collectionId: _e, collectionSlug: _f, ...v }) => v)
+				? siblings.map(
+						({ createdAt: _c, commissionedAt: _d, collectionId: _e, collectionName: _g, collectionSlug: _f, ...v }) => v
+					)
 				: [],
 		neighbors,
 		// Appended to the previous/next and variant links so the context

@@ -181,3 +181,23 @@ test('a piece opened from the home page keeps the gallery default order', async 
 	await expect(nextLink(page)).toHaveAccessibleName('Next: Ref Sheet');
 	await expect(nextLink(page)).toHaveAttribute('href', '/gallery/ref-sheet');
 });
+
+test("a version names its original's collection, not the one its own row is filed in", async ({
+	page
+}, testInfo) => {
+	// Variant Piece NSFW is filed in E2E Other Collection; its original,
+	// Parent Piece SFW, is in E2E Collection.
+	const breadcrumbLink = page.locator('.breadcrumb').getByRole('link', { name: 'E2E Collection' });
+	const detailsLink = page.locator('.details').getByRole('link', { name: 'E2E Collection' });
+	await open(page, '/gallery/variant-piece');
+	await expect(h1(page)).toHaveText('Variant Piece NSFW');
+	await expect(breadcrumbLink).toHaveAttribute('href', '/collections/e2e-collection');
+	await expect(detailsLink).toHaveAttribute('href', '/collections/e2e-collection');
+	await expect(page.getByText('E2E Other Collection')).toHaveCount(0);
+	await settledShot(page, testInfo.outputPath('version-collection.png'));
+
+	// Its original still names its own collection.
+	await open(page, '/gallery/parent-piece');
+	await expect(breadcrumbLink).toHaveAttribute('href', '/collections/e2e-collection');
+	await expect(detailsLink).toHaveAttribute('href', '/collections/e2e-collection');
+});

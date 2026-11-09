@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
-import { artists, images } from '$lib/server/db/schema';
+import { artists, collections, images } from '$lib/server/db/schema';
 import { load } from './+page.server';
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -147,5 +147,92 @@ describe('/gallery/[slug] load', () => {
 		const data = await pending;
 		expect(data.image.slug).toBe('pub');
 		expect(data.neighbors).toEqual({ prev: null, next: null });
+	});
+
+	// A version (a variant) follows its original's collection on the piece
+	// page, whatever collection its own row names.
+	describe('the collection a version shows', () => {
+		type Shown = { image: { collectionName: string | null; collectionSlug: string | null } };
+
+		async function seedGroup(opts: {
+			parentCollection: 'a' | null;
+			variantCollection: 'b' | null;
+			parentPublished?: boolean;
+		}) {
+			const { db, platform } = makeDb();
+			const [a, b] = await db
+				.insert(collections)
+				.values([
+					{ name: 'Collection A', slug: 'collection-a', createdAt: NOW },
+					{ name: 'Collection B', slug: 'collection-b', createdAt: NOW }
+				])
+				.returning({ id: collections.id });
+			const [{ id: artistId }] = await db
+				.insert(artists)
+				.values({ name: 'Arty', createdAt: NOW })
+				.returning({ id: artists.id });
+			const [{ id: parentId }] = await db
+				.insert(images)
+				.values({
+					title: 'parent',
+					slug: 'parent',
+					imageUrl: 'https://example.com/p.png',
+					published: opts.parentPublished ?? true,
+					artistId,
+					createdAt: NOW,
+					collectionId: opts.parentCollection === 'a' ? a.id : null
+				})
+				.returning({ id: images.id });
+			await db.insert(images).values({
+				title: 'variant',
+				slug: 'variant',
+				imageUrl: 'https://example.com/v.png',
+				published: true,
+				parentImageId: parentId,
+				artistId,
+				createdAt: NOW,
+				collectionId: opts.variantCollection === 'b' ? b.id : null
+			});
+			return platform;
+		}
+
+		const shown = async (platform: App.Platform, slug: string) => {
+			const { image } = (await load(loadEvent(platform, slug))) as Shown;
+			return { name: image.collectionName, slug: image.collectionSlug };
+		};
+
+		it("shows the parent's collection on a version filed in another one", async () => {
+			const platform = await seedGroup({ parentCollection: 'a', variantCollection: 'b' });
+			expect(await shown(platform, 'variant')).toEqual({ name: 'Collection A', slug: 'collection-a' });
+		});
+
+		it('shows no collection on a version whose parent has none, even when the version has one', async () => {
+			const platform = await seedGroup({ parentCollection: null, variantCollection: 'b' });
+			expect(await shown(platform, 'variant')).toEqual({ name: null, slug: null });
+		});
+
+		it("shows the parent's collection on a version with none of its own", async () => {
+			const platform = await seedGroup({ parentCollection: 'a', variantCollection: null });
+			expect(await shown(platform, 'variant')).toEqual({ name: 'Collection A', slug: 'collection-a' });
+		});
+
+		it('leaves the parent page showing its own collection', async () => {
+			const platform = await seedGroup({ parentCollection: 'a', variantCollection: 'b' });
+			expect(await shown(platform, 'parent')).toEqual({ name: 'Collection A', slug: 'collection-a' });
+		});
+
+		it('keeps the own collection of a version whose parent is unpublished, as paging does', async () => {
+			const platform = await seedGroup({ parentCollection: 'a', variantCollection: 'b', parentPublished: false });
+			expect(await shown(platform, 'variant')).toEqual({ name: 'Collection B', slug: 'collection-b' });
+		});
+
+		it('keeps collection fields out of the variant strip', async () => {
+			const platform = await seedGroup({ parentCollection: 'a', variantCollection: 'b' });
+			const { variants } = (await load(loadEvent(platform, 'variant'))) as { variants: object[] };
+			expect(variants).toHaveLength(2);
+			for (const v of variants) {
+				expect(Object.keys(v).filter((k) => k.startsWith('collection'))).toEqual([]);
+			}
+		});
 	});
 });
