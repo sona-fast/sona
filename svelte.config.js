@@ -2,6 +2,7 @@ import adapter from '@sveltejs/adapter-cloudflare';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { healingAdapter } from './scripts/platform-proxy-heal.js';
 
 // Anchor wrangler-config paths to this file, not process.cwd() — a build
 // started from another directory must not resolve them against that cwd.
@@ -113,7 +114,10 @@ const config = {
 		// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
 		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-		adapter: adapter({
+		// healingAdapter rebuilds the dev server's bindings when the local Workers
+		// runtime restarts under it, which otherwise leaves them dead until the
+		// server restarts (scripts/platform-proxy-heal.js). Builds never call it.
+		adapter: healingAdapter(adapter({
 			// Pin the adapter's wrangler-config lookup to THIS project. Left unset,
 			// wrangler's discovery walks up parent directories, so a checkout without
 			// its own wrangler.toml (git worktrees; fresh clones) adopts a parent
@@ -135,7 +139,7 @@ const config = {
 					? { path: process.env.SONA_E2E_PERSIST_TO }
 					: undefined
 			}
-		}),
+		})),
 		// Origin check is the real CSRF control for admin form POSTs (SameSite=Lax
 		// alone is not enough). An empty trustedOrigins list is SvelteKit's strict
 		// default (same-origin only), pinned explicitly so a later `['*']` — which
