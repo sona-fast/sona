@@ -5,16 +5,22 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { artists, collections, images } from '$lib/server/db/schema';
 import { load } from './+page.server';
+import { load as collectionLoad } from '../../collections/[slug]/+page.server';
 import { makeD1 } from '$lib/server/test/d1';
 
-// SONA-179: lets one case make the neighbor read hang, as a stalled D1 would.
-const stall = vi.hoisted(() => ({ neighbors: false }));
+// SONA-179: lets one case make the neighbor read hang, as a stalled D1 would,
+// and another make the collection position read fail outright.
+const stall = vi.hoisted(() => ({ neighbors: false, positionFails: false }));
 vi.mock('$lib/server/gallery-order', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/server/gallery-order')>();
 	return {
 		...actual,
 		galleryNeighbors: (...args: Parameters<typeof actual.galleryNeighbors>) =>
-			stall.neighbors ? new Promise<never>(() => {}) : actual.galleryNeighbors(...args)
+			stall.neighbors ? new Promise<never>(() => {}) : actual.galleryNeighbors(...args),
+		collectionNeighbors: (...args: Parameters<typeof actual.collectionNeighbors>) =>
+			stall.neighbors ? new Promise<never>(() => {}) : actual.collectionNeighbors(...args),
+		collectionPosition: (...args: Parameters<typeof actual.collectionPosition>) =>
+			stall.positionFails ? Promise.reject(new Error('D1 error')) : actual.collectionPosition(...args)
 	};
 });
 
@@ -60,6 +66,7 @@ function makeDb() {
 	`);
 	const d1 = makeD1(sqlite);
 	return {
+		sqlite,
 		db: drizzle(d1, { schema }),
 		platform: { env: { DB: d1 } } as unknown as App.Platform
 	};
@@ -131,6 +138,7 @@ describe('/gallery/[slug] load', () => {
 
 	afterEach(() => {
 		stall.neighbors = false;
+		stall.positionFails = false;
 		vi.useRealTimers();
 	});
 
@@ -147,6 +155,106 @@ describe('/gallery/[slug] load', () => {
 		const data = await pending;
 		expect(data.image.slug).toBe('pub');
 		expect(data.neighbors).toEqual({ prev: null, next: null });
+	});
+	// The "4 of 7 in <collection>" line and the pager's name in a collection.
+	describe('the collection pager', () => {
+		type Pager = { name: string; slug: string; position: number; total: number } | null;
+		type Data = { collectionPager: Pager; neighbors: { prev: unknown; next: unknown } };
+
+		/**
+		 * Collection "Badges" (1) lists five originals, newest first: c5, c4,
+		 * then c3 and c2 sharing one upload date (the higher id first), then
+		 * c1. Also filed in it, and never counted: a variant of c3 (which
+		 * pages from c3's place), a draft newer than all of them, and a
+		 * variant of the out-of-collection piece o1. Collection "Other" (2)
+		 * holds o1, which is newer than every Badges piece.
+		 */
+		function seedCollection() {
+			const { sqlite, platform } = makeDb();
+			sqlite.exec(`
+				INSERT INTO artists (id, name, created_at) VALUES (1, 'Arty', '${NOW}');
+				INSERT INTO collections (id, name, slug, created_at) VALUES
+					(1, 'Badges', 'badges', '${NOW}'), (2, 'Other', 'other', '${NOW}');
+				INSERT INTO images (id, title, slug, image_url, artist_id, collection_id, published, parent_image_id, created_at) VALUES
+					(1, 'c1', 'c1', '/c1.png', 1, 1, 1, NULL, '2026-01-01T00:00:00.000Z'),
+					(2, 'c2', 'c2', '/c2.png', 1, 1, 1, NULL, '2026-01-02T00:00:00.000Z'),
+					(3, 'c3', 'c3', '/c3.png', 1, 1, 1, NULL, '2026-01-02T00:00:00.000Z'),
+					(4, 'c4', 'c4', '/c4.png', 1, 1, 1, NULL, '2026-01-04T00:00:00.000Z'),
+					(5, 'c5', 'c5', '/c5.png', 1, 1, 1, NULL, '2026-01-05T00:00:00.000Z'),
+					(6, 'o1', 'o1', '/o1.png', 1, 2, 1, NULL, '2026-02-01T00:00:00.000Z'),
+					(7, 'c3 alt', 'c3-alt', '/c3-alt.png', 1, 1, 1, 3, '2026-03-01T00:00:00.000Z'),
+					(8, 'draft', 'draft', '/draft.png', 1, 1, 0, NULL, '2026-03-01T00:00:00.000Z'),
+					(9, 'o1 alt', 'o1-alt', '/o1-alt.png', 1, 1, 1, 6, '2026-03-01T00:00:00.000Z');
+			`);
+			return platform;
+		}
+
+		const at = (platform: App.Platform, slug: string, query = '?collection=badges') =>
+			load({
+				platform,
+				params: { slug },
+				url: new URL(`https://e2e.test/gallery/${slug}${query}`)
+			} as never) as Promise<Data>;
+
+		it("numbers every card by its place in the collection page's grid, out of the grid's size", async () => {
+			const platform = seedCollection();
+			const grid = (
+				(await collectionLoad({ platform, params: { slug: 'badges' } } as never)) as { images: { slug: string }[] }
+			).images.map((i) => i.slug);
+			// The tie between c3 and c2 is settled by id, newest id first.
+			expect(grid).toEqual(['c5', 'c4', 'c3', 'c2', 'c1']);
+			for (const [i, slug] of grid.entries()) {
+				const { collectionPager } = await at(platform, slug);
+				expect(collectionPager, slug).toEqual({ name: 'Badges', slug: 'badges', position: i + 1, total: 5 });
+			}
+		});
+
+		it("gives a variant its parent's place, not one of its own", async () => {
+			const platform = seedCollection();
+			expect((await at(platform, 'c3-alt')).collectionPager).toEqual({
+				name: 'Badges',
+				slug: 'badges',
+				position: 3,
+				total: 5
+			});
+		});
+
+		it('has no collection pager in a gallery context, or with no context at all', async () => {
+			const platform = seedCollection();
+			expect((await at(platform, 'c3', '')).collectionPager).toBeNull();
+			expect((await at(platform, 'c3', '?sort=oldest')).collectionPager).toBeNull();
+		});
+
+		it.each([
+			['a collection that does not exist', 'c3', '?collection=no-such'],
+			["another collection's slug", 'c3', '?collection=other'],
+			['a variant filed in the collection whose parent is not', 'o1-alt', '?collection=badges']
+		])('has no collection pager for %s', async (_label, slug, query) => {
+			const platform = seedCollection();
+			const data = await at(platform, slug, query);
+			expect(data.collectionPager).toBeNull();
+			// The pager itself still shows, in the gallery's order.
+			expect(data.neighbors.prev ?? data.neighbors.next).not.toBeNull();
+		});
+
+		it('drops the position line with the pager when the collection walk never answers', async () => {
+			const platform = seedCollection();
+			stall.neighbors = true;
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			const pending = at(platform, 'c3');
+			await vi.advanceTimersByTimeAsync(10_000);
+			const data = await pending;
+			expect(data.neighbors).toEqual({ prev: null, next: null });
+			expect(data.collectionPager).toBeNull();
+		});
+
+		it('drops the pager with the position line when the position read fails', async () => {
+			const platform = seedCollection();
+			stall.positionFails = true;
+			const data = await at(platform, 'c3');
+			expect(data.collectionPager).toBeNull();
+			expect(data.neighbors).toEqual({ prev: null, next: null });
+		});
 	});
 
 	// A version (a variant) follows its original's collection on the piece

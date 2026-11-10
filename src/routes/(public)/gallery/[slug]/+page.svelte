@@ -55,6 +55,21 @@
 		return m.gallery_variant_n({ n });
 	}
 
+	// The collection the pager walks, with this piece's place in it; null in a
+	// gallery context.
+	const pagerCollection = $derived(data.collectionPager);
+	// "4 of 7 in <collection>" as the text either side of the collection link.
+	// The message is one sentence, so each locale orders it its own way; a
+	// stand-in for the name marks where the link goes.
+	const positionText = $derived.by(() => {
+		if (!pagerCollection) return null;
+		const mark = '\u0000';
+		const [before = '', after = ''] = m
+			.gallery_pager_position({ position: pagerCollection.position, total: pagerCollection.total, collection: mark })
+			.split(mark);
+		return [before, after] as const;
+	});
+
 	// Previous/next through the grid the visitor came from (SONA-179). The links
 	// keep the grid context (data.contextQuery), so it survives every hop.
 	const prev = $derived(data.neighbors.prev);
@@ -193,11 +208,14 @@
 				<!-- Visible controls for the arrow keys, so nobody has to guess they
 				     work. At either end of the grid that side is left out rather than
 				     shown dead; the other keeps its place. -->
-				<nav class="pager" aria-label={m.gallery_pager_label()}>
+				<nav class="pager" aria-label={pagerCollection ? m.gallery_pager_label_collection({ collection: pagerCollection.name }) : m.gallery_pager_label()}>
 					{#if prev}
 						<a href={prevHref} class="btn btn-outline" rel="prev" aria-label={m.gallery_previous_piece({ title: prev.title })} aria-keyshortcuts="ArrowLeft">
 							<ChevronLeft size={16} aria-hidden="true" /> {m.gallery_previous()}
 						</a>
+					{/if}
+					{#if pagerCollection && positionText}
+						<p class="pager-position">{positionText[0]}<a href="/collections/{pagerCollection.slug}">{pagerCollection.name}</a>{positionText[1]}</p>
 					{/if}
 					{#if next}
 						<a href={nextHref} class="btn btn-outline pager-next" rel="next" aria-label={m.gallery_next_piece({ title: next.title })} aria-keyshortcuts="ArrowRight">
@@ -402,6 +420,22 @@
 	/* Next keeps the right edge even when there is no previous piece. */
 	.pager-next {
 		margin-inline-start: auto;
+	}
+
+	/* "4 of 7 in <collection>": centered in the space between the buttons. */
+	.pager-position {
+		flex: 1;
+		align-self: center;
+		margin: 0;
+		text-align: center;
+		color: var(--muted-foreground);
+		font-size: 0.875rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.pager-position a {
+		color: inherit;
+		text-decoration: underline;
 	}
 
 	.nsfw-overlay {

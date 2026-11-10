@@ -114,6 +114,38 @@ export async function collectionNeighbors(
 	return neighborsWhere(db, collectionConditions(collectionId), COLLECTION_SORT, anchor);
 }
 
+/** Where a piece sits in its collection's grid: 1-based, out of `total`. */
+export interface CollectionPosition {
+	position: number;
+	total: number;
+}
+
+/**
+ * `anchor`'s place in the collection page's order, and the size of that grid,
+ * in one read: the grid's rows, and how many of them come before the anchor.
+ * The caller checks that `anchor` belongs to the collection.
+ */
+export async function collectionPosition(
+	db: Database,
+	collectionId: number,
+	anchor: NeighborAnchor
+): Promise<CollectionPosition> {
+	const { key, descending } = sortSpec(COLLECTION_SORT);
+	// Rows ahead of the anchor in the grid: a later upload (the collection
+	// sorts on the upload date, newest first), the id settling ties the same
+	// way galleryOrderBy does.
+	const op = sql.raw(descending ? '>' : '<');
+	const row = await db
+		.select({
+			total: sql<number>`COUNT(*)`,
+			before: sql<number>`COALESCE(SUM(CASE WHEN (${key} ${op} ${anchor.createdAt} OR (${key} = ${anchor.createdAt} AND ${images.id} ${op} ${anchor.id})) THEN 1 ELSE 0 END), 0)`
+		})
+		.from(images)
+		.where(and(...collectionConditions(collectionId)))
+		.get();
+	return { position: Number(row?.before ?? 0) + 1, total: Number(row?.total ?? 0) };
+}
+
 /** The grid piece a detail page pages from, with the dates the sorts read. */
 export interface NeighborAnchor {
 	id: number;

@@ -4,13 +4,25 @@ import { images, artists, collections, imageTags, tags, characters, imageCharact
 import { eq, and, or, asc } from 'drizzle-orm';
 import { parseAliases } from '$lib/server/registry';
 import { getSettings } from '$lib/server/settings';
-import { collectionNeighbors, galleryNeighbors, type GalleryNeighbors } from '$lib/server/gallery-order';
+import {
+	collectionNeighbors,
+	collectionPosition,
+	galleryNeighbors,
+	type CollectionPosition,
+	type GalleryNeighbors
+} from '$lib/server/gallery-order';
 import { galleryContextFromParams, resolveGallerySort } from '$lib/gallery';
 import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
 
 // The pager is optional: a slow or failing D1 drops it instead of holding the page.
 const NEIGHBORS_TIMEOUT_MS = 2000;
+
+/** The collection a piece pages through, and where in it the piece sits. */
+interface CollectionPager extends CollectionPosition {
+	name: string;
+	slug: string;
+}
 
 export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// read replica (eventually consistent); admin writes use the primary
@@ -135,7 +147,7 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 		// collection.
 		const parent = image.parentImageId === null ? undefined : siblings.find((s) => s.id === image.parentImageId);
 		const anchorIsCard = image.parentImageId === null || parent !== undefined;
-		const { id, createdAt, commissionedAt, collectionId, collectionSlug } = parent ?? image;
+		const { id, createdAt, commissionedAt, collectionId, collectionName, collectionSlug } = parent ?? image;
 		const anchor = { id, createdAt, commissionedAt };
 		// The anchor's collection came back with its row, so membership needs
 		// no lookup of its own, and is settled before the neighbor walk starts.
@@ -145,11 +157,22 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 		// drop an unconfirmed collection slug.
 		const keptQuery = context.collection === null || inCollection ? context.query : '';
 		const paging = await withTimeout(
-			(async (): Promise<{ neighbors: GalleryNeighbors; contextQuery: string }> => {
-				if (inCollection && collectionId !== null) {
+			(async (): Promise<{
+				neighbors: GalleryNeighbors;
+				contextQuery: string;
+				collectionPager: CollectionPager | null;
+			}> => {
+				if (inCollection && collectionId !== null && collectionName !== null && collectionSlug !== null) {
+					// The "4 of 7" line reads beside the walk, so it costs no
+					// extra round trip, and falls back with it.
+					const [neighbors, place] = await Promise.all([
+						collectionNeighbors(db, collectionId, anchor),
+						collectionPosition(db, collectionId, anchor)
+					]);
 					return {
-						neighbors: await collectionNeighbors(db, collectionId, anchor),
-						contextQuery: keptQuery
+						neighbors,
+						contextQuery: keptQuery,
+						collectionPager: { name: collectionName, slug: collectionSlug, ...place }
 					};
 				}
 				// A collection context carries no gallery filters or sort, so a
@@ -158,17 +181,19 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 				const sort = resolveGallerySort(context.sort, settings.galleryDefaultSort);
 				return {
 					neighbors: await galleryNeighbors(db, context.filters, sort, anchor),
-					contextQuery: keptQuery
+					contextQuery: keptQuery,
+					collectionPager: null
 				};
 			})(),
 			NEIGHBORS_TIMEOUT_MS,
-			// A slow walk drops the pager, but not a context that held.
-			{ neighbors: { prev: null, next: null }, contextQuery: keptQuery }
+			// A slow walk drops the pager and its position line, but not a
+			// context that held.
+			{ neighbors: { prev: null, next: null }, contextQuery: keptQuery, collectionPager: null }
 		);
 		return { siblings, parent, ...paging };
 	})();
 
-	const [imageTags_, imageChars, { siblings, parent, neighbors, contextQuery }] = await Promise.all([
+	const [imageTags_, imageChars, { siblings, parent, neighbors, contextQuery, collectionPager }] = await Promise.all([
 		tagsQuery,
 		charactersQuery,
 		siblingsAndNeighbors
@@ -201,6 +226,9 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 		// Appended to the previous/next and variant links so the context
 		// survives every hop. Empty when the visitor came from no grid, or from
 		// a collection this piece isn't in.
-		contextQuery
+		contextQuery,
+		// The collection the pager walks, and the anchor's place in it. Null
+		// in a gallery context, and when the walk fell back.
+		collectionPager
 	};
 };
