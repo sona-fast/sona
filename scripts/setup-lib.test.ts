@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeHttpsUrl } from '../src/lib/server/validate';
-import { readFileSync, readdirSync, existsSync, statSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -121,6 +122,13 @@ describe('parseAppliedMigrations', () => {
 	it('puts what wrangler printed in the error', () => {
 		expect(() => parseAppliedMigrations('✘ [ERROR] not json')).toThrow(/invalid JSON[\s\S]*✘ \[ERROR\] not json/);
 		expect(() => parseAppliedMigrations('[{"error":"x"}]')).toThrow(/no result set[\s\S]*"error":"x"/);
+	});
+
+	it('throws on a row without a name instead of treating that migration as pending', () => {
+		const json = (row: string) => `[{"results":[{"name":"0001_b.sql"},${row}]}]`;
+		expect(() => parseAppliedMigrations(json('{}'))).toThrow(/a row without a name/);
+		expect(() => parseAppliedMigrations(json('{"name":7}'))).toThrow(/a row without a name/);
+		expect(() => parseAppliedMigrations(json('null'))).toThrow(/a row without a name/);
 	});
 });
 
@@ -2026,19 +2034,64 @@ describe('setup.ts ↔ untrusted values are encoded, never pasted raw', () => {
 	});
 });
 
-describe('setup.ts ↔ never steers the operator to a local Pages deploy', () => {
+describe('never steers the operator to a local Pages deploy', () => {
 	// A local `wrangler pages deploy` replaces the project's dashboard-managed vars
 	// and secrets (SETUP_TOKEN, CRON_SECRET) with what wrangler.toml declares, so
 	// setup attaches bindings through the API and requires the token to do it.
-	it('never suggests `wrangler pages deploy`', () => {
+	it('setup never suggests `wrangler pages deploy`', () => {
 		const advice = setupCode.match(/console\.(log|warn|error)\([^;]*pages deploy[^;]*\);/g);
 		expect(advice).toBeNull();
 	});
 
-	it('stops before provisioning when the API token or account id is missing', () => {
-		const guard = setupCode.indexOf('if (!cfToken || !cfAccount) {');
-		expect(guard).toBeGreaterThan(-1);
-		expect(guard).toBeLessThan(setupCode.indexOf("'npx wrangler whoami'"));
-		expect(setupCode.slice(guard, guard + 400)).toMatch(/process\.exitCode = 1;[\s\S]*return;/);
+	it('neither does the app UI or its messages', () => {
+		const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+		const files = (dir: string): string[] =>
+			readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+				e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]
+			);
+		const offenders = [...files(join(root, 'src')), ...files(join(root, 'messages'))]
+			.filter((f) => /\.(svelte|json)$/.test(f))
+			.filter((f) => readFileSync(f, 'utf8').includes('wrangler pages deploy'));
+		expect(offenders).toEqual([]);
 	});
+});
+
+describe('setup.ts without CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID', () => {
+	const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+	const tsx = join(root, 'node_modules', '.bin', 'tsx');
+
+	// Runs setup with stub npx/wrangler/gh first on PATH; each stub records its
+	// call, so an empty log means setup provisioned nothing.
+	function runSetup(creds: { CLOUDFLARE_API_TOKEN?: string; CLOUDFLARE_ACCOUNT_ID?: string }) {
+		const bin = mkdtempSync(join(tmpdir(), 'sona-setup-stub-'));
+		const log = join(bin, 'calls.log');
+		for (const cmd of ['npx', 'wrangler', 'gh']) {
+			writeFileSync(join(bin, cmd), `#!/bin/sh\necho "${cmd} $*" >> "${log}"\n`, { mode: 0o755 });
+		}
+		const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+		delete env.CLOUDFLARE_API_TOKEN;
+		delete env.CLOUDFLARE_ACCOUNT_ID;
+		Object.assign(env, creds);
+		try {
+			const res = spawnSync(tsx, [join(root, 'scripts', 'setup.ts')], {
+				env,
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe'],
+				timeout: 30_000
+			});
+			return { status: res.status, stderr: res.stderr, calls: existsSync(log) ? readFileSync(log, 'utf8') : '' };
+		} finally {
+			rmSync(bin, { recursive: true, force: true });
+		}
+	}
+
+	it.each([
+		['the API token', { CLOUDFLARE_ACCOUNT_ID: 'acct' }],
+		['the account id', { CLOUDFLARE_API_TOKEN: 'token' }]
+	])('exits non-zero without %s and runs no command', (_, creds) => {
+		const { status, stderr, calls } = runSetup(creds);
+		expect(status).toBe(1);
+		expect(stderr).toContain('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must both be set');
+		expect(calls).toBe('');
+	}, 30_000);
 });

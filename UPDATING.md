@@ -71,9 +71,24 @@ that key, so every wrangler command that loads the file fails with
 
 Deploys aren't affected: the deploy workflow doesn't read `wrangler.toml`.
 
-`npm run setup` now also requires `CLOUDFLARE_API_TOKEN` and
-`CLOUDFLARE_ACCOUNT_ID` in the environment; `wrangler login` alone is no longer
-enough.
+## Read before re-running setup: it needs an API token, not `wrangler login`
+
+`npm run setup` now stops unless `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` are both set in the environment. A `wrangler login`
+session alone is no longer enough. Without a token, the only way to attach the
+D1/R2 bindings was a local `wrangler pages deploy`, and that replaces the
+project's variables and secrets (`SETUP_TOKEN`, `CRON_SECRET`) with what
+`wrangler.toml` declares.
+
+If you used `wrangler login`, create a token with the scopes in **API token
+scopes** (README, Quick start step 3), then export both before you re-run:
+
+```sh
+export CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>
+npm run setup
+```
+
+Deploy from CI by pushing to `main`, not with a local `wrangler pages deploy`.
 
 ## Nothing to do: two more themes (SONA-227)
 

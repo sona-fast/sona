@@ -71,7 +71,13 @@ export function parseAppliedMigrations(json: string): string[] {
 	if (!last || !Array.isArray(last.results)) {
 		throw unreadable('no result set');
 	}
-	return last.results.map((r) => r.name).filter((n): n is string => typeof n === 'string');
+	// A row without a name is unreadable too: dropping it would mark that
+	// migration pending and replay its CREATE TABLE.
+	return last.results.map((r) => {
+		const name = (r as { name?: unknown } | null)?.name;
+		if (typeof name !== 'string') throw unreadable('a row without a name');
+		return name;
+	});
 }
 
 export interface SeedSettingsInput {
