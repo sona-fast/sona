@@ -112,7 +112,7 @@
 				<span class="step-num">3</span>
 				<div class="step-body">
 					<div class="step-title">{m.admin_stickers_setup_step3_title()}</div>
-					<div class="step-text">{m.admin_stickers_setup_step3_a()}<code>main</code>{m.admin_stickers_setup_step3_b()}<code>npx wrangler pages deploy</code>{m.admin_stickers_setup_step3_c()}<strong>{m.admin_stickers_import_telegram()}</strong>{m.admin_stickers_setup_step3_d()}<code>t.me/addstickers/…</code>{m.admin_stickers_setup_step3_e()}</div>
+					<div class="step-text">{m.admin_stickers_setup_step3_a()}<code>main</code>{m.admin_stickers_setup_step3_b()}<strong>{m.admin_stickers_import_telegram()}</strong>{m.admin_stickers_setup_step3_d()}<code>t.me/addstickers/…</code>{m.admin_stickers_setup_step3_e()}</div>
 				</div>
 			</li>
 		</ol>

@@ -14,7 +14,7 @@
  * first-run wizard at /admin/setup. To switch storage later, use Settings →
  * Storage Provider (which sets up the new token/bucket + migrates).
  *
- * Prerequisites: `wrangler login` (or CLOUDFLARE_API_TOKEN) must be set up first.
+ * Prerequisites: CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the env.
  */
 import { execSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -24,6 +24,7 @@ import { stdin, stdout, env, cwd } from 'node:process';
 import { basename, join } from 'node:path';
 import {
 	buildMigrationSql,
+	parseAppliedMigrations,
 	buildSeedSql,
 	sanitizeProjectName,
 	askResourceName,
@@ -192,30 +193,38 @@ const TOKEN_RECIPE =
 
 async function main() {
 	console.log('— Sona setup —\n');
-	console.log('Make sure you are logged in: `npx wrangler login` (or set CLOUDFLARE_API_TOKEN).\n');
 
-	// The API token + account, when present, let setup do the few things wrangler
-	// can't: attach Pages bindings and run the DNS / image-transform preflights.
-	// Absent (i.e. `wrangler login`), those steps degrade to printed manual steps.
+	// The API token + account let setup do the things wrangler can't: attach the
+	// Pages bindings and run the DNS / image-transform preflights. Without them
+	// the only way to attach bindings is a local `wrangler pages deploy`, which
+	// replaces the project's dashboard-managed vars and secrets (SETUP_TOKEN,
+	// CRON_SECRET) with whatever wrangler.toml declares. So require them up front.
 	const cfToken = env.CLOUDFLARE_API_TOKEN;
 	const cfAccount = env.CLOUDFLARE_ACCOUNT_ID;
+	if (!cfToken || !cfAccount) {
+		console.error('✖ CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must both be set.');
+		console.error('  Export them, then re-run setup (`npx wrangler login` alone is not enough).\n');
+		console.error(TOKEN_RECIPE);
+		process.exitCode = 1;
+		rl.close();
+		return;
+	}
 
 	// Preflight: confirm the credentials resolve BEFORE provisioning, so a bad or
 	// expired token fails here with an actionable message instead of midway
-	// through creating resources. `wrangler whoami` works for both `wrangler
-	// login` and a CLOUDFLARE_API_TOKEN.
+	// through creating resources.
 	// WRANGLER_LOG=warn|error|none in the operator's env suppresses wrangler's
-	// info-level "You are logged in" banner, which tokenResolves keys off — that
-	// would fail-closed on VALID creds. Drop it for this one invocation so the
-	// banner always prints.
-	const whoamiEnv = { ...env };
-	delete whoamiEnv.WRANGLER_LOG;
-	const whoami = run('npx wrangler whoami', { capture: true, allowFail: true, env: whoamiEnv });
+	// info-level output: the "You are logged in" banner tokenResolves keys off
+	// (fail-closed on VALID creds) and the `d1 execute --json` result the
+	// applied-migrations read parses. Drop it for the calls whose output we read.
+	const readableEnv = { ...env };
+	delete readableEnv.WRANGLER_LOG;
+	const whoami = run('npx wrangler whoami', { capture: true, allowFail: true, env: readableEnv });
 	process.stdout.write(whoami);
 	if (!tokenResolves(whoami)) {
 		console.error('\n✖ Cloudflare credentials did not resolve (`wrangler whoami` failed).');
 		console.error(
-			'  Run `npx wrangler login`, or export CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID, then re-run setup.\n'
+			'  Check CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID, then re-run setup.\n'
 		);
 		console.error(TOKEN_RECIPE);
 		// Non-zero so a wrapper/CI can detect the aborted setup (a bare `return`
@@ -415,110 +424,102 @@ async function main() {
 	let resolvedZoneName: string | null = null;
 	if (domain) {
 		const host = hostFromDomain(domain);
-		if (cfToken && cfAccount) {
-			// A subdomain (sona.example.com) is served by the registrable zone
-			// (example.com); the shared candidate walk tries the host then strips
-			// leading labels, and aborts on a failed lookup so a 403 or transient
-			// error is reported as what it is — not as "no zone".
-			const {
-				zone: preflightZone,
-				zoneName: preflightZoneName,
-				errorStatus: zoneLookupError,
-				errors: zoneLookupErrors,
-				failedName: zoneLookupFailedName
-			} = await resolveZone(zoneNameCandidates(host), (name) =>
-				cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
-			);
-			resolvedZoneName = preflightZoneName;
-			const zoneId = preflightZone.id;
-			if (zoneLookupError !== null) {
-				// The reason (and whether a scope is named at all) is decided by the
-				// status, in the shared helper — see zoneLookupWarnLines.
-				for (const line of zoneLookupWarnLines(
-					zoneLookupFailedName ?? host,
-					zoneLookupError,
-					zoneLookupErrors
-				)) {
-					console.warn(line);
-				}
-			} else if (!zoneId) {
-				console.warn(
-					`\n⚠ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
-				);
-				console.warn('  Add the domain to this Cloudflare account first if you want setup to check it.');
-			} else {
-				// DNS scope probe: listing records needs DNS access. A 401/403 means the
-				// token can't even read DNS (and so can't write the apex CNAME later) —
-				// but setup never writes DNS itself, and an operator attaching the domain
-				// from the dashboard is fine, so warn + offer to continue rather than abort.
-				const dnsProbe = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/dns_records?per_page=1`);
-				if (dnsProbeBlocksSetup(dnsProbe)) {
-					console.warn(
-						`\n⚠ Could not verify DNS access for ${host} (token lacks Zone → DNS: Read; attaching the apex CNAME later needs Zone → DNS: Edit).`
-					);
-					console.warn('  Setup only checks access — it never writes DNS itself. If you plan to attach');
-					console.warn('  the domain from the Cloudflare dashboard, you can continue.');
-					// Default to NO: pressing Enter (or a non-interactive run) aborts, so a
-					// missing DNS scope fails fast instead of silently leaving the apex domain
-					// stuck `pending` with a 522 after setup reports success.
-					const proceed = await askYesNo('Continue setup anyway?', false);
-					if (!proceed) {
-						console.error(`\n${TOKEN_RECIPE}`);
-						process.exitCode = 1;
-						rl.close();
-						return;
-					}
-				}
-				// Image Transformations. Off by default, per-zone, and NOT grantable by
-				// the deploy token — enable it if the token carries Zone → Zone Settings: Edit,
-				// else leave imageResizingOn=null (unknown) and warn in Next steps.
-				const ir = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/settings/image_resizing`);
-				let patchOk = false;
-				if (ir.ok && !imageResizingIsOn(ir)) {
-					const enabled = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/settings/image_resizing`, {
-						method: 'PATCH',
-						body: { value: 'on' }
-					});
-					patchOk = enabled.ok;
-				}
-				imageResizingOn = imageResizingOutcome(ir, patchOk);
-
-				// WAF rate limit for the anonymously-reachable /api paths (download
-				// beacon + oEmbed provider — one rule, Free-plan cap). Non-fatal:
-				// a token without Zone → WAF: Edit just yields an 'error'
-				// result we warn about in Next steps — setup keeps going regardless.
-				// Reuse the zone the preflight just resolved — no second candidate walk.
-				const rateLimit = await applyDownloadRateLimit(cfToken, host, cfApi, zoneId);
-				downloadRateLimit = rateLimit.status;
-				downloadRateLimitDetail = rateLimit.detail;
-				if (rateLimit.status === 'error') {
-					console.warn(`\n⚠ Could not attach the public-endpoint rate-limit rule: ${rateLimit.detail}`);
-				} else {
-					console.log(`✔ Public-endpoint rate limit: ${rateLimit.detail}`);
-				}
+		// A subdomain (sona.example.com) is served by the registrable zone
+		// (example.com); the shared candidate walk tries the host then strips
+		// leading labels, and aborts on a failed lookup so a 403 or transient
+		// error is reported as what it is — not as "no zone".
+		const {
+			zone: preflightZone,
+			zoneName: preflightZoneName,
+			errorStatus: zoneLookupError,
+			errors: zoneLookupErrors,
+			failedName: zoneLookupFailedName
+		} = await resolveZone(zoneNameCandidates(host), (name) =>
+			cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+		);
+		resolvedZoneName = preflightZoneName;
+		const zoneId = preflightZone.id;
+		if (zoneLookupError !== null) {
+			// The reason (and whether a scope is named at all) is decided by the
+			// status, in the shared helper — see zoneLookupWarnLines.
+			for (const line of zoneLookupWarnLines(
+				zoneLookupFailedName ?? host,
+				zoneLookupError,
+				zoneLookupErrors
+			)) {
+				console.warn(line);
 			}
-
-			// Turnstile widget for the admin-login bot check. Account-
-			// scoped, so — unlike the DNS / image-resizing checks above — it does NOT
-			// need a resolved zone and runs even when the domain's DNS lives elsewhere.
-			// Non-fatal: a token without Account → Turnstile: Edit just yields an
-			// 'error' result we warn about in Next steps — setup keeps going regardless.
-			const ts = await provisionTurnstileWidget(cfToken, cfAccount, host);
-			turnstileStatus = ts.status;
-			turnstileDetail = ts.detail;
-			turnstileSitekey = ts.sitekey ?? '';
-			turnstileSecret = ts.secret ?? '';
-			if (ts.status === 'error') {
-				console.warn(`\n⚠ Admin-login protection NOT set — ${ts.detail}`);
-			} else {
-				console.log(`✔ Admin-login Turnstile: ${ts.detail}`);
-			}
-		} else {
+		} else if (!zoneId) {
 			console.warn(
-				'\n⚠ A custom domain was given but CLOUDFLARE_API_TOKEN/ACCOUNT_ID are not in the env,'
+				`\n⚠ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
 			);
-			console.warn('  so setup cannot preflight DNS access. Attaching the apex domain needs a token');
-			console.warn('  with Zone → DNS: Edit (see README → custom domain).');
+			console.warn('  Add the domain to this Cloudflare account first if you want setup to check it.');
+		} else {
+			// DNS scope probe: listing records needs DNS access. A 401/403 means the
+			// token can't even read DNS (and so can't write the apex CNAME later) —
+			// but setup never writes DNS itself, and an operator attaching the domain
+			// from the dashboard is fine, so warn + offer to continue rather than abort.
+			const dnsProbe = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/dns_records?per_page=1`);
+			if (dnsProbeBlocksSetup(dnsProbe)) {
+				console.warn(
+					`\n⚠ Could not verify DNS access for ${host} (token lacks Zone → DNS: Read; attaching the apex CNAME later needs Zone → DNS: Edit).`
+				);
+				console.warn('  Setup only checks access — it never writes DNS itself. If you plan to attach');
+				console.warn('  the domain from the Cloudflare dashboard, you can continue.');
+				// Default to NO: pressing Enter (or a non-interactive run) aborts, so a
+				// missing DNS scope fails fast instead of silently leaving the apex domain
+				// stuck `pending` with a 522 after setup reports success.
+				const proceed = await askYesNo('Continue setup anyway?', false);
+				if (!proceed) {
+					console.error(`\n${TOKEN_RECIPE}`);
+					process.exitCode = 1;
+					rl.close();
+					return;
+				}
+			}
+			// Image Transformations. Off by default, per-zone, and NOT grantable by
+			// the deploy token — enable it if the token carries Zone → Zone Settings: Edit,
+			// else leave imageResizingOn=null (unknown) and warn in Next steps.
+			const ir = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/settings/image_resizing`);
+			let patchOk = false;
+			if (ir.ok && !imageResizingIsOn(ir)) {
+				const enabled = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/settings/image_resizing`, {
+					method: 'PATCH',
+					body: { value: 'on' }
+				});
+				patchOk = enabled.ok;
+			}
+			imageResizingOn = imageResizingOutcome(ir, patchOk);
+
+			// WAF rate limit for the anonymously-reachable /api paths (download
+			// beacon + oEmbed provider — one rule, Free-plan cap). Non-fatal:
+			// a token without Zone → WAF: Edit just yields an 'error'
+			// result we warn about in Next steps — setup keeps going regardless.
+			// Reuse the zone the preflight just resolved — no second candidate walk.
+			const rateLimit = await applyDownloadRateLimit(cfToken, host, cfApi, zoneId);
+			downloadRateLimit = rateLimit.status;
+			downloadRateLimitDetail = rateLimit.detail;
+			if (rateLimit.status === 'error') {
+				console.warn(`\n⚠ Could not attach the public-endpoint rate-limit rule: ${rateLimit.detail}`);
+			} else {
+				console.log(`✔ Public-endpoint rate limit: ${rateLimit.detail}`);
+			}
+		}
+
+		// Turnstile widget for the admin-login bot check. Account-
+		// scoped, so — unlike the DNS / image-resizing checks above — it does NOT
+		// need a resolved zone and runs even when the domain's DNS lives elsewhere.
+		// Non-fatal: a token without Account → Turnstile: Edit just yields an
+		// 'error' result we warn about in Next steps — setup keeps going regardless.
+		const ts = await provisionTurnstileWidget(cfToken, cfAccount, host);
+		turnstileStatus = ts.status;
+		turnstileDetail = ts.detail;
+		turnstileSitekey = ts.sitekey ?? '';
+		turnstileSecret = ts.secret ?? '';
+		if (ts.status === 'error') {
+			console.warn(`\n⚠ Admin-login protection NOT set — ${ts.detail}`);
+		} else {
+			console.log(`✔ Admin-login Turnstile: ${ts.detail}`);
 		}
 	}
 
@@ -613,54 +614,48 @@ async function main() {
 	// 4b. Attach the D1/R2 bindings + FURTRACK_MODE to the Pages PROJECT via the
 	//     API. setup only wrote them to the gitignored wrangler.toml, which a
 	//     CI-only deploy never sees — so without this the first `git push` deploy
-	//     ships with no D1/R2 binding (a broken database). Needs the API token +
-	//     account id; if they're absent (wrangler login) or the PATCH fails, fall
-	//     back to a one-time local deploy that reads wrangler.toml.
-	if (cfToken && cfAccount) {
-		const payload = buildPagesConfigPayload({
-			dbId,
-			// Bind R2 only when a bucket is actually there — binding a name the create
-			// never made ships a broken IMAGES binding on the first CI deploy.
-			bucket: bucketReady ? bucket : '',
-			// TURNSTILE_SITEKEY is public (rendered into the login page), so it rides
-			// as a plain Pages var alongside FURTRACK_MODE. Its secret is set separately
-			// as a Pages secret below. Absent when Turnstile wasn't provisioned.
-			envVars: {
-				FURTRACK_MODE: furtrackMode,
-				...(turnstileSitekey ? { TURNSTILE_SITEKEY: turnstileSitekey } : {})
-			}
-		});
-		const res = await cfApi(cfToken, `/accounts/${encodeURIComponent(cfAccount)}/pages/projects/${encodeURIComponent(project)}`, {
-			method: 'PATCH',
-			body: payload
-		});
-		// A 200 whose body dropped the sitekey must not read as wired — confirm the
-		// PATCH persisted TURNSTILE_SITEKEY (skipped when no widget was provisioned).
-		pagesConfigOk =
-			res.ok && (!turnstileSitekey || pagesPatchConfirmsSitekey(res.result, turnstileSitekey));
-		if (res.ok) {
-			// Name only what was sent: the R2 binding is omitted when no bucket exists.
-			console.log(
-				`✔ attached D1${bucketReady ? '/R2' : ''} bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).`
-			);
-		} else {
-			// failureDetail keeps the reason honest per status — a thrown fetch says
-			// the API did not respond instead of "(HTTP 0)", and only a 401/403 names
-			// the scope. It reads the allowlisted code+message pairs, never the raw
-			// errors body, which can echo account/project identifiers.
-			console.warn(
-				`\n⚠ Could not attach bindings to the Pages project via the API${failureDetail(res, PAGES_SCOPE_HINT)}`
-			);
-			console.warn('  Fix: run ONE local deploy with wrangler.toml present so the bindings attach:');
-			console.warn('    npx wrangler pages deploy .svelte-kit/cloudflare');
-			console.warn('  Until then, CI (git push) deploys will have no D1/R2 binding.');
+	//     ships with no D1/R2 binding (a broken database). If the PATCH fails, the
+	//     fix is the token scope and a re-run, never a local `wrangler pages deploy`
+	//     (it would replace the project's vars and secrets with wrangler.toml's).
+	const payload = buildPagesConfigPayload({
+		dbId,
+		// Bind R2 only when a bucket is actually there — binding a name the create
+		// never made ships a broken IMAGES binding on the first CI deploy.
+		bucket: bucketReady ? bucket : '',
+		// TURNSTILE_SITEKEY is public (rendered into the login page), so it rides
+		// as a plain Pages var alongside FURTRACK_MODE. Its secret is set separately
+		// as a Pages secret below. Absent when Turnstile wasn't provisioned.
+		envVars: {
+			FURTRACK_MODE: furtrackMode,
+			...(turnstileSitekey ? { TURNSTILE_SITEKEY: turnstileSitekey } : {})
 		}
+	});
+	const res = await cfApi(cfToken, `/accounts/${encodeURIComponent(cfAccount)}/pages/projects/${encodeURIComponent(project)}`, {
+		method: 'PATCH',
+		body: payload
+	});
+	// A 200 whose body dropped the sitekey must not read as wired — confirm the
+	// PATCH persisted TURNSTILE_SITEKEY (skipped when no widget was provisioned).
+	pagesConfigOk =
+		res.ok && (!turnstileSitekey || pagesPatchConfirmsSitekey(res.result, turnstileSitekey));
+	if (res.ok) {
+		// Name only what was sent: the R2 binding is omitted when no bucket exists.
+		console.log(
+			`✔ attached D1${bucketReady ? '/R2' : ''} bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).`
+		);
 	} else {
-		console.warn('\n⚠ Skipping Pages-project binding wiring (CLOUDFLARE_API_TOKEN/ACCOUNT_ID not in env).');
-		console.warn('  Run ONE local deploy (reads wrangler.toml) so the D1/R2 bindings attach to the project:');
-		console.warn('    npx wrangler pages deploy .svelte-kit/cloudflare');
-		console.warn('  Otherwise a CI-only deploy ships without D1/R2 bindings (broken database).');
+		// failureDetail keeps the reason honest per status — a thrown fetch says
+		// the API did not respond instead of "(HTTP 0)", and only a 401/403 names
+		// the scope. It reads the allowlisted code+message pairs, never the raw
+		// errors body, which can echo account/project identifiers.
+		console.warn(
+			`\n⚠ Could not attach bindings to the Pages project via the API${failureDetail(res, PAGES_SCOPE_HINT)}`
+		);
+		console.warn('  Fix the token (see below), then re-run setup so the bindings attach.');
+		console.warn('  Until then, CI (git push) deploys will have no D1/R2 binding.');
+		console.warn(TOKEN_RECIPE);
 	}
+
 
 	// 5. Apply D1 migrations (remote) in ONE execute. We build a single SQL script
 	//    — CREATE schema_migrations + every drizzle/*.sql in order, each followed
@@ -669,19 +664,44 @@ async function main() {
 	//    step treats as already-applied (a clean no-op on the first CI deploy).
 	//    stdin is ignored so wrangler's interactive "Ok to proceed?" never fires
 	//    (the same reason CI, which has no TTY, is never prompted).
-	const migFiles = readdirSync('drizzle')
-		.filter((f) => f.endsWith('.sql'))
-		.sort();
-	const combinedSql = buildMigrationSql(
-		migFiles.map((name) => ({ name, sql: readFileSync(join('drizzle', name), 'utf8') }))
+	//    Files already recorded in schema_migrations are left out, as the deploy
+	//    workflow does: a re-run otherwise replays 0000 against a populated
+	//    database, dies on "table already exists", and never reaches the secrets.
+	const applied = new Set(
+		parseAppliedMigrations(
+			runArgs(
+				'npx',
+				[
+					'wrangler',
+					'd1',
+					'execute',
+					dbName,
+					'--remote',
+					'--json',
+					'--command',
+					'CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL); SELECT name FROM schema_migrations;'
+				],
+				{ capture: true, env: readableEnv }
+			)
+		)
 	);
-	const migrations = writePrivateTempSql(combinedSql, 'sona-migrations-');
-	try {
-		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${migrations.path}`], {
-			stdin: 'ignore'
-		});
-	} finally {
-		removeTempSqlDir(migrations.dir);
+	const migFiles = readdirSync('drizzle')
+		.filter((f) => f.endsWith('.sql') && !applied.has(f))
+		.sort();
+	if (migFiles.length === 0) {
+		console.log('✔ D1 migrations already applied — nothing to run.');
+	} else {
+		const combinedSql = buildMigrationSql(
+			migFiles.map((name) => ({ name, sql: readFileSync(join('drizzle', name), 'utf8') }))
+		);
+		const migrations = writePrivateTempSql(combinedSql, 'sona-migrations-');
+		try {
+			runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${migrations.path}`], {
+				stdin: 'ignore'
+			});
+		} finally {
+			removeTempSqlDir(migrations.dir);
+		}
 	}
 
 	// 6. Seed the storage provider so the app boots with the chosen backend (the
@@ -765,9 +785,8 @@ async function main() {
 	if (turnstileSecret) turnstileSecretSet = putSecret('TURNSTILE_SECRET', turnstileSecret);
 
 	// 8. Offer to wire the fork's GitHub Actions secrets/vars so CI deploys work
-	//    with no separate manual step. Only when gh is installed + authenticated,
-	//    there is a GitHub origin, and the CLOUDFLARE_* values are in the env (if
-	//    the operator used `wrangler login` there is no token value to pass on).
+	//    with no separate manual step. Only when gh is installed + authenticated
+	//    and there is a GitHub origin.
 	const originUrl = run('git remote get-url origin', { capture: true, allowFail: true }).trim();
 	// One GitHub-origin parser: deriveRepoSlug is the source of truth, and
 	// "has a GitHub origin" is simply "we could derive owner/repo from it". This
@@ -777,9 +796,7 @@ async function main() {
 	const gh = ghSecretEligibility({
 		ghInstalled: commandSucceeds('gh --version'),
 		ghAuthenticated: commandSucceeds('gh auth status'),
-		hasGithubOrigin: repoSlug !== null,
-		apiToken: env.CLOUDFLARE_API_TOKEN,
-		accountId: env.CLOUDFLARE_ACCOUNT_ID
+		hasGithubOrigin: repoSlug !== null
 	});
 	let ciSecretsSet = false;
 	if (gh.eligible && repoSlug) {
@@ -794,8 +811,8 @@ async function main() {
 			// sticker-resync.yml authenticate, and FURTRACK_MODE — always, even 'off',
 			// so a live→off re-run neutralizes a stale 'live') lives in ciWiringEntries.
 			const entries = ciWiringEntries({
-				apiToken: env.CLOUDFLARE_API_TOKEN!,
-				accountId: env.CLOUDFLARE_ACCOUNT_ID!,
+				apiToken: cfToken,
+				accountId: cfAccount,
 				cronSecret,
 				setupToken,
 				project,
@@ -843,7 +860,7 @@ async function main() {
 	for (const line of resendSecretWarnLines(resendFailed, project)) console.warn(line);
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
-	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
+	console.log('  1. Deploy:  git push');
 	console.log(`  2. Open  https://${project}.pages.dev/admin/setup  and finish in the wizard.`);
 	if (useR2 && r2PublicUrl) {
 		for (const line of cdnAttachmentLines(r2PublicUrl, bucket, domain)) {

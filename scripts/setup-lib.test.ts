@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeHttpsUrl } from '../src/lib/server/validate';
-import { readFileSync, readdirSync, existsSync, statSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
 	buildMigrationSql,
+	parseAppliedMigrations,
 	buildSeedSql,
 	sanitizeProjectName,
 	isValidResourceName,
@@ -94,6 +96,39 @@ describe('buildMigrationSql', () => {
 	it('escapes single quotes in a basename', () => {
 		const sql = buildMigrationSql([{ name: "0000_o'brien.sql", sql: 'SELECT 1;' }]);
 		expect(sql).toContain("VALUES ('0000_o''brien.sql'");
+	});
+});
+
+describe('parseAppliedMigrations', () => {
+	it('reads the names from the last result set, skipping the CREATE before it', () => {
+		const json = JSON.stringify([
+			{ results: [], success: true },
+			{ results: [{ name: '0000_a.sql' }, { name: '0001_b.sql' }], success: true }
+		]);
+		expect(parseAppliedMigrations(json)).toEqual(['0000_a.sql', '0001_b.sql']);
+	});
+
+	it('returns [] for a fresh database with an empty schema_migrations', () => {
+		const json = JSON.stringify([{ results: [] }, { results: [] }]);
+		expect(parseAppliedMigrations(json)).toEqual([]);
+	});
+
+	it('throws on output it cannot read instead of assuming nothing is applied', () => {
+		expect(() => parseAppliedMigrations('✘ [ERROR] not json')).toThrow();
+		expect(() => parseAppliedMigrations('[]')).toThrow();
+		expect(() => parseAppliedMigrations('[{"error":"x"}]')).toThrow();
+	});
+
+	it('puts what wrangler printed in the error', () => {
+		expect(() => parseAppliedMigrations('✘ [ERROR] not json')).toThrow(/invalid JSON[\s\S]*✘ \[ERROR\] not json/);
+		expect(() => parseAppliedMigrations('[{"error":"x"}]')).toThrow(/no result set[\s\S]*"error":"x"/);
+	});
+
+	it('throws on a row without a name instead of treating that migration as pending', () => {
+		const json = (row: string) => `[{"results":[{"name":"0001_b.sql"},${row}]}]`;
+		expect(() => parseAppliedMigrations(json('{}'))).toThrow(/a row without a name/);
+		expect(() => parseAppliedMigrations(json('{"name":7}'))).toThrow(/a row without a name/);
+		expect(() => parseAppliedMigrations(json('null'))).toThrow(/a row without a name/);
 	});
 });
 
@@ -638,9 +673,7 @@ describe('ghSecretEligibility', () => {
 	const ok = {
 		ghInstalled: true,
 		ghAuthenticated: true,
-		hasGithubOrigin: true,
-		apiToken: 'tok',
-		accountId: 'acct'
+		hasGithubOrigin: true
 	};
 
 	it('is eligible when everything is present', () => {
@@ -663,11 +696,6 @@ describe('ghSecretEligibility', () => {
 		const r = ghSecretEligibility({ ...ok, hasGithubOrigin: false });
 		expect(r.eligible).toBe(false);
 		expect(r.reason).toMatch(/origin/);
-	});
-
-	it('skips when the CLOUDFLARE_* env values are absent (wrangler login)', () => {
-		expect(ghSecretEligibility({ ...ok, apiToken: undefined }).eligible).toBe(false);
-		expect(ghSecretEligibility({ ...ok, accountId: '' }).eligible).toBe(false);
 	});
 });
 
@@ -1886,8 +1914,24 @@ describe('setup.ts ↔ no operator answer reaches a shell', () => {
 });
 
 describe('setup.ts ↔ SQL never rides a command line', () => {
-	it('never hands wrangler SQL with --command', () => {
-		expect(setupCode).not.toContain('--command');
+	// The one --command is the applied-migrations read: D1 returns no rows for a
+	// --file execute, so a SELECT has to ride --command. It must stay a fixed
+	// literal — nothing interpolated — so no operator answer can reach it.
+	// The literal must be the whole argv element — followed by `,` or `]` —
+	// so `'SELECT ' + value` (a literal with a variable glued on) doesn't count.
+	const FIXED_COMMAND_ARG = /'--command',\s*'[^'`$]*'\s*[,\]]/g;
+
+	it('hands wrangler --command only a fixed SQL literal, never an interpolated one', () => {
+		const uses = setupCode.match(/'--command'/g) ?? [];
+		const literals = setupCode.match(FIXED_COMMAND_ARG) ?? [];
+		expect(uses).toHaveLength(1);
+		expect(literals).toHaveLength(uses.length);
+	});
+
+	it('reads the applied migrations with WRANGLER_LOG removed, so the JSON prints', () => {
+		const at = setupCode.indexOf("'--command'");
+		expect(setupCode.slice(at, at + 400)).toMatch(/env:\s*readableEnv/);
+		expect(setupCode).toMatch(/delete readableEnv\.WRANGLER_LOG/);
 	});
 
 	it('passes the migration and seed SQL as files, written through the private helper', () => {
@@ -1988,4 +2032,66 @@ describe('setup.ts ↔ untrusted values are encoded, never pasted raw', () => {
 		expect(setupCode).not.toMatch(/\/zones\/\$\{zoneId\}/);
 		expect(setupCode.match(/\/zones\/\$\{encodeURIComponent\(zoneId\)\}/g)).toHaveLength(3);
 	});
+});
+
+describe('never steers the operator to a local Pages deploy', () => {
+	// A local `wrangler pages deploy` replaces the project's dashboard-managed vars
+	// and secrets (SETUP_TOKEN, CRON_SECRET) with what wrangler.toml declares, so
+	// setup attaches bindings through the API and requires the token to do it.
+	it('setup never suggests `wrangler pages deploy`', () => {
+		const advice = setupCode.match(/console\.(log|warn|error)\([^;]*pages deploy[^;]*\);/g);
+		expect(advice).toBeNull();
+	});
+
+	it('neither does the app UI or its messages', () => {
+		const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+		const files = (dir: string): string[] =>
+			readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+				e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]
+			);
+		const offenders = [...files(join(root, 'src')), ...files(join(root, 'messages'))]
+			.filter((f) => /\.(svelte|json)$/.test(f))
+			.filter((f) => readFileSync(f, 'utf8').includes('wrangler pages deploy'));
+		expect(offenders).toEqual([]);
+	});
+});
+
+describe('setup.ts without CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID', () => {
+	const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+	const tsx = join(root, 'node_modules', '.bin', 'tsx');
+
+	// Runs setup with stub npx/wrangler/gh first on PATH; each stub records its
+	// call, so an empty log means setup provisioned nothing.
+	function runSetup(creds: { CLOUDFLARE_API_TOKEN?: string; CLOUDFLARE_ACCOUNT_ID?: string }) {
+		const bin = mkdtempSync(join(tmpdir(), 'sona-setup-stub-'));
+		const log = join(bin, 'calls.log');
+		for (const cmd of ['npx', 'wrangler', 'gh']) {
+			writeFileSync(join(bin, cmd), `#!/bin/sh\necho "${cmd} $*" >> "${log}"\n`, { mode: 0o755 });
+		}
+		const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+		delete env.CLOUDFLARE_API_TOKEN;
+		delete env.CLOUDFLARE_ACCOUNT_ID;
+		Object.assign(env, creds);
+		try {
+			const res = spawnSync(tsx, [join(root, 'scripts', 'setup.ts')], {
+				env,
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe'],
+				timeout: 30_000
+			});
+			return { status: res.status, stderr: res.stderr, calls: existsSync(log) ? readFileSync(log, 'utf8') : '' };
+		} finally {
+			rmSync(bin, { recursive: true, force: true });
+		}
+	}
+
+	it.each([
+		['the API token', { CLOUDFLARE_ACCOUNT_ID: 'acct' }],
+		['the account id', { CLOUDFLARE_API_TOKEN: 'token' }]
+	])('exits non-zero without %s and runs no command', (_, creds) => {
+		const { status, stderr, calls } = runSetup(creds);
+		expect(status).toBe(1);
+		expect(stderr).toContain('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must both be set');
+		expect(calls).toBe('');
+	}, 30_000);
 });
