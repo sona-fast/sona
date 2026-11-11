@@ -117,6 +117,11 @@ describe('parseAppliedMigrations', () => {
 		expect(() => parseAppliedMigrations('[]')).toThrow();
 		expect(() => parseAppliedMigrations('[{"error":"x"}]')).toThrow();
 	});
+
+	it('puts what wrangler printed in the error', () => {
+		expect(() => parseAppliedMigrations('✘ [ERROR] not json')).toThrow(/invalid JSON[\s\S]*✘ \[ERROR\] not json/);
+		expect(() => parseAppliedMigrations('[{"error":"x"}]')).toThrow(/no result set[\s\S]*"error":"x"/);
+	});
 });
 
 describe('buildSeedSql', () => {
@@ -660,9 +665,7 @@ describe('ghSecretEligibility', () => {
 	const ok = {
 		ghInstalled: true,
 		ghAuthenticated: true,
-		hasGithubOrigin: true,
-		apiToken: 'tok',
-		accountId: 'acct'
+		hasGithubOrigin: true
 	};
 
 	it('is eligible when everything is present', () => {
@@ -685,11 +688,6 @@ describe('ghSecretEligibility', () => {
 		const r = ghSecretEligibility({ ...ok, hasGithubOrigin: false });
 		expect(r.eligible).toBe(false);
 		expect(r.reason).toMatch(/origin/);
-	});
-
-	it('skips when the CLOUDFLARE_* env values are absent (wrangler login)', () => {
-		expect(ghSecretEligibility({ ...ok, apiToken: undefined }).eligible).toBe(false);
-		expect(ghSecretEligibility({ ...ok, accountId: '' }).eligible).toBe(false);
 	});
 });
 
@@ -1922,10 +1920,10 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		expect(literals).toHaveLength(uses.length);
 	});
 
-	it('rejects a --command literal with a variable concatenated onto it', () => {
-		expect("'--command', 'SELECT 1;'\n\t\t\t\t],".match(FIXED_COMMAND_ARG)).toHaveLength(1);
-		expect("'--command', 'SELECT ' + value,".match(FIXED_COMMAND_ARG)).toBeNull();
-		expect("'--command', `SELECT ${value}`,".match(FIXED_COMMAND_ARG)).toBeNull();
+	it('reads the applied migrations with WRANGLER_LOG removed, so the JSON prints', () => {
+		const at = setupCode.indexOf("'--command'");
+		expect(setupCode.slice(at, at + 400)).toMatch(/env:\s*readableEnv/);
+		expect(setupCode).toMatch(/delete readableEnv\.WRANGLER_LOG/);
 	});
 
 	it('passes the migration and seed SQL as files, written through the private helper', () => {
@@ -2025,5 +2023,22 @@ describe('setup.ts ↔ untrusted values are encoded, never pasted raw', () => {
 	it('encodes the zone id in every zone call it makes itself', () => {
 		expect(setupCode).not.toMatch(/\/zones\/\$\{zoneId\}/);
 		expect(setupCode.match(/\/zones\/\$\{encodeURIComponent\(zoneId\)\}/g)).toHaveLength(3);
+	});
+});
+
+describe('setup.ts ↔ never steers the operator to a local Pages deploy', () => {
+	// A local `wrangler pages deploy` replaces the project's dashboard-managed vars
+	// and secrets (SETUP_TOKEN, CRON_SECRET) with what wrangler.toml declares, so
+	// setup attaches bindings through the API and requires the token to do it.
+	it('never suggests `wrangler pages deploy`', () => {
+		const advice = setupCode.match(/console\.(log|warn|error)\([^;]*pages deploy[^;]*\);/g);
+		expect(advice).toBeNull();
+	});
+
+	it('stops before provisioning when the API token or account id is missing', () => {
+		const guard = setupCode.indexOf('if (!cfToken || !cfAccount) {');
+		expect(guard).toBeGreaterThan(-1);
+		expect(guard).toBeLessThan(setupCode.indexOf("'npx wrangler whoami'"));
+		expect(setupCode.slice(guard, guard + 400)).toMatch(/process\.exitCode = 1;[\s\S]*return;/);
 	});
 });
