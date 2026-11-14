@@ -55,7 +55,7 @@
 	},
 	"dependencies": {
 		"@pixiv/three-vrm": "^3.5.5",
-		"@sveltejs/adapter-cloudflare": "^7.2.8",
+		"@sveltejs/adapter-cloudflare": "^7.2.10",
 		"@uploadthing/shared": "^7.1.10",
 		"@uploadthing/svelte": "^7.3.3",
 		"drizzle-orm": "^0.45.2",
