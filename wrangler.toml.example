@@ -34,7 +34,8 @@ keep_vars = true
 #   REGISTRY_URL       — optional; override the registry base URL (defaults to the
 #                        public registry, https://registry.sona.fast).
 #   FUZZYSEARCH_API_KEY — optional; enables "Look up artist" (reverse image search
-#                        against FuzzySearch). Overrides the key saved in
+#                        against FuzzySearch, and against Skyseek for Bluesky
+#                        posts, which needs no key). Overrides the key saved in
 #                        Settings → Connections. Free key: api.fuzzysearch.net/selfserve.
 #   RESEND_API_KEY     — optional; enables the admin "Forgot password" reset email
 #                        (via Resend). Without it, recovery is `npm run reset-password`.

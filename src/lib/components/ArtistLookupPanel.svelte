@@ -7,10 +7,12 @@
 	import { tick } from 'svelte';
 	import { Check, Globe, Info, Loader2 } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
+	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import {
 		bandLabel,
+		canAddPosterAsArtist,
 		candidateArtists,
 		clearedLine,
 		isCrossSiteAmbiguity,
@@ -225,7 +227,8 @@
 <!-- The panel and its live region are ALWAYS in the DOM, collapsed to nothing
      while idle. A role="status" inserted together with its first content is
      commonly missed by screen readers, and that first content is "Sending the
-     image to FuzzySearch." — the one message that says the lookup started.
+     image to FuzzySearch and Skyseek." — the one message that says the lookup
+     started.
 
      The region is atomic, so every change to the status line re-speaks the whole
      panel. What the lookup filled is a fixed record and only the edited-since
@@ -269,7 +272,13 @@
 				{/if}
 			{:else if lookup.kind === 'no_match'}
 				<div class="lookup-eyebrow">{m.admin_lookup_no_match_eyebrow()}</div>
-				<p class="lookup-lead">{m.admin_lookup_no_match_body()}</p>
+				<!-- Bluesky is on the list of sites only when Skyseek answered: the
+				     sentence must not say a site was checked when nobody looked. -->
+				<p class="lookup-lead">
+					{lookup.blueskySearched
+						? m.admin_lookup_no_match_body_bluesky()
+						: m.admin_lookup_no_match_body()}
+				</p>
 				<!-- A no-match is a result with nothing to prefill, so it empties what
 				     the last lookup filled. Said here, above the hint: the operator
 				     watches the two fields go blank and this arm carries no status
@@ -382,6 +391,8 @@
 									<FurAffinityIcon size={14} />
 								{:else if match.site === 'Twitter'}
 									<TwitterIcon size={14} />
+								{:else if match.site === 'Bluesky'}
+									<BlueskyIcon size={14} />
 								{:else}
 									<Globe size={14} />
 								{/if}
@@ -454,7 +465,12 @@
 					{:else if outcome === 'unlinked'}
 						<p class="outcome">
 							<Info size={14} aria-hidden="true" />
-							{m.admin_lookup_unlinked()}
+							<!-- A Bluesky poster gets its own sentence: the other one names two
+							     sites it is not, and the reason differs — Sona can link the
+							     handle, it just cannot tell whether the poster drew the piece. -->
+							{prefill?.site === 'Bluesky'
+								? m.admin_lookup_unlinked_bluesky({ handle })
+								: m.admin_lookup_unlinked()}
 						</p>
 					{/if}
 				{/if}
@@ -677,7 +693,7 @@
 							{m.admin_lookup_add_new({ handle })}
 						</button>
 					{/if}
-				{:else if outcome === 'unlinked' && prefill}
+				{:else if outcome === 'unlinked' && prefill && canAddPosterAsArtist(prefill.site)}
 					<button
 						type="button"
 						class="btn btn-primary"

@@ -185,9 +185,11 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toMatch(/entail.dev \(an image classifier that suggests tags for artwork from its source post or the picture in it\)/);
 		expect(text).toContain('FurTrack');
 		expect(text).toContain('FuzzySearch');
+		expect(text).toContain('Skyseek');
 		// The lookup sends a copy of the image, and an unpublished one too; naming
 		// the provider alone would not disclose either (SONA-156).
-		expect(text).toMatch(/FuzzySearch \(finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent, including images not published on this site\)/);
+		// Skyseek gets the same copy in the same click, so it is named with it (SONA-243).
+		expect(text).toMatch(/FuzzySearch and Skyseek \(finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent to both, including images not published on this site\)/);
 		expect(text).toMatch(/shared artist registry/);
 	});
 });
@@ -299,8 +301,8 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '49bdb4a12e8dd6f00aede315b5891dd8e81f681240195e7ab8c6d9faa67baef7';
-	const RECORDED_UPDATED = '2026-10-17';
+	const RECORDED_TEXT_HASH = 'a434a15d6e8a0592903a6c31018674369df865fc60cc05838d7a63e40d3a9f57';
+	const RECORDED_UPDATED = '2026-11-16';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

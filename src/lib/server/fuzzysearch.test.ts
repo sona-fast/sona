@@ -86,6 +86,15 @@ describe('normalizeMatches', () => {
 		expect(matches).toHaveLength(5);
 	});
 
+	// Bluesky rows come from Skyseek alone. A FuzzySearch row claiming the site
+	// has no `<did>/<rkey>` id to link, and would otherwise pass for one.
+	it('drops a FuzzySearch row that names Bluesky', () => {
+		const rows = normalizeMatches([
+			{ site: 'Bluesky', site_id_str: 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/a', artists: [], distance: 0 }
+		]);
+		expect(rows).toEqual([]);
+	});
+
 	it('sorts closest first, ties by site, nulls last', () => {
 		expect(matches.map((m) => `${m.site}:${m.siteId}`)).toEqual([
 			'FurAffinity:12345',
@@ -510,6 +519,37 @@ describe('strictestRating', () => {
 });
 
 describe('normalizeSourceUrl', () => {
+	// SONA-243: a Bluesky post can be the prefill now, so its URL is compared too.
+	it('folds a Bluesky post link to its account and record key', () => {
+		const did = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		const canonical = `bsky.app/profile/${did}/post/3mwwswjznmk25`;
+		expect(normalizeSourceUrl(`https://bsky.app/profile/${did}/post/3mwwswjznmk25`)).toBe(canonical);
+		expect(normalizeSourceUrl(`https://BSKY.app/profile/${did}/post/3mwwswjznmk25/`)).toBe(canonical);
+		expect(normalizeSourceUrl(`bsky.app/profile/${did}/post/3mwwswjznmk25?ref=x#y`)).toBe(canonical);
+		expect(normalizeSourceUrl(`https://bsky.app/profile/${did}/post/3mwwswjznmk25/liked-by`)).toBe(
+			canonical
+		);
+		expect(
+			normalizeSourceUrl('https://bsky.app/profile/did%3Aplc%3Aaaaaaaaaaaaaaaaaaaaaaaaa/post/3mwwswjznmk25')
+		).toBe(canonical);
+		// A handle is a hostname, so its case folds; the record key's does not.
+		expect(normalizeSourceUrl('https://bsky.app/profile/Artist.Example/post/3mwwswjznmk25')).toBe(
+			'bsky.app/profile/artist.example/post/3mwwswjznmk25'
+		);
+		expect(normalizeSourceUrl(`https://bsky.app/profile/${did}/post/3MWWSWJZNMK25`)).not.toBe(
+			canonical
+		);
+		// The handle spelling and the DID spelling stay apart here: only a caller
+		// that knows both names can say they are one post.
+		expect(normalizeSourceUrl('https://bsky.app/profile/artist.example/post/3mwwswjznmk25')).not.toBe(
+			canonical
+		);
+		// Not a post: left as any other URL is.
+		expect(normalizeSourceUrl('https://bsky.app/profile/Artist.Example')).toBe(
+			'bsky.app/profile/Artist.Example'
+		);
+	});
+
 	it('folds scheme, host case, www, query, fragment, and trailing slash', () => {
 		const canonical = 'furaffinity.net/view/12345';
 		expect(normalizeSourceUrl('https://www.furaffinity.net/view/12345/')).toBe(canonical);
@@ -640,6 +680,9 @@ describe('handleProfileUrl', () => {
 			'https://www.furaffinity.net/user/kuttoya/'
 		);
 		expect(handleProfileUrl('Twitter', '@kuttoya')).toBe('https://twitter.com/kuttoya');
+		expect(handleProfileUrl('Bluesky', '@artist.example')).toBe(
+			'https://bsky.app/profile/artist.example'
+		);
 	});
 
 	// A handle is third-party text: unescaped, a slash or a '?' in it re-points
@@ -649,6 +692,7 @@ describe('handleProfileUrl', () => {
 			'https://www.furaffinity.net/user/evil%2F..%2F..%2Fnews/'
 		);
 		expect(handleProfileUrl('Twitter', 'a?b#c')).toBe('https://twitter.com/a%3Fb%23c');
+		expect(handleProfileUrl('Bluesky', 'a/../b?c')).toBe('https://bsky.app/profile/a%2F..%2Fb%3Fc');
 	});
 
 	it('returns null for sites with no artist column yet, and for a blank handle', () => {

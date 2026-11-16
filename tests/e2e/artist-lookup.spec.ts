@@ -48,6 +48,38 @@ function matchedBody(over: Record<string, unknown> = {}) {
 	};
 }
 
+// A made-up Bluesky post, as the endpoint builds one from a Skyseek match: no
+// distance, band or rating, the id is DID + record key, and the link names the
+// account by DID.
+const BLUESKY_DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+const BLUESKY_POST = `https://bsky.app/profile/${BLUESKY_DID}/post/3mwwswjznmk25`;
+/** A Bluesky post with no distance: a row to follow, never a value to fill. */
+const BLUESKY_LEAD = {
+	site: 'Bluesky',
+	siteId: `${BLUESKY_DID}/3mwwswjznmk25`,
+	handles: ['artist.example'],
+	distance: null,
+	band: null,
+	postedAt: '2026-10-03T02:15:28.000Z',
+	rating: null,
+	postUrl: BLUESKY_POST
+};
+/** The same post as an exact match, which Skyseek's distance makes confident. */
+const BLUESKY_EXACT = { ...BLUESKY_LEAD, distance: 0, band: 'exact' };
+
+/** A lookup that found that one Bluesky post and nothing else. */
+function blueskyOnlyBody(match: Record<string, unknown>, over: Record<string, unknown> = {}) {
+	return {
+		enabled: true,
+		matches: [match],
+		localArtists: [],
+		nameMatches: [],
+		sourceClash: null,
+		blueskySearched: true,
+		...over
+	};
+}
+
 // An X status the tag-suggestion pill also recognises. The two features only
 // meet on a post BOTH of them can read: FuzzySearch matches it, and the pill
 // runs on Bluesky and X links alone — so a FurAffinity match leaves the
@@ -388,6 +420,212 @@ test.describe('with a key saved', () => {
 		const link = panel(page).getByRole('link', { name: /View post/ });
 		await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
 		await expect(link).toHaveAttribute('target', '_blank');
+	});
+
+	// SONA-243: the same click searches Skyseek, and a Bluesky post comes back as
+	// a row of its own. The endpoint sorts a FuzzySearch match ahead of a Bluesky
+	// one that is exactly as close, so the form is filled from FurAffinity here.
+	test('a Bluesky post is listed with the other matches, which still fill the form', async ({
+		page
+	}, testInfo) => {
+		const base = matchedBody();
+		await stubLookup(page, { ...base, matches: [...base.matches, BLUESKY_EXACT], blueskySearched: true });
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		const rows = panel(page).locator('.match-row');
+		await expect(rows).toHaveCount(2);
+		await expect(rows.nth(0)).toContainText('kuttoya on FurAffinity');
+		await expect(rows.nth(1)).toContainText('artist.example on Bluesky');
+		await expect(rows.nth(1).locator('.match-meta')).toHaveText('Exact match · Posted 2026-10-03');
+		const link = rows.nth(1).getByRole('link', { name: /View post on Bluesky/ });
+		await expect(link).toHaveAttribute('href', BLUESKY_POST);
+		await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+		await expect(panel(page)).toContainText('Found on 2 sites');
+		await expect(page.locator('input[name="sourcePostUrl"]')).toHaveValue(POST_URL);
+		await expect(page.locator('input[name="commissionedAt"]')).toHaveValue('2026-03-04');
+		await testInfo.attach('bluesky-match-row', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+	});
+
+	// No distance, so no band: the post is shown and nothing is done with it.
+	test('a Bluesky post with no distance is shown, with nothing filled or offered', async ({
+		page
+	}) => {
+		// No handle resolved for this one either: the row still links the post.
+		await stubLookup(page, blueskyOnlyBody({ ...BLUESKY_LEAD, handles: [] }));
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		await expect(panel(page).locator('.match-row')).toHaveCount(1);
+		await expect(panel(page)).toContainText('Unknown poster on Bluesky');
+		// No band to claim: the row carries the post date and nothing about
+		// confidence.
+		await expect(panel(page).locator('.match-meta')).toHaveText('Posted 2026-10-03');
+		await expect(panel(page).getByRole('link', { name: /View post/ })).toHaveAttribute(
+			'href',
+			BLUESKY_POST
+		);
+		await expect(page.locator('input[name="sourcePostUrl"]')).toHaveValue('');
+		await expect(page.locator('input[name="commissionedAt"]')).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(panel(page).getByRole('button', { name: /^(Use|Add) / })).toHaveCount(0);
+		await expect(panel(page).getByRole('button', { name: 'Close' })).toBeVisible();
+	});
+
+	// An exact Bluesky match is a confident one: it fills the source link and the
+	// date, and a poster already in the artist list is offered like any other.
+	test('an exact Bluesky match fills the source link and date, and offers its local artist', async ({
+		page
+	}, testInfo) => {
+		await stubLookup(
+			page,
+			blueskyOnlyBody(BLUESKY_EXACT, {
+				localArtists: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }]
+			})
+		);
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		await expect(page.locator('input[name="sourcePostUrl"]')).toHaveValue(BLUESKY_POST);
+		await expect(page.locator('input[name="commissionedAt"]')).toHaveValue('2026-10-03');
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveText('From lookup');
+		await expect(panel(page)).toContainText(
+			'artist.example is already in your artist list as Test Artist.'
+		);
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date from the Bluesky post.'
+		);
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+		await testInfo.attach('bluesky-exact-match', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+	});
+
+	// Whoever posted a picture on Bluesky may have commissioned or reposted it, so
+	// a poster Sona does not know is named and never offered as a new artist.
+	test('an exact Bluesky match by an unknown poster fills the form and offers no new artist', async ({
+		page
+	}) => {
+		await stubLookup(page, blueskyOnlyBody(BLUESKY_EXACT));
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		await expect(page.locator('input[name="sourcePostUrl"]')).toHaveValue(BLUESKY_POST);
+		await expect(page.locator('input[name="commissionedAt"]')).toHaveValue('2026-10-03');
+		await expect(panel(page)).toContainText(
+			"artist.example posted this on Bluesky and isn't in your artist list. Check the post before you credit them, because the poster isn't always the artist."
+		);
+		await expect(panel(page)).not.toContainText('Weasyl or e621');
+		await expect(panel(page).getByRole('button', { name: /^(Use|Add) / })).toHaveCount(0);
+		await expect(panel(page).getByRole('button', { name: 'Close' })).toBeVisible();
+	});
+
+	// A Bluesky handle is a hostname, up to 253 characters with no space in it,
+	// and a dot is not somewhere a browser breaks a line. Unwrapped it runs under
+	// "View post" or widens the page, in the row and again in the sentence below
+	// that repeats it.
+	test('a long Bluesky handle wraps inside the panel at phone width', async ({ page }, testInfo) => {
+		const handle = 'averyveryverylongunbrokenhandlelabelthatkeepsgoingandgoingon.example';
+		expect(handle.length).toBeGreaterThan(60);
+		await stubLookup(page, blueskyOnlyBody({ ...BLUESKY_EXACT, handles: [handle] }));
+		await oneDoneTile(page);
+		await page.setViewportSize({ width: 390, height: 900 });
+		await pill(page).click();
+
+		const who = panel(page).locator('.match-who');
+		const link = panel(page).locator('.match-link');
+		const outcome = panel(page).locator('.outcome');
+		await expect(who).toContainText(`${handle} on Bluesky`);
+		await expect(outcome).toContainText(`${handle} posted this on Bluesky`);
+		await testInfo.attach('long-handle-390', {
+			body: await page.screenshot({ fullPage: true }),
+			contentType: 'image/png'
+		});
+
+		const boxOf = async (locator: typeof who, name: string) => {
+			const box = await locator.boundingBox();
+			if (!box) throw new Error(`${name} has no box`);
+			return box;
+		};
+		const panelBox = await boxOf(panel(page), 'the panel');
+		const whoBox = await boxOf(who, 'the handle line');
+		const linkBox = await boxOf(link, 'the View post link');
+		const outcomeBox = await boxOf(outcome, 'the outcome line');
+		const iconBox = await boxOf(outcome.locator('svg'), 'the outcome icon');
+
+		// The page does not scroll sideways.
+		const overflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(overflow).toBeLessThanOrEqual(0);
+		// The handle and the link each have their own space: the two boxes do not
+		// intersect, and the link is still wholly inside the panel.
+		const overlapX =
+			Math.min(whoBox.x + whoBox.width, linkBox.x + linkBox.width) - Math.max(whoBox.x, linkBox.x);
+		const overlapY =
+			Math.min(whoBox.y + whoBox.height, linkBox.y + linkBox.height) - Math.max(whoBox.y, linkBox.y);
+		expect(overlapX <= 0 || overlapY <= 0, 'the handle runs under "View post"').toBe(true);
+		expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+		expect(whoBox.x + whoBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+		// The sentence that repeats the handle stays inside the panel too.
+		expect(outcomeBox.x + outcomeBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+		// It runs to several lines here, and its icon sits on the first of them, at
+		// full size, rather than halfway down the block.
+		const lineHeight = await outcome.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+		expect(outcomeBox.height).toBeGreaterThan(lineHeight * 2);
+		expect(iconBox.y + iconBox.height).toBeLessThanOrEqual(outcomeBox.y + lineHeight + 1);
+		expect(iconBox.width).toBeCloseTo(14, 0);
+	});
+
+	// The fix for the wrapped sentence must not move the icon on the outcomes that
+	// fit on one line: it stays centred on the text beside it.
+	test('a one-line outcome keeps its icon centred on the line', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		const outcome = panel(page).locator('.outcome');
+		await expect(outcome).toContainText('kuttoya is already in your artist list as Test Artist.');
+		const outcomeBox = await outcome.boundingBox();
+		const iconBox = await outcome.locator('svg').boundingBox();
+		if (!outcomeBox || !iconBox) throw new Error('the outcome line or its icon has no box');
+		const lineHeight = await outcome.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+		// One line, so the block's centre is the line's.
+		expect(outcomeBox.height).toBeLessThan(lineHeight * 1.5);
+		const offCentre =
+			iconBox.y + iconBox.height / 2 - (outcomeBox.y + outcomeBox.height / 2);
+		expect(Math.abs(offCentre)).toBeLessThanOrEqual(1);
+		// A short handle's row is one line with the link beside it, as before.
+		const whoBox = await panel(page).locator('.match-who').boundingBox();
+		const linkBox = await panel(page).locator('.match-link').boundingBox();
+		if (!whoBox || !linkBox) throw new Error('the match row has no box');
+		expect(whoBox.height).toBeLessThan(lineHeight * 1.5);
+		expect(linkBox.x).toBeGreaterThanOrEqual(whoBox.x + whoBox.width - 1);
+	});
+
+	// "Nothing matched" lists the sites that were checked, and Bluesky is on the
+	// list only when the endpoint says Skyseek answered.
+	test('a no-match names Bluesky only when it was searched', async ({ page }) => {
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: true });
+		await oneDoneTile(page);
+		await pill(page).click();
+		await expect(panel(page)).toContainText(
+			'Nothing matched on FurAffinity, Weasyl, e621, Twitter, or Bluesky.'
+		);
+
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: false });
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(panel(page)).toContainText(
+			'Nothing matched on FurAffinity, Weasyl, e621, or Twitter.'
+		);
+		await expect(panel(page)).not.toContainText('Bluesky');
 	});
 
 	test('editing a tagged field drops its tag', async ({ page }) => {
@@ -1354,7 +1592,7 @@ test.describe('with a key saved', () => {
 			'FuzzySearch is limiting how often your site can search right now.'
 		);
 		await expect(panel(page)).toContainText(
-			'Sona sent this file to FuzzySearch while it was marked private.'
+			'Sona sent this file to FuzzySearch and Skyseek while it was marked private.'
 		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 
@@ -1444,7 +1682,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'Sona sent this file to FuzzySearch while it was marked private.'
+			'Sona sent this file to FuzzySearch and Skyseek while it was marked private.'
 		);
 
 		await privateBox.uncheck();
@@ -1462,12 +1700,12 @@ test.describe('with a key saved', () => {
 		await privateBox.check();
 		await tileLookup(page).nth(1).click();
 		await expect(page.locator('.tile-private-notice')).toContainText(
-			'Sona sent this file to FuzzySearch while it was marked private.'
+			'Sona sent this file to FuzzySearch and Skyseek while it was marked private.'
 		);
 		// The notice is a plain paragraph outside any live region, so the spoken
 		// outcome has to carry the disclosure with it.
 		await expect(page.locator(LIVE_REGION)).toHaveText(
-			'back.png: kuttoya on FurAffinity, Exact match. Sona sent this file to FuzzySearch while it was marked private.'
+			'back.png: kuttoya on FurAffinity, Exact match. Sona sent this file to FuzzySearch and Skyseek while it was marked private.'
 		);
 
 		// Unticking leaves the send that already happened described as it was.
@@ -1497,7 +1735,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'Sona sent this file to FuzzySearch while it was marked private.'
+			'Sona sent this file to FuzzySearch and Skyseek while it was marked private.'
 		);
 
 		// And back the other way. The hint is about the NEXT click, so it goes;
@@ -1543,7 +1781,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'Sona sent this file to FuzzySearch while it was marked private.'
+			'Sona sent this file to FuzzySearch and Skyseek while it was marked private.'
 		);
 	});
 
@@ -3978,7 +4216,7 @@ test.describe('with a key saved', () => {
 		// says out loud that it sends the file to an outside service.
 		await expect(tileLookup(page).nth(1)).toHaveAccessibleDescription(
 			'No key This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.' +
-				" Sona sends each image to FuzzySearch to find who posted it. The parent's result fills the shared fields below; a variant's result only rates that variant."
+				" Sona sends each image to FuzzySearch and Skyseek to find who posted it. The parent's result fills the shared fields below; a variant's result only rates that variant."
 		);
 		// The link beside it repeats none of that: the reason is the line right
 		// above it and its own name says where it goes.

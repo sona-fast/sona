@@ -9,7 +9,7 @@
 
 import * as m from '$lib/paraglide/messages';
 
-export type LookupSite = 'FurAffinity' | 'Weasyl' | 'e621' | 'Twitter';
+export type LookupSite = 'FurAffinity' | 'Weasyl' | 'e621' | 'Twitter' | 'Bluesky';
 export type LookupRating = 'general' | 'mature' | 'adult';
 /** 0 → exact, 1-2 → strong, 3-7 → possible, unknown distance → null. */
 export type MatchBand = 'exact' | 'strong' | 'possible' | null;
@@ -57,6 +57,11 @@ export interface LookupResponse {
 	localArtists: ArtistHit[];
 	nameMatches: ArtistHit[];
 	sourceClash: SourceClash | null;
+	/** Whether Skyseek answered, so Bluesky was searched along with the sites
+	 * FuzzySearch covers. Only the no-match state reads it: "nothing matched"
+	 * must not name a site nobody looked at. Optional: a response from before
+	 * the endpoint searched Bluesky carries none, and reads as not searched. */
+	blueskySearched?: boolean;
 }
 
 /** Why a lookup did not produce matches. `signed_out`, `no_key` and `gone` are
@@ -82,7 +87,9 @@ export type LookupState =
 	| { kind: 'idle' }
 	| { kind: 'searching' }
 	| { kind: 'results'; data: LookupResponse }
-	| { kind: 'no_match' }
+	// `blueskySearched` is the endpoint's field of that name: the sentence lists
+	// the sites that were checked, and Bluesky is on it only when Skyseek answered.
+	| { kind: 'no_match'; blueskySearched: boolean }
 	// `sent` records whether the file left the browser, which the reason cannot:
 	// too_large and invalid_image each arise both from a gate that runs before
 	// anything is forwarded and from FuzzySearch answering 413/400 after the file
@@ -97,7 +104,11 @@ export type LookupState =
 export const LOOKUP_MAX_BYTES = 10 * 1024 * 1024;
 
 /** The sites Sona holds an artist column for. A match on any other site can be
- * shown, but never linked to a local artist (SONA-219). */
+ * shown, but never linked to a local artist (SONA-219). Bluesky has a column
+ * and is deliberately not here: this list decides whether an unknown poster is
+ * offered as a NEW artist with a profile link, and a Bluesky poster is not
+ * offered as one at all (see canAddPosterAsArtist). A Bluesky poster the
+ * operator already holds is matched by the endpoint through that column. */
 const LINKABLE_SITES: readonly LookupSite[] = ['FurAffinity', 'Twitter'];
 
 /** Sites are proper nouns — spelled the same in every locale. */
@@ -249,6 +260,7 @@ export function profileUrlFor(site: LookupSite, handle: string): string | null {
 	const safe = encodeURIComponent(clean);
 	if (site === 'FurAffinity') return `https://www.furaffinity.net/user/${safe}/`;
 	if (site === 'Twitter') return `https://twitter.com/${safe}`;
+	if (site === 'Bluesky') return `https://bsky.app/profile/${safe}`;
 	return null;
 }
 
@@ -301,6 +313,18 @@ export function nameMatchArtists(data: LookupResponse): Array<{ id: number; name
 	if (!match) return [];
 	const index = data.matches.indexOf(match);
 	return data.nameMatches.find((h) => h.matchIndex === index)?.artists ?? [];
+}
+
+/**
+ * Whether an unlinked match's poster may be offered as a new artist. Not on
+ * Bluesky: Skyseek finds whoever POSTED the picture, and on Bluesky that is as
+ * often the person who commissioned it, or someone reposting it, as the artist.
+ * Weasyl and e621 name the artist in the match itself, so their offer stands.
+ * A Bluesky poster already in the artist list is still offered, through the
+ * 'existing' outcome — the operator vouched for that account when they saved it.
+ */
+export function canAddPosterAsArtist(site: LookupSite): boolean {
+	return site !== 'Bluesky';
 }
 
 export type LookupOutcome = 'existing' | 'ambiguous' | 'new' | 'unlinked' | 'none';
@@ -936,7 +960,9 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	if (matches.length === 0 && raw.length > 0) {
 		return { kind: 'failed', reason: 'unavailable', sent: forwarded };
 	}
-	if (matches.length === 0) return { kind: 'no_match' };
+	if (matches.length === 0) {
+		return { kind: 'no_match', blueskySearched: data.blueskySearched === true };
+	}
 	return {
 		kind: 'results',
 		data: {

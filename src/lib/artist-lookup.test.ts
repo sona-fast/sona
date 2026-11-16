@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	LOOKUP_MAX_BYTES,
 	bandLabel,
+	canAddPosterAsArtist,
 	candidateArtists,
 	clearedLine,
 	isCrossSiteAmbiguity,
@@ -365,6 +366,7 @@ describe('labels and formatting', () => {
 	it('spells sites as their own names', () => {
 		expect(siteLabel('e621')).toBe('e621');
 		expect(siteLabel('FurAffinity')).toBe('FurAffinity');
+		expect(siteLabel('Bluesky')).toBe('Bluesky');
 	});
 
 	it('builds the rating tag, with the parent spelling for the shared box', () => {
@@ -1430,7 +1432,206 @@ describe('stateFromResponse', () => {
 
 	it('reads an empty match list as no_match', async () => {
 		expect(await stateFromResponse(jsonResponse({ enabled: true, matches: [] }))).toEqual({
-			kind: 'no_match'
+			kind: 'no_match',
+			blueskySearched: false
+		});
+	});
+
+	// The no-match sentence lists the sites that were checked. Bluesky is on it
+	// only when the endpoint says Skyseek answered: a body without the field, or
+	// with anything but true in it, must not claim a site nobody looked at.
+	it.each([
+		[true, true],
+		[false, false],
+		[undefined, false],
+		['true', false],
+		[1, false]
+	])('carries blueskySearched %j on a no_match as %j', async (wire, expected) => {
+		const state = await stateFromResponse(
+			jsonResponse({ enabled: true, matches: [], blueskySearched: wire })
+		);
+		expect(state).toEqual({ kind: 'no_match', blueskySearched: expected });
+	});
+
+	// SONA-243: a Bluesky post from Skyseek whose answer carried no distance. It
+	// has no band, so it is shown and never acted on: no prefill, no rating, no
+	// artist offered or applied.
+	describe('a Bluesky match with no distance', () => {
+		const DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		const bluesky = match({
+			site: 'Bluesky',
+			siteId: `${DID}/3mwwswjznmk25`,
+			handles: ['artist.example'],
+			distance: null,
+			band: null,
+			rating: null,
+			postedAt: '2026-10-03T02:15:28.000Z',
+			postUrl: `https://bsky.app/profile/${DID}/post/3mwwswjznmk25`
+		});
+
+		it('is rendered beside the FuzzySearch matches, in the order it was sent', async () => {
+			const state = await stateFromResponse(
+				jsonResponse({
+					enabled: true,
+					matches: [match(), bluesky],
+					localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Sky Artist' }] }],
+					nameMatches: [],
+					sourceClash: null,
+					blueskySearched: true
+				})
+			);
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(state.data.matches).toEqual([match(), bluesky]);
+			expect(matchHandles(state.data.matches[1])).toBe('artist.example');
+			// The prefill and the offer still come from the FurAffinity match.
+			expect(pickPrefillMatch(state.data.matches)).toEqual(match());
+			expect(candidateArtists(state.data)).toEqual([]);
+			expect(resolveOutcome(state.data)).toBe('new');
+		});
+
+		it('on its own fills nothing and offers nothing', async () => {
+			const state = await stateFromResponse(
+				jsonResponse({
+					enabled: true,
+					matches: [bluesky],
+					localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist' }] }],
+					nameMatches: [{ matchIndex: 0, artists: [{ id: 8, name: 'artist.example' }] }],
+					sourceClash: null,
+					blueskySearched: true
+				})
+			);
+			// A result with rows, not a no-match: the operator gets the lead.
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(pickPrefillMatch(state.data.matches)).toBeNull();
+			expect(resolveOutcome(state.data)).toBe('none');
+			expect(candidateArtists(state.data)).toEqual([]);
+			expect(nameMatchArtists(state.data)).toEqual([]);
+			expect(strictestRating(state.data.matches)).toBeNull();
+			expect(prefillForResult(state.data, { sourcePostUrl: '', commissionedAt: '' })).toEqual({});
+		});
+
+		it('names an unresolved poster as unknown rather than by DID', () => {
+			const unresolved = { ...bluesky, handles: [] };
+			expect(matchHandles(unresolved)).toBe('');
+			expect(tileResultText('', 'Bluesky', null).line).toBe('Unknown poster on Bluesky');
+		});
+
+		it('is not offered as a new artist, whatever else is', () => {
+			expect(canAddPosterAsArtist('Bluesky')).toBe(false);
+			for (const site of ['FurAffinity', 'Twitter', 'Weasyl', 'e621'] as LookupSite[]) {
+				expect(canAddPosterAsArtist(site)).toBe(true);
+			}
+		});
+
+		it('links a handle to its bsky.app profile, kept inside its path segment', () => {
+			expect(profileUrlFor('Bluesky', '@artist.example')).toBe(
+				'https://bsky.app/profile/artist.example'
+			);
+			expect(profileUrlFor('Bluesky', 'artist.example/post/x?y')).toBe(
+				'https://bsky.app/profile/artist.example%2Fpost%2Fx%3Fy'
+			);
+		});
+	});
+
+	// Skyseek reports a distance on FuzzySearch's scale, so an exact or strong
+	// Bluesky post is a confident match: it fills the form, and a poster the
+	// operator already holds is offered. A poster they do not hold is NOT offered
+	// as a new artist — whoever posted a picture on Bluesky may have commissioned
+	// or reposted it.
+	describe('a confident Bluesky match', () => {
+		const DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		const POST = `https://bsky.app/profile/${DID}/post/3mwwswjznmk25`;
+		const bluesky = match({
+			site: 'Bluesky',
+			siteId: `${DID}/3mwwswjznmk25`,
+			handles: ['artist.example'],
+			distance: 0,
+			band: 'exact',
+			rating: null,
+			postedAt: '2026-10-03T02:15:28.000Z',
+			postUrl: POST
+		});
+		const skyArtist = { matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist', pieces: 3 }] };
+
+		it('fills the source post URL and date, and the sentence names Bluesky', () => {
+			const data = response({ matches: [bluesky] });
+			const filled = prefillForResult(data, { sourcePostUrl: '', commissionedAt: '' });
+			expect(filled).toEqual({ sourcePostUrl: POST, commissionedAt: '2026-10-03' });
+			expect(statusSentence(statusLineKind(filled), 'Bluesky')).toBe(
+				'Sona filled the source post URL and commissioned date from the Bluesky post. You can change both before you save.'
+			);
+		});
+
+		it('never overwrites what the operator already typed', () => {
+			const data = response({ matches: [bluesky] });
+			expect(
+				prefillForResult(data, { sourcePostUrl: 'https://example.com/mine', commissionedAt: '2026-01-01' })
+			).toEqual({});
+		});
+
+		it('offers the local artist whose Bluesky link matched', () => {
+			const data = response({ matches: [bluesky], localArtists: [skyArtist] });
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(candidateArtists(data)).toEqual([{ id: 7, name: 'Sky Artist', pieces: 3, site: 'Bluesky' }]);
+			expect(matchHandle(matchForArtist(data, 7))).toBe('artist.example');
+		});
+
+		it('is "unlinked" for a poster not in the artist list, with no new-artist offer', () => {
+			const data = response({ matches: [bluesky] });
+			expect(resolveOutcome(data)).toBe('unlinked');
+			expect(canAddPosterAsArtist(bluesky.site)).toBe(false);
+			// A by-name collision is the 'new' outcome's prompt, and stays out of it.
+			const named = response({
+				matches: [bluesky],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 8, name: 'artist.example' }] }]
+			});
+			expect(resolveOutcome(named)).toBe('unlinked');
+			expect(candidateArtists(named)).toEqual([]);
+		});
+
+		it('is "none" when no handle resolved: there is nobody to name', () => {
+			const data = response({ matches: [{ ...bluesky, handles: [] }] });
+			expect(resolveOutcome(data)).toBe('none');
+			// The post is still what the form is filled from.
+			expect(prefillForResult(data, { sourcePostUrl: '', commissionedAt: '' }).sourcePostUrl).toBe(POST);
+		});
+
+		it('yields to a FuzzySearch match the endpoint sorted ahead of it', () => {
+			const data = response({ matches: [match(), bluesky] });
+			expect(pickPrefillMatch(data.matches)).toEqual(match());
+			expect(resolveOutcome(data)).toBe('new');
+		});
+
+		it('counts as its own site when two matches name two local artists', () => {
+			const data = response({
+				matches: [bluesky, match()],
+				localArtists: [skyArtist, { matchIndex: 1, artists: [{ id: 9, name: 'Fur Artist' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('ambiguous');
+			expect(isCrossSiteAmbiguity(data)).toBe(true);
+			expect(candidateArtists(data).map((c) => c.site)).toEqual(['Bluesky', 'FurAffinity']);
+		});
+
+		it('raises no rating itself, and leaves the others their own', () => {
+			expect(strictestRating([bluesky])).toBeNull();
+			expect(ratingTag(strictestRating([bluesky]))).toBeNull();
+			expect(strictestRating([bluesky, match({ rating: 'adult' })])).toEqual({
+				rating: 'adult',
+				sites: ['FurAffinity']
+			});
+		});
+
+		it('names Bluesky in the clash sentence when the post is already a source', () => {
+			const filled = { commissionedAt: '2026-10-03' };
+			expect(statusSentence(statusLineKind(filled, { clash: true }), 'Bluesky', { title: 'Held' })).toBe(
+				'Sona filled the commissioned date from the Bluesky post and left the source post URL empty, because that post is already the source of Held. You can change the date before you save.'
+			);
+		});
+
+		it('reads on a variant tile like any other confident match', () => {
+			expect(tileResultText('artist.example', 'Bluesky', 'exact').line).toBe(
+				'artist.example on Bluesky · Exact match'
+			);
 		});
 	});
 
@@ -1627,7 +1828,7 @@ describe('lookupSentFile', () => {
 	// lookup having worked: it belongs on a failure just as much as on a result.
 	it('is true for every outcome the request actually reached', () => {
 		expect(lookupSentFile({ kind: 'results', data: response() })).toBe(true);
-		expect(lookupSentFile({ kind: 'no_match' })).toBe(true);
+		expect(lookupSentFile({ kind: 'no_match', blueskySearched: false })).toBe(true);
 		for (const reason of ['key_refused', 'rate_limited', 'unavailable'] as const) {
 			expect(lookupSentFile({ kind: 'failed', reason, sent: true })).toBe(true);
 		}
@@ -1665,7 +1866,7 @@ describe('sentAfterApplyThrew', () => {
 		['a failure the browser refused to send', { kind: 'failed', reason: 'too_large', sent: false }, false],
 		['a failure that went out', { kind: 'failed', reason: 'rate_limited', sent: true }, true],
 		['a result', { kind: 'results', data: response() }, true],
-		['a no-match', { kind: 'no_match' }, true],
+		['a no-match', { kind: 'no_match', blueskySearched: false }, true],
 		// Cancelled or re-fired, never a state the request settles on: it reaches
 		// this only if the capture itself is what threw, and by then the request
 		// had gone out.
