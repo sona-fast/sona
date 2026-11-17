@@ -25,6 +25,7 @@ import { basename, join } from 'node:path';
 import {
 	buildMigrationSql,
 	parseAppliedMigrations,
+	parseStoredProvider,
 	buildSeedSql,
 	sanitizeProjectName,
 	askResourceName,
@@ -705,12 +706,39 @@ async function main() {
 	}
 
 	// 6. Seed the storage provider so the app boots with the chosen backend (the
-	//    wizard no longer asks; switching later is a migration in Settings). Also
+	//    wizard no longer asks; switching later is a migration in Settings). A
+	//    re-run against a database that already records one keeps it: the images
+	//    live in that backend, and only the Settings migration moves them. Also
 	//    seed siteUrl (the canonical origin for outgoing-email links) from the same
 	//    domain answer — only when a custom domain was given AND it normalizes to a
 	//    valid https URL (same rule the admin Settings save enforces, so a bad value
 	//    can't be stored here and then throw at email-send time). Blank/invalid leaves
 	//    it unset so the app falls back to the request origin (the Pages URL) on its own.
+	const storedProvider = parseStoredProvider(
+		runArgs(
+			'npx',
+			[
+				'wrangler',
+				'd1',
+				'execute',
+				dbName,
+				'--remote',
+				'--json',
+				'--command',
+				"SELECT value FROM site_settings WHERE key = 'storageProvider';"
+			],
+			{ capture: true, allowFail: true, env: readableEnv }
+		)
+	);
+	const keptProvider = storedProvider !== null && storedProvider !== provider ? storedProvider : null;
+	if (keptProvider) {
+		console.warn(
+			`\n⚠ This database already stores images in ${keptProvider} — setup keeps it rather than switch to ${provider}.`
+		);
+		console.warn(
+			'  To move to the new backend, deploy, then use admin Settings → Storage Provider (it migrates existing images).'
+		);
+	}
 	const siteUrlSeed = domain ? (normalizeHttpsUrl(ensureUrlScheme(domain)) ?? '') : '';
 	const seed = buildSeedSql({
 		provider,
@@ -804,7 +832,17 @@ async function main() {
 			`Set ${repoSlug}'s GitHub Actions secrets/vars for CI deploys (from your CLOUDFLARE_* env)?`,
 			false
 		);
-		if (doIt) {
+		if (!doIt) {
+			// deploy.yml re-puts SETUP_TOKEN from the repo secret before every deploy,
+			// so a secret left from an earlier run would replace the token set above.
+			console.warn(
+				'\n⚠ The next deploy replaces the Pages SETUP_TOKEN with the SETUP_TOKEN repository secret.'
+			);
+			console.warn(
+				`  Set that secret to the new token printed below (gh secret set SETUP_TOKEN -R ${repoSlug}),`
+			);
+			console.warn('  or the wizard will reject it.');
+		} else {
 			// -R repoSlug on every call: a fork has two remotes (origin + upstream
 			// sona), so a bare `gh secret set` errors "multiple remotes detected".
 			// The exact set (incl. CRON_SECRET as a repo secret so artist-sync.yml /
@@ -843,15 +881,21 @@ async function main() {
 	rl.close();
 
 	console.log('\n──────────────────────────────────────────────');
-	for (const line of storageSummaryLines({
-		provider,
-		r2Missing,
-		bucketReady,
-		uploadThingTokenSet,
-		bucket,
-		project
-	})) {
-		console.log(line);
+	if (keptProvider) {
+		console.log(
+			`Storage backend: ${keptProvider} (kept from the existing database; this run chose ${provider} — switch in admin Settings → Storage Provider).`
+		);
+	} else {
+		for (const line of storageSummaryLines({
+			provider,
+			r2Missing,
+			bucketReady,
+			uploadThingTokenSet,
+			bucket,
+			project
+		})) {
+			console.log(line);
+		}
 	}
 	console.log(
 		`Fursuit photos: ${furtrackMode === 'off' ? 'disabled' : `enabled (${furtrackMode})`}${primaryCharacter ? ` — character "${primaryCharacter}"` : ''}.`

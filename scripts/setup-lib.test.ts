@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeHttpsUrl } from '../src/lib/server/validate';
-import { readFileSync, readdirSync, existsSync, statSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, rmSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
 	buildMigrationSql,
 	parseAppliedMigrations,
 	buildSeedSql,
+	parseStoredProvider,
 	sanitizeProjectName,
 	isValidResourceName,
 	isValidDatabaseName,
@@ -135,8 +136,16 @@ describe('parseAppliedMigrations', () => {
 describe('buildSeedSql', () => {
 	it('always seeds storageProvider', () => {
 		expect(buildSeedSql({ provider: 'uploadthing' })).toBe(
-			"INSERT OR REPLACE INTO site_settings (key,value) VALUES ('storageProvider','uploadthing');"
+			"INSERT OR IGNORE INTO site_settings (key,value) VALUES ('storageProvider','uploadthing');"
 		);
+	});
+
+	// A re-run must not swap the backend the images already live in for the
+	// prompt's default; only the Settings migration changes it.
+	it('never replaces a storageProvider row that already exists', () => {
+		const sql = buildSeedSql({ provider: 'r2', siteUrl: 'https://taro.surf' });
+		expect(sql).toMatch(/^INSERT OR IGNORE INTO site_settings \(key,value\) VALUES \('storageProvider','r2'\);/);
+		expect(sql.match(/'storageProvider'/g)).toHaveLength(1);
 	});
 
 	it('seeds siteUrl from the domain answer alongside storageProvider', () => {
@@ -158,8 +167,9 @@ describe('buildSeedSql', () => {
 			primaryCharacter: 'taro'
 		});
 		expect(sql).toBe(
-			"INSERT OR REPLACE INTO site_settings (key,value) VALUES " +
-				"('storageProvider','r2'), ('siteUrl','https://taro.surf'), " +
+			"INSERT OR IGNORE INTO site_settings (key,value) VALUES ('storageProvider','r2'); " +
+				"INSERT OR REPLACE INTO site_settings (key,value) VALUES " +
+				"('siteUrl','https://taro.surf'), " +
 				"('r2PublicUrl','https://cdn.taro.surf'), ('primaryCharacter','taro');"
 		);
 	});
@@ -194,6 +204,21 @@ describe('buildSeedSql', () => {
 		expect(buildSeedSql({ provider: 'r2', siteUrl: good ?? '' })).toContain(
 			"('siteUrl','https://taro.surf')"
 		);
+	});
+});
+
+describe('parseStoredProvider', () => {
+	const json = (rows: string) => `[{"results":[${rows}],"success":true}]`;
+
+	it('returns the stored value', () => {
+		expect(parseStoredProvider(json('{"value":"uploadthing"}'))).toBe('uploadthing');
+	});
+
+	it('returns null when there is no row or the output is unreadable', () => {
+		expect(parseStoredProvider(json(''))).toBeNull();
+		expect(parseStoredProvider(json('{"value":""}'))).toBeNull();
+		expect(parseStoredProvider('✘ [ERROR] no such table: site_settings')).toBeNull();
+		expect(parseStoredProvider('')).toBeNull();
 	});
 });
 
@@ -1914,17 +1939,17 @@ describe('setup.ts ↔ no operator answer reaches a shell', () => {
 });
 
 describe('setup.ts ↔ SQL never rides a command line', () => {
-	// The one --command is the applied-migrations read: D1 returns no rows for a
-	// --file execute, so a SELECT has to ride --command. It must stay a fixed
-	// literal — nothing interpolated — so no operator answer can reach it.
-	// The literal must be the whole argv element — followed by `,` or `]` —
-	// so `'SELECT ' + value` (a literal with a variable glued on) doesn't count.
-	const FIXED_COMMAND_ARG = /'--command',\s*'[^'`$]*'\s*[,\]]/g;
+	// The two --command uses are reads (applied migrations, stored storageProvider):
+	// D1 returns no rows for a --file execute, so a SELECT has to ride --command.
+	// Each must stay a fixed literal — nothing interpolated — so no operator answer
+	// can reach it. The literal must be the whole argv element — followed by `,` or
+	// `]` — so `'SELECT ' + value` (a literal with a variable glued on) doesn't count.
+	const FIXED_COMMAND_ARG = /'--command',\s*(?:'[^'`$]*'|"[^"`$]*")\s*[,\]]/g;
 
 	it('hands wrangler --command only a fixed SQL literal, never an interpolated one', () => {
 		const uses = setupCode.match(/'--command'/g) ?? [];
 		const literals = setupCode.match(FIXED_COMMAND_ARG) ?? [];
-		expect(uses).toHaveLength(1);
+		expect(uses).toHaveLength(2);
 		expect(literals).toHaveLength(uses.length);
 	});
 
@@ -1933,6 +1958,74 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		expect(setupCode.slice(at, at + 400)).toMatch(/env:\s*readableEnv/);
 		expect(setupCode).toMatch(/delete readableEnv\.WRANGLER_LOG/);
 	});
+
+	// The source pins above can't see which env object reaches the child; run
+	// setup against stub npx/gh and read the env each call actually got.
+	it('runs both --command reads without the operator\'s WRANGLER_LOG', () => {
+		const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+		const dir = mkdtempSync(join(tmpdir(), 'sona-setup-run-'));
+		const bin = join(dir, 'bin');
+		const work = join(dir, 'work');
+		const log = join(dir, 'calls.log');
+		try {
+			mkdirSync(bin);
+			mkdirSync(join(work, 'drizzle'), { recursive: true });
+			writeFileSync(join(work, 'wrangler.toml.example'), readFileSync(join(root, 'wrangler.toml.example')));
+			writeFileSync(join(work, 'drizzle', '0000_init.sql'), 'SELECT 1;');
+			// Answers what setup parses: the whoami banner, a database_id, and an
+			// empty result set for every --json read.
+			writeFileSync(
+				join(bin, 'npx'),
+				[
+					'#!/bin/sh',
+					`echo "npx $* WRANGLER_LOG=\${WRANGLER_LOG-unset}" >> "${log}"`,
+					'case "$*" in',
+					'  *whoami*) echo "You are logged in with an API Token" ;;',
+					'  *"d1 create"*) echo \'database_id = "00000000-0000-0000-0000-000000000000"\' ;;',
+					'  *--json*) echo \'[{"results":[]}]\' ;;',
+					'esac',
+					''
+				].join('\n'),
+				{ mode: 0o755 }
+			);
+			writeFileSync(join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+			// Every prompt takes its default, and the Pages PATCH never leaves the box.
+			const preload = join(dir, 'preload.mjs');
+			writeFileSync(
+				preload,
+				"import { Interface } from 'node:readline/promises';\n" +
+					"Interface.prototype.question = async () => '';\n" +
+					'globalThis.fetch = async () => new Response(\'{"success":true,"result":{}}\');\n'
+			);
+			const res = spawnSync(join(root, 'node_modules', '.bin', 'tsx'), [
+				'--tsconfig',
+				join(root, 'tsconfig.json'),
+				join(root, 'scripts', 'setup.ts')
+			], {
+				cwd: work,
+				env: {
+					...process.env,
+					PATH: `${bin}:${process.env.PATH}`,
+					CLOUDFLARE_API_TOKEN: 'token',
+					CLOUDFLARE_ACCOUNT_ID: 'acct',
+					WRANGLER_LOG: 'warn',
+					NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`
+				},
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe'],
+				timeout: 30_000
+			});
+			expect(res.status, res.stderr).toBe(0);
+			const calls = readFileSync(log, 'utf8').split('\n');
+			const reads = calls.filter((c) => c.includes('--command'));
+			expect(reads).toHaveLength(2);
+			for (const read of reads) expect(read).toMatch(/WRANGLER_LOG=unset$/);
+			// Non-vacuity: a call setup doesn't read still inherits the operator's value.
+			expect(calls.find((c) => c.includes('d1 create'))).toMatch(/WRANGLER_LOG=warn$/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
 
 	it('passes the migration and seed SQL as files, written through the private helper', () => {
 		expect(setupCode.match(/--file=\$\{\w+\.path\}/g)).toHaveLength(2);

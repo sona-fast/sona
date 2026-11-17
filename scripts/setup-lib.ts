@@ -80,6 +80,21 @@ export function parseAppliedMigrations(json: string): string[] {
 	});
 }
 
+/**
+ * The storageProvider a `wrangler d1 execute --json` read of site_settings
+ * returned, or null when there is no row or the output can't be read. Null only
+ * costs the re-run its warning: the seed itself never replaces an existing row.
+ */
+export function parseStoredProvider(json: string): string | null {
+	try {
+		const sets = JSON.parse(json) as { results?: { value?: unknown }[] }[];
+		const value = sets[sets.length - 1]?.results?.[0]?.value;
+		return typeof value === 'string' && value ? value : null;
+	} catch {
+		return null;
+	}
+}
+
 export interface SeedSettingsInput {
 	/** Active image store: 'r2' | 'uploadthing'. */
 	provider: string;
@@ -92,19 +107,24 @@ export interface SeedSettingsInput {
 }
 
 /**
- * Builds the `INSERT OR REPLACE INTO site_settings` statement the setup CLI runs
- * to seed the values it collected (mirrors the wizard-less defaults). Only
- * non-empty optional values are seeded — an absent row means "unset", which the
- * app reads as its own fallback (e.g. an empty siteUrl falls back to the request
- * origin). storageProvider is always written so the app boots with a backend.
+ * Builds the SQL the setup CLI runs to seed the values it collected (mirrors the
+ * wizard-less defaults). Only non-empty optional values are seeded — an absent
+ * row means "unset", which the app reads as its own fallback (e.g. an empty
+ * siteUrl falls back to the request origin). storageProvider is inserted only
+ * when no row exists yet: on a re-run the database already records the backend
+ * the images live in, and changing it is the Settings → Storage Provider
+ * migration's job, not a prompt default's.
  */
 export function buildSeedSql(input: SeedSettingsInput): string {
-	const rows: [string, string][] = [['storageProvider', input.provider]];
+	const row = (k: string, v: string) => `('${sqlStr(k)}','${sqlStr(v)}')`;
+	const provider = `INSERT OR IGNORE INTO site_settings (key,value) VALUES ${row('storageProvider', input.provider)};`;
+	const rows: [string, string][] = [];
 	if (input.siteUrl) rows.push(['siteUrl', input.siteUrl]);
 	if (input.r2PublicUrl) rows.push(['r2PublicUrl', input.r2PublicUrl]);
 	if (input.primaryCharacter) rows.push(['primaryCharacter', input.primaryCharacter]);
-	const values = rows.map(([k, v]) => `('${sqlStr(k)}','${sqlStr(v)}')`).join(', ');
-	return `INSERT OR REPLACE INTO site_settings (key,value) VALUES ${values};`;
+	if (rows.length === 0) return provider;
+	const values = rows.map(([k, v]) => row(k, v)).join(', ');
+	return `${provider} INSERT OR REPLACE INTO site_settings (key,value) VALUES ${values};`;
 }
 
 /**
