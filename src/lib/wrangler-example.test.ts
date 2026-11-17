@@ -3,9 +3,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // wrangler.toml.example is the committed template forks copy to wrangler.toml.
-// A local `wrangler pages deploy` applies this file, including deleting any
-// production var/secret it doesn't declare — so it must (a) set keep_vars so
-// dashboard-managed vars survive, and (b) NOT pin FURTRACK_MODE, which is
+// It must (a) NOT set keep_vars — Pages configs reject it, so every wrangler
+// command that loads the file fails — and (b) NOT pin FURTRACK_MODE, which is
 // managed via the GitHub Actions repo variable (pinning "off" here stomped a
 // live deployment). No TOML parser is vendored, so assert on the raw text.
 const example = readFileSync(
@@ -19,8 +18,8 @@ describe('wrangler.toml.example', () => {
 		expect(example).toMatch(/^pages_build_output_dir\s*=/m);
 	});
 
-	it('sets keep_vars = true so local deploys keep dashboard-managed vars', () => {
-		expect(example).toMatch(/^keep_vars\s*=\s*true\s*$/m);
+	it('does not set keep_vars (Pages configs reject it, failing every wrangler command)', () => {
+		expect(example).not.toMatch(/^\s*keep_vars\s*=/m);
 	});
 
 	it('does not pin FURTRACK_MODE (it would stomp the dashboard variable)', () => {
