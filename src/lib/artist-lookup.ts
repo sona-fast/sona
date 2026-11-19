@@ -277,14 +277,30 @@ export interface ArtistChoice {
 }
 
 /**
+ * Which matches may name a local artist: the confident ones, except that a
+ * Bluesky row is only a lead once another site has a confident match. Skyseek
+ * finds whoever posted the picture, so the same rule as `pickPrefillMatch`
+ * keeps a commissioner's or reposter's local artist from deciding the outcome
+ * over a match that names the artist. Every reader of `localArtists` that
+ * decides what to offer goes through this.
+ */
+function namesLocalArtist(matches: LookupMatch[]): (match: LookupMatch) => boolean {
+	const confident = (x: LookupMatch) => x.band === 'exact' || x.band === 'strong';
+	const leadsOnly = matches.some((x) => confident(x) && x.site !== 'Bluesky');
+	return (x) => confident(x) && !(leadsOnly && x.site === 'Bluesky');
+}
+
+/**
  * Local artists any confident match points at, deduplicated by id. Union rather
  * than the prefill match alone: two sites can name two different artists Sona
  * already holds, and hiding the second one would silently pick for the operator.
+ * Bluesky rows count only when no other site matched confidently.
  */
 export function candidateArtists(data: LookupResponse): ArtistChoice[] {
+	const counts = namesLocalArtist(data.matches);
 	const seen = new Map<number, ArtistChoice>();
 	data.matches.forEach((match, index) => {
-		if (match.band !== 'exact' && match.band !== 'strong') return;
+		if (!counts(match)) return;
 		const hit = data.localArtists.find((h) => h.matchIndex === index);
 		for (const artist of hit?.artists ?? []) {
 			if (!seen.has(artist.id)) seen.set(artist.id, { ...artist, site: match.site });
@@ -301,13 +317,31 @@ export function candidateArtists(data: LookupResponse): ArtistChoice[] {
  * your list as Bob". Null when no hit names the artist.
  */
 export function matchForArtist(data: LookupResponse, artistId: number): LookupMatch | null {
+	const counts = namesLocalArtist(data.matches);
 	return (
 		data.matches.find((match, index) => {
-			if (match.band !== 'exact' && match.band !== 'strong') return false;
+			if (!counts(match)) return false;
 			const hit = data.localArtists.find((h) => h.matchIndex === index);
 			return (hit?.artists ?? []).some((a) => a.id === artistId);
 		}) ?? null
 	);
+}
+
+/**
+ * The match behind a variant tile's "different artist" warning: its result
+ * names a local artist, none of them the shared selection `sharedId`. Returns
+ * the match whose hit triggered it, because that is the poster the line names,
+ * and the candidates are unioned across matches, so it is not necessarily the
+ * prefill match. Null when `sharedId` is 0 (nothing selected) or nothing
+ * differs.
+ */
+export function differentArtistMatch(data: LookupResponse, sharedId: number): LookupMatch | null {
+	if (!sharedId) return null;
+	const own = candidateArtists(data);
+	if (own.length === 0 || own.some((a) => a.id === sharedId)) return null;
+	// The first candidate comes from the first match that counts, so this is
+	// that match, under the same Bluesky rule as the candidates.
+	return matchForArtist(data, own[0].id);
 }
 
 /** The artists a name (not a handle) collision turned up for the prefill match.

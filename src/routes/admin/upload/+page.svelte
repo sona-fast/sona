@@ -24,7 +24,7 @@
 		statusSentence,
 		strictestRating,
 		tileResultText,
-		candidateArtists,
+		differentArtistMatch,
 		lookupSentFile,
 		sentAfterApplyThrew,
 		withCreatedArtist,
@@ -1251,28 +1251,15 @@
 	}
 
 	/** A variant tile whose confident match names a different local artist than
-	 * the shared one — worth flagging rather than silently rating. Returns the
-	 * match whose local-artist hit triggered it, because that is the poster the
-	 * line names: the candidates are unioned across every confident match, so
-	 * the trigger is not necessarily the prefill match. */
-	function differentArtistMatch(tile: Tile): LookupMatch | null {
+	 * the shared one — worth flagging rather than silently rating. The rule,
+	 * including which poster the line names, is `differentArtistMatch`. */
+	function tileDifferentArtistMatch(tile: Tile): LookupMatch | null {
 		if (tile.lookup.kind !== 'results') return null;
 		// The shared SELECTION, not just a panel-applied one: appliedArtist is set
 		// by the panel's Use button and by a created artist, so keying off it meant
 		// an artist the operator picked from the select by hand never warned.
 		// Number('') is 0, which is the unselected case.
-		const sharedId = Number(selectedArtistId);
-		if (!sharedId) return null;
-		const data = tile.lookup.data;
-		const own = candidateArtists(data);
-		if (own.length === 0 || own.some((a) => a.id === sharedId)) return null;
-		return (
-			data.matches.find(
-				(match, index) =>
-					(match.band === 'exact' || match.band === 'strong') &&
-					data.localArtists.some((hit) => hit.matchIndex === index && hit.artists.length > 0)
-			) ?? null
-		);
+		return differentArtistMatch(tile.lookup.data, Number(selectedArtistId));
 	}
 
 	/** Everything a variant tile shows from its own result. One guard and one
@@ -1289,7 +1276,7 @@
 		const handle = matchHandle(match);
 		// The different-artist line names the poster whose local artist triggered
 		// it, which is not always the match the rest of the tile reads from.
-		const differentMatch = differentArtistMatch(tile);
+		const differentMatch = tileDifferentArtistMatch(tile);
 		const different = differentMatch !== null;
 		// The visible line and the spoken one come from the same parts, so the
 		// middle dot never reaches the live region and never dangles. The

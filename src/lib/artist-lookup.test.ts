@@ -5,6 +5,7 @@ import {
 	canAddPosterAsArtist,
 	candidateArtists,
 	clearedLine,
+	differentArtistMatch,
 	isCrossSiteAmbiguity,
 	matchForArtist,
 	matchHandle,
@@ -1646,14 +1647,69 @@ describe('stateFromResponse', () => {
 			expect(resolveOutcome(data)).toBe('new');
 		});
 
-		it('counts as its own site when two matches name two local artists', () => {
+		// Beside a confident match from another site, a Bluesky row is a lead: it
+		// stays in the results list, but its local artist decides nothing.
+		it('names no local artist beside a confident match from another site', () => {
+			const data = response({
+				matches: [match({ handles: ['alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('new');
+			expect(candidateArtists(data)).toEqual([]);
+			expect(matchForArtist(data, 7)).toBeNull();
+			expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+		});
+
+		it('leaves the other site\'s local artist as the one answer when both name one', () => {
 			const data = response({
 				matches: [bluesky, match()],
 				localArtists: [skyArtist, { matchIndex: 1, artists: [{ id: 9, name: 'Fur Artist' }] }]
 			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(isCrossSiteAmbiguity(data)).toBe(false);
+			expect(candidateArtists(data)).toEqual([{ id: 9, name: 'Fur Artist', site: 'FurAffinity' }]);
+			expect(matchForArtist(data, 9)?.site).toBe('FurAffinity');
+			expect(matchForArtist(data, 7)).toBeNull();
+		});
+
+		// The upload page's variant-tile warning reads the same rule: a Bluesky
+		// row's local artist neither raises the warning nor is the poster it names.
+		it('neither raises nor names the different-artist warning beside another site', () => {
+			const repro = response({
+				matches: [match({ handles: ['alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(differentArtistMatch(repro, 3)).toBeNull();
+			const both = response({
+				matches: [bluesky, match()],
+				localArtists: [skyArtist, { matchIndex: 1, artists: [{ id: 9, name: 'Fur Artist' }] }]
+			});
+			expect(differentArtistMatch(both, 3)?.site).toBe('FurAffinity');
+			expect(differentArtistMatch(both, 9)).toBeNull();
+			expect(differentArtistMatch(both, 0)).toBeNull();
+			expect(differentArtistMatch(response({ matches: [bluesky], localArtists: [skyArtist] }), 3)?.site).toBe(
+				'Bluesky'
+			);
+		});
+
+		it('is "ambiguous" when two confident Bluesky rows name two local artists', () => {
+			const other = { ...bluesky, siteId: `${DID}/3mwwswjznmk26`, handles: ['other.example'] };
+			const data = response({
+				matches: [bluesky, other],
+				localArtists: [skyArtist, { matchIndex: 1, artists: [{ id: 8, name: 'Other' }] }]
+			});
 			expect(resolveOutcome(data)).toBe('ambiguous');
-			expect(isCrossSiteAmbiguity(data)).toBe(true);
-			expect(candidateArtists(data).map((c) => c.site)).toEqual(['Bluesky', 'FurAffinity']);
+			expect(candidateArtists(data).map((c) => c.id)).toEqual([7, 8]);
+		});
+
+		it('still offers its local artist beside a merely possible match from another site', () => {
+			const data = response({
+				matches: [bluesky, match({ distance: 5, band: 'possible' })],
+				localArtists: [skyArtist]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(candidateArtists(data)).toEqual([{ id: 7, name: 'Sky Artist', pieces: 3, site: 'Bluesky' }]);
+			expect(matchHandle(matchForArtist(data, 7))).toBe('artist.example');
 		});
 
 		it('raises no rating itself, and leaves the others their own', () => {
