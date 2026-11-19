@@ -871,9 +871,14 @@
 		flex: 1;
 		min-width: 0;
 	}
+	/* A handle is third-party text with no space in it, and a Bluesky one is a
+	   hostname of up to 253 characters: unwrapped it runs under "View post" and
+	   widens the page. .match-id already has min-width: 0, so the line may
+	   shrink; this lets a single long word break to fit it. */
 	.match-who {
 		font-size: 14px;
 		color: var(--foreground);
+		overflow-wrap: anywhere;
 	}
 	.match-who.muted {
 		color: var(--muted-foreground);
@@ -889,12 +894,21 @@
 	}
 	.outcome {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 6px;
 		font-size: 14px;
 		color: var(--foreground);
 		margin: 0;
 		line-height: 1.5;
+		/* The sentence repeats the handle, so it wraps the way the row does. */
+		overflow-wrap: anywhere;
+	}
+	/* The icon keeps its size and sits on the first line: offset by half the
+	   gap between the line box and the icon, which centres it on a one-line
+	   sentence exactly as align-items: center did. */
+	.outcome :global(svg) {
+		flex: none;
+		margin-top: calc((1.5em - 14px) / 2);
 	}
 	.callout {
 		font-size: 13px;

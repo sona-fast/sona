@@ -10,11 +10,11 @@ import {
 	FUZZYSEARCH_API_KEY_SETTING,
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
 	FUZZYSEARCH_MAX_BYTES,
+	blueskyPostUrl,
 	type LookupResult
 } from '$lib/server/fuzzysearch';
 import {
 	SKYSEEK_MAX_MATCHES,
-	skyseekPostUrl,
 	type SkyseekMatch,
 	type SkyseekResult
 } from '$lib/server/skyseek';
@@ -1531,7 +1531,7 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		postedAt: string | null = null,
 		distance: number | null = null
 	): SkyseekMatch {
-		return { did, rkey, distance, postedAt, postUrl: skyseekPostUrl(did, rkey) };
+		return { did, rkey, distance, postedAt, postUrl: blueskyPostUrl(did, rkey) };
 	}
 
 	type Body = {
@@ -1594,12 +1594,12 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			distance: null,
 			band: null,
 			rating: null,
-			postUrl: skyseekPostUrl(ARTIST_DID, 'first')
+			postUrl: blueskyPostUrl(ARTIST_DID, 'first')
 		});
 		// The account the AppView named nobody for stays, linked by its DID.
 		expect(body.matches[3]).toMatchObject({
 			handles: [],
-			postUrl: skyseekPostUrl(REPOSTER_DID, 'later')
+			postUrl: blueskyPostUrl(REPOSTER_DID, 'later')
 		});
 		// The artist's stored Bluesky link is what ties the row to them.
 		expect(body.localArtists).toEqual([
@@ -1631,7 +1631,7 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		sqlite.exec(
 			`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
 			 VALUES ('Held', 'held', 'https://cdn.example.com/held.png',
-			         '${skyseekPostUrl(ARTIST_DID, 'first')}', '2026-01-01');`
+			         '${blueskyPostUrl(ARTIST_DID, 'first')}', '2026-01-01');`
 		);
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
 
@@ -1668,7 +1668,7 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 				band: 'exact',
 				postedAt: '2026-10-03T02:15:28.000Z',
 				rating: null,
-				postUrl: skyseekPostUrl(ARTIST_DID, 'first')
+				postUrl: blueskyPostUrl(ARTIST_DID, 'first')
 			}
 		]);
 		expect(body.localArtists).toEqual([
@@ -1756,7 +1756,7 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		sqlite.exec(
 			`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
 			 VALUES ('Held', 'held', 'https://cdn.example.com/held.png',
-			         '${skyseekPostUrl(ARTIST_DID, 'first')}', '2026-01-01');`
+			         '${blueskyPostUrl(ARTIST_DID, 'first')}', '2026-01-01');`
 		);
 		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
@@ -1767,9 +1767,32 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		expect(body.sourceClash).toBeNull();
 	});
 
+	// A closer Bluesky row is often a repost, so the confident FuzzySearch row
+	// stays the prefill, and the clash check follows it, not the Bluesky post.
+	it('checks the clash on a confident FuzzySearch match over a closer Bluesky post', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+			 VALUES ('Reposted', 'reposted', 'https://cdn.example.com/reposted.png',
+			         '${blueskyPostUrl(REPOSTER_DID, 'closer')}', '2026-01-01'),
+			        ('Held', 'held', 'https://cdn.example.com/held.png',
+			         '${FA_EXACT.postUrl}', '2026-01-02');`
+		);
+		searchImage.mockResolvedValue({
+			ok: true,
+			matches: [{ ...FA_EXACT, distance: 1, band: 'strong' as const }]
+		});
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(REPOSTER_DID, 'closer', null, 0)] });
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.matches.map((x) => x.site)).toEqual(['Bluesky', 'FurAffinity']);
+		expect(body.sourceClash).toMatchObject({ title: 'Held' });
+	});
+
 	describe('a source clash on a Bluesky post', () => {
 		const HANDLE_URL = 'https://bsky.app/profile/artist.example/post/3mwwswjznmk25';
-		const DID_URL = skyseekPostUrl(ARTIST_DID, '3mwwswjznmk25');
+		const DID_URL = blueskyPostUrl(ARTIST_DID, '3mwwswjznmk25');
 
 		async function lookupWith(storedUrl: string, handle: string | null, distance: number | null = 0) {
 			const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });

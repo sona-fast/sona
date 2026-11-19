@@ -190,16 +190,31 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 				: `https://twitter.com/i/status/${id}`;
 		}
 		case 'Bluesky': {
-			// The id is `<did>/<rkey>` (skyseek.ts builds it), and bsky.app resolves
-			// a DID in the profile segment, so the handles are not needed here.
-			const slash = siteId.indexOf('/');
-			const did = slash === -1 ? siteId : siteId.slice(0, slash);
-			const rkey = slash === -1 ? '' : siteId.slice(slash + 1);
-			// Colons literal, as in skyseekPostUrl, so the two spellings agree.
-			const profile = encodeURIComponent(did).replace(/%3A/gi, ':');
-			return `https://bsky.app/profile/${profile}/post/${encodeURIComponent(rkey)}`;
+			// bsky.app resolves a DID in the profile segment, so the handles are
+			// not needed here.
+			const { did, rkey } = splitBlueskySiteId(siteId);
+			return blueskyPostUrl(did, rkey);
 		}
 	}
+}
+
+/** A Bluesky row's id is `<did>/<rkey>` (skyseek.ts builds it). The one place
+ * it is taken apart; an id with no slash is all DID and no record key. */
+export function splitBlueskySiteId(siteId: string): { did: string; rkey: string } {
+	const slash = siteId.indexOf('/');
+	return slash === -1
+		? { did: siteId, rkey: '' }
+		: { did: siteId.slice(0, slash), rkey: siteId.slice(slash + 1) };
+}
+
+/** Public Bluesky post URL. `actor` is a DID or a handle: bsky.app resolves
+ * either in the profile segment. The DID's colons stay literal, the way
+ * bsky.app writes its own links; a colon cannot end a path segment, and
+ * everything else is percent-encoded so a hostile value stays in its segment.
+ * The one builder: Skyseek rows, `postUrlFor`, and the clash check use it. */
+export function blueskyPostUrl(actor: string, rkey: string): string {
+	const profile = encodeURIComponent(actor).replace(/%3A/gi, ':');
+	return `https://bsky.app/profile/${profile}/post/${encodeURIComponent(rkey)}`;
 }
 
 /** Hosts that are the same site under two names. Without folding these, an

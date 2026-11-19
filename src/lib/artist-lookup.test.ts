@@ -187,6 +187,30 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 		expect(pickPrefillMatch(matches)?.site).toBe('Twitter');
 		expect(pickPrefillMatch([match({ distance: 6, band: 'possible' })])).toBeNull();
 	});
+
+	// A Bluesky row names whoever posted the picture, often a commissioner or a
+	// reposter, so a closer Bluesky row must not displace a confident
+	// FuzzySearch one: that would drop the add-artist offer, fill the URL and
+	// date from a repost, and skip the clash check for the real post (SONA-243).
+	const bluesky = (over: Partial<LookupMatch> = {}) =>
+		match({
+			site: 'Bluesky',
+			siteId: 'did:plc:abc/3kxyz',
+			handles: ['someone.bsky.social'],
+			postUrl: 'https://bsky.app/profile/did:plc:abc/post/3kxyz',
+			...over
+		});
+
+	it('prefills a confident FuzzySearch match over a closer Bluesky one', () => {
+		const matches = [bluesky({ distance: 0 }), match({ distance: 1, band: 'strong' })];
+		expect(pickPrefillMatch(matches)?.site).toBe('FurAffinity');
+	});
+
+	it('prefills a Bluesky match when it is the only confident one', () => {
+		expect(pickPrefillMatch([bluesky()])?.site).toBe('Bluesky');
+		const matches = [bluesky({ distance: 1, band: 'strong' }), match({ distance: 5, band: 'possible' })];
+		expect(pickPrefillMatch(matches)?.site).toBe('Bluesky');
+	});
 });
 
 describe('withCreatedArtist', () => {
@@ -213,6 +237,26 @@ describe('withCreatedArtist', () => {
 	it('records the hit against the prefill match', () => {
 		const data = withCreatedArtist(
 			response({ matches: [match({ band: 'possible', distance: 9 }), match({ siteId: '9' })] }),
+			{ id: 7, name: 'Kuttoya' }
+		);
+		expect(data.localArtists).toEqual([
+			{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya', pieces: 0 }] }
+		]);
+	});
+
+	it('records the hit against a confident FuzzySearch match, not a closer Bluesky one', () => {
+		const data = withCreatedArtist(
+			response({
+				matches: [
+					match({
+						site: 'Bluesky',
+						siteId: 'did:plc:abc/3kxyz',
+						handles: ['someone.bsky.social'],
+						distance: 0
+					}),
+					match({ distance: 1, band: 'strong' })
+				]
+			}),
 			{ id: 7, name: 'Kuttoya' }
 		);
 		expect(data.localArtists).toEqual([

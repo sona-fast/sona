@@ -13,10 +13,9 @@ import {
 	normalizeSkyseekMatches,
 	resolveBlueskyHandles,
 	searchSkyseek,
-	skyseekLookupMatch,
-	skyseekPostUrl
+	skyseekLookupMatch
 } from './skyseek';
-import { findLocalArtists, pickPrefillMatch, postUrlFor, strictestRating } from './fuzzysearch';
+import { blueskyPostUrl, findLocalArtists, pickPrefillMatch, strictestRating } from './fuzzysearch';
 
 // Injected rather than stubbed globally (the fuzzysearch.test.ts shape).
 function fakeFetch(response: Response | (() => Promise<Response>)) {
@@ -157,14 +156,6 @@ describe('normalizeSkyseekMatches', () => {
 		// The reposter's row shares the key but not the account, so it stays.
 		expect(matches).toHaveLength(2);
 		expect(matches?.[0]).toMatchObject({ did: ARTIST, postedAt: '2026-10-03T02:15:28.000Z' });
-	});
-});
-
-describe('skyseekPostUrl', () => {
-	it('keeps a hostile value inside its own path segment', () => {
-		expect(skyseekPostUrl('did:plc:x', 'a/b?c#d')).toBe(
-			'https://bsky.app/profile/did:plc:x/post/a%2Fb%3Fc%23d'
-		);
 	});
 });
 
@@ -459,7 +450,7 @@ describe('skyseekLookupMatch', () => {
 		rkey: '3mwwswjznmk25',
 		distance: null as number | null,
 		postedAt: '2026-10-03T02:15:28.000Z',
-		postUrl: skyseekPostUrl(ARTIST, '3mwwswjznmk25')
+		postUrl: blueskyPostUrl(ARTIST, '3mwwswjznmk25')
 	};
 
 	it('is a Bluesky row that names the poster and links the post', () => {
@@ -484,13 +475,6 @@ describe('skyseekLookupMatch', () => {
 	it('gives two posts by one account two different ids', () => {
 		const other = { ...post, rkey: 'another' };
 		expect(skyseekLookupMatch(post, null).siteId).not.toBe(skyseekLookupMatch(other, null).siteId);
-	});
-
-	// The post URL has two builders, one per module. They have to agree, or the
-	// row would link somewhere other than where its id says it is.
-	it('carries the URL the shared post-URL builder gives for its id', () => {
-		const row = skyseekLookupMatch(post, 'artist.example');
-		expect(postUrlFor('Bluesky', row.siteId, row.handles)).toBe(row.postUrl);
 	});
 
 	// Skyseek's distance is on FuzzySearch's scale, so it is banded the same way.
@@ -544,7 +528,7 @@ describe('isOwnBlueskyPost', () => {
 		rkey: 'a',
 		distance: 0,
 		postedAt: null,
-		postUrl: skyseekPostUrl(ARTIST, 'a')
+		postUrl: blueskyPostUrl(ARTIST, 'a')
 	};
 	const mine = skyseekLookupMatch(post, 'operator.example');
 

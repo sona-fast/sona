@@ -215,9 +215,13 @@ export function strictestRating(
 
 /** The match the form is filled from: the closest confident one. The endpoint
  * already sorted by distance then site, so the first qualifier is the best.
+ * A confident Bluesky row only wins when no other site has one: Skyseek finds
+ * whoever posted the picture, often a commissioner or a reposter, so a closer
+ * Bluesky row must not displace a FuzzySearch match that names the artist.
  * Re-exported by `$lib/server/fuzzysearch`; this is the only copy. */
 export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
-	return matches.find((x) => x.band === 'exact' || x.band === 'strong') ?? null;
+	const confident = matches.filter((x) => x.band === 'exact' || x.band === 'strong');
+	return confident.find((x) => x.site !== 'Bluesky') ?? confident[0] ?? null;
 }
 
 /** `<input type="date">` wants a bare calendar day. A timestamp that isn't one
@@ -362,8 +366,9 @@ export function withCreatedArtist(
 	data: LookupResponse,
 	artist: { id: number; name: string }
 ): LookupResponse {
-	const matchIndex = data.matches.findIndex((x) => x.band === 'exact' || x.band === 'strong');
-	if (matchIndex === -1) return data;
+	const prefill = pickPrefillMatch(data.matches);
+	if (!prefill) return data;
+	const matchIndex = data.matches.indexOf(prefill);
 	const hit = { id: artist.id, name: artist.name, pieces: 0 };
 	const existing = data.localArtists.find((h) => h.matchIndex === matchIndex);
 	if (!existing) {

@@ -26,9 +26,11 @@
 import { APP_NAME } from '$lib/config';
 import {
 	FUZZYSEARCH_MAX_DISTANCE,
+	blueskyPostUrl,
 	discardBody,
 	distanceBand,
 	readBounded,
+	splitBlueskySiteId,
 	type LookupMatch
 } from './fuzzysearch';
 import { normalizeHandle } from './handle-normalize';
@@ -114,16 +116,6 @@ const RKEY_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/;
  * post date, and one in milliseconds would land thousands of years out. */
 const EARLIEST_POST_SECONDS = Date.UTC(2022, 0, 1) / 1000;
 
-/** Public post URL, built here rather than taken from the response so a hostile
- * payload cannot hand the operator an arbitrary link. bsky.app resolves a DID
- * in the profile segment, so no handle lookup is needed to link the post. The
- * DID's colons stay literal, the way bsky.app writes its own links; a colon
- * cannot end a path segment, and everything else is percent-encoded. */
-export function skyseekPostUrl(did: string, rkey: string): string {
-	const profile = encodeURIComponent(did).replace(/%3A/gi, ':');
-	return `https://bsky.app/profile/${profile}/post/${encodeURIComponent(rkey)}`;
-}
-
 function toPostedAt(raw: unknown, now: number): string | null {
 	if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
 	// A day of slack for clock skew; past it the value is not a date we can show.
@@ -155,7 +147,9 @@ function normalizeMatch(raw: RawSkyseekMatch, now: number): SkyseekMatch | null 
 		rkey,
 		distance,
 		postedAt: toPostedAt(raw.created_at, now),
-		postUrl: skyseekPostUrl(did, rkey)
+		// Built from the DID and record key rather than taken from the response,
+		// so a hostile payload cannot hand the operator an arbitrary link.
+		postUrl: blueskyPostUrl(did, rkey)
 	};
 }
 
@@ -399,6 +393,6 @@ export function isOwnBlueskyPost(
 	if (match.site !== 'Bluesky') return false;
 	const own = normalizeHandle('bluesky', ownBlueskyUrl);
 	if (!own) return false;
-	const did = match.siteId.split('/')[0].toLowerCase();
+	const did = splitBlueskySiteId(match.siteId).did.toLowerCase();
 	return did === own || match.handles.some((h) => normalizeHandle('bluesky', h) === own);
 }

@@ -11,6 +11,8 @@ import {
 	strictestRating,
 	normalizeSourceUrl,
 	postUrlFor,
+	blueskyPostUrl,
+	splitBlueskySiteId,
 	handleProfileUrl,
 	findLocalArtists,
 	findArtistsByName,
@@ -671,6 +673,29 @@ describe('postUrlFor', () => {
 		expect(postUrlFor('Twitter', '160', ['@'])).toBe('https://twitter.com/i/status/160');
 		expect(postUrlFor('Twitter', '160', ['  '])).toBe('https://twitter.com/i/status/160');
 		expect(postUrlFor('Twitter', '160', [])).toBe('https://twitter.com/i/status/160');
+	});
+
+	it('links a Bluesky id by its DID, colons literal', () => {
+		expect(postUrlFor('Bluesky', 'did:plc:x/3kxyz', [])).toBe(
+			'https://bsky.app/profile/did:plc:x/post/3kxyz'
+		);
+	});
+});
+
+describe('blueskyPostUrl', () => {
+	it('keeps a hostile value inside its own path segment', () => {
+		expect(blueskyPostUrl('did:plc:x', 'a/b?c#d')).toBe(
+			'https://bsky.app/profile/did:plc:x/post/a%2Fb%3Fc%23d'
+		);
+		expect(blueskyPostUrl('a/../b', 'k')).toBe('https://bsky.app/profile/a%2F..%2Fb/post/k');
+	});
+});
+
+describe('splitBlueskySiteId', () => {
+	it('splits at the first slash, and reads a slashless id as all DID', () => {
+		expect(splitBlueskySiteId('did:plc:x/3kxyz')).toEqual({ did: 'did:plc:x', rkey: '3kxyz' });
+		expect(splitBlueskySiteId('did:plc:x/a/b')).toEqual({ did: 'did:plc:x', rkey: 'a/b' });
+		expect(splitBlueskySiteId('did:plc:x')).toEqual({ did: 'did:plc:x', rkey: '' });
 	});
 });
 

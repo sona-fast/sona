@@ -12,6 +12,7 @@ import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import {
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
 	FUZZYSEARCH_MAX_BYTES,
+	blueskyPostUrl,
 	compareMatches,
 	findArtistsByName,
 	findLocalArtists,
@@ -21,6 +22,7 @@ import {
 	pickPrefillMatch,
 	resolveFuzzysearchKey,
 	searchImage,
+	splitBlueskySiteId,
 	type LookupFailure,
 	type LookupMatch
 } from '$lib/server/fuzzysearch';
@@ -619,11 +621,9 @@ async function findSourceClash(
 	// about pieces that are not duplicates.
 	const targets = new Set([target]);
 	if (prefill.site === 'Bluesky') {
-		const rkey = prefill.siteId.slice(prefill.siteId.indexOf('/') + 1);
+		const { rkey } = splitBlueskySiteId(prefill.siteId);
 		for (const handle of prefill.handles) {
-			const byHandle = normalizeSourceUrl(
-				`https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(rkey)}`
-			);
+			const byHandle = normalizeSourceUrl(blueskyPostUrl(handle, rkey));
 			if (byHandle) targets.add(byHandle);
 		}
 	}
