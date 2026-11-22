@@ -52,8 +52,11 @@ original deployment it grew out of). The project home is
 ## Quick start (fork → deploy)
 
 1. **Fork** this repo and clone it. `npm install`.
-2. **Provision Cloudflare** with the setup CLI (after `npx wrangler login`):
+2. **Provision Cloudflare** with the setup CLI. Export a Cloudflare API token
+   and your account ID first (scopes under **API token scopes** below); setup
+   stops without them:
    ```sh
+   export CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>
    npm run setup
    ```
    It creates the Pages project, D1 database, and (optionally) an R2 bucket;
@@ -61,10 +64,8 @@ original deployment it grew out of). The project home is
    applies migrations; and generates + sets the `SETUP_TOKEN` and `CRON_SECRET`
    secrets. It prints your one-time `SETUP_TOKEN` — keep it for step 4.
 
-   > **Setting up a custom domain?** Export `CLOUDFLARE_API_TOKEN` +
-   > `CLOUDFLARE_ACCOUNT_ID` (the same token as step 3, under **API token
-   > scopes** below) before running setup so it can preflight your DNS /
-   > image-transform config. Setup itself never touches DNS — once the zone is
+   > **Setting up a custom domain?** Setup uses the same token to preflight
+   > your DNS / image-transform config. It never touches DNS itself — once the zone is
    > active, `npm run connect-domains` attaches the CDN and site domains (see
    > **Custom domain + image thumbnails** below).
 
@@ -80,8 +81,9 @@ original deployment it grew out of). The project home is
    D1 migrations and deploys to Pages. Set repo secrets `CLOUDFLARE_ACCOUNT_ID` +
    `CLOUDFLARE_API_TOKEN`, and (optionally) repo variables `CLOUDFLARE_PAGES_PROJECT` /
    `D1_DATABASE_NAME` / `SITE_URL` / `FURTRACK_MODE` (`npm run setup` can set
-   these for you). (Or deploy directly:
-   `npx wrangler pages deploy .svelte-kit/cloudflare`.)
+   these for you). Deploy through the workflow rather than a local
+   `wrangler pages deploy`: a local deploy replaces the project's variables
+   and secrets (`SETUP_TOKEN`, `CRON_SECRET`) with the ones in `wrangler.toml`.
 
    **API token scopes.** Create a Cloudflare API token (dash → *My Profile → API
    Tokens → Create Token → Custom token*) with:
