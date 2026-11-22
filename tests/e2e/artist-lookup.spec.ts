@@ -44,6 +44,9 @@ function matchedBody(over: Record<string, unknown> = {}) {
 		localArtists: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }],
 		nameMatches: [],
 		sourceClash: null,
+		// Both services answered, as the endpoint says on every whole result. A
+		// body without it reads as "Bluesky was not searched" and draws that notice.
+		blueskySearched: true,
 		...over
 	};
 }
@@ -626,6 +629,243 @@ test.describe('with a key saved', () => {
 			'Nothing matched on FurAffinity, Weasyl, e621, or Twitter.'
 		);
 		await expect(panel(page)).not.toContainText('Bluesky');
+	});
+
+	// SONA-243: one service down is not a failed lookup. The rows of the one that
+	// answered are shown and work, and the panel says which sites they do not
+	// cover. The reason picks the advice and the routes, as it does when the
+	// whole lookup fails.
+	test('FuzzySearch down still shows the Bluesky posts, and says what was not searched', async ({
+		page
+	}, testInfo) => {
+		const notice = panel(page).locator('.lookup-partial');
+		const partial = (reason: string) =>
+			blueskyOnlyBody(BLUESKY_EXACT, {
+				localArtists: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }],
+				fuzzysearchFailure: reason
+			});
+		await stubLookup(page, partial('unavailable'));
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		// A result, not a failure: the row, the fill and the offer are all there.
+		await expect(panel(page).locator('.match-row')).toHaveCount(1);
+		await expect(panel(page).locator('.match-row')).toContainText('artist.example on Bluesky');
+		await expect(sourceInput(page)).toHaveValue(BLUESKY_POST);
+		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+		await expect(panel(page)).not.toContainText('Lookup failed');
+		await expect(notice).toHaveText(
+			"FuzzySearch didn't answer, so these are Bluesky posts only. Sona didn't search FurAffinity, Weasyl, e621, or Twitter."
+		);
+		// The notice is read before the rows it is about.
+		const noticeBox = await notice.boundingBox();
+		const rowBox = await panel(page).locator('.match-row').boundingBox();
+		if (!noticeBox || !rowBox) throw new Error('notice or row not laid out');
+		expect(noticeBox.y).toBeLessThan(rowBox.y);
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
+		await testInfo.attach('fuzzysearch-down-partial', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+
+		// A refused key keeps the route to Settings the failed state has.
+		await stubLookup(page, partial('key_refused'));
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(notice).toContainText('Check the key in Settings');
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
+			'href',
+			'/admin/settings?tab=connections'
+		);
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
+			'target',
+			'_blank'
+		);
+
+		await stubLookup(page, partial('rate_limited'));
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(notice).toContainText('Try again in a minute');
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
+
+		// Try again really asks again: with both services back the notice goes,
+		// and so does the retry, which a whole result has no use for.
+		const base = matchedBody();
+		await stubLookup(page, { ...base, matches: [...base.matches, BLUESKY_EXACT] });
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(panel(page).locator('.match-row')).toHaveCount(2);
+		await expect(notice).toHaveCount(0);
+		await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+	});
+
+	test('Skyseek down says Bluesky was not searched, over the matches that did come back', async ({
+		page
+	}, testInfo) => {
+		await stubLookup(page, matchedBody({ blueskySearched: false }));
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
+		await expect(panel(page).locator('.lookup-partial')).toHaveText(
+			"Skyseek didn't answer, so Sona didn't search Bluesky."
+		);
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
+		await testInfo.attach('skyseek-down-partial', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+
+		await stubLookup(page, matchedBody());
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(panel(page).locator('.lookup-partial')).toHaveCount(0);
+		await expect(panel(page).locator('.match-row')).toHaveCount(1);
+	});
+
+	test('the edit page shows a partial answer with its notice and a retry', async ({ page }) => {
+		await stubLookup(page, blueskyOnlyBody(BLUESKY_EXACT, { fuzzysearchFailure: 'unavailable' }));
+		await gotoEditHydrated(page);
+		await pill(page).click();
+
+		await expect(panel(page).locator('.match-row')).toContainText('artist.example on Bluesky');
+		await expect(panel(page).locator('.lookup-partial')).toContainText(
+			"FuzzySearch didn't answer, so these are Bluesky posts only."
+		);
+
+		await stubLookup(page, matchedBody());
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
+		await expect(panel(page).locator('.lookup-partial')).toHaveCount(0);
+	});
+
+	// A variant tile's result is a line on the tile, outside the panel, so the
+	// tile carries the notice itself and the announcement speaks it.
+	test('a variant tile says which service its result is missing', async ({ page }) => {
+		await stubLookup(page, blueskyOnlyBody(BLUESKY_EXACT, { fuzzysearchFailure: 'rate_limited' }));
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(1).click();
+
+		await expect(page.locator('.tile-result')).toHaveText('artist.example on Bluesky · Exact match');
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(
+			"FuzzySearch didn't answer, so these are Bluesky posts only. Sona didn't search FurAffinity, Weasyl, e621, or Twitter."
+		);
+		await expect(page.locator(LIVE_REGION)).toContainText('back.png: artist.example on Bluesky');
+		await expect(page.locator(LIVE_REGION)).toContainText("FuzzySearch didn't answer");
+		// Still a result: the tile's button re-runs the lookup, not a failed retry.
+		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
+
+		await stubLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-result')).toHaveText('kuttoya on FurAffinity · Exact match');
+		await expect(page.locator('.tile-lookup-reason')).toHaveCount(0);
+	});
+
+	// FurAffinity names one artist in the list and Bluesky names another. Neither
+	// wins: the operator picks, and nothing is applied before they do.
+	test('two sites naming two local artists ask which one, and apply only the pick', async ({
+		page
+	}, testInfo) => {
+		const base = matchedBody();
+		await stubLookup(page, {
+			...base,
+			matches: [...base.matches, BLUESKY_EXACT],
+			localArtists: [
+				{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist', pieces: 3 }] },
+				{ matchIndex: 1, artists: [{ id: 2, name: 'Avatar Artist', pieces: 1 }] }
+			]
+		});
+		await oneDoneTile(page);
+		const select = page.locator('select[name="artistId"]');
+		const before = await select.inputValue();
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText('These matches point to 2 artists in your list.');
+		const rows = panel(page).locator('.pick-row');
+		await expect(rows).toHaveCount(2);
+		await expect(rows.nth(0)).toContainText('Test Artist');
+		await expect(rows.nth(0)).toContainText('via FurAffinity');
+		await expect(rows.nth(1)).toContainText('Avatar Artist');
+		await expect(rows.nth(1)).toContainText('via Bluesky');
+		// The pick list is the question, so the different-accounts callout stays out.
+		await expect(panel(page)).not.toContainText('come from different accounts');
+		// Nothing chosen for the operator: no single-artist offer, and the select
+		// is where it was.
+		await expect(panel(page).getByRole('button', { name: /^Use (Test|Avatar) Artist$/ })).toHaveCount(0);
+		await expect(panel(page).getByRole('button', { name: 'Use selected artist' })).toBeDisabled();
+		await expect(select).toHaveValue(before);
+		// The form is still filled from the FurAffinity post.
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await testInfo.attach('cross-source-pick', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+
+		// The Bluesky one, which the removed leads-only rule would not have offered.
+		await rows.nth(1).getByRole('radio').check();
+		await panel(page).getByRole('button', { name: 'Use selected artist' }).click();
+		await expect(panel(page).getByRole('button', { name: 'Using Avatar Artist' })).toBeVisible();
+		await expect(select).toHaveValue('2');
+	});
+
+	// Two confident matches by two accounts, only one of them (or neither) in the
+	// artist list. The offer is what it would be anyway; the callout says to look
+	// at both posts before taking it.
+	test('matches from different accounts say so, and apply nothing until the click', async ({
+		page
+	}, testInfo) => {
+		const base = matchedBody();
+		const callout = panel(page).locator('p.callout');
+		const select = page.locator('select[name="artistId"]');
+		// FurAffinity's poster is in the list, the Bluesky poster is somebody else.
+		await stubLookup(page, {
+			...base,
+			matches: [...base.matches, { ...BLUESKY_EXACT, handles: ['bob.example'] }]
+		});
+		await oneDoneTile(page);
+		const before = await select.inputValue();
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText('kuttoya is already in your artist list as Test Artist.');
+		await expect(callout).toHaveText(
+			'These matches come from different accounts: kuttoya on FurAffinity and bob.example on Bluesky. Check both posts before you credit either one.'
+		);
+		await expect(select).toHaveValue(before);
+		// Under the rows, above the offer it qualifies, and able to break a long
+		// handle the way a result row does.
+		const lastRow = await panel(page).locator('.match-row').last().boundingBox();
+		const calloutBox = await callout.boundingBox();
+		const outcomeBox = await panel(page).locator('p.outcome').boundingBox();
+		if (!lastRow || !calloutBox || !outcomeBox) throw new Error('panel parts not laid out');
+		expect(calloutBox.y).toBeGreaterThanOrEqual(lastRow.y + lastRow.height);
+		expect(calloutBox.y + calloutBox.height).toBeLessThanOrEqual(outcomeBox.y);
+		await expect(callout).toHaveCSS('overflow-wrap', 'anywhere');
+		await testInfo.attach('different-accounts-callout', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+		await expect(select).toHaveValue('1');
+
+		// Neither poster is in the list: still the new-artist offer, with the callout.
+		await stubLookup(page, {
+			...base,
+			matches: [...base.matches, { ...BLUESKY_EXACT, handles: ['bob.example'] }],
+			localArtists: []
+		});
+		await pill(page).click();
+		await expect(panel(page)).toContainText("kuttoya isn't in your artist list yet.");
+		await expect(callout).toContainText('kuttoya on FurAffinity and bob.example on Bluesky');
+		await expect(panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' })).toBeVisible();
+
+		// The same person under each site's spelling of them is not a disagreement.
+		await stubLookup(page, {
+			...base,
+			matches: [...base.matches, { ...BLUESKY_EXACT, handles: ['Kuttoya.bsky.social'] }],
+			localArtists: []
+		});
+		await pill(page).click();
+		await expect(panel(page).locator('.match-row')).toContainText(['kuttoya on FurAffinity', 'Kuttoya.bsky.social on Bluesky']);
+		await expect(callout).toHaveCount(0);
 	});
 
 	test('editing a tagged field drops its tag', async ({ page }) => {

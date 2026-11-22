@@ -1924,37 +1924,215 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		expect(resolveBlueskyHandles.mock.calls.every(([dids]) => dids.length === 0)).toBe(true);
 	});
 
-	// FuzzySearch's answer decides the status exactly as before. The Bluesky rows
-	// Skyseek found are not returned on their own: the simplest rule, and the one
-	// that keeps every failure body the shape the client already reads.
-	it.each([
+	const FUZZY_FAILURES = [
 		['key_refused', 424],
 		['rate_limited', 429],
 		['too_large', 413],
 		['invalid_image', 422],
 		['unavailable', 502]
-	] as const)('keeps the %s answer when Skyseek found posts', async (reason, status) => {
+	] as const;
+
+	// One service down is not a failed lookup. The rows of the one that answered
+	// are the answer, and `fuzzysearchFailure` says why the others are missing.
+	it.each(FUZZY_FAILURES)(
+		'answers the Bluesky posts with the reason when FuzzySearch fails with %s',
+		async (reason) => {
+			const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			searchImage.mockResolvedValue({ ok: false, reason });
+			searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+			resolveBlueskyHandles.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+
+			const res = await POST(multipartEvent(platform, pngFile()));
+
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as Body & { fuzzysearchFailure: string | null; error?: string };
+			expect(body.fuzzysearchFailure).toBe(reason);
+			expect(body.error).toBeUndefined();
+			expect(body.blueskySearched).toBe(true);
+			expect(body.matches.map((x) => [x.site, x.handles, x.band])).toEqual([
+				['Bluesky', ['artist.example'], 'exact']
+			]);
+		}
+	);
+
+	it('says FuzzySearch answered on an ordinary result, with or without Bluesky posts', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const alone = (await (await POST(multipartEvent(platform, pngFile()))).json()) as {
+			fuzzysearchFailure: unknown;
+		};
+		expect(alone.fuzzysearchFailure).toBeNull();
+
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+		const both = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body & {
+			fuzzysearchFailure: unknown;
+		};
+		expect(both.fuzzysearchFailure).toBeNull();
+		expect(both.matches.map((x) => x.site)).toEqual(['FurAffinity', 'Bluesky']);
+	});
+
+	// The rows of a partial answer get every read a whole one gets: the local
+	// artist behind the poster, the by-name prompt, and the duplicate-source
+	// check, which here runs on the Bluesky post because it is the prefill.
+	it('still matches local artists, names and the source clash on a partial answer', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, bluesky_url, created_at)
+			 VALUES (1, 'Sky Artist', 'https://bsky.app/profile/artist.example', '2026-01-01'),
+			        (2, 'artist.example', NULL, '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, source_post_url, created_at)
+			 VALUES (5, 'Held', 'held', 'https://cdn.example.com/held.png',
+			         '${blueskyPostUrl('artist.example', 'first')}', '2026-01-01');`
+		);
+		searchImage.mockResolvedValue({ ok: false, reason: 'unavailable' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+		resolveBlueskyHandles.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 0, artists: [{ id: 1, name: 'Sky Artist', pieces: 0 }] }
+		]);
+		expect(body.nameMatches).toEqual([
+			{ matchIndex: 0, artists: [{ id: 2, name: 'artist.example', pieces: 0 }] }
+		]);
+		expect(body.sourceClash).toMatchObject({ imageId: 5, title: 'Held' });
+	});
+
+	// The settings page's "your key stopped working" does not depend on whether
+	// Bluesky happened to have the picture.
+	it('records a refused key on a partial answer too, and does not clear it', async () => {
+		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(
+			/^\d{4}-\d{2}-\d{2}T.*\|env$/
+		);
+	});
+
+	it('leaves a standing refusal marker alone when FuzzySearch fails another way', async () => {
+		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z|env');
+		searchImage.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+
+		expect((await POST(multipartEvent(platform, pngFile()))).status).toBe(200);
+		// Only a FuzzySearch success clears it, and this was not one.
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe(
+			'2026-09-01T00:00:00.000Z|env'
+		);
+	});
+
+	// A throw out of searchImage is a FuzzySearch failure like a typed one: the
+	// Bluesky rows are not thrown away with it.
+	it('answers the Bluesky posts when the FuzzySearch call throws', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		searchImage.mockResolvedValue({ ok: false, reason });
+		searchImage.mockRejectedValue(new Error('connection reset'));
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
 
 		const res = await POST(multipartEvent(platform, pngFile()));
 		warn.mockRestore();
 
-		expect(res.status).toBe(status);
-		expect(await res.json()).toEqual({ enabled: true, error: reason, forwarded: true });
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Body & { fuzzysearchFailure: string | null };
+		expect(body.fuzzysearchFailure).toBe('unavailable');
+		expect(body.matches.map((x) => x.site)).toEqual(['Bluesky']);
 	});
 
-	it('does not hold a FuzzySearch failure back for a Skyseek search still running', async () => {
+	// With no Bluesky row to show, the failure is the whole answer, exactly as
+	// it was before the two were aggregated: same status, same body.
+	describe.each(FUZZY_FAILURES)('a FuzzySearch %s with nothing from Bluesky', (reason, status) => {
+		const expectFailure = async (res: Response) => {
+			expect(res.status).toBe(status);
+			expect(await res.json()).toEqual({ enabled: true, error: reason, forwarded: true });
+		};
+
+		it('keeps its answer when Skyseek fails too', async () => {
+			const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			searchImage.mockResolvedValue({ ok: false, reason });
+			searchSkyseek.mockResolvedValue({ ok: false, reason: 'unavailable' });
+
+			const res = await POST(multipartEvent(platform, pngFile()));
+			warn.mockRestore();
+
+			await expectFailure(res);
+		});
+
+		it('keeps its answer when Skyseek finds no post', async () => {
+			const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			searchImage.mockResolvedValue({ ok: false, reason });
+
+			await expectFailure(await POST(multipartEvent(platform, pngFile())));
+		});
+
+		// Decided after the own-post filter. Before it, this would be a 200 with
+		// an empty list, which the panel reads as "nothing matched".
+		it("keeps its answer when the only post is the operator's own", async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/me.example');
+			searchImage.mockResolvedValue({ ok: false, reason });
+			searchSkyseek.mockResolvedValue({ ok: true, matches: [post(OPERATOR_DID, 'mine', null, 0)] });
+			resolveBlueskyHandles.mockResolvedValue(new Map([[OPERATOR_DID, 'me.example']]));
+
+			await expectFailure(await POST(multipartEvent(platform, pngFile())));
+		});
+	});
+
+	// The cost of aggregating, stated in the handler: a FuzzySearch failure is
+	// no longer answered the moment it arrives, because the Bluesky rows that
+	// may replace it are not in yet.
+	it('waits for Skyseek before answering a FuzzySearch failure', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		searchImage.mockResolvedValue({ ok: false, reason: 'rate_limited' });
-		// Never settles: an answer that waited on it would hang this test.
-		searchSkyseek.mockReturnValue(new Promise<SkyseekResult>(() => {}));
+		let answerSkyseek: (result: SkyseekResult) => void = () => {};
+		searchSkyseek.mockReturnValue(
+			new Promise<SkyseekResult>((resolve) => {
+				answerSkyseek = resolve;
+			})
+		);
+
+		let settled = false;
+		const pending = Promise.resolve(POST(multipartEvent(platform, pngFile()))).then((res) => {
+			settled = true;
+			return res;
+		});
+		// Long enough for the FuzzySearch failure and every await behind it.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(settled).toBe(false);
+
+		answerSkyseek({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		const res = await pending;
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { fuzzysearchFailure: string }).fuzzysearchFailure).toBe(
+			'rate_limited'
+		);
+	});
+
+	// The reads behind a partial answer can fail like the ones behind a whole
+	// one. The answer is then FuzzySearch's own failure: it is the one with a
+	// remedy the operator can act on.
+	it('answers the FuzzySearch failure when a read behind a partial answer throws', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "artists"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
 
 		const res = await POST(multipartEvent(platform, pngFile()));
 
 		expect(res.status).toBe(429);
+		expect(await res.json()).toEqual({ enabled: true, error: 'rate_limited', forwarded: true });
 	});
 
 	it('asks neither service with no key, a commission piece, or a file it refuses', async () => {

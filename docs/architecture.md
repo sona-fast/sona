@@ -161,8 +161,12 @@ graph TB
 - Telegram, FurTrack, FuzzySearch, Resend, and Turnstile are optional
   integrations, keyed off secrets or settings (see `wrangler.toml.example` for the full list).
 - Skyseek needs no key or secret of its own. The artist lookup searches it
-  whenever the FuzzySearch lookup is on, in the same click. If Skyseek fails,
-  the lookup still answers, with no Bluesky posts in the result. The lookup
+  whenever the FuzzySearch lookup is on, in the same click. The lookup answers
+  with the matches of whichever service answered and names the one that did
+  not: if Skyseek fails, there are no Bluesky posts in the result, and if
+  FuzzySearch fails, the result holds the Bluesky posts alone. A FuzzySearch
+  failure is answered as a failure only when Skyseek has no post to show, so it
+  waits for Skyseek's answer, bounded by Skyseek's timeout. The lookup
   then asks Bluesky's public API for the handles of the accounts that posted
   the matches. That request carries only their DIDs. Both requests send a
   User-Agent that names the software and the site's hostname, which Skyseek's

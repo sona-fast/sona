@@ -58,11 +58,26 @@ export interface LookupResponse {
 	nameMatches: ArtistHit[];
 	sourceClash: SourceClash | null;
 	/** Whether Skyseek answered, so Bluesky was searched along with the sites
-	 * FuzzySearch covers. Only the no-match state reads it: "nothing matched"
-	 * must not name a site nobody looked at. Optional: a response from before
-	 * the endpoint searched Bluesky carries none, and reads as not searched. */
+	 * FuzzySearch covers. The no-match sentence reads it, because "nothing
+	 * matched" must not name a site nobody looked at, and so does the results
+	 * panel, which says when Bluesky was not searched. Optional: a response from
+	 * before the endpoint searched Bluesky carries none, and reads as not
+	 * searched. */
 	blueskySearched?: boolean;
+	/** Why FuzzySearch gave no rows, when the answer holds Bluesky posts only.
+	 * Null or absent when FuzzySearch answered. The endpoint sends it only beside
+	 * at least one Bluesky row: with nothing to show, the failure is the whole
+	 * answer and arrives as one. */
+	fuzzysearchFailure?: UpstreamFailReason | null;
 }
+
+/** The reasons FuzzySearch itself can fail with, as the endpoint names them. */
+export type UpstreamFailReason =
+	| 'key_refused'
+	| 'rate_limited'
+	| 'too_large'
+	| 'invalid_image'
+	| 'unavailable';
 
 /** Why a lookup did not produce matches. `signed_out`, `no_key` and `gone` are
  * this file's own: the admin gate answers an expired session with a plain-text
@@ -71,11 +86,7 @@ export interface LookupResponse {
  * `error`. None of the three is a FuzzySearch failure, and each carries a
  * different remedy from every one below. */
 export type LookupFailReason =
-	| 'key_refused'
-	| 'rate_limited'
-	| 'too_large'
-	| 'invalid_image'
-	| 'unavailable'
+	| UpstreamFailReason
 	| 'signed_out'
 	| 'no_key'
 	| 'gone'
@@ -191,6 +202,13 @@ export function ratingTag(
  * be added in three places to agree. */
 export const RATING_ORDER: readonly LookupRating[] = ['general', 'mature', 'adult'];
 
+/** Whether a match is close enough to act on: exact or strong. The one copy of
+ * the rule. A possible match, or one with no distance, is shown and decides
+ * nothing: no prefill, no rating, no artist offered. */
+export function isConfident(match: Pick<LookupMatch, 'band'>): boolean {
+	return match.band === 'exact' || match.band === 'strong';
+}
+
 /** The strictest rating across the confident matches, with the sites carrying
  * it. The one implementation — `$lib/server/fuzzysearch` re-exports this rather
  * than restating it. Possible and unknown-distance matches are excluded: a
@@ -198,7 +216,7 @@ export const RATING_ORDER: readonly LookupRating[] = ['general', 'mature', 'adul
 export function strictestRating(
 	matches: LookupMatch[]
 ): { rating: LookupRating; sites: LookupSite[] } | null {
-	const confident = matches.filter((x) => x.band === 'exact' || x.band === 'strong');
+	const confident = matches.filter(isConfident);
 	let best: LookupRating | null = null;
 	for (const match of confident) {
 		if (!match.rating) continue;
@@ -220,7 +238,7 @@ export function strictestRating(
  * Bluesky row must not displace a FuzzySearch match that names the artist.
  * Re-exported by `$lib/server/fuzzysearch`; this is the only copy. */
 export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
-	const confident = matches.filter((x) => x.band === 'exact' || x.band === 'strong');
+	const confident = matches.filter(isConfident);
 	return confident.find((x) => x.site !== 'Bluesky') ?? confident[0] ?? null;
 }
 
@@ -277,30 +295,17 @@ export interface ArtistChoice {
 }
 
 /**
- * Which matches may name a local artist: the confident ones, except that a
- * Bluesky row is only a lead once another site has a confident match. Skyseek
- * finds whoever posted the picture, so the same rule as `pickPrefillMatch`
- * keeps a commissioner's or reposter's local artist from deciding the outcome
- * over a match that names the artist. Every reader of `localArtists` that
- * decides what to offer goes through this.
- */
-function namesLocalArtist(matches: LookupMatch[]): (match: LookupMatch) => boolean {
-	const confident = (x: LookupMatch) => x.band === 'exact' || x.band === 'strong';
-	const leadsOnly = matches.some((x) => confident(x) && x.site !== 'Bluesky');
-	return (x) => confident(x) && !(leadsOnly && x.site === 'Bluesky');
-}
-
-/**
  * Local artists any confident match points at, deduplicated by id. Union rather
  * than the prefill match alone: two sites can name two different artists Sona
  * already holds, and hiding the second one would silently pick for the operator.
- * Bluesky rows count only when no other site matched confidently.
+ * A confident Bluesky row counts like any other, so a Bluesky poster and a
+ * FurAffinity poster who are two different local artists come out as two
+ * candidates, and the operator picks.
  */
 export function candidateArtists(data: LookupResponse): ArtistChoice[] {
-	const counts = namesLocalArtist(data.matches);
 	const seen = new Map<number, ArtistChoice>();
 	data.matches.forEach((match, index) => {
-		if (!counts(match)) return;
+		if (!isConfident(match)) return;
 		const hit = data.localArtists.find((h) => h.matchIndex === index);
 		for (const artist of hit?.artists ?? []) {
 			if (!seen.has(artist.id)) seen.set(artist.id, { ...artist, site: match.site });
@@ -317,10 +322,9 @@ export function candidateArtists(data: LookupResponse): ArtistChoice[] {
  * your list as Bob". Null when no hit names the artist.
  */
 export function matchForArtist(data: LookupResponse, artistId: number): LookupMatch | null {
-	const counts = namesLocalArtist(data.matches);
 	return (
 		data.matches.find((match, index) => {
-			if (!counts(match)) return false;
+			if (!isConfident(match)) return false;
 			const hit = data.localArtists.find((h) => h.matchIndex === index);
 			return (hit?.artists ?? []).some((a) => a.id === artistId);
 		}) ?? null
@@ -339,8 +343,8 @@ export function differentArtistMatch(data: LookupResponse, sharedId: number): Lo
 	if (!sharedId) return null;
 	const own = candidateArtists(data);
 	if (own.length === 0 || own.some((a) => a.id === sharedId)) return null;
-	// The first candidate comes from the first match that counts, so this is
-	// that match, under the same Bluesky rule as the candidates.
+	// The first candidate comes from the first confident match with a hit, so
+	// this is that match.
 	return matchForArtist(data, own[0].id);
 }
 
@@ -358,8 +362,10 @@ export function nameMatchArtists(data: LookupResponse): Array<{ id: number; name
  * Bluesky: Skyseek finds whoever POSTED the picture, and on Bluesky that is as
  * often the person who commissioned it, or someone reposting it, as the artist.
  * Weasyl and e621 name the artist in the match itself, so their offer stands.
- * A Bluesky poster already in the artist list is still offered, through the
- * 'existing' outcome — the operator vouched for that account when they saved it.
+ * A Bluesky poster already in the artist list is still offered, as the
+ * 'existing' outcome or as one of the 'ambiguous' picks when another site names
+ * a different local artist. The operator vouched for that account when they
+ * saved it.
  */
 export function canAddPosterAsArtist(site: LookupSite): boolean {
 	return site !== 'Bluesky';
@@ -420,6 +426,80 @@ export function withCreatedArtist(
 /** True when the ambiguity spans sites, which the copy names differently. */
 export function isCrossSiteAmbiguity(data: LookupResponse): boolean {
 	return new Set(candidateArtists(data).map((c) => c.site)).size > 1;
+}
+
+/**
+ * A handle reduced to what two sites' spellings of one person tend to share:
+ * lowercased, a Bluesky handle cut to its first label (the rest is a domain),
+ * and everything but letters and digits dropped. "Kuttoya_Art" on Twitter and
+ * "kuttoya-art.bsky.social" on Bluesky both come out as "kuttoyaart". Only for
+ * deciding whether to warn, never for linking anybody.
+ */
+function looseHandle(site: LookupSite, handle: string): string {
+	let clean = handle.trim().replace(/^@+/, '').toLowerCase();
+	if (site === 'Bluesky') clean = clean.split('.')[0];
+	return clean.replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+function looseHandles(match: LookupMatch): string[] {
+	return match.handles.map((h) => looseHandle(match.site, h)).filter(Boolean);
+}
+
+/**
+ * Two confident matches, on two different sites, that name different accounts,
+ * for the callout that tells the operator to check before picking. Null when
+ * the sources agree or there is nothing to compare.
+ *
+ * `a` is the account the panel's offer is about: the match behind the one
+ * local artist when there is one, else the prefill match, else the first
+ * confident match that names anybody. `b` is the first confident match on
+ * another site whose handles share nothing with `a`'s once both are reduced by
+ * `looseHandle`.
+ *
+ * Three things keep it quiet. A match that names a local artist is skipped as
+ * `b`: outside the 'ambiguous' outcome there is at most one candidate, so that
+ * match names the same person under another handle. The 'ambiguous' outcome
+ * returns null, because its pick list already puts the disagreement in front of
+ * the operator. A match with no handle names nobody, so it is never either side.
+ */
+export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: LookupMatch } | null {
+	const candidates = candidateArtists(data);
+	if (candidates.length >= 2) return null;
+	const named = data.matches.filter((x) => isConfident(x) && looseHandles(x).length > 0);
+	const prefill = pickPrefillMatch(data.matches);
+	const offered = candidates.length === 1 ? matchForArtist(data, candidates[0].id) : prefill;
+	const a = offered && named.includes(offered) ? offered : named[0];
+	if (!a) return null;
+	const mine = looseHandles(a);
+	const b = named.find((x) => {
+		if (x.site === a.site) return false;
+		const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(x));
+		if (hit?.artists.length) return false;
+		return !looseHandles(x).some((h) => mine.includes(h));
+	});
+	return b ? { a, b } : null;
+}
+
+/**
+ * Which service did not answer, for the notice over a partial result. Null when
+ * both did. They are never both named: with neither answering there are no rows
+ * and the lookup is a failure, not a result.
+ */
+export function unansweredService(
+	data: LookupResponse
+): { service: 'fuzzysearch'; reason: UpstreamFailReason } | { service: 'skyseek' } | null {
+	if (data.fuzzysearchFailure) return { service: 'fuzzysearch', reason: data.fuzzysearchFailure };
+	return data.blueskySearched === true ? null : { service: 'skyseek' };
+}
+
+/** The sentence for `unansweredService`, shared by the panel and the upload
+ * page's variant tiles. */
+export function unansweredLine(data: LookupResponse): string | null {
+	const missing = unansweredService(data);
+	if (!missing) return null;
+	return missing.service === 'fuzzysearch'
+		? m.admin_lookup_partial_fuzzysearch()
+		: m.admin_lookup_partial_skyseek();
 }
 
 /** The two form fields a lookup can fill. Absent means "left alone". */
@@ -800,14 +880,15 @@ interface FailureBody {
 	forwarded?: boolean;
 }
 
-const FAIL_REASONS: readonly LookupFailReason[] = [
+const UPSTREAM_FAIL_REASONS: readonly UpstreamFailReason[] = [
 	'key_refused',
 	'rate_limited',
 	'too_large',
 	'invalid_image',
-	'unavailable',
-	'from_commission'
+	'unavailable'
 ];
+
+const FAIL_REASONS: readonly LookupFailReason[] = [...UPSTREAM_FAIL_REASONS, 'from_commission'];
 
 /**
  * The one gate on a match's post URL. The endpoint builds these itself, so a
@@ -999,7 +1080,19 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	if (matches.length === 0 && raw.length > 0) {
 		return { kind: 'failed', reason: 'unavailable', sent: forwarded };
 	}
+	// Null and absent both mean FuzzySearch answered. Anything else says it did
+	// not, and a value this client does not know is still a failure: reading it
+	// as an answer would present Bluesky-only rows as the whole search.
+	const wireFailure: unknown = data.fuzzysearchFailure;
+	const fuzzysearchFailure =
+		wireFailure === null || wireFailure === undefined
+			? null
+			: (UPSTREAM_FAIL_REASONS.find((r) => r === wireFailure) ?? 'unavailable');
 	if (matches.length === 0) {
+		// The endpoint answers a FuzzySearch failure with no rows as that failure.
+		// A 200 that says both at once is read the same way, and never as "nothing
+		// matched" on sites nobody searched.
+		if (fuzzysearchFailure) return { kind: 'failed', reason: fuzzysearchFailure, sent: forwarded };
 		return { kind: 'no_match', blueskySearched: data.blueskySearched === true };
 	}
 	return {
@@ -1009,7 +1102,9 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 			matches,
 			localArtists: remapHits(data.localArtists, indexMap),
 			nameMatches: remapHits(data.nameMatches, indexMap),
-			sourceClash: data.sourceClash ?? null
+			sourceClash: data.sourceClash ?? null,
+			blueskySearched: data.blueskySearched === true,
+			fuzzysearchFailure
 		}
 	};
 }

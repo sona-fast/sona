@@ -59,9 +59,12 @@ import type { RequestHandler } from './$types';
 //
 // The same click searches Skyseek for Bluesky posts of the picture (SONA-243),
 // whenever the FuzzySearch lookup is on: there is no second setting. The two
-// searches run side by side once every gate below has passed, and FuzzySearch
-// alone decides the status of the answer. A Skyseek failure means no Bluesky
-// rows and nothing else.
+// searches run side by side once every gate below has passed, and the answer
+// holds the rows of whichever service answered. With Skyseek down it is
+// FuzzySearch's rows and `blueskySearched: false`. With FuzzySearch down it is
+// the Bluesky rows and `fuzzysearchFailure`, the reason. FuzzySearch's failure
+// is the whole answer, with its own status, only when there is no Bluesky row
+// to show beside it.
 
 /** What the UI gets back for a failed lookup, and the status carrying it. */
 const FAILURE_STATUS: Record<LookupFailure, number> = {
@@ -188,10 +191,10 @@ function hasAllowedImageBytes(head: Uint8Array): boolean {
  * account's handle where the AppView gave one. Null when Bluesky was not
  * searched, which the caller reports as that and never as "no Bluesky posts".
  *
- * Never rejects. The caller starts this beside the FuzzySearch call and may
- * answer without awaiting it, and a rejection nobody is waiting on is an
- * unhandled rejection. Only the failure reason is logged, a word from a fixed
- * list: the response body stays in skyseek.ts.
+ * Never rejects. The caller starts this beside the FuzzySearch call and awaits
+ * it after, outside any guard of its own, so a rejection here would answer 500
+ * for bytes that already left the worker. Only the failure reason is logged, a
+ * word from a fixed list: the response body stays in skyseek.ts.
  */
 async function searchBluesky(
 	bytes: Blob,
@@ -408,10 +411,10 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// left the worker. forwarded is true for that reason: the file went out
 	// whether or not the call came back.
 	//
-	// Skyseek is started first and awaited last, so the two searches overlap and
-	// every FuzzySearch failure below answers exactly when it did before: a
-	// refused key is not held back for a Bluesky search whose rows would be
-	// thrown away with it.
+	// Skyseek is started first and awaited last, so the two searches overlap. A
+	// FuzzySearch failure waits for Skyseek too, because the Bluesky rows are
+	// shown without it: the wait is bounded by Skyseek's own timeout
+	// (SKYSEEK_TIMEOUT_MS) plus the handle lookup's.
 	//
 	// The User-Agent names this site by the hostname the request came in on, which
 	// Skyseek's owner asked callers to send. An unparseable URL leaves it off.
@@ -433,10 +436,14 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			'artist-lookup: lookup threw after the file was sent',
 			e instanceof Error ? e.message : 'non-Error value'
 		);
-		return failure('unavailable', true);
+		// A FuzzySearch failure like any other below: Skyseek may still have rows.
+		result = { ok: false, reason: 'unavailable' };
 	}
 
+	/** Why FuzzySearch gave no rows, or null when it answered. */
+	let fuzzysearchFailure: LookupFailure | null = null;
 	if (!result.ok) {
+		fuzzysearchFailure = result.reason;
 		// A refused key is the one failure worth remembering: the settings page
 		// tells the operator their key stopped working instead of leaving the
 		// button failing silently. The marker records WHICH key was refused, so a
@@ -444,6 +451,8 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// The marker is a convenience for the settings page, not part of the
 		// answer: a failed write must not turn a typed 424 into a 500 the caller
 		// can't read. Nothing about the write's error names the body or the key.
+		// Written whether or not Bluesky rows turn this into a partial answer: the
+		// key was refused either way.
 		if (result.reason === 'key_refused') {
 			try {
 				await setRawSetting(
@@ -458,27 +467,26 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 				);
 			}
 		}
-		return failure(result.reason, true);
-	}
-
-	// The key works — clear a stale refusal marker, but only the marker for the
-	// key that just succeeded (a marker against the other source stays: a deploy
-	// secret succeeding says nothing about the stored key FuzzySearch refused).
-	// Read first, so the happy path costs one read rather than a write. Best
-	// effort for the same reason as the write above: a settings row that won't
-	// clear must not cost the operator the matches they asked for.
-	try {
-		const refusedMarker = parseFuzzysearchRefusedMarker(
-			await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)
-		);
-		if (refusedMarker && refusedMarker.source === resolved.source) {
-			await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+	} else {
+		// The key works — clear a stale refusal marker, but only the marker for the
+		// key that just succeeded (a marker against the other source stays: a deploy
+		// secret succeeding says nothing about the stored key FuzzySearch refused).
+		// Read first, so the happy path costs one read rather than a write. Best
+		// effort for the same reason as the write above: a settings row that won't
+		// clear must not cost the operator the matches they asked for.
+		try {
+			const refusedMarker = parseFuzzysearchRefusedMarker(
+				await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)
+			);
+			if (refusedMarker && refusedMarker.source === resolved.source) {
+				await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+			}
+		} catch (e) {
+			console.warn(
+				'artist-lookup: refused-key marker not cleared',
+				e instanceof Error ? e.message : 'non-Error value'
+			);
 		}
-	} catch (e) {
-		console.warn(
-			'artist-lookup: refused-key marker not cleared',
-			e instanceof Error ? e.message : 'non-Error value'
-		);
 	}
 
 	// One list, in the order FuzzySearch's rows already had: closest first, then
@@ -502,9 +510,15 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			);
 		}
 	}
+	// FuzzySearch failed and there is no Bluesky row to show in its place (Skyseek
+	// failed too, found nothing, or found only the operator's own post), so the
+	// failure is the whole answer, with the status it always had. Decided after
+	// the own-post filter: a partial answer made of a row the filter then removed
+	// would be an empty result that reads as "nothing matched".
+	if (fuzzysearchFailure && blueskyMatches.length === 0) return failure(fuzzysearchFailure, true);
 	// Sorted BEFORE anything below reads it: localArtists and nameMatches address
 	// a match by its index in this list, and the client reads the same indexes.
-	const matches = [...result.matches, ...blueskyMatches].sort(compareMatches);
+	const matches = [...(result.ok ? result.matches : []), ...blueskyMatches].sort(compareMatches);
 	// Every read below runs AFTER the bytes reached FuzzySearch, so a D1 fault
 	// here is answered `forwarded: true` — the private-image notice on the edit
 	// page is honest about a lookup that did leave the app. Answered as a typed
@@ -565,7 +579,9 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		}
 		sourceClash = await findSourceClash(db, matches, selfImage);
 	} catch {
-		return failure('unavailable', true);
+		// With FuzzySearch already failed, its reason is the one that names a
+		// remedy (a refused key, a rate limit), so it is the one answered.
+		return failure(fuzzysearchFailure ?? 'unavailable', true);
 	}
 
 	const withPieces = (a: { id: number; name: string }) => ({
@@ -597,7 +613,10 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		nameMatches,
 		sourceClash,
 		// Null is "Skyseek did not answer". An empty list is an answer.
-		blueskySearched: bluesky !== null
+		blueskySearched: bluesky !== null,
+		// Set only on a partial answer: the rows above are Bluesky posts alone,
+		// and this is why. Null when FuzzySearch answered.
+		fuzzysearchFailure
 	});
 };
 

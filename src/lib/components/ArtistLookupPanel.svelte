@@ -15,6 +15,7 @@
 		canAddPosterAsArtist,
 		candidateArtists,
 		clearedLine,
+		differingAccounts,
 		isCrossSiteAmbiguity,
 		matchForArtist,
 		matchHandle,
@@ -30,6 +31,8 @@
 		siteLabel,
 		statusLineKind,
 		statusSentence,
+		unansweredLine,
+		unansweredService,
 		type ArtistChoice,
 		type LookupCleared,
 		type LookupEdited,
@@ -129,6 +132,24 @@
 	const crossSite = $derived(data ? isCrossSiteAmbiguity(data) : false);
 	const nameHits = $derived(data ? nameMatchArtists(data) : []);
 	const clash = $derived(data?.sourceClash ?? null);
+	// A result one of the two services did not contribute to. The rows are real
+	// and everything below works on them; the notice says which sites they do not
+	// cover, so a short list is not read as the whole search.
+	const unanswered = $derived(data ? unansweredService(data) : null);
+	const unansweredText = $derived(data ? unansweredLine(data) : null);
+	// The advice the failed arm gives for the same reason, where it has any.
+	const unansweredHint = $derived(
+		unanswered?.service !== 'fuzzysearch'
+			? ''
+			: unanswered.reason === 'rate_limited'
+				? m.admin_lookup_paused_hint()
+				: unanswered.reason === 'key_refused'
+					? m.admin_lookup_refused_hint()
+					: ''
+	);
+	// Two confident matches on two sites naming different accounts. Not under the
+	// ambiguous outcome, whose pick list already asks the question.
+	const differing = $derived(data ? differingAccounts(data) : null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(
 		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared })
@@ -379,6 +400,14 @@
 					</div>
 				{/if}
 
+				<!-- Above the rows it qualifies: "these are Bluesky posts only" is read
+				     before the list it is about. -->
+				{#if unansweredText}
+					<p class="lookup-partial">
+						{unansweredText}{#if unansweredHint}{' '}{unansweredHint}{/if}
+					</p>
+				{/if}
+
 				<ul class="match-list">
 					{#each data.matches as match (matchKey(match))}
 						{@const handles = matchHandles(match)}
@@ -413,6 +442,21 @@
 						</li>
 					{/each}
 				</ul>
+
+				<!-- Directly under the rows it is about and above the offer, clash or
+				     not: the outcome is unchanged and nothing is applied until the
+				     operator clicks, so this only says the click deserves a look at
+				     both posts first. -->
+				{#if differing}
+					<p class="callout differing">
+						{m.admin_lookup_sources_differ({
+							a: matchHandle(differing.a),
+							siteA: siteLabel(differing.a.site),
+							b: matchHandle(differing.b),
+							siteB: siteLabel(differing.b.site)
+						})}
+					</p>
+				{/if}
 
 				<!-- The clash panel asks the same question about the artist as any
 				     other ambiguous result: a duplicate source URL says nothing about
@@ -702,6 +746,23 @@
 						{m.admin_lookup_add_new({ handle })}
 					</button>
 				{/if}
+				<!-- A partial answer can be asked for again, and a refused key is
+				     fixed in Settings first: the same two routes the failed arm
+				     offers, beside whatever the rows that did come back allow. -->
+				{#if unanswered}
+					{#if unanswered.service === 'fuzzysearch' && unanswered.reason === 'key_refused'}
+						<a
+							class="btn btn-secondary"
+							href="/admin/settings?tab=connections"
+							target="_blank"
+							rel="noopener noreferrer"
+							>{m.admin_lookup_open_settings()}<span class="sr-only"
+								>{' '}{m.link_opens_new_tab()}</span
+							></a
+						>
+					{/if}
+					<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
+				{/if}
 				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{/if}
 		</div>
@@ -916,6 +977,22 @@
 		border-left: 2px solid var(--border);
 		padding-left: 10px;
 		margin: 10px 0 0;
+	}
+	/* A partial answer, over the rows it qualifies. The private notice's warning
+	   line, with its space below instead of above because it leads the list. */
+	.lookup-partial {
+		font-size: 13px;
+		color: var(--status-warn);
+		line-height: 1.55;
+		margin: 0 0 12px;
+		max-width: 62ch;
+	}
+	/* Two handles in one sentence, and a Bluesky one is a hostname with no space
+	   in it: the same wrap rule as .match-who. The space below keeps the offer
+	   that follows from reading as part of it. */
+	.callout.differing {
+		overflow-wrap: anywhere;
+		margin-bottom: 10px;
 	}
 	.pick-list {
 		border: 0;

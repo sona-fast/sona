@@ -26,6 +26,7 @@
 		tileResultText,
 		differentArtistMatch,
 		lookupSentFile,
+		unansweredLine,
 		sentAfterApplyThrew,
 		withCreatedArtist,
 		type LookupCleared,
@@ -861,6 +862,14 @@
 			line = result
 				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
 				: m.admin_lookup_announce_tile_no_match({ fileName });
+			// Spoken with the match, for the reason the private notice below is: the
+			// tile's own paragraph sits outside any live region.
+			if (result?.partial) {
+				line = m.admin_lookup_announce_tile_with_notice({
+					outcome: line,
+					disclosure: result.partial
+				});
+			}
 		}
 		// The tile's private notice is a plain paragraph outside any live region,
 		// so this is the only way the disclosure reaches a screen-reader operator.
@@ -1250,9 +1259,10 @@
 		if (options.focus !== false) focusLookupOrigin();
 	}
 
-	/** A variant tile whose confident match names a different local artist than
-	 * the shared one — worth flagging rather than silently rating. The rule,
-	 * including which poster the line names, is `differentArtistMatch`. */
+	/** The match behind a variant tile's "Different artist" line, or null when
+	 * the tile raises none. A thin wrapper: the rule, including which matches
+	 * count (any confident one, Bluesky included) and which poster the line
+	 * names, is `differentArtistMatch`. This only supplies the shared selection. */
 	function tileDifferentArtistMatch(tile: Tile): LookupMatch | null {
 		if (tile.lookup.kind !== 'results') return null;
 		// The shared SELECTION, not just a panel-applied one: appliedArtist is set
@@ -1295,7 +1305,10 @@
 			spoken: text.spoken,
 			postUrl: match.postUrl,
 			site: match.site,
-			ratingTag: ratingTag(strictestRating(matches))
+			ratingTag: ratingTag(strictestRating(matches)),
+			// One of the two services did not answer. Still a result: the line above
+			// stands, and this says which sites it does not cover.
+			partial: unansweredLine(tile.lookup.data)
 		};
 	}
 </script>
@@ -1554,6 +1567,9 @@
 							{@const result = tileResult(tile)}
 							{#if result}
 								<p class="tile-result" class:tile-result-warn={result.different}>{result.line}</p>
+							{#if result.partial}
+								<p class="tile-lookup-reason">{result.partial}</p>
+							{/if}
 								<a class="tile-post-link" href={result.postUrl} target="_blank" rel="noopener noreferrer">
 									{m.admin_lookup_view_post()}<span class="sr-only"
 										>{m.admin_lookup_view_post_site({ site: siteLabel(result.site) })}</span
