@@ -69,6 +69,9 @@ const BLUESKY_LEAD = {
 };
 /** The same post as an exact match, which Skyseek's distance makes confident. */
 const BLUESKY_EXACT = { ...BLUESKY_LEAD, distance: 0, band: 'exact' };
+/** The notice's first sentence when FuzzySearch gave no rows, for any reason. */
+const FUZZY_PARTIAL =
+	"FuzzySearch didn't return results, so Sona only has Bluesky posts to show. It couldn't check FurAffinity, Weasyl, e621, or Twitter.";
 
 /** A lookup that found that one Bluesky post and nothing else. */
 function blueskyOnlyBody(match: Record<string, unknown>, over: Record<string, unknown> = {}) {
@@ -654,9 +657,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(BLUESKY_POST);
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 		await expect(panel(page)).not.toContainText('Lookup failed');
-		await expect(notice).toHaveText(
-			"FuzzySearch didn't answer, so these are Bluesky posts only. Sona didn't search FurAffinity, Weasyl, e621, or Twitter."
-		);
+		await expect(notice).toHaveText(FUZZY_PARTIAL);
 		// The notice is read before the rows it is about.
 		const noticeBox = await notice.boundingBox();
 		const rowBox = await panel(page).locator('.match-row').boundingBox();
@@ -668,22 +669,14 @@ test.describe('with a key saved', () => {
 			contentType: 'image/png'
 		});
 
-		// A refused key keeps the route to Settings the failed state has.
-		await stubLookup(page, partial('key_refused'));
-		await panel(page).getByRole('button', { name: 'Try again' }).click();
-		await expect(notice).toContainText('Check the key in Settings');
-		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
-			'href',
-			'/admin/settings?tab=connections'
-		);
-		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
-			'target',
-			'_blank'
-		);
-
+		// A rate limit says so, with the failed state's advice, and keeps Try
+		// again: the limit lifts.
 		await stubLookup(page, partial('rate_limited'));
 		await panel(page).getByRole('button', { name: 'Try again' }).click();
-		await expect(notice).toContainText('Try again in a minute');
+		await expect(notice).toHaveText(
+			`${FUZZY_PARTIAL} FuzzySearch is limiting how often your site can search right now. Try again in a minute, or add the artist by hand. Your upload is unaffected.`
+		);
+		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
 
 		// Try again really asks again: with both services back the notice goes,
@@ -696,6 +689,45 @@ test.describe('with a key saved', () => {
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
 	});
 
+	// FuzzySearch answered and refused: the key, or the file. The notice says
+	// which, and Try again is gone, because a second send gets the same answer.
+	// A refused key keeps the route to Settings the failed state has.
+	for (const [reason, reasonText, settings] of [
+		['key_refused', "FuzzySearch didn't accept your API key. Check the key in Settings, or add the artist by hand. Your upload is unaffected.", true],
+		['too_large', 'This file is too large for FuzzySearch. Add the artist by hand.', false],
+		['invalid_image', "FuzzySearch couldn't read this file. Add the artist by hand.", false]
+	] as const) {
+		test(`a partial answer with FuzzySearch reason ${reason} says why and offers no retry`, async ({
+			page
+		}, testInfo) => {
+			await stubLookup(
+				page,
+				blueskyOnlyBody(BLUESKY_EXACT, {
+					localArtists: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }],
+					fuzzysearchFailure: reason
+				})
+			);
+			await oneDoneTile(page);
+			await pill(page).click();
+
+			await expect(panel(page).locator('.match-row')).toContainText('artist.example on Bluesky');
+			await expect(panel(page).locator('.lookup-partial')).toHaveText(`${FUZZY_PARTIAL} ${reasonText}`);
+			await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+			await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+			const settingsLink = panel(page).getByRole('link', { name: 'Open Settings' });
+			if (settings) {
+				await expect(settingsLink).toHaveAttribute('href', '/admin/settings?tab=connections');
+				await expect(settingsLink).toHaveAttribute('target', '_blank');
+			} else {
+				await expect(settingsLink).toHaveCount(0);
+			}
+			await testInfo.attach(`partial-${reason}`, {
+				body: await panel(page).screenshot(),
+				contentType: 'image/png'
+			});
+		});
+	}
+
 	test('Skyseek down says Bluesky was not searched, over the matches that did come back', async ({
 		page
 	}, testInfo) => {
@@ -705,7 +737,7 @@ test.describe('with a key saved', () => {
 
 		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
 		await expect(panel(page).locator('.lookup-partial')).toHaveText(
-			"Skyseek didn't answer, so Sona didn't search Bluesky."
+			"Skyseek didn't return results, so Sona couldn't check Bluesky."
 		);
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
@@ -727,9 +759,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 
 		await expect(panel(page).locator('.match-row')).toContainText('artist.example on Bluesky');
-		await expect(panel(page).locator('.lookup-partial')).toContainText(
-			"FuzzySearch didn't answer, so these are Bluesky posts only."
-		);
+		await expect(panel(page).locator('.lookup-partial')).toHaveText(FUZZY_PARTIAL);
 
 		await stubLookup(page, matchedBody());
 		await panel(page).getByRole('button', { name: 'Try again' }).click();
@@ -746,11 +776,9 @@ test.describe('with a key saved', () => {
 		await tileLookup(page).nth(1).click();
 
 		await expect(page.locator('.tile-result')).toHaveText('artist.example on Bluesky · Exact match');
-		await expect(page.locator('.tile-lookup-reason')).toHaveText(
-			"FuzzySearch didn't answer, so these are Bluesky posts only. Sona didn't search FurAffinity, Weasyl, e621, or Twitter."
-		);
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(FUZZY_PARTIAL);
 		await expect(page.locator(LIVE_REGION)).toContainText('back.png: artist.example on Bluesky');
-		await expect(page.locator(LIVE_REGION)).toContainText("FuzzySearch didn't answer");
+		await expect(page.locator(LIVE_REGION)).toContainText(FUZZY_PARTIAL);
 		// Still a result: the tile's button re-runs the lookup, not a failed retry.
 		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
 

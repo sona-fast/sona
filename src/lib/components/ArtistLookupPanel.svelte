@@ -16,6 +16,7 @@
 		candidateArtists,
 		clearedLine,
 		differingAccounts,
+		failReasonHint,
 		isCrossSiteAmbiguity,
 		matchForArtist,
 		matchHandle,
@@ -27,12 +28,15 @@
 		postDateToInput,
 		ratingLabel,
 		resolveOutcome,
+		retryCanSucceed,
 		seedStatusKind,
 		siteLabel,
 		statusLineKind,
 		statusSentence,
-		unansweredLine,
+		unansweredCanRetry,
+		unansweredNotice,
 		unansweredService,
+		upstreamReasonBody,
 		type ArtistChoice,
 		type LookupCleared,
 		type LookupEdited,
@@ -136,17 +140,10 @@
 	// and everything below works on them; the notice says which sites they do not
 	// cover, so a short list is not read as the whole search.
 	const unanswered = $derived(data ? unansweredService(data) : null);
-	const unansweredText = $derived(data ? unansweredLine(data) : null);
-	// The advice the failed arm gives for the same reason, where it has any.
-	const unansweredHint = $derived(
-		unanswered?.service !== 'fuzzysearch'
-			? ''
-			: unanswered.reason === 'rate_limited'
-				? m.admin_lookup_paused_hint()
-				: unanswered.reason === 'key_refused'
-					? m.admin_lookup_refused_hint()
-					: ''
-	);
+	// The sentence, then the reason and advice the failed arm gives for the same
+	// FuzzySearch failure.
+	const unansweredText = $derived(data ? unansweredNotice(data) : null);
+	const unansweredRetry = $derived(data ? unansweredCanRetry(data) : false);
 	// Two confident matches on two sites naming different accounts. Not under the
 	// ambiguous outcome, whose pick list already asks the question.
 	const differing = $derived(data ? differingAccounts(data) : null);
@@ -187,15 +184,7 @@
 	// read before what to do about the failure. This list and the failed arm's
 	// own reason branches have to stay in step — a reason that grows a hint in
 	// one and not the other renders nothing.
-	const failedHint = $derived(
-		lookup.kind !== 'failed'
-			? ''
-			: lookup.reason === 'rate_limited'
-				? m.admin_lookup_paused_hint()
-				: lookup.reason === 'key_refused'
-					? m.admin_lookup_refused_hint()
-					: ''
-	);
+	const failedHint = $derived(lookup.kind !== 'failed' ? '' : failReasonHint(lookup.reason));
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// The "Sets the artist to {name}." sentence and the button it
 	// names render on the same condition, so the button can describe itself with
@@ -311,16 +300,16 @@
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'rate_limited'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_paused_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_paused_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'key_refused'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_refused_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_refused_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'too_large'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_too_large_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_too_large_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'invalid_image'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_failed_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_invalid_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'no_key'}
 					<!-- The key went away after the page loaded, so the button is still
 					     here. Nothing was sent, and the remedy is Settings, not a retry. -->
@@ -404,7 +393,7 @@
 				     before the list it is about. -->
 				{#if unansweredText}
 					<p class="lookup-partial">
-						{unansweredText}{#if unansweredHint}{' '}{unansweredHint}{/if}
+						{unansweredText}
 					</p>
 				{/if}
 
@@ -686,7 +675,7 @@
 							>{' '}{m.link_opens_new_tab()}</span
 						></a
 					>
-				{:else if lookup.reason === 'rate_limited' || lookup.reason === 'unavailable'}
+				{:else if retryCanSucceed(lookup.reason)}
 					<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
 				{/if}
 				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
@@ -746,9 +735,10 @@
 						{m.admin_lookup_add_new({ handle })}
 					</button>
 				{/if}
-				<!-- A partial answer can be asked for again, and a refused key is
-				     fixed in Settings first: the same two routes the failed arm
-				     offers, beside whatever the rows that did come back allow. -->
+				<!-- A partial answer can be asked for again where a second send can
+				     come back different, and a refused key is fixed in Settings
+				     first: the same routes the failed arm offers, beside whatever the
+				     rows that did come back allow. -->
 				{#if unanswered}
 					{#if unanswered.service === 'fuzzysearch' && unanswered.reason === 'key_refused'}
 						<a
@@ -761,7 +751,9 @@
 							></a
 						>
 					{/if}
-					<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
+					{#if unansweredRetry}
+						<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
+					{/if}
 				{/if}
 				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{/if}

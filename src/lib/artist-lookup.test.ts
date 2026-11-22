@@ -34,7 +34,10 @@ import {
 	tileResultText,
 	runLookup,
 	sentAfterApplyThrew,
+	retryCanSucceed,
+	unansweredCanRetry,
 	unansweredLine,
+	unansweredNotice,
 	unansweredService,
 	withCreatedArtist,
 	type LookupCleared,
@@ -60,6 +63,7 @@ import {
 	type LookupMatch as ServerLookupMatch
 } from './server/fuzzysearch';
 import * as m from './paraglide/messages';
+import { setLocale, baseLocale } from './paraglide/runtime';
 
 function match(over: Partial<LookupMatch> = {}): LookupMatch {
 	return {
@@ -1868,6 +1872,27 @@ describe('stateFromResponse', () => {
 			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), unbanded] }))).toBeNull();
 		});
 
+		// Two local artists make the outcome ambiguous, and its pick list already
+		// asks the question. A third, unlinked poster on another site would
+		// otherwise pass every other check and raise a second callout over it.
+		it('is quiet under the ambiguous outcome, even with an unlinked poster on a third site', () => {
+			const twitter = match({
+				site: 'Twitter',
+				siteId: '9',
+				handles: ['carol'],
+				postUrl: 'https://twitter.com/carol/status/9'
+			});
+			const data = response({
+				matches: [match({ handles: ['kuttoya'] }), sky('artist.example'), twitter],
+				localArtists: [
+					{ matchIndex: 0, artists: [{ id: 9, name: 'Fur Artist' }] },
+					{ matchIndex: 1, artists: [{ id: 7, name: 'Sky Artist' }] }
+				]
+			});
+			expect(resolveOutcome(data)).toBe('ambiguous');
+			expect(differingAccounts(data)).toBeNull();
+		});
+
 		it('compares across sites only: two posters on one site are not a disagreement between sources', () => {
 			const data = response({
 				matches: [sky('alice.example'), sky('bob.example', { siteId: `${DID}/3mwwswjznmk26` })]
@@ -1989,6 +2014,78 @@ describe('stateFromResponse', () => {
 			expect(unansweredLine(noFuzzy.data)).toBe(m.admin_lookup_partial_fuzzysearch());
 			expect(unansweredLine(noSky.data)).toBe(m.admin_lookup_partial_skyseek());
 			expect(unansweredLine(noFuzzy.data)).not.toBe(unansweredLine(noSky.data));
+		});
+
+		// FuzzySearch often did answer: it refused the key, limited the site, or
+		// refused the file. The notice says the reason the failed state would, and
+		// Try again is offered only where a second send can come back different.
+		const FUZZY_LINE =
+			"FuzzySearch didn't return results, so Sona only has Bluesky posts to show. It couldn't check FurAffinity, Weasyl, e621, or Twitter.";
+		it.each([
+			['invalid_image', `${FUZZY_LINE} FuzzySearch couldn't read this file. Add the artist by hand.`, false],
+			['too_large', `${FUZZY_LINE} This file is too large for FuzzySearch. Add the artist by hand.`, false],
+			[
+				'key_refused',
+				`${FUZZY_LINE} FuzzySearch didn't accept your API key. Check the key in Settings, or add the artist by hand. Your upload is unaffected.`,
+				false
+			],
+			[
+				'rate_limited',
+				`${FUZZY_LINE} FuzzySearch is limiting how often your site can search right now. Try again in a minute, or add the artist by hand. Your upload is unaffected.`,
+				true
+			],
+			['unavailable', FUZZY_LINE, true]
+		] as const)('with FuzzySearch reason %s, says why and offers a retry only if one can work', async (reason, notice, retry) => {
+			const state = await stateFromResponse(wire({ fuzzysearchFailure: reason }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredNotice(state.data)).toBe(notice);
+			expect(unansweredCanRetry(state.data)).toBe(retry);
+			// The variant tile keeps the one sentence, which is true for every reason.
+			expect(unansweredLine(state.data)).toBe(FUZZY_LINE);
+		});
+
+		it('offers a retry when Skyseek is the one missing, with no reason after the sentence', async () => {
+			const state = await stateFromResponse(wire({ matches: [match()], blueskySearched: false }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredNotice(state.data)).toBe("Skyseek didn't return results, so Sona couldn't check Bluesky.");
+			expect(unansweredCanRetry(state.data)).toBe(true);
+		});
+
+		it('has no notice and no retry when both answered', async () => {
+			const state = await stateFromResponse(wire({}));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredNotice(state.data)).toBeNull();
+			expect(unansweredCanRetry(state.data)).toBe(false);
+		});
+
+		// Japanese joins sentences with no space after "。".
+		it('joins the Japanese sentences without a space', async () => {
+			const state = await stateFromResponse(wire({ fuzzysearchFailure: 'key_refused' }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			setLocale('ja', { reload: false });
+			try {
+				expect(unansweredNotice(state.data)).toBe(
+					'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。FuzzySearchがAPIキーを受け付けませんでした。設定のキーを確認するか、アーティストを手で入力してください。アップロードには影響しません。'
+				);
+			} finally {
+				setLocale(baseLocale, { reload: false });
+			}
+		});
+
+		// The failed state's footer reads the same rule, so the two cannot drift.
+		it('lets a failed lookup retry only for a limit or an outage', () => {
+			const reasons: LookupFailReason[] = [
+				'key_refused',
+				'rate_limited',
+				'too_large',
+				'invalid_image',
+				'unavailable',
+				'signed_out',
+				'no_key',
+				'gone',
+				'from_commission'
+			];
+			expect(reasons.filter(retryCanSucceed)).toEqual(['rate_limited', 'unavailable']);
 		});
 
 		// The endpoint answers this case as the failure itself. A 200 that carries

@@ -502,6 +502,58 @@ export function unansweredLine(data: LookupResponse): string | null {
 		: m.admin_lookup_partial_skyseek();
 }
 
+/** The sentence that says why FuzzySearch gave no rows, for the failed state's
+ * lead and the partial notice alike. Empty for `unavailable`, which names no
+ * cause the operator can act on. */
+export function upstreamReasonBody(reason: UpstreamFailReason): string {
+	switch (reason) {
+		case 'rate_limited':
+			return m.admin_lookup_paused_body();
+		case 'key_refused':
+			return m.admin_lookup_refused_body();
+		case 'too_large':
+			return m.admin_lookup_too_large_body();
+		case 'invalid_image':
+			return m.admin_lookup_invalid_body();
+		case 'unavailable':
+			return '';
+	}
+}
+
+/** The advice under a failure reason, where it has any. */
+export function failReasonHint(reason: LookupFailReason): string {
+	if (reason === 'rate_limited') return m.admin_lookup_paused_hint();
+	if (reason === 'key_refused') return m.admin_lookup_refused_hint();
+	return '';
+}
+
+/** Whether sending the same image again can come back different: a rate limit
+ * lifts and an outage ends. A refused file is refused again, and a refused or
+ * missing key is fixed in Settings first. */
+export function retryCanSucceed(reason: LookupFailReason): boolean {
+	return reason === 'rate_limited' || reason === 'unavailable';
+}
+
+/** The panel's notice over a partial result: `unansweredLine`, then the reason
+ * and advice the failed state gives for the same FuzzySearch failure. Joined
+ * through a message, because Japanese puts no space after "。". */
+export function unansweredNotice(data: LookupResponse): string | null {
+	const line = unansweredLine(data);
+	const missing = unansweredService(data);
+	if (!line || !missing) return null;
+	if (missing.service !== 'fuzzysearch') return line;
+	return [upstreamReasonBody(missing.reason), failReasonHint(missing.reason)]
+		.filter(Boolean)
+		.reduce((first, second) => m.admin_lookup_partial_join({ first, second }), line);
+}
+
+/** Whether a partial result's Try again can fill in what is missing. */
+export function unansweredCanRetry(data: LookupResponse): boolean {
+	const missing = unansweredService(data);
+	if (!missing) return false;
+	return missing.service === 'skyseek' || retryCanSucceed(missing.reason);
+}
+
 /** The two form fields a lookup can fill. Absent means "left alone". */
 export interface LookupFields {
 	sourcePostUrl?: string;
