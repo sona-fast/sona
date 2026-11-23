@@ -900,6 +900,36 @@ export function resendSecretWarnLines(failed: string[], project: string): string
 }
 
 /**
+ * The "Deploy" next step. Setup commits nothing, so a fork with nothing to push
+ * gets no deploy from `git push`; the workflow's manual run starts one.
+ */
+export function deployStepLines(repoSlug: string | null): string[] {
+	return [
+		'  1. Deploy:  push a commit to main. With nothing to push, run the workflow by hand:',
+		`       gh workflow run deploy.yml --ref main${repoSlug ? ` -R ${repoSlug}` : ''}`,
+		'     (or GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow)'
+	];
+}
+
+/**
+ * Printed when the operator declines the GitHub Actions wiring. deploy.yml
+ * re-puts SETUP_TOKEN and CRON_SECRET from the repository secrets before every
+ * deploy, so secrets left from an earlier run replace the ones this run set.
+ * Conditional wording: setup doesn't read the repository's secrets, and on a
+ * first run there are none to go stale.
+ */
+export function ciWiringDeclinedWarnLines(repoSlug: string): string[] {
+	return [
+		`\n⚠ Skipped the GitHub Actions wiring. If ${repoSlug} already has SETUP_TOKEN or CRON_SECRET`,
+		'  repository secrets from an earlier run, the next deploy puts those older values back on',
+		'  the Pages project, and the wizard rejects the token printed below.',
+		`  Set the new token:  gh secret set SETUP_TOKEN -R ${repoSlug}`,
+		`  CRON_SECRET is not printed. Set any long random value:  gh secret set CRON_SECRET -R ${repoSlug}`,
+		'  The deploy copies both repository secrets to the Pages project.'
+	];
+}
+
+/**
  * The end-of-run "Telegram sticker import:" line. `enabled (bot token set)` is a
  * claim about a secret put, so it needs the put's result — a failed put leaves
  * Telegram import hidden, and saying "enabled" would send the operator hunting in

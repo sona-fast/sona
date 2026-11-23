@@ -63,6 +63,8 @@ import {
 	storageSummaryLines,
 	telegramSummaryLine,
 	resendSecretWarnLines,
+	deployStepLines,
+	ciWiringDeclinedWarnLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -833,15 +835,7 @@ async function main() {
 			false
 		);
 		if (!doIt) {
-			// deploy.yml re-puts SETUP_TOKEN from the repo secret before every deploy,
-			// so a secret left from an earlier run would replace the token set above.
-			console.warn(
-				'\n⚠ The next deploy replaces the Pages SETUP_TOKEN with the SETUP_TOKEN repository secret.'
-			);
-			console.warn(
-				`  Set that secret to the new token printed below (gh secret set SETUP_TOKEN -R ${repoSlug}),`
-			);
-			console.warn('  or the wizard will reject it.');
+			for (const line of ciWiringDeclinedWarnLines(repoSlug)) console.warn(line);
 		} else {
 			// -R repoSlug on every call: a fork has two remotes (origin + upstream
 			// sona), so a bare `gh secret set` errors "multiple remotes detected".
@@ -904,7 +898,7 @@ async function main() {
 	for (const line of resendSecretWarnLines(resendFailed, project)) console.warn(line);
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
-	console.log('  1. Deploy:  git push');
+	for (const line of deployStepLines(repoSlug)) console.log(line);
 	console.log(`  2. Open  https://${project}.pages.dev/admin/setup  and finish in the wizard.`);
 	if (useR2 && r2PublicUrl) {
 		for (const line of cdnAttachmentLines(r2PublicUrl, bucket, domain)) {

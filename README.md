@@ -85,6 +85,16 @@ original deployment it grew out of). The project home is
    `wrangler pages deploy`: a local deploy replaces the project's variables
    and secrets (`SETUP_TOKEN`, `CRON_SECRET`) with the ones in `wrangler.toml`.
 
+   Setup commits nothing, so a fresh fork has nothing to push. To start a
+   deploy without a new commit, go to **Actions > Deploy to Cloudflare Pages >
+   Run workflow**, or run `gh workflow run deploy.yml --ref main`.
+
+   If you skipped setup's GitHub Actions step, also set the `SETUP_TOKEN` and
+   `CRON_SECRET` repo secrets yourself. The workflow copies both to the Pages
+   project before each deploy, so use the `SETUP_TOKEN` that setup printed.
+   Setup doesn't print `CRON_SECRET`; any long random value works. Without it,
+   the scheduled sync workflows can't authenticate.
+
    **API token scopes.** Create a Cloudflare API token (dash → *My Profile → API
    Tokens → Create Token → Custom token*) with:
 

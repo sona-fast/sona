@@ -5,6 +5,9 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import Database from 'better-sqlite3';
 import {
 	buildMigrationSql,
 	parseAppliedMigrations,
@@ -42,6 +45,8 @@ import {
 	storageSummaryLines,
 	telegramSummaryLine,
 	resendSecretWarnLines,
+	deployStepLines,
+	ciWiringDeclinedWarnLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -146,6 +151,41 @@ describe('buildSeedSql', () => {
 		const sql = buildSeedSql({ provider: 'r2', siteUrl: 'https://taro.surf' });
 		expect(sql).toMatch(/^INSERT OR IGNORE INTO site_settings \(key,value\) VALUES \('storageProvider','r2'\);/);
 		expect(sql.match(/'storageProvider'/g)).toHaveLength(1);
+	});
+
+	// The same statement, run against the real table shape (drizzle/0001), so the
+	// claim holds for what SQLite does with it and not only for how it reads.
+	describe('run against site_settings', () => {
+		const seeded = (existing: string | null, input: Parameters<typeof buildSeedSql>[0]) => {
+			const db = new Database(':memory:');
+			try {
+				db.exec('CREATE TABLE `site_settings` (`key` text PRIMARY KEY NOT NULL, `value` text NOT NULL);');
+				if (existing) {
+					db.prepare('INSERT INTO site_settings (key,value) VALUES (?,?)').run('storageProvider', existing);
+				}
+				db.exec(buildSeedSql(input));
+				const rows = db.prepare('SELECT key, value FROM site_settings').all() as {
+					key: string;
+					value: string;
+				}[];
+				return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+			} finally {
+				db.close();
+			}
+		};
+
+		it('keeps a stored uploadthing provider when the re-run chose r2', () => {
+			expect(seeded('uploadthing', { provider: 'r2' }).storageProvider).toBe('uploadthing');
+		});
+
+		it('still updates the other settings on that re-run', () => {
+			const rows = seeded('uploadthing', { provider: 'r2', siteUrl: 'https://taro.surf' });
+			expect(rows).toEqual({ storageProvider: 'uploadthing', siteUrl: 'https://taro.surf' });
+		});
+
+		it('seeds the chosen provider into an empty table', () => {
+			expect(seeded(null, { provider: 'r2' }).storageProvider).toBe('r2');
+		});
 	});
 
 	it('seeds siteUrl from the domain answer alongside storageProvider', () => {
@@ -1376,6 +1416,49 @@ describe('storageSummaryLines', () => {
 		}).join('\n');
 		expect(unset).toContain('NOT READY (the UPLOADTHING_TOKEN secret is not set)');
 		expect(unset).toContain('--project-name taro');
+	});
+});
+
+describe('deployStepLines', () => {
+	// Setup commits nothing, so `git push` alone deploys nothing on a fresh fork.
+	it('gives a way to deploy that needs no new commit, aimed at the fork', () => {
+		const text = deployStepLines('taro/sona').join('\n');
+		expect(text).toContain('gh workflow run deploy.yml --ref main -R taro/sona');
+		expect(text).toContain('Run workflow');
+	});
+
+	it('drops -R when the repo could not be derived', () => {
+		const text = deployStepLines(null).join('\n');
+		expect(text).toContain('gh workflow run deploy.yml --ref main');
+		expect(text).not.toContain('-R');
+	});
+
+	it('names the workflow as deploy.yml calls itself, so the Actions tab entry matches', () => {
+		const here = dirname(fileURLToPath(import.meta.url));
+		const workflow = readFileSync(join(here, '..', '.github', 'workflows', 'deploy.yml'), 'utf8');
+		const name = /^name:\s*(.+)$/m.exec(workflow)?.[1].trim();
+		expect(name).toBeTruthy();
+		expect(deployStepLines(null).join('\n')).toContain(`"${name}"`);
+		expect(workflow).toMatch(/^\s*workflow_dispatch:/m);
+	});
+
+	it('never suggests a local Pages deploy', () => {
+		expect(deployStepLines('taro/sona').join('\n')).not.toContain('pages deploy');
+	});
+});
+
+describe('ciWiringDeclinedWarnLines', () => {
+	const text = ciWiringDeclinedWarnLines('taro/sona').join('\n');
+
+	it('covers both secrets the deploy copies back, each with a command for this fork', () => {
+		expect(text).toContain('gh secret set SETUP_TOKEN -R taro/sona');
+		expect(text).toContain('gh secret set CRON_SECRET -R taro/sona');
+	});
+
+	// On a first run there is no repository secret, so an unconditional "the next
+	// deploy replaces your token" would be false.
+	it('is conditional on secrets from an earlier run', () => {
+		expect(text).toMatch(/If taro\/sona already has/);
 	});
 });
 
