@@ -1568,7 +1568,7 @@
 							{#if result}
 								<p class="tile-result" class:tile-result-warn={result.different}>{result.line}</p>
 							{#if result.partial}
-								<p class="tile-lookup-reason">{result.partial}</p>
+								<p class="tile-lookup-reason tile-lookup-partial">{result.partial}</p>
 							{/if}
 								<a class="tile-post-link" href={result.postUrl} target="_blank" rel="noopener noreferrer">
 									{m.admin_lookup_view_post()}<span class="sr-only"
@@ -2461,6 +2461,12 @@
 	.tile-result-warn,
 	.tile-lookup-failed {
 		color: var(--status-warn);
+	}
+
+	/* What was not searched, under what was found: a small gap so it does not
+	   read as the match line's metadata. */
+	.tile-lookup-partial {
+		margin-top: 4px;
 	}
 
 	.tile-post-link,

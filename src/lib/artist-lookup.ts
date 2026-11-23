@@ -75,17 +75,24 @@ export interface LookupResponse {
 	skyseekFailure?: SkyseekFailReason | null;
 }
 
+/** The reasons FuzzySearch itself can fail with, as the endpoint names them.
+ * The one list: the types below and the server's own (`LookupFailure`,
+ * `SkyseekFailure`) are derived from it. */
+const UPSTREAM_FAIL_REASONS = [
+	'key_refused',
+	'rate_limited',
+	'too_large',
+	'invalid_image',
+	'unavailable'
+] as const;
+export type UpstreamFailReason = (typeof UPSTREAM_FAIL_REASONS)[number];
+
 /** The reasons Skyseek can fail with, as the endpoint names them. It takes no
  * key, so there is no refusal of one. */
-export type SkyseekFailReason = 'rate_limited' | 'too_large' | 'invalid_image' | 'unavailable';
-
-/** The reasons FuzzySearch itself can fail with, as the endpoint names them. */
-export type UpstreamFailReason =
-	| 'key_refused'
-	| 'rate_limited'
-	| 'too_large'
-	| 'invalid_image'
-	| 'unavailable';
+export type SkyseekFailReason = Exclude<UpstreamFailReason, 'key_refused'>;
+const SKYSEEK_FAIL_REASONS = UPSTREAM_FAIL_REASONS.filter(
+	(r): r is SkyseekFailReason => r !== 'key_refused'
+);
 
 /** Why a lookup did not produce matches. `signed_out`, `no_key` and `gone` are
  * this file's own: the admin gate answers an expired session with a plain-text
@@ -557,6 +564,14 @@ function partialReasonHint(reason: UpstreamFailReason): string {
 	}
 }
 
+/** Why Skyseek refused the file, where it did. Empty for a rate limit or an
+ * outage: the partial notice offers Try again for both, which says enough. */
+function skyseekReasonBody(reason: SkyseekFailReason): string {
+	if (reason === 'too_large') return m.admin_lookup_skyseek_too_large_body();
+	if (reason === 'invalid_image') return m.admin_lookup_skyseek_invalid_body();
+	return '';
+}
+
 /** Whether sending the same image again can come back different: a rate limit
  * lifts and an outage ends. A refused file is refused again, and a refused or
  * missing key is fixed in Settings first. */
@@ -564,18 +579,23 @@ export function retryCanSucceed(reason: LookupFailReason): boolean {
 	return reason === 'rate_limited' || reason === 'unavailable';
 }
 
-/** The panel's notice over a partial result: `unansweredLine`, then the reason
- * the failed state gives for the same FuzzySearch failure and the partial
- * notice's own advice. Joined through a message, because Japanese puts no space
- * after "。". */
-export function unansweredNotice(data: LookupResponse): string | null {
-	const line = unansweredLine(data);
+/** The panel's notice over a partial result. `lead` is `unansweredLine`, the
+ * warning; `rest` is the reason the failed state gives for the same failure and
+ * the partial notice's own advice, rendered beneath it in the body style, or
+ * empty when there is none. The parts of `rest` are joined through a message,
+ * because Japanese puts no space after "。". */
+export function unansweredNotice(data: LookupResponse): { lead: string; rest: string } | null {
+	const lead = unansweredLine(data);
 	const missing = unansweredService(data);
-	if (!line || !missing) return null;
-	if (missing.service !== 'fuzzysearch') return line;
-	return [upstreamReasonBody(missing.reason), partialReasonHint(missing.reason)]
+	if (!lead || !missing) return null;
+	const parts =
+		missing.service === 'fuzzysearch'
+			? [upstreamReasonBody(missing.reason), partialReasonHint(missing.reason)]
+			: [skyseekReasonBody(missing.reason)];
+	const rest = parts
 		.filter(Boolean)
-		.reduce((first, second) => m.admin_lookup_partial_join({ first, second }), line);
+		.reduce((first, second) => (first ? m.admin_lookup_partial_join({ first, second }) : second), '');
+	return { lead, rest };
 }
 
 /** Whether a partial result's Try again can fill in what is missing. */
@@ -963,21 +983,6 @@ interface FailureBody {
 	forwarded?: boolean;
 }
 
-const UPSTREAM_FAIL_REASONS: readonly UpstreamFailReason[] = [
-	'key_refused',
-	'rate_limited',
-	'too_large',
-	'invalid_image',
-	'unavailable'
-];
-
-const SKYSEEK_FAIL_REASONS: readonly SkyseekFailReason[] = [
-	'rate_limited',
-	'too_large',
-	'invalid_image',
-	'unavailable'
-];
-
 const FAIL_REASONS: readonly LookupFailReason[] = [...UPSTREAM_FAIL_REASONS, 'from_commission'];
 
 /**
@@ -1164,12 +1169,6 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	}
 	const raw = data.matches;
 	const { matches, indexMap } = usableMatches(raw);
-	// Same reasoning as the malformed-body branch above: something looked, something
-	// answered, and the client refused to show it. Calling that "no matches" would
-	// tell the operator their art is unindexed when it may well be posted.
-	if (matches.length === 0 && raw.length > 0) {
-		return { kind: 'failed', reason: 'unavailable', sent: forwarded };
-	}
 	// Null and absent both mean FuzzySearch answered. Anything else says it did
 	// not, and a value this client does not know is still a failure: reading it
 	// as an answer would present Bluesky-only rows as the whole search.
@@ -1178,6 +1177,13 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 		wireFailure === null || wireFailure === undefined
 			? null
 			: (UPSTREAM_FAIL_REASONS.find((r) => r === wireFailure) ?? 'unavailable');
+	// Same reasoning as the malformed-body branch above: something looked, something
+	// answered, and the client refused to show it. Calling that "no matches" would
+	// tell the operator their art is unindexed when it may well be posted. On a
+	// partial answer FuzzySearch's reason is the one that names a remedy.
+	if (matches.length === 0 && raw.length > 0) {
+		return { kind: 'failed', reason: fuzzysearchFailure ?? 'unavailable', sent: forwarded };
+	}
 	// Read only where Bluesky was not searched, and never as an answer: a value
 	// this client does not know, or none, is an outage.
 	const wireSkyseek: unknown = data.skyseekFailure;

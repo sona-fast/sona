@@ -693,7 +693,7 @@ describe('lookupUserAgent', () => {
 	});
 });
 
-describe('the two requests identify the site asking', () => {
+describe('the two requests identify themselves', () => {
 	const UA = lookupUserAgent('gallery.example');
 
 	it('sends the given User-Agent to Skyseek', async () => {
@@ -702,10 +702,12 @@ describe('the two requests identify the site asking', () => {
 		expect((calls[0].init.headers as Record<string, string>)['user-agent']).toBe(UA);
 	});
 
-	it('sends the given User-Agent to the AppView', async () => {
+	it('names the software to the AppView, and no site', async () => {
 		const { fn, calls } = fakeFetch(jsonResponse({ profiles: [] }));
-		await resolveBlueskyHandles([ARTIST], fn, UA);
-		expect((calls[0].init.headers as Record<string, string>)['user-agent']).toBe(UA);
+		await resolveBlueskyHandles([ARTIST], fn);
+		expect((calls[0].init.headers as Record<string, string>)['user-agent']).toBe(
+			'Sona/1.0 (+https://sona.fast)'
+		);
 	});
 });
 

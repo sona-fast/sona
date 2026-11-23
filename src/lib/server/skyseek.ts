@@ -34,6 +34,7 @@ import {
 	type LookupMatch
 } from './fuzzysearch';
 import { normalizeHandle } from './handle-normalize';
+import type { SkyseekFailReason } from '$lib/artist-lookup';
 
 export const SKYSEEK_ENDPOINT = 'https://skyseek.app/search';
 /** A match list is a few short objects per hit; past this the response is a
@@ -68,10 +69,11 @@ const UA_HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/;
 
 /**
  * The User-Agent for this file's two requests: the software, the project's
- * public page, and the hostname of the site the lookup was asked from. Skyseek's
- * owner asked for it, so traffic (and any trouble) can be traced to one site
- * instead of to every site running this software. It names no person: a
- * hostname is already public, an owner's name or address is not this header's
+ * public page, and, for Skyseek only, the hostname of the site the lookup was
+ * asked from. Skyseek's owner asked for it, so traffic (and any trouble) can be
+ * traced to one site instead of to every site running this software. Bluesky
+ * did not ask, so its request gets the header without one. It names no person:
+ * a hostname is already public, an owner's name or address is not this header's
  * to publish.
  *
  * With no usable hostname the header still identifies the software.
@@ -97,7 +99,8 @@ export interface SkyseekMatch {
 	postUrl: string;
 }
 
-export type SkyseekFailure = 'rate_limited' | 'too_large' | 'invalid_image' | 'unavailable';
+/** The client's list of Skyseek failures, so the two cannot drift. */
+export type SkyseekFailure = SkyseekFailReason;
 
 export type SkyseekResult =
 	| { ok: true; matches: SkyseekMatch[] }
@@ -107,7 +110,7 @@ export type SkyseekResult =
  * goes into a URL the operator is shown, and a value that is not one cannot be
  * trusted to stay inside the path segment it is put in. */
 const DID_PATTERN = /^did:(?:plc:[a-z2-7]{24}|web:[A-Za-z0-9.-]+(?::[A-Za-z0-9._%-]+)*)$/;
-/** The record-key grammar from the AT Protocol spec, minus ':' — the path
+/** The record-key grammar from the AT Protocol spec, minus ':': the path
  * separator's neighbour, and never present in the timestamp keys posts use. */
 const RKEY_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/;
 
@@ -211,7 +214,7 @@ export function normalizeSkyseekMatches(
  *
  * Same contract as `searchImage` in fuzzysearch.ts: `fetchFn` is injected so
  * tests drive this without globals, failures come back as typed reasons, and
- * the remote body never travels with them. One request, no retry — a 429 is
+ * the remote body never travels with them. One request, no retry: a 429 is
  * answered as rate_limited and left alone. `userAgent` is `lookupUserAgent` for
  * the site asking; without one the request still names the software.
  */
@@ -294,13 +297,12 @@ const INVALID_HANDLE = 'handle.invalid';
  * AppView's per-call cap are left unresolved for the same reason: a second
  * request would be a second wait for the same nicety.
  *
- * `fetchFn` is injected, as in `searchSkyseek`, and the request carries the same
- * User-Agent.
+ * `fetchFn` is injected, as in `searchSkyseek`. The User-Agent names the
+ * software and never the site: there is no parameter for a hostname to arrive by.
  */
 export async function resolveBlueskyHandles(
 	dids: string[],
-	fetchFn: typeof fetch = fetch,
-	userAgent: string = lookupUserAgent()
+	fetchFn: typeof fetch = fetch
 ): Promise<Map<string, string>> {
 	const handles = new Map<string, string>();
 	// Only values this file would link to: the DIDs come from Skyseek's answer.
@@ -314,7 +316,7 @@ export async function resolveBlueskyHandles(
 	let res: Response;
 	try {
 		res = await fetchFn(`${BLUESKY_PROFILES_ENDPOINT}?${query}`, {
-			headers: { accept: 'application/json', 'user-agent': userAgent },
+			headers: { accept: 'application/json', 'user-agent': lookupUserAgent() },
 			redirect: 'manual',
 			signal: AbortSignal.timeout(BLUESKY_PROFILES_TIMEOUT_MS)
 		});

@@ -313,6 +313,15 @@ const THREE_TAG_SUGGESTION = {
 };
 
 const panel = (page: Page) => page.getByRole('region', { name: 'Artist lookup' });
+/** The partial notice's warning sentence, and the reason and advice beneath it.
+ * Found through the panel's status region, so a split that moved either out of
+ * it would fail here. */
+const noticeLead = (page: Page) => panel(page).getByRole('status').locator('.lookup-partial-lead');
+const noticeRest = (page: Page) => panel(page).getByRole('status').locator('.lookup-partial-rest');
+/** Every button in the panel's footer, in order. Waiting on the whole list is a
+ * positive signal that the footer rendered, so a missing Try again is read from
+ * a finished render and not from one still on its way. */
+const footerButtons = (page: Page) => panel(page).locator('.lookup-actions').getByRole('button');
 
 /** The sentence a parent move onto a tile with no lookup of its own leaves on
  * screen. The panel's status region draws it and speaks it, so it is one node:
@@ -657,7 +666,8 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(BLUESKY_POST);
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 		await expect(panel(page)).not.toContainText('Lookup failed');
-		await expect(notice).toHaveText(FUZZY_PARTIAL);
+		await expect(noticeLead(page)).toHaveText(FUZZY_PARTIAL);
+		await expect(noticeRest(page)).toHaveCount(0);
 		// The notice is read before the rows it is about.
 		const noticeBox = await notice.boundingBox();
 		const rowBox = await panel(page).locator('.match-row').boundingBox();
@@ -672,8 +682,17 @@ test.describe('with a key saved', () => {
 		// A rate limit says so, and keeps Try again: the limit lifts.
 		await stubLookup(page, partial('rate_limited'));
 		await panel(page).getByRole('button', { name: 'Try again' }).click();
-		await expect(notice).toHaveText(
-			`${FUZZY_PARTIAL} FuzzySearch is limiting how often your site can search right now. Try again in a minute.`
+		await expect(noticeLead(page)).toHaveText(FUZZY_PARTIAL);
+		await expect(noticeRest(page)).toHaveText(
+			'FuzzySearch is limiting how often your site can search right now. Try again in a minute.'
+		);
+		// Only the lead is the warning: the reason and advice are in the body style.
+		const colour = (el: Element) => getComputedStyle(el).color;
+		expect(await noticeRest(page).evaluate(colour)).not.toBe(
+			await noticeLead(page).evaluate(colour)
+		);
+		expect(await noticeRest(page).evaluate(colour)).toBe(
+			await panel(page).locator('.lookup-status').first().evaluate(colour)
 		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
@@ -694,8 +713,8 @@ test.describe('with a key saved', () => {
 	// file does not order the artist by hand: "Use Test Artist" sits below.
 	for (const [reason, reasonText, settings] of [
 		['key_refused', "FuzzySearch didn't accept your API key. Check the key in Settings.", true],
-		['too_large', 'This file is too large for FuzzySearch. If none of these is the artist, add them by hand.', false],
-		['invalid_image', "FuzzySearch couldn't read this file. If none of these is the artist, add them by hand.", false]
+		['too_large', 'This file is too large for FuzzySearch. If none of these is the artist, add the artist by hand.', false],
+		['invalid_image', "FuzzySearch couldn't read this file. If none of these is the artist, add the artist by hand.", false]
 	] as const) {
 		test(`a partial answer with FuzzySearch reason ${reason} says why and offers no retry`, async ({
 			page
@@ -711,8 +730,9 @@ test.describe('with a key saved', () => {
 			await pill(page).click();
 
 			await expect(panel(page).locator('.match-row')).toContainText('artist.example on Bluesky');
-			await expect(panel(page).locator('.lookup-partial')).toHaveText(`${FUZZY_PARTIAL} ${reasonText}`);
-			await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+			await expect(noticeLead(page)).toHaveText(FUZZY_PARTIAL);
+			await expect(noticeRest(page)).toHaveText(reasonText);
+			await expect(footerButtons(page)).toHaveText(['Use Test Artist', 'Close']);
 			await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
 			const settingsLink = panel(page).getByRole('link', { name: 'Open Settings' });
 			if (settings) {
@@ -728,8 +748,10 @@ test.describe('with a key saved', () => {
 		});
 	}
 
-	// With no rows at all, a refused file still says to add the artist by hand,
-	// as the line under the reason.
+	// With no rows at all (FuzzySearch refused the file and Skyseek had no row to
+	// show), a refused file still says to add the artist by hand, as the line
+	// under the reason. A second send is refused again and no key is at fault, so
+	// the footer holds Close alone: no Try again, no Open Settings.
 	for (const [reason, status, lead] of [
 		['too_large', 413, 'This file is too large for FuzzySearch.'],
 		['invalid_image', 422, "FuzzySearch couldn't read this file."]
@@ -743,7 +765,9 @@ test.describe('with a key saved', () => {
 
 			await expect(panel(page).locator('.lookup-lead')).toHaveText(lead);
 			await expect(panel(page).locator('.lookup-status')).toHaveText('Add the artist by hand.');
+			await expect(footerButtons(page)).toHaveText(['Close']);
 			await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+			await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
 		});
 	}
 
@@ -757,10 +781,12 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 
 		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
-		await expect(panel(page).locator('.lookup-partial')).toHaveText(
+		await expect(noticeLead(page)).toHaveText(
 			"Skyseek didn't return results, so Sona couldn't check Bluesky."
 		);
-		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+		// The reason, since nothing else says why there is no retry.
+		await expect(noticeRest(page)).toHaveText('This file is too large for Skyseek.');
+		await expect(footerButtons(page)).toHaveText(['Use Test Artist', 'Close']);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
 	});
 
@@ -772,9 +798,10 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 
 		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
-		await expect(panel(page).locator('.lookup-partial')).toHaveText(
+		await expect(noticeLead(page)).toHaveText(
 			"Skyseek didn't return results, so Sona couldn't check Bluesky."
 		);
+		await expect(noticeRest(page)).toHaveCount(0);
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
@@ -795,12 +822,79 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 
 		await expect(panel(page).locator('.match-row')).toContainText('artist.example on Bluesky');
-		await expect(panel(page).locator('.lookup-partial')).toHaveText(FUZZY_PARTIAL);
+		await expect(noticeLead(page)).toHaveText(FUZZY_PARTIAL);
 
 		await stubLookup(page, matchedBody());
 		await panel(page).getByRole('button', { name: 'Try again' }).click();
 		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
 		await expect(panel(page).locator('.lookup-partial')).toHaveCount(0);
+	});
+
+	// Try again swaps the button it sits in for the searching arm. Focus lands on
+	// that arm's Cancel instead of dropping to <body>, from every state that
+	// offers a retry.
+	for (const [state, body, status] of [
+		['a partial result', blueskyOnlyBody(BLUESKY_EXACT, { fuzzysearchFailure: 'unavailable' }), 200],
+		['a no-match', { enabled: true, matches: [], blueskySearched: true }, 200],
+		['a failed lookup', { enabled: true, error: 'unavailable', forwarded: true }, 502]
+	] as const) {
+		test(`Try again from ${state} moves focus to Cancel`, async ({ page }) => {
+			await stubLookup(page, body, status);
+			await oneDoneTile(page);
+			await pill(page).click();
+			const retry = panel(page).getByRole('button', { name: 'Try again' });
+			await expect(retry).toBeVisible();
+
+			const release = await deferredLookup(page, matchedBody());
+			await retry.click();
+			const cancel = panel(page).getByRole('button', { name: 'Cancel lookup' });
+			await expect(cancel).toBeFocused();
+			release();
+			await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
+		});
+	}
+
+	// Below 480px a results footer stacks its actions full width, so Close is not
+	// left alone on a ragged third row. Wider, they stay on one row.
+	test('a results footer stacks its actions full width on a narrow screen', async ({
+		page
+	}, testInfo) => {
+		await stubLookup(
+			page,
+			blueskyOnlyBody(BLUESKY_EXACT, {
+				localArtists: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }],
+				fuzzysearchFailure: 'rate_limited'
+			})
+		);
+		await page.setViewportSize({ width: 390, height: 900 });
+		await oneDoneTile(page);
+		await pill(page).click();
+		await expect(footerButtons(page)).toHaveText(['Use Test Artist', 'Try again', 'Close']);
+
+		const footer = await panel(page).locator('.lookup-actions').boundingBox();
+		if (!footer) throw new Error('the footer has no box');
+		const boxes = await footerButtons(page).evaluateAll((els) =>
+			els.map((el) => {
+				const r = el.getBoundingClientRect();
+				return { x: r.x, y: r.y, width: r.width };
+			})
+		);
+		for (const box of boxes) {
+			expect(box.x).toBeCloseTo(footer.x, 0);
+			expect(box.width).toBeCloseTo(footer.width, 0);
+		}
+		expect(boxes[1].y).toBeGreaterThan(boxes[0].y);
+		expect(boxes[2].y).toBeGreaterThan(boxes[1].y);
+		await testInfo.attach('results-footer-390', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+
+		await page.setViewportSize({ width: 1280, height: 900 });
+		const wide = await footerButtons(page).evaluateAll((els) =>
+			els.map((el) => el.getBoundingClientRect().y)
+		);
+		expect(new Set(wide.map(Math.round)).size).toBe(1);
 	});
 
 	// A variant tile's result is a line on the tile, outside the panel, so the
@@ -813,6 +907,12 @@ test.describe('with a key saved', () => {
 
 		await expect(page.locator('.tile-result')).toHaveText('artist.example on Bluesky · Exact match');
 		await expect(page.locator('.tile-lookup-reason')).toHaveText(FUZZY_PARTIAL);
+		// More space under the match line than the tile's 8px rhythm, so the notice
+		// does not read as that line's metadata.
+		const resultBox = await page.locator('.tile-result').boundingBox();
+		const partialBox = await page.locator('.tile-lookup-reason').boundingBox();
+		if (!resultBox || !partialBox) throw new Error('the tile lines have no box');
+		expect(partialBox.y - (resultBox.y + resultBox.height)).toBeGreaterThanOrEqual(11);
 		await expect(page.locator(LIVE_REGION)).toContainText('back.png: artist.example on Bluesky');
 		await expect(page.locator(LIVE_REGION)).toContainText(FUZZY_PARTIAL);
 		// Still a result: the tile's button re-runs the lookup, not a failed retry.

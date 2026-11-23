@@ -164,13 +164,13 @@ graph TB
   whenever the FuzzySearch lookup is on, in the same click. The lookup answers
   with the matches of whichever service answered and names the one that did
   not: if Skyseek fails, there are no Bluesky posts in the result, and if
-  FuzzySearch fails, the result holds the Bluesky posts alone. A FuzzySearch
-  failure is answered as a failure only when Skyseek has no post to show, so it
-  waits for Skyseek's answer, bounded by Skyseek's timeout. The lookup
+  FuzzySearch fails, the result holds the Bluesky posts alone. The lookup
+  reports a FuzzySearch failure as a failure only when Skyseek has no post to
+  show, so it waits for Skyseek's answer, up to Skyseek's timeout. The lookup
   then asks Bluesky's public API for the handles of the accounts that posted
   the matches. That request carries only their DIDs. Both requests send a
-  User-Agent that names the software and the site's hostname, which Skyseek's
-  owner asked for.
+  User-Agent that names the software. The one to Skyseek also names the site's
+  hostname, which Skyseek's owner asked for.
 - The artist lookup never sends FuzzySearch or Skyseek a piece linked to a
   commission ledger entry, or a variant of one: the entry already names the
   artist.

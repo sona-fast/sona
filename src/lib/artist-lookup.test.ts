@@ -1369,6 +1369,23 @@ describe('stateFromResponse', () => {
 		).toEqual({ kind: 'failed', reason: 'unavailable', sent: true });
 	});
 
+	// A partial answer whose only row the client refuses still knows why
+	// FuzzySearch gave none, and that reason names the remedy: a refused key goes
+	// to Settings, where "unavailable" would offer a retry that fails the same way.
+	it("keeps FuzzySearch's reason when a partial answer's only row has an unusable URL", async () => {
+		expect(
+			await stateFromResponse(
+				jsonResponse(
+					response({
+						matches: [match({ site: 'Bluesky', postUrl: 'javascript:alert(1)' })],
+						blueskySearched: true,
+						fuzzysearchFailure: 'key_refused'
+					})
+				)
+			)
+		).toEqual({ kind: 'failed', reason: 'key_refused', sent: true });
+	});
+
 	// The panel keys its rows on site + siteId. The endpoint dedupes too; this is
 	// the second pass, on the side that would throw each_key_duplicate.
 	// The endpoint merges duplicates rather than dropping them; this pass has to
@@ -1591,7 +1608,7 @@ describe('stateFromResponse', () => {
 	// Skyseek reports a distance on FuzzySearch's scale, so an exact or strong
 	// Bluesky post is a confident match: it fills the form, and a poster the
 	// operator already holds is offered. A poster they do not hold is NOT offered
-	// as a new artist — whoever posted a picture on Bluesky may have commissioned
+	// as a new artist: whoever posted a picture on Bluesky may have commissioned
 	// or reposted it.
 	describe('a confident Bluesky match', () => {
 		const DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
@@ -2053,30 +2070,32 @@ describe('stateFromResponse', () => {
 		// FuzzySearch often did answer: it refused the key, limited the site, or
 		// refused the file. The notice says the reason the failed state would, and
 		// Try again is offered only where a second send can come back different.
+		// The warning sentence is the lead; the reason and advice are the rest,
+		// which the panel renders beneath it in the body style.
 		const FUZZY_LINE =
 			"FuzzySearch didn't return results, so Sona only has Bluesky posts to show. It couldn't check FurAffinity, Weasyl, e621, or Twitter.";
 		it.each([
 			[
 				'invalid_image',
-				`${FUZZY_LINE} FuzzySearch couldn't read this file. If none of these is the artist, add them by hand.`,
+				"FuzzySearch couldn't read this file. If none of these is the artist, add the artist by hand.",
 				false
 			],
 			[
 				'too_large',
-				`${FUZZY_LINE} This file is too large for FuzzySearch. If none of these is the artist, add them by hand.`,
+				'This file is too large for FuzzySearch. If none of these is the artist, add the artist by hand.',
 				false
 			],
-			['key_refused', `${FUZZY_LINE} FuzzySearch didn't accept your API key. Check the key in Settings.`, false],
+			['key_refused', "FuzzySearch didn't accept your API key. Check the key in Settings.", false],
 			[
 				'rate_limited',
-				`${FUZZY_LINE} FuzzySearch is limiting how often your site can search right now. Try again in a minute.`,
+				'FuzzySearch is limiting how often your site can search right now. Try again in a minute.',
 				true
 			],
-			['unavailable', FUZZY_LINE, true]
-		] as const)('with FuzzySearch reason %s, says why and offers a retry only if one can work', async (reason, notice, retry) => {
+			['unavailable', '', true]
+		] as const)('with FuzzySearch reason %s, says why and offers a retry only if one can work', async (reason, rest, retry) => {
 			const state = await stateFromResponse(wire({ fuzzysearchFailure: reason }));
 			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
-			expect(unansweredNotice(state.data)).toBe(notice);
+			expect(unansweredNotice(state.data)).toEqual({ lead: FUZZY_LINE, rest });
 			expect(unansweredCanRetry(state.data)).toBe(retry);
 			// The variant tile keeps the one sentence, which is true for every reason.
 			expect(unansweredLine(state.data)).toBe(FUZZY_LINE);
@@ -2085,18 +2104,23 @@ describe('stateFromResponse', () => {
 		// Skyseek refuses a file the way FuzzySearch does (413, or 400/415/422), and
 		// a second send is refused again. The sentence stays the same for every
 		// reason; only the retry follows it.
+		// A refused file names its reason, since nothing else on screen says why the
+		// retry is missing. A rate limit or an outage needs none: Try again is there.
+		const SKY_LINE = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
 		it.each([
-			['rate_limited', true],
-			['unavailable', true],
-			['too_large', false],
-			['invalid_image', false]
-		] as const)('with Skyseek reason %s, offers a retry only if one can work', async (reason, retry) => {
+			['rate_limited', '', true],
+			['unavailable', '', true],
+			['too_large', 'This file is too large for Skyseek.', false],
+			['invalid_image', "Skyseek couldn't read this file.", false]
+		] as const)('with Skyseek reason %s, says why and offers a retry only if one can work', async (reason, rest, retry) => {
 			const state = await stateFromResponse(
 				wire({ matches: [match()], blueskySearched: false, skyseekFailure: reason })
 			);
 			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
-			expect(unansweredNotice(state.data)).toBe("Skyseek didn't return results, so Sona couldn't check Bluesky.");
+			expect(unansweredNotice(state.data)).toEqual({ lead: SKY_LINE, rest });
 			expect(unansweredCanRetry(state.data)).toBe(retry);
+			// The variant tile keeps the one sentence.
+			expect(unansweredLine(state.data)).toBe(SKY_LINE);
 		});
 
 		it('has no notice and no retry when both answered', async () => {
@@ -2112,14 +2136,16 @@ describe('stateFromResponse', () => {
 			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
 			setLocale('ja', { reload: false });
 			try {
-				expect(unansweredNotice(state.data)).toBe(
-					'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。FuzzySearchがAPIキーを受け付けませんでした。設定のキーを確認してください。'
-				);
+				expect(unansweredNotice(state.data)).toEqual({
+					lead: 'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。',
+					rest: 'FuzzySearchがAPIキーを受け付けませんでした。設定のキーを確認してください。'
+				});
 				const file = await stateFromResponse(wire({ fuzzysearchFailure: 'too_large' }));
 				if (file.kind !== 'results') throw new Error(`expected results, got ${file.kind}`);
-				expect(unansweredNotice(file.data)).toBe(
-					'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。このファイルはFuzzySearchには大きすぎます。この中にアーティストがいない場合は、手で入力してください。'
-				);
+				expect(unansweredNotice(file.data)).toEqual({
+					lead: 'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。',
+					rest: 'このファイルはFuzzySearchには大きすぎます。この中にアーティストがいない場合は、手で入力してください。'
+				});
 			} finally {
 				setLocale(baseLocale, { reload: false });
 			}

@@ -54,13 +54,15 @@ const searchSkyseek = vi.hoisted(() =>
 	)
 );
 const resolveBlueskyHandles = vi.hoisted(() =>
-	vi.fn(
-		async (_dids: string[], _fetchFn?: typeof fetch, _userAgent?: string) =>
-			new Map<string, string>()
-	)
+	vi.fn(async (_dids: string[], _fetchFn?: typeof fetch) => new Map<string, string>())
 );
+// The real handle lookup, for the test that reads the request it makes.
+const realResolveBlueskyHandles = vi.hoisted(() => ({
+	fn: null as null | ((dids: string[], fetchFn?: typeof fetch) => Promise<Map<string, string>>)
+}));
 vi.mock('$lib/server/skyseek', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/server/skyseek')>();
+	realResolveBlueskyHandles.fn = original.resolveBlueskyHandles;
 	return { ...original, searchSkyseek, resolveBlueskyHandles };
 });
 
@@ -1849,9 +1851,22 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		});
 	});
 
-	it('identifies this site to Skyseek and to the AppView by its hostname', async () => {
+	it('identifies this site to Skyseek by its hostname and to the AppView without it', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		// The real handle lookup, so the header read below is the one it sends.
+		resolveBlueskyHandles.mockImplementation(realResolveBlueskyHandles.fn!);
+		const appViewHeaders: Record<string, string>[] = [];
+		const fetchFn = (async (url: string, init?: RequestInit) => {
+			if (String(url).startsWith('https://public.api.bsky.app/')) {
+				appViewHeaders.push(init?.headers as Record<string, string>);
+				return new Response(JSON.stringify({ profiles: [] }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				});
+			}
+			return imageFetch().fn(url);
+		}) as unknown as typeof fetch;
 		const form = new FormData();
 		form.append('file', pngFile());
 		const request = new Request('https://Gallery.Example/api/admin/artist-lookup', {
@@ -1859,11 +1874,12 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			body: form
 		});
 
-		await POST({ request, platform, fetch: imageFetch().fn } as never);
+		await POST({ request, platform, fetch: fetchFn } as never);
 
-		const sent = searchSkyseek.mock.calls[0][2];
-		expect(sent).toBe('Sona/1.0 (+https://sona.fast; gallery.example)');
-		expect(resolveBlueskyHandles.mock.calls[0][2]).toBe(sent);
+		expect(searchSkyseek.mock.calls[0][2]).toBe('Sona/1.0 (+https://sona.fast; gallery.example)');
+		// Skyseek's owner asked for the hostname; Bluesky did not.
+		expect(appViewHeaders).toHaveLength(1);
+		expect(appViewHeaders[0]['user-agent']).toBe('Sona/1.0 (+https://sona.fast)');
 		// FuzzySearch's call is as it was: the key, and no say in the header.
 		expect(searchImage.mock.calls[0]).toHaveLength(3);
 	});
@@ -2014,6 +2030,28 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			{ matchIndex: 0, artists: [{ id: 2, name: 'artist.example', pieces: 0 }] }
 		]);
 		expect(body.sourceClash).toMatchObject({ imageId: 5, title: 'Held' });
+	});
+
+	// An artist whose Bluesky link was saved by DID is the poster of a Skyseek
+	// row from that DID, whether or not the AppView gave the row a handle.
+	it.each([
+		['with a resolved handle', new Map([[ARTIST_DID, 'artist.example']])],
+		['with no handle resolved', new Map<string, string>()]
+	])('matches a local artist saved by DID to the post %s', async (_name, handles) => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, bluesky_url, created_at)
+			 VALUES (1, 'Sky Artist', 'https://bsky.app/profile/${ARTIST_DID}', '2026-01-01'),
+			        (2, 'Someone Else', 'https://bsky.app/profile/${REPOSTER_DID}', '2026-01-01');`
+		);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+		resolveBlueskyHandles.mockResolvedValue(handles);
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 0, artists: [{ id: 1, name: 'Sky Artist', pieces: 0 }] }
+		]);
 	});
 
 	// The settings page's "your key stopped working" does not depend on whether

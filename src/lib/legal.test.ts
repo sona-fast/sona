@@ -188,8 +188,9 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toContain('Skyseek');
 		// The lookup sends a copy of the image, and an unpublished one too; naming
 		// the provider alone would not disclose either (SONA-156).
-		// Skyseek gets the same copy in the same click, so it is named with it (SONA-243).
-		expect(text).toMatch(/FuzzySearch and Skyseek \(finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent to both, including images not published on this site\)/);
+		// Skyseek gets the same copy in the same click, so it is named with it, along
+		// with the hostname it receives and the handle lookup Bluesky gets (SONA-243).
+		expect(text).toMatch(/FuzzySearch and Skyseek \(finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent to both, including images not published on this site, and Skyseek also receives this site's hostname with each lookup; during a lookup, the site asks Bluesky for the current handles of the accounts that posted a match\)/);
 		expect(text).toMatch(/shared artist registry/);
 	});
 });
@@ -301,8 +302,8 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = 'a434a15d6e8a0592903a6c31018674369df865fc60cc05838d7a63e40d3a9f57';
-	const RECORDED_UPDATED = '2026-11-16';
+	const RECORDED_TEXT_HASH = 'd7b288010be07df7e0f2063426d0ed50c285f9c45a05c4da1c4f9d1b30b54b69';
+	const RECORDED_UPDATED = '2026-11-23';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

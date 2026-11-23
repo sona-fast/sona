@@ -212,10 +212,10 @@ async function searchBluesky(
 		}
 		// Closest first already, then earliest, so the cap keeps the best leads.
 		const posts = result.matches.slice(0, SKYSEEK_MAX_MATCHES);
+		// Without the site's hostname: Skyseek's owner asked for it, Bluesky did not.
 		const handles = await resolveBlueskyHandles(
 			posts.map((post) => post.did),
-			fetchFn,
-			userAgent
+			fetchFn
 		);
 		return {
 			ok: true,
@@ -498,7 +498,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// One list, in the order FuzzySearch's rows already had: closest first, then
 	// site order, where Bluesky is last so a FuzzySearch row wins a tie. The sort
 	// is stable, so rows that compare equal keep the order their own search gave
-	// them — which for Bluesky is earliest post first.
+	// them, which for Bluesky is earliest post first.
 	const bluesky = await blueskyPending;
 	let blueskyMatches = bluesky.ok ? bluesky.matches : [];
 	if (blueskyMatches.length > 0) {

@@ -156,8 +156,12 @@ test.describe('admin settings artist lookup key', () => {
 	}) => {
 		// The disclosure is the reason the section leads with prose: an operator
 		// has to read what gets sent before pasting a key.
-		await expect(section(page)).toContainText('sends that image file to FuzzySearch');
-		await expect(section(page)).toContainText('independent service, not part of Sona');
+		await expect(section(page)).toContainText('sends that image file to FuzzySearch and Skyseek');
+		// The handle lookup to Bluesky is disclosed as well (SONA-243).
+		await expect(section(page)).toContainText(
+			'Sona then asks Bluesky for the handles of the accounts that posted the matches.'
+		);
+		await expect(section(page)).toContainText('independent services, not part of Sona');
 		await expect(keyInput(page)).toBeVisible();
 		// Nothing saved yet: no masked record, no removal action.
 		await expect(keyRecord(page)).toHaveCount(0);

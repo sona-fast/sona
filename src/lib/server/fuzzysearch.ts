@@ -14,7 +14,7 @@
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
 import { findLocalArtistsByHandle, type Platform } from './handle-normalize';
-import { matchKey, mergeSamePost, RATING_ORDER } from '$lib/artist-lookup';
+import { matchKey, mergeSamePost, RATING_ORDER, type UpstreamFailReason } from '$lib/artist-lookup';
 import type { Database } from './db';
 
 // Four rules the browser needs as much as this file does: which match the form
@@ -73,12 +73,8 @@ export interface LookupMatch {
 	postUrl: string;
 }
 
-export type LookupFailure =
-	| 'key_refused'
-	| 'rate_limited'
-	| 'too_large'
-	| 'invalid_image'
-	| 'unavailable';
+/** The client's list of FuzzySearch failures, so the two cannot drift. */
+export type LookupFailure = UpstreamFailReason;
 
 export type LookupResult =
 	| { ok: true; matches: LookupMatch[] }
@@ -275,7 +271,7 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	// link copied from elsewhere may carry the DID's colons percent-encoded. The
 	// record key is case-sensitive and stays as written. Anything after it
 	// (`/liked-by`, `/quotes`) is a view of the same post. The handle spelling and
-	// the DID spelling of one post stay two different strings here — only a
+	// the DID spelling of one post stay two different strings here. Only a
 	// caller that knows both names can equate them (see findSourceClash).
 	if (host === 'bsky.app') {
 		path = path.replace(
@@ -486,13 +482,22 @@ const SITE_PLATFORM: Partial<Record<LookupSite, Platform>> = {
  * site's platform, then findLocalArtistsByHandle, which the ledger's paste-a-
  * link lookup shares, so both agree with the registry import and the artists
  * API on what a match is.
+ *
+ * A Bluesky match also offers its poster's DID, so an artist whose link was
+ * saved as bsky.app/profile/did:plc:... is found with or without a resolved
+ * handle.
  */
 export function findLocalArtists<T extends Record<string, unknown>>(
 	rows: T[],
-	match: Pick<LookupMatch, 'site' | 'handles'>
+	match: Pick<LookupMatch, 'site' | 'handles'> & { siteId?: string }
 ): T[] {
 	const platform = SITE_PLATFORM[match.site];
-	return platform ? findLocalArtistsByHandle(rows, platform, match.handles) : [];
+	if (!platform) return [];
+	const handles =
+		match.site === 'Bluesky' && match.siteId
+			? [...match.handles, splitBlueskySiteId(match.siteId).did]
+			: match.handles;
+	return findLocalArtistsByHandle(rows, platform, handles);
 }
 
 /**
