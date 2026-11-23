@@ -870,6 +870,11 @@ async function main() {
 			'  secrets and CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL, FURTRACK_MODE variables'
 		);
 		console.log('  (Settings → Secrets and variables → Actions).');
+		const cronCmd = repoSlug
+			? `openssl rand -hex 32 | gh secret set CRON_SECRET -R ${repoSlug}`
+			: 'openssl rand -hex 32';
+		console.log("  Setup doesn't print CRON_SECRET. Generate one and set it as that secret:");
+		console.log(`    ${cronCmd}`);
 	}
 
 	rl.close();

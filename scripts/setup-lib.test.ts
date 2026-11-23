@@ -46,6 +46,7 @@ import {
 	telegramSummaryLine,
 	resendSecretWarnLines,
 	deployStepLines,
+	ciWiringDeclinedWarnLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -1424,10 +1425,12 @@ describe('deployStepLines', () => {
 		expect(deployStepLines('taro/sona').join('\n')).toContain('Run workflow');
 	});
 
-	it('drops -R when the repo could not be derived', () => {
+	// Without -R, gh picks a repo from the current directory, which may be the wrong one.
+	it('gives only the Actions tab path when the repo could not be derived', () => {
 		const text = deployStepLines(null).join('\n');
-		expect(text).toContain('gh workflow run deploy.yml --ref main');
-		expect(text).not.toContain('-R');
+		expect(text).not.toContain('gh workflow run');
+		expect(text).toContain('Run workflow');
+		expect(text).not.toContain('(or');
 	});
 
 	it('names the workflow as deploy.yml calls itself, so the Actions tab entry matches', () => {
@@ -1437,6 +1440,20 @@ describe('deployStepLines', () => {
 		expect(name).toBeTruthy();
 		expect(deployStepLines(null).join('\n')).toContain(`"${name}"`);
 		expect(workflow).toMatch(/^\s*workflow_dispatch:/m);
+	});
+});
+
+describe('ciWiringDeclinedWarnLines', () => {
+	// A first CI deploy doesn't bind the values setup put on Pages, so the repo
+	// secrets are needed on every run, not only when old ones exist.
+	it('tells the operator to set both secrets before a CI deploy, with no condition', () => {
+		const text = ciWiringDeclinedWarnLines('taro/sona').join('\n');
+		expect(text).toMatch(
+			/before you deploy from GitHub Actions, set the\s+SETUP_TOKEN and CRON_SECRET/i
+		);
+		expect(text).not.toMatch(/\bif taro\/sona already has/i);
+		expect(text).toContain('gh secret set SETUP_TOKEN -R taro/sona');
+		expect(text).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
 	});
 });
 
@@ -2104,6 +2121,18 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		for (const read of reads) expect(read).toMatch(/WRANGLER_LOG=unset$/);
 		// Non-vacuity: a call setup doesn't read still inherits the operator's value.
 		expect(calls.find((c) => c.includes('d1 create'))).toMatch(/WRANGLER_LOG=warn$/);
+		// No origin, so the CRON_SECRET hint can't name a repo.
+		expect(res.stdout).toContain('openssl rand -hex 32');
+		expect(res.stdout).not.toContain('gh secret set CRON_SECRET');
+	}, 30_000);
+
+	// gh fails here, so setup skips the CI wiring; setup never prints the
+	// CRON_SECRET it generated, so the skip note says how to make one.
+	it('tells a skipped-wiring run how to set CRON_SECRET for the derived repo', () => {
+		const { res } = runSetupWithStubs({ ghExit: 1, origin: 'https://github.com/taro/sona.git' });
+		expect(res.status, res.stderr).toBe(0);
+		expect(res.stdout).toContain('Skipping GitHub Actions secret setup');
+		expect(res.stdout).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
 	}, 30_000);
 
 	// With gh installed and authed and a GitHub origin, the CI-wiring prompt runs;

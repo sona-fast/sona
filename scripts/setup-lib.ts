@@ -904,10 +904,17 @@ export function resendSecretWarnLines(failed: string[], project: string): string
  * gets no deploy from `git push`; the workflow's manual run starts one.
  */
 export function deployStepLines(repoSlug: string | null): string[] {
+	// No slug: a bare `gh workflow run` picks a repo from the current directory,
+	// which may be the wrong one, so give only the Actions tab path.
+	const manual = repoSlug
+		? [
+				`       gh workflow run deploy.yml --ref main -R ${repoSlug}`,
+				'     (or GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow)'
+			]
+		: ['       GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow'];
 	return [
 		'  1. Deploy:  push a commit to main. If you have nothing to push, run the workflow by hand:',
-		`       gh workflow run deploy.yml --ref main${repoSlug ? ` -R ${repoSlug}` : ''}`,
-		'     (or GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow)',
+		...manual,
 		'     On a new fork, enable workflows in the Actions tab first.'
 	];
 }
@@ -915,18 +922,18 @@ export function deployStepLines(repoSlug: string | null): string[] {
 /**
  * Printed when the operator declines the GitHub Actions wiring. deploy.yml
  * re-puts SETUP_TOKEN and CRON_SECRET from the repository secrets before every
- * deploy, so secrets left from an earlier run replace the ones this run set.
- * Conditional wording: setup doesn't read the repository's secrets, and on a
- * first run there are none to go stale.
+ * deploy, and a fork's first CI deploy doesn't bind the values setup put on the
+ * Pages project, so the repository secrets are needed on a first run too.
  */
 export function ciWiringDeclinedWarnLines(repoSlug: string): string[] {
 	return [
-		`\n⚠ Skipped the GitHub Actions wiring. If ${repoSlug} already has SETUP_TOKEN or CRON_SECRET`,
-		'  repository secrets from an earlier run, the next deploy puts those older values back on',
-		'  the Pages project, and the wizard rejects the token printed below.',
+		'\n⚠ Skipped the GitHub Actions wiring. Before you deploy from GitHub Actions, set the',
+		`  SETUP_TOKEN and CRON_SECRET repository secrets on ${repoSlug}. The deploy copies them to the`,
+		'  Pages project, and a first CI deploy does not pick up the values setup stored there.',
+		'  Values left from an earlier run get copied back, and the wizard then rejects the token',
+		'  printed below.',
 		`  Set the new token:  gh secret set SETUP_TOKEN -R ${repoSlug}`,
 		`  CRON_SECRET is not printed. Generate and set one:  openssl rand -hex 32 | gh secret set CRON_SECRET -R ${repoSlug}`,
-		'  The deploy copies both repository secrets to the Pages project.',
 		'  A CI deploy also needs the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets and the',
 		'  repo variables: see README, Quick start step 3.'
 	];
