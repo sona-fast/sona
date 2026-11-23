@@ -160,7 +160,7 @@ function normalizeMatch(raw: RawSkyseekMatch, now: number): SkyseekMatch | null 
  * Then earliest first: among several accounts that posted the same picture, the
  * first to post it is the likeliest original. A post with no usable date sorts
  * last. */
-function compareMatches(a: SkyseekMatch, b: SkyseekMatch): number {
+function compareSkyseekPosts(a: SkyseekMatch, b: SkyseekMatch): number {
 	const ad = a.distance ?? Number.POSITIVE_INFINITY;
 	const bd = b.distance ?? Number.POSITIVE_INFINITY;
 	if (ad !== bd) return ad - bd;
@@ -202,11 +202,23 @@ export function normalizeSkyseekMatches(
 			kept.set(key, match);
 			continue;
 		}
-		const closer = compareMatches(match, already) < 0 ? match : already;
+		const closer = compareSkyseekPosts(match, already) < 0 ? match : already;
 		const other = closer === match ? already : match;
 		kept.set(key, { ...closer, postedAt: closer.postedAt ?? other.postedAt });
 	}
-	return [...kept.values()].sort(compareMatches);
+	return [...kept.values()].sort(compareSkyseekPosts);
+}
+
+/** A bounded body parsed as JSON, or null when it is past the cap or is not
+ * JSON. The callers read null as "no answer". */
+async function readBoundedJson(res: Response, maxBytes: number): Promise<unknown> {
+	const text = await readBounded(res, maxBytes);
+	if (text === null) return null;
+	try {
+		return JSON.parse(text);
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -260,13 +272,7 @@ export async function searchSkyseek(
 		return { ok: false, reason: 'unavailable' };
 	}
 
-	const text = await readBounded(res, SKYSEEK_RESPONSE_BYTES);
-	let payload: unknown = null;
-	try {
-		if (text !== null) payload = JSON.parse(text);
-	} catch {
-		payload = null;
-	}
+	const payload = await readBoundedJson(res, SKYSEEK_RESPONSE_BYTES);
 	// A 200 that isn't the JSON shape (the HTML fragment, a `success: false`, a
 	// body past the cap) is a lookup that didn't happen. Reporting it as "no
 	// matches" would tell the operator the piece isn't on Bluesky when nobody
@@ -328,13 +334,7 @@ export async function resolveBlueskyHandles(
 		return handles;
 	}
 
-	const text = await readBounded(res, BLUESKY_PROFILES_RESPONSE_BYTES);
-	let payload: unknown = null;
-	try {
-		if (text !== null) payload = JSON.parse(text);
-	} catch {
-		payload = null;
-	}
+	const payload = await readBoundedJson(res, BLUESKY_PROFILES_RESPONSE_BYTES);
 	const profiles = (payload as { profiles?: unknown } | null)?.profiles;
 	if (!Array.isArray(profiles)) return handles;
 
@@ -377,6 +377,16 @@ export function skyseekLookupMatch(match: SkyseekMatch, handle: string | null): 
 	};
 }
 
+/** `value` with its percent escapes decoded, or as it stands when one is
+ * malformed. */
+function decodeEscapes(value: string): string {
+	try {
+		return decodeURIComponent(value);
+	} catch {
+		return value;
+	}
+}
+
 /**
  * Whether a Bluesky match was posted by the site operator's own account, given
  * the Bluesky link saved in the site's settings. The operator posting their own
@@ -385,15 +395,17 @@ export function skyseekLookupMatch(match: SkyseekMatch, handle: string | null): 
  *
  * Compared the way local artists are matched (`normalizeHandle`), against the
  * resolved handle and against the DID, so a link saved as
- * bsky.app/profile/did:plc:… is recognised too. An empty setting matches
- * nothing, and so does any match that is not a Bluesky one.
+ * bsky.app/profile/did:plc:… is recognised too, and so is one copied with its
+ * colons percent-encoded (did%3Aplc%3A…), which the local-artist match also
+ * decodes. A malformed escape is compared as it stands. An empty setting
+ * matches nothing, and so does any match that is not a Bluesky one.
  */
 export function isOwnBlueskyPost(
 	match: Pick<LookupMatch, 'site' | 'siteId' | 'handles'>,
 	ownBlueskyUrl: string | null | undefined
 ): boolean {
 	if (match.site !== 'Bluesky') return false;
-	const own = normalizeHandle('bluesky', ownBlueskyUrl);
+	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl));
 	if (!own) return false;
 	const did = splitBlueskySiteId(match.siteId).did.toLowerCase();
 	return did === own || match.handles.some((h) => normalizeHandle('bluesky', h) === own);

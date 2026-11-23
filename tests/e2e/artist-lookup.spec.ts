@@ -1007,6 +1007,9 @@ test.describe('with a key saved', () => {
 			body: await panel(page).screenshot(),
 			contentType: 'image/png'
 		});
+		// The unknown account is a Bluesky poster, so it is never offered as a new
+		// artist: "Use Test Artist" is the only offer.
+		await expect(panel(page).getByRole('button', { name: /as a new artist/ })).toHaveCount(0);
 		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
 		await expect(select).toHaveValue('1');
 
@@ -1030,6 +1033,66 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page).locator('.match-row')).toContainText(['kuttoya on FurAffinity', 'Kuttoya.bsky.social on Bluesky']);
 		await expect(callout).toHaveCount(0);
+	});
+
+	// The reverse: the Bluesky poster is in the list and the FurAffinity poster,
+	// whose post fills the form, is not. Both answers are one click away and the
+	// operator picks; nothing is applied before the click.
+	test('a local Bluesky poster beside an unknown FurAffinity poster offers both', async ({
+		page
+	}, testInfo) => {
+		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 77, name: 'kuttoya' })
+			});
+		});
+		const base = matchedBody();
+		await stubLookup(page, {
+			...base,
+			matches: [...base.matches, { ...BLUESKY_EXACT, handles: ['bob.example'] }],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 1, name: 'Test Artist' }] }]
+		});
+		await oneDoneTile(page);
+		const select = page.locator('select[name="artistId"]');
+		const before = await select.inputValue();
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText('bob.example is already in your artist list as Test Artist.');
+		await expect(panel(page).locator('p.callout')).toHaveText(
+			'These matches come from different accounts: bob.example on Bluesky and kuttoya on FurAffinity. Check both posts before you credit either one.'
+		);
+		const use = panel(page).getByRole('button', { name: 'Use Test Artist' });
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await expect(use).toBeVisible();
+		await expect(addNew).toBeVisible();
+		await expect(addNew).toHaveClass(/btn-secondary/);
+		// "Use" comes first, then the add offer, then Close.
+		await expect(panel(page).locator('.lookup-actions button')).toHaveText([
+			'Use Test Artist',
+			'Add kuttoya as a new artist',
+			'Close'
+		]);
+		await expect(select).toHaveValue(before);
+		await testInfo.attach('differing-accounts-both-offers', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+
+		// The add offer opens the new-artist dialog seeded with the FurAffinity
+		// poster, not the Bluesky one.
+		await addNew.click();
+		await expect(page.locator('#new-artist-name')).toHaveValue('kuttoya');
+		await expect(select).toHaveValue(before);
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+		await expect(select).toHaveValue('77');
+		// The new artist is recorded on the FurAffinity row, so the result is now
+		// the pick between the two, and the add offer is gone.
+		await expect(addNew).toHaveCount(0);
+		await expect(panel(page)).toContainText('These matches point to 2 artists in your list.');
+		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
 	});
 
 	test('editing a tagged field drops its tag', async ({ page }) => {

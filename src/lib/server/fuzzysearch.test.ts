@@ -751,6 +751,19 @@ describe('findLocalArtists', () => {
 		expect(found.map((r) => r.id)).toEqual([2]);
 	});
 
+	// A copied profile link can carry its DID's colons percent-encoded.
+	it('matches a Bluesky DID stored with encoded colons, and survives a malformed escape', () => {
+		const did = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		const stored = [
+			{ id: 1, name: 'Encoded', blueskyUrl: 'https://bsky.app/profile/did%3Aplc%3Aaaaaaaaaaaaaaaaaaaaaaaaa' },
+			{ id: 2, name: 'Lowercase escapes', blueskyUrl: 'bsky.app/profile/did%3aplc%3aaaaaaaaaaaaaaaaaaaaaaaaa/' },
+			{ id: 3, name: 'Malformed', blueskyUrl: 'https://bsky.app/profile/did%3Aplc%ZZaaaa' },
+			{ id: 4, name: 'Other DID', blueskyUrl: 'https://bsky.app/profile/did%3Aplc%3Abbbbbbbbbbbbbbbbbbbbbbbb' }
+		];
+		const found = findLocalArtists(stored, { site: 'Bluesky', handles: [], siteId: `${did}/3kxyz` });
+		expect(found.map((r) => r.id)).toEqual([1, 2]);
+	});
+
 	it('returns nothing for sites with no artist column, or with no handles', () => {
 		expect(findLocalArtists(rows, { site: 'Weasyl', handles: ['kuttoya'] })).toEqual([]);
 		expect(findLocalArtists(rows, { site: 'e621', handles: ['kuttoya'] })).toEqual([]);

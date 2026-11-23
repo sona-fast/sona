@@ -11,6 +11,7 @@
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import {
+		addOtherPosterSeed,
 		bandLabel,
 		canAddPosterAsArtist,
 		candidateArtists,
@@ -147,6 +148,10 @@
 	// Two confident matches on two sites naming different accounts. Not under the
 	// ambiguous outcome, whose pick list already asks the question.
 	const differing = $derived(data ? differingAccounts(data) : null);
+	// When that callout disagrees with the one local artist on offer, the other
+	// account, if it fills the form and may be added, is offered as a new artist
+	// beside "Use {name}", so the operator decides between the two.
+	const otherPoster = $derived(data ? addOtherPosterSeed(data) : null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(
 		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared })
@@ -722,6 +727,13 @@
 					</a>
 				{:else if outcome === 'existing' && candidates[0]}
 					{@render useArtistAction(candidates[0], true)}
+					{#if otherPoster}
+						<!-- Names the handle: with two accounts in the callout, "instead"
+						     would not say which one is added. -->
+						<button type="button" class="btn btn-secondary" onclick={() => onaddnew(otherPoster)}>
+							{m.admin_lookup_add_new({ handle: otherPoster.handle })}
+						</button>
+					{/if}
 				{:else if outcome === 'ambiguous'}
 					{@render useSelectedAction(true)}
 				{:else if outcome === 'new' && prefill}

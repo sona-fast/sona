@@ -547,6 +547,15 @@ describe('isOwnBlueskyPost', () => {
 		expect(isOwnBlueskyPost(skyseekLookupMatch(post, null), saved)).toBe(true);
 	});
 
+	// A copied profile link can carry its DID's colons percent-encoded.
+	it('recognises it by a DID saved with encoded colons', () => {
+		const saved = `https://bsky.app/profile/${ARTIST.replaceAll(':', '%3A')}`;
+		expect(isOwnBlueskyPost(skyseekLookupMatch(post, null), saved)).toBe(true);
+		expect(isOwnBlueskyPost(skyseekLookupMatch(post, null), saved.toLowerCase())).toBe(true);
+		// A malformed escape is nobody's DID, and does not throw.
+		expect(isOwnBlueskyPost(skyseekLookupMatch(post, null), 'https://bsky.app/profile/did%3Aplc%ZZ')).toBe(false);
+	});
+
 	it('leaves everyone else’s posts alone', () => {
 		expect(isOwnBlueskyPost(mine, 'https://bsky.app/profile/someone.example')).toBe(false);
 		expect(isOwnBlueskyPost(mine, `https://bsky.app/profile/${REPOSTER}`)).toBe(false);

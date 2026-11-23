@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	LOOKUP_MAX_BYTES,
+	addOtherPosterSeed,
 	bandLabel,
 	canAddPosterAsArtist,
 	candidateArtists,
@@ -1727,6 +1728,86 @@ describe('stateFromResponse', () => {
 			expect(matchHandle(differing?.a ?? null)).toBe('bob.bsky.social');
 			expect(differing?.b.site).toBe('FurAffinity');
 			expect(matchHandle(differing?.b ?? null)).toBe('alice');
+		});
+
+		// The operator decides between the two: the local Bluesky poster is the
+		// primary offer, and the unknown FurAffinity poster is the second one.
+		it('also offers the unknown FurAffinity poster as a new artist when the local artist is the Bluesky poster', () => {
+			const data = response({
+				matches: [match({ handles: ['alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+			// Creating that artist records it on the FurAffinity row it was seeded
+			// from, so the result becomes the pick between the two and the offer goes.
+			const created = withCreatedArtist(data, { id: 8, name: 'alice' });
+			expect(resolveOutcome(created)).toBe('ambiguous');
+			expect(addOtherPosterSeed(created)).toBeNull();
+		});
+
+		it('seeds a name only for an unknown poster on a site Sona holds no column for', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Weasyl', handles: ['alice'] }),
+					{ ...bluesky, handles: ['bob.bsky.social'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Weasyl', linkable: false });
+		});
+
+		it('never offers an unknown Bluesky poster as a new artist beside a local artist', () => {
+			const data = response({
+				matches: [match(), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)?.b.site).toBe('Bluesky');
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		it('offers nothing extra when the sources agree, or under any other outcome', () => {
+			// Both rows name the same local artist: no disagreement.
+			expect(
+				addOtherPosterSeed(
+					response({
+						matches: [match(), bluesky],
+						localArtists: [
+							{ matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist' }] },
+							{ ...skyArtist, matchIndex: 1 }
+						]
+					})
+				)
+			).toBeNull();
+			// The same person under each site's spelling.
+			expect(
+				addOtherPosterSeed(
+					response({
+						matches: [match(), { ...bluesky, handles: ['kuttoya.bsky.social'] }],
+						localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+					})
+				)
+			).toBeNull();
+			// 'new' already offers the prefill poster as its primary action.
+			expect(
+				addOtherPosterSeed(response({ matches: [match(), { ...bluesky, handles: ['bob.bsky.social'] }] }))
+			).toBeNull();
+		});
+
+		it('offers nothing extra when the differing poster is not the one that fills the form', () => {
+			// The prefill row is a FurAffinity post by the local artist; the
+			// differing Twitter account is another row and fills nothing.
+			const data = response({
+				matches: [
+					match(),
+					match({ site: 'Twitter', siteId: '99', handles: ['someone_else'], distance: 1 })
+				],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)?.b.site).toBe('Twitter');
+			expect(addOtherPosterSeed(data)).toBeNull();
 		});
 
 		// The upload page's variant-tile warning reads the same candidates, so a

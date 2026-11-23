@@ -496,6 +496,31 @@ export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: Lo
 }
 
 /**
+ * The second offer beside "Use {name}" when the sources disagree: the 'existing'
+ * outcome holds one local artist, and the differing account that is NOT that
+ * artist's is the prefill match, on a site whose poster may be added. The
+ * operator gets "Add {handle} as a new artist" for it, so the two answers are
+ * both one click away and the operator decides. The seed is the one the 'new'
+ * outcome's button sends. Null otherwise, and always for a Bluesky poster (see
+ * canAddPosterAsArtist).
+ */
+export function addOtherPosterSeed(
+	data: LookupResponse
+): { handle: string; site: LookupSite; linkable: boolean } | null {
+	if (resolveOutcome(data) !== 'existing') return null;
+	const differing = differingAccounts(data);
+	if (!differing) return null;
+	const own = matchForArtist(data, candidateArtists(data)[0].id);
+	const other = differing.a === own ? differing.b : differing.b === own ? differing.a : null;
+	if (!other || other !== pickPrefillMatch(data.matches) || !canAddPosterAsArtist(other.site)) {
+		return null;
+	}
+	const handle = matchHandle(other);
+	if (!handle) return null;
+	return { handle, site: other.site, linkable: LINKABLE_SITES.includes(other.site) };
+}
+
+/**
  * Which service did not answer, for the notice over a partial result. Null when
  * both did. They are never both named: with neither answering there are no rows
  * and the lookup is a failure, not a result.
