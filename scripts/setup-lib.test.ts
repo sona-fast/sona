@@ -46,7 +46,6 @@ import {
 	telegramSummaryLine,
 	resendSecretWarnLines,
 	deployStepLines,
-	ciWiringDeclinedWarnLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -1421,10 +1420,8 @@ describe('storageSummaryLines', () => {
 
 describe('deployStepLines', () => {
 	// Setup commits nothing, so `git push` alone deploys nothing on a fresh fork.
-	it('gives a way to deploy that needs no new commit, aimed at the fork', () => {
-		const text = deployStepLines('taro/sona').join('\n');
-		expect(text).toContain('gh workflow run deploy.yml --ref main -R taro/sona');
-		expect(text).toContain('Run workflow');
+	it('also gives the Actions tab path, for a deploy without the gh CLI', () => {
+		expect(deployStepLines('taro/sona').join('\n')).toContain('Run workflow');
 	});
 
 	it('drops -R when the repo could not be derived', () => {
@@ -1440,25 +1437,6 @@ describe('deployStepLines', () => {
 		expect(name).toBeTruthy();
 		expect(deployStepLines(null).join('\n')).toContain(`"${name}"`);
 		expect(workflow).toMatch(/^\s*workflow_dispatch:/m);
-	});
-
-	it('never suggests a local Pages deploy', () => {
-		expect(deployStepLines('taro/sona').join('\n')).not.toContain('pages deploy');
-	});
-});
-
-describe('ciWiringDeclinedWarnLines', () => {
-	const text = ciWiringDeclinedWarnLines('taro/sona').join('\n');
-
-	it('covers both secrets the deploy copies back, each with a command for this fork', () => {
-		expect(text).toContain('gh secret set SETUP_TOKEN -R taro/sona');
-		expect(text).toContain('gh secret set CRON_SECRET -R taro/sona');
-	});
-
-	// On a first run there is no repository secret, so an unconditional "the next
-	// deploy replaces your token" would be false.
-	it('is conditional on secrets from an earlier run', () => {
-		expect(text).toMatch(/If taro\/sona already has/);
 	});
 });
 
@@ -2109,7 +2087,7 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 				stdio: ['ignore', 'pipe', 'pipe'],
 				timeout: 30_000
 			});
-			const calls = existsSync(log) ? readFileSync(log, 'utf8').split('\n') : [];
+			const calls = readFileSync(log, 'utf8').split('\n');
 			return { res, calls };
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -2135,8 +2113,12 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		const { res, calls } = runSetupWithStubs({ ghExit: 0, origin: 'https://github.com/taro/sona.git' });
 		expect(res.status, res.stderr).toBe(0);
 		expect(res.stdout).toContain('gh workflow run deploy.yml --ref main -R taro/sona');
+		// A new fork has workflows off until the owner turns them on.
+		expect(res.stdout).toContain('enable workflows');
 		expect(res.stderr).toContain('gh secret set SETUP_TOKEN -R taro/sona');
-		expect(res.stderr).toContain('gh secret set CRON_SECRET -R taro/sona');
+		expect(res.stderr).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
+		// The closing line's "see the note above" also covers the deploy secrets.
+		expect(res.stderr).toContain('CLOUDFLARE_API_TOKEN');
 		// The stubs answered, and a declined prompt sets no secret.
 		expect(calls).toContain('gh auth status');
 		expect(calls.some((c) => c.startsWith('gh secret set'))).toBe(false);

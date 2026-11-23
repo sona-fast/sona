@@ -86,17 +86,21 @@ original deployment it grew out of). The project home is
    and secrets (`SETUP_TOKEN`, `CRON_SECRET`) with the ones in `wrangler.toml`.
 
    If you skipped setup's GitHub Actions step, also set the `SETUP_TOKEN` and
-   `CRON_SECRET` repo secrets yourself, before you start the first deploy. The
+   `CRON_SECRET` repo secrets yourself before you start the first deploy. The
    workflow copies both to the Pages project before each deploy, so use the
-   `SETUP_TOKEN` that setup printed. Setup doesn't print `CRON_SECRET`; any long
-   random value works. Without it, the scheduled sync workflows can't
-   authenticate. If you set either secret after a deploy, run the deploy again.
-   Until you do, the Pages project keeps the old value, and a `CRON_SECRET`
-   that differs from it gets the scheduled workflows rejected.
+   `SETUP_TOKEN` that setup printed. Setup doesn't print `CRON_SECRET`; generate
+   and set one with
+   `openssl rand -hex 32 | gh secret set CRON_SECRET -R <owner>/<repo>`.
+   Without it, the scheduled workflows can't authenticate. If you set or change
+   either secret after a deploy, run the deploy again. Until you do, the Pages
+   project keeps its previous value, or none, and the site rejects the
+   scheduled workflows.
 
-   Setup commits nothing, so a fresh fork has nothing to push. To start a
-   deploy without a new commit, go to **Actions > Deploy to Cloudflare Pages >
-   Run workflow**, or run `gh workflow run deploy.yml --ref main`.
+   Setup commits nothing, so a new fork has nothing to push. GitHub also turns
+   workflows off on a new fork; enable them in the **Actions** tab first. To
+   start a deploy without a new commit, go to **Actions > Deploy to Cloudflare
+   Pages > Run workflow**, or run
+   `gh workflow run deploy.yml --ref main -R <owner>/<repo>`.
 
    **API token scopes.** Create a Cloudflare API token (dash → *My Profile → API
    Tokens → Create Token → Custom token*) with:

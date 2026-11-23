@@ -905,9 +905,10 @@ export function resendSecretWarnLines(failed: string[], project: string): string
  */
 export function deployStepLines(repoSlug: string | null): string[] {
 	return [
-		'  1. Deploy:  push a commit to main. With nothing to push, run the workflow by hand:',
+		'  1. Deploy:  push a commit to main. If you have nothing to push, run the workflow by hand:',
 		`       gh workflow run deploy.yml --ref main${repoSlug ? ` -R ${repoSlug}` : ''}`,
-		'     (or GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow)'
+		'     (or GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow)',
+		'     On a new fork, enable workflows in the Actions tab first.'
 	];
 }
 
@@ -924,8 +925,10 @@ export function ciWiringDeclinedWarnLines(repoSlug: string): string[] {
 		'  repository secrets from an earlier run, the next deploy puts those older values back on',
 		'  the Pages project, and the wizard rejects the token printed below.',
 		`  Set the new token:  gh secret set SETUP_TOKEN -R ${repoSlug}`,
-		`  CRON_SECRET is not printed. Set any long random value:  gh secret set CRON_SECRET -R ${repoSlug}`,
-		'  The deploy copies both repository secrets to the Pages project.'
+		`  CRON_SECRET is not printed. Generate and set one:  openssl rand -hex 32 | gh secret set CRON_SECRET -R ${repoSlug}`,
+		'  The deploy copies both repository secrets to the Pages project.',
+		'  A CI deploy also needs the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets and the',
+		'  repo variables: see README, Quick start step 3.'
 	];
 }
 
