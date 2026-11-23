@@ -32,7 +32,8 @@ import {
 	lookupUserAgent,
 	resolveBlueskyHandles,
 	searchSkyseek,
-	skyseekLookupMatch
+	skyseekLookupMatch,
+	type SkyseekFailure
 } from '$lib/server/skyseek';
 import type { RequestHandler } from './$types';
 
@@ -61,7 +62,8 @@ import type { RequestHandler } from './$types';
 // whenever the FuzzySearch lookup is on: there is no second setting. The two
 // searches run side by side once every gate below has passed, and the answer
 // holds the rows of whichever service answered. With Skyseek down it is
-// FuzzySearch's rows and `blueskySearched: false`. With FuzzySearch down it is
+// FuzzySearch's rows, `blueskySearched: false`, and `skyseekFailure`, the
+// reason. With FuzzySearch down it is
 // the Bluesky rows and `fuzzysearchFailure`, the reason. FuzzySearch's failure
 // is the whole answer, with its own status, only when there is no Bluesky row
 // to show beside it.
@@ -188,8 +190,9 @@ function hasAllowedImageBytes(head: Uint8Array): boolean {
 
 /**
  * The Bluesky half of the lookup: Skyseek's posts, capped, with each posting
- * account's handle where the AppView gave one. Null when Bluesky was not
- * searched, which the caller reports as that and never as "no Bluesky posts".
+ * account's handle where the AppView gave one. A failure reason when Bluesky
+ * was not searched, which the caller reports as that and never as "no Bluesky
+ * posts". Anything that throws, the handle lookup included, is `unavailable`.
  *
  * Never rejects. The caller starts this beside the FuzzySearch call and awaits
  * it after, outside any guard of its own, so a rejection here would answer 500
@@ -200,12 +203,12 @@ async function searchBluesky(
 	bytes: Blob,
 	fetchFn: typeof fetch,
 	userAgent: string
-): Promise<LookupMatch[] | null> {
+): Promise<{ ok: true; matches: LookupMatch[] } | { ok: false; reason: SkyseekFailure }> {
 	try {
 		const result = await searchSkyseek(bytes, fetchFn, userAgent);
 		if (!result.ok) {
 			console.warn('artist-lookup: Skyseek search failed', result.reason);
-			return null;
+			return result;
 		}
 		// Closest first already, then earliest, so the cap keeps the best leads.
 		const posts = result.matches.slice(0, SKYSEEK_MAX_MATCHES);
@@ -214,13 +217,16 @@ async function searchBluesky(
 			fetchFn,
 			userAgent
 		);
-		return posts.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null));
+		return {
+			ok: true,
+			matches: posts.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null))
+		};
 	} catch (e) {
 		console.warn(
 			'artist-lookup: Skyseek search threw',
 			e instanceof Error ? e.message : 'non-Error value'
 		);
-		return null;
+		return { ok: false, reason: 'unavailable' };
 	}
 }
 
@@ -494,7 +500,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// is stable, so rows that compare equal keep the order their own search gave
 	// them — which for Bluesky is earliest post first.
 	const bluesky = await blueskyPending;
-	let blueskyMatches = bluesky ?? [];
+	let blueskyMatches = bluesky.ok ? bluesky.matches : [];
 	if (blueskyMatches.length > 0) {
 		// The operator's own post of the piece is not a lead on who drew it. Best
 		// effort: with the setting unreadable their post stays in the list, which
@@ -612,8 +618,11 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		localArtists,
 		nameMatches,
 		sourceClash,
-		// Null is "Skyseek did not answer". An empty list is an answer.
-		blueskySearched: bluesky !== null,
+		// False is "Skyseek did not answer". An empty list is an answer.
+		blueskySearched: bluesky.ok,
+		// Why it did not, so the panel offers Try again only where a second send
+		// can come back different. Null when Skyseek answered.
+		skyseekFailure: bluesky.ok ? null : bluesky.reason,
 		// Set only on a partial answer: the rows above are Bluesky posts alone,
 		// and this is why. Null when FuzzySearch answered.
 		fuzzysearchFailure

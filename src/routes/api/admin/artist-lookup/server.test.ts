@@ -1889,6 +1889,11 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			expect(body.matches).toEqual([FA_EXACT]);
 			// Not "no Bluesky posts": nobody looked, and the panel must not say so.
 			expect(body.blueskySearched).toBe(false);
+			// And why, so the panel offers Try again only where a second send can
+			// come back different: a refused file is refused again.
+			expect((body as Body & { skyseekFailure?: unknown }).skyseekFailure).toBe(
+				failed.ok ? null : failed.reason
+			);
 			expect(body.error).toBeUndefined();
 			expect(resolveBlueskyHandles).not.toHaveBeenCalled();
 		}
@@ -1902,7 +1907,9 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 
 		const thrown = await POST(multipartEvent(platform, pngFile()));
 		expect(thrown.status).toBe(200);
-		expect(((await thrown.json()) as Body).blueskySearched).toBe(false);
+		const thrownBody = (await thrown.json()) as Body & { skyseekFailure?: unknown };
+		expect(thrownBody.blueskySearched).toBe(false);
+		expect(thrownBody.skyseekFailure).toBe('unavailable');
 
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
 		resolveBlueskyHandles.mockRejectedValue(new Error('connection reset'));
@@ -1910,7 +1917,12 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		warn.mockRestore();
 
 		expect(unresolved.status).toBe(200);
-		expect(((await unresolved.json()) as Body).matches).toEqual([FA_EXACT]);
+		const unresolvedBody = (await unresolved.json()) as Body & { skyseekFailure?: unknown };
+		expect(unresolvedBody.matches).toEqual([FA_EXACT]);
+		// A handle lookup that threw is answered as it always was: Bluesky not
+		// searched, and nothing that says Skyseek refused the file.
+		expect(unresolvedBody.blueskySearched).toBe(false);
+		expect(unresolvedBody.skyseekFailure).toBe('unavailable');
 	});
 
 	it('says Bluesky was searched when it was and nothing matched anywhere', async () => {
@@ -1961,14 +1973,18 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 
 		const alone = (await (await POST(multipartEvent(platform, pngFile()))).json()) as {
 			fuzzysearchFailure: unknown;
+			skyseekFailure: unknown;
 		};
 		expect(alone.fuzzysearchFailure).toBeNull();
+		expect(alone.skyseekFailure).toBeNull();
 
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
 		const both = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body & {
 			fuzzysearchFailure: unknown;
+			skyseekFailure: unknown;
 		};
 		expect(both.fuzzysearchFailure).toBeNull();
+		expect(both.skyseekFailure).toBeNull();
 		expect(both.matches.map((x) => x.site)).toEqual(['FurAffinity', 'Bluesky']);
 	});
 

@@ -69,7 +69,15 @@ export interface LookupResponse {
 	 * at least one Bluesky row: with nothing to show, the failure is the whole
 	 * answer and arrives as one. */
 	fuzzysearchFailure?: UpstreamFailReason | null;
+	/** Why Skyseek gave no rows, when `blueskySearched` is false. Null when
+	 * Skyseek answered. Absent on a response from before the endpoint sent it,
+	 * which reads as `unavailable`: the one reason a retry can end. */
+	skyseekFailure?: SkyseekFailReason | null;
 }
+
+/** The reasons Skyseek can fail with, as the endpoint names them. It takes no
+ * key, so there is no refusal of one. */
+export type SkyseekFailReason = 'rate_limited' | 'too_large' | 'invalid_image' | 'unavailable';
 
 /** The reasons FuzzySearch itself can fail with, as the endpoint names them. */
 export type UpstreamFailReason =
@@ -487,9 +495,13 @@ export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: Lo
  */
 export function unansweredService(
 	data: LookupResponse
-): { service: 'fuzzysearch'; reason: UpstreamFailReason } | { service: 'skyseek' } | null {
+):
+	| { service: 'fuzzysearch'; reason: UpstreamFailReason }
+	| { service: 'skyseek'; reason: SkyseekFailReason }
+	| null {
 	if (data.fuzzysearchFailure) return { service: 'fuzzysearch', reason: data.fuzzysearchFailure };
-	return data.blueskySearched === true ? null : { service: 'skyseek' };
+	if (data.blueskySearched === true) return null;
+	return { service: 'skyseek', reason: data.skyseekFailure ?? 'unavailable' };
 }
 
 /** The sentence for `unansweredService`, shared by the panel and the upload
@@ -520,11 +532,29 @@ export function upstreamReasonBody(reason: UpstreamFailReason): string {
 	}
 }
 
-/** The advice under a failure reason, where it has any. */
+/** The advice under a failure reason in the failed state, where it has any. */
 export function failReasonHint(reason: LookupFailReason): string {
 	if (reason === 'rate_limited') return m.admin_lookup_paused_hint();
 	if (reason === 'key_refused') return m.admin_lookup_refused_hint();
+	if (reason === 'too_large' || reason === 'invalid_image') return m.admin_lookup_by_hand_hint();
 	return '';
+}
+
+/** The advice under a FuzzySearch reason in the partial notice. Shorter than the
+ * failed state's: rows are on screen, and the footer may offer one of them, so
+ * the artist by hand is the fallback and never the order. */
+function partialReasonHint(reason: UpstreamFailReason): string {
+	switch (reason) {
+		case 'rate_limited':
+			return m.admin_lookup_partial_paused_hint();
+		case 'key_refused':
+			return m.admin_lookup_partial_refused_hint();
+		case 'too_large':
+		case 'invalid_image':
+			return m.admin_lookup_partial_by_hand_hint();
+		case 'unavailable':
+			return '';
+	}
 }
 
 /** Whether sending the same image again can come back different: a rate limit
@@ -535,14 +565,15 @@ export function retryCanSucceed(reason: LookupFailReason): boolean {
 }
 
 /** The panel's notice over a partial result: `unansweredLine`, then the reason
- * and advice the failed state gives for the same FuzzySearch failure. Joined
- * through a message, because Japanese puts no space after "。". */
+ * the failed state gives for the same FuzzySearch failure and the partial
+ * notice's own advice. Joined through a message, because Japanese puts no space
+ * after "。". */
 export function unansweredNotice(data: LookupResponse): string | null {
 	const line = unansweredLine(data);
 	const missing = unansweredService(data);
 	if (!line || !missing) return null;
 	if (missing.service !== 'fuzzysearch') return line;
-	return [upstreamReasonBody(missing.reason), failReasonHint(missing.reason)]
+	return [upstreamReasonBody(missing.reason), partialReasonHint(missing.reason)]
 		.filter(Boolean)
 		.reduce((first, second) => m.admin_lookup_partial_join({ first, second }), line);
 }
@@ -551,7 +582,7 @@ export function unansweredNotice(data: LookupResponse): string | null {
 export function unansweredCanRetry(data: LookupResponse): boolean {
 	const missing = unansweredService(data);
 	if (!missing) return false;
-	return missing.service === 'skyseek' || retryCanSucceed(missing.reason);
+	return retryCanSucceed(missing.reason);
 }
 
 /** The two form fields a lookup can fill. Absent means "left alone". */
@@ -940,6 +971,13 @@ const UPSTREAM_FAIL_REASONS: readonly UpstreamFailReason[] = [
 	'unavailable'
 ];
 
+const SKYSEEK_FAIL_REASONS: readonly SkyseekFailReason[] = [
+	'rate_limited',
+	'too_large',
+	'invalid_image',
+	'unavailable'
+];
+
 const FAIL_REASONS: readonly LookupFailReason[] = [...UPSTREAM_FAIL_REASONS, 'from_commission'];
 
 /**
@@ -1140,6 +1178,13 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 		wireFailure === null || wireFailure === undefined
 			? null
 			: (UPSTREAM_FAIL_REASONS.find((r) => r === wireFailure) ?? 'unavailable');
+	// Read only where Bluesky was not searched, and never as an answer: a value
+	// this client does not know, or none, is an outage.
+	const wireSkyseek: unknown = data.skyseekFailure;
+	const skyseekFailure =
+		data.blueskySearched === true
+			? null
+			: (SKYSEEK_FAIL_REASONS.find((r) => r === wireSkyseek) ?? 'unavailable');
 	if (matches.length === 0) {
 		// The endpoint answers a FuzzySearch failure with no rows as that failure.
 		// A 200 that says both at once is read the same way, and never as "nothing
@@ -1156,7 +1201,8 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 			nameMatches: remapHits(data.nameMatches, indexMap),
 			sourceClash: data.sourceClash ?? null,
 			blueskySearched: data.blueskySearched === true,
-			fuzzysearchFailure
+			fuzzysearchFailure,
+			skyseekFailure
 		}
 	};
 }

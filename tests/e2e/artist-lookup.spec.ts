@@ -669,12 +669,11 @@ test.describe('with a key saved', () => {
 			contentType: 'image/png'
 		});
 
-		// A rate limit says so, with the failed state's advice, and keeps Try
-		// again: the limit lifts.
+		// A rate limit says so, and keeps Try again: the limit lifts.
 		await stubLookup(page, partial('rate_limited'));
 		await panel(page).getByRole('button', { name: 'Try again' }).click();
 		await expect(notice).toHaveText(
-			`${FUZZY_PARTIAL} FuzzySearch is limiting how often your site can search right now. Try again in a minute, or add the artist by hand. Your upload is unaffected.`
+			`${FUZZY_PARTIAL} FuzzySearch is limiting how often your site can search right now. Try again in a minute.`
 		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
@@ -691,11 +690,12 @@ test.describe('with a key saved', () => {
 
 	// FuzzySearch answered and refused: the key, or the file. The notice says
 	// which, and Try again is gone, because a second send gets the same answer.
-	// A refused key keeps the route to Settings the failed state has.
+	// A refused key keeps the route to Settings the failed state has. A refused
+	// file does not order the artist by hand: "Use Test Artist" sits below.
 	for (const [reason, reasonText, settings] of [
-		['key_refused', "FuzzySearch didn't accept your API key. Check the key in Settings, or add the artist by hand. Your upload is unaffected.", true],
-		['too_large', 'This file is too large for FuzzySearch. Add the artist by hand.', false],
-		['invalid_image', "FuzzySearch couldn't read this file. Add the artist by hand.", false]
+		['key_refused', "FuzzySearch didn't accept your API key. Check the key in Settings.", true],
+		['too_large', 'This file is too large for FuzzySearch. If none of these is the artist, add them by hand.', false],
+		['invalid_image', "FuzzySearch couldn't read this file. If none of these is the artist, add them by hand.", false]
 	] as const) {
 		test(`a partial answer with FuzzySearch reason ${reason} says why and offers no retry`, async ({
 			page
@@ -727,6 +727,42 @@ test.describe('with a key saved', () => {
 			});
 		});
 	}
+
+	// With no rows at all, a refused file still says to add the artist by hand,
+	// as the line under the reason.
+	for (const [reason, status, lead] of [
+		['too_large', 413, 'This file is too large for FuzzySearch.'],
+		['invalid_image', 422, "FuzzySearch couldn't read this file."]
+	] as const) {
+		test(`a failed lookup with reason ${reason} says why, then to add the artist by hand`, async ({
+			page
+		}) => {
+			await stubLookup(page, { enabled: true, error: reason, forwarded: true }, status);
+			await oneDoneTile(page);
+			await pill(page).click();
+
+			await expect(panel(page).locator('.lookup-lead')).toHaveText(lead);
+			await expect(panel(page).locator('.lookup-status')).toHaveText('Add the artist by hand.');
+			await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+		});
+	}
+
+	// Skyseek refuses a file the way FuzzySearch does, and a second send is
+	// refused again, so the FuzzySearch rows come with the notice and no retry.
+	test('Skyseek refusing the file says Bluesky was not searched, and offers no retry', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody({ blueskySearched: false, skyseekFailure: 'too_large' }));
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
+		await expect(panel(page).locator('.lookup-partial')).toHaveText(
+			"Skyseek didn't return results, so Sona couldn't check Bluesky."
+		);
+		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+		await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+	});
 
 	test('Skyseek down says Bluesky was not searched, over the matches that did come back', async ({
 		page

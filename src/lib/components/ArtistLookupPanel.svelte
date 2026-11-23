@@ -140,8 +140,8 @@
 	// and everything below works on them; the notice says which sites they do not
 	// cover, so a short list is not read as the whole search.
 	const unanswered = $derived(data ? unansweredService(data) : null);
-	// The sentence, then the reason and advice the failed arm gives for the same
-	// FuzzySearch failure.
+	// The sentence, then the reason the failed arm gives for the same FuzzySearch
+	// failure and the notice's own advice.
 	const unansweredText = $derived(data ? unansweredNotice(data) : null);
 	const unansweredRetry = $derived(data ? unansweredCanRetry(data) : false);
 	// Two confident matches on two sites naming different accounts. Not under the
@@ -178,7 +178,7 @@
 			statusKind === 'clash_emptied' ||
 			statusKind === 'clash_date_url_emptied'
 	);
-	// The two failure reasons that carry advice under the lead. Held as text so
+	// The four failure reasons that carry advice under the lead. Held as text so
 	// the emptied sentence can go ABOVE it: a parent move onto a tile whose
 	// lookup failed empties the fields, and what just happened to the form is
 	// read before what to do about the failure. This list and the failed arm's

@@ -7,6 +7,7 @@ import {
 	clearedLine,
 	differentArtistMatch,
 	differingAccounts,
+	failReasonHint,
 	isConfident,
 	isCrossSiteAmbiguity,
 	matchForArtist,
@@ -39,6 +40,7 @@ import {
 	unansweredLine,
 	unansweredNotice,
 	unansweredService,
+	upstreamReasonBody,
 	withCreatedArtist,
 	type LookupCleared,
 	type LookupEdited,
@@ -1984,8 +1986,40 @@ describe('stateFromResponse', () => {
 			for (const blueskySearched of [false, undefined, 'true']) {
 				const state = await stateFromResponse(wire({ matches: [match()], localArtists: [], blueskySearched }));
 				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
-				expect(unansweredService(state.data)).toEqual({ service: 'skyseek' });
+				// A response that names no reason reads as an outage, the one that a
+				// retry can end.
+				expect(unansweredService(state.data)).toEqual({ service: 'skyseek', reason: 'unavailable' });
 			}
+		});
+
+		it.each(['rate_limited', 'too_large', 'invalid_image', 'unavailable'] as const)(
+			'carries the Skyseek reason %s off the wire',
+			async (reason) => {
+				const state = await stateFromResponse(
+					wire({ matches: [match()], localArtists: [], blueskySearched: false, skyseekFailure: reason })
+				);
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				expect(unansweredService(state.data)).toEqual({ service: 'skyseek', reason });
+			}
+		);
+
+		// Same rule as fuzzysearchFailure: a value this client does not know still
+		// says Skyseek gave nothing, and never reads as a refused file.
+		it('reads an unknown Skyseek reason as unavailable', async () => {
+			for (const junk of ['key_refused', 'nope', true, 1, {}, null]) {
+				const state = await stateFromResponse(
+					wire({ matches: [match()], localArtists: [], blueskySearched: false, skyseekFailure: junk })
+				);
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				expect(unansweredService(state.data)).toEqual({ service: 'skyseek', reason: 'unavailable' });
+			}
+		});
+
+		it('names nobody when Bluesky was searched, whatever the Skyseek field says', async () => {
+			const state = await stateFromResponse(wire({ skyseekFailure: 'too_large' }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredService(state.data)).toBeNull();
+			expect(unansweredCanRetry(state.data)).toBe(false);
 		});
 
 		it('names nobody when both answered', async () => {
@@ -2022,16 +2056,20 @@ describe('stateFromResponse', () => {
 		const FUZZY_LINE =
 			"FuzzySearch didn't return results, so Sona only has Bluesky posts to show. It couldn't check FurAffinity, Weasyl, e621, or Twitter.";
 		it.each([
-			['invalid_image', `${FUZZY_LINE} FuzzySearch couldn't read this file. Add the artist by hand.`, false],
-			['too_large', `${FUZZY_LINE} This file is too large for FuzzySearch. Add the artist by hand.`, false],
 			[
-				'key_refused',
-				`${FUZZY_LINE} FuzzySearch didn't accept your API key. Check the key in Settings, or add the artist by hand. Your upload is unaffected.`,
+				'invalid_image',
+				`${FUZZY_LINE} FuzzySearch couldn't read this file. If none of these is the artist, add them by hand.`,
 				false
 			],
 			[
+				'too_large',
+				`${FUZZY_LINE} This file is too large for FuzzySearch. If none of these is the artist, add them by hand.`,
+				false
+			],
+			['key_refused', `${FUZZY_LINE} FuzzySearch didn't accept your API key. Check the key in Settings.`, false],
+			[
 				'rate_limited',
-				`${FUZZY_LINE} FuzzySearch is limiting how often your site can search right now. Try again in a minute, or add the artist by hand. Your upload is unaffected.`,
+				`${FUZZY_LINE} FuzzySearch is limiting how often your site can search right now. Try again in a minute.`,
 				true
 			],
 			['unavailable', FUZZY_LINE, true]
@@ -2044,11 +2082,21 @@ describe('stateFromResponse', () => {
 			expect(unansweredLine(state.data)).toBe(FUZZY_LINE);
 		});
 
-		it('offers a retry when Skyseek is the one missing, with no reason after the sentence', async () => {
-			const state = await stateFromResponse(wire({ matches: [match()], blueskySearched: false }));
+		// Skyseek refuses a file the way FuzzySearch does (413, or 400/415/422), and
+		// a second send is refused again. The sentence stays the same for every
+		// reason; only the retry follows it.
+		it.each([
+			['rate_limited', true],
+			['unavailable', true],
+			['too_large', false],
+			['invalid_image', false]
+		] as const)('with Skyseek reason %s, offers a retry only if one can work', async (reason, retry) => {
+			const state = await stateFromResponse(
+				wire({ matches: [match()], blueskySearched: false, skyseekFailure: reason })
+			);
 			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
 			expect(unansweredNotice(state.data)).toBe("Skyseek didn't return results, so Sona couldn't check Bluesky.");
-			expect(unansweredCanRetry(state.data)).toBe(true);
+			expect(unansweredCanRetry(state.data)).toBe(retry);
 		});
 
 		it('has no notice and no retry when both answered', async () => {
@@ -2065,11 +2113,37 @@ describe('stateFromResponse', () => {
 			setLocale('ja', { reload: false });
 			try {
 				expect(unansweredNotice(state.data)).toBe(
-					'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。FuzzySearchがAPIキーを受け付けませんでした。設定のキーを確認するか、アーティストを手で入力してください。アップロードには影響しません。'
+					'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。FuzzySearchがAPIキーを受け付けませんでした。設定のキーを確認してください。'
+				);
+				const file = await stateFromResponse(wire({ fuzzysearchFailure: 'too_large' }));
+				if (file.kind !== 'results') throw new Error(`expected results, got ${file.kind}`);
+				expect(unansweredNotice(file.data)).toBe(
+					'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。このファイルはFuzzySearchには大きすぎます。この中にアーティストがいない場合は、手で入力してください。'
 				);
 			} finally {
 				setLocale(baseLocale, { reload: false });
 			}
+		});
+
+		// The failed state has no rows to choose from, so a refused file still
+		// orders the artist by hand there, and the two advice lines keep their
+		// whole wording: the partial notice's shorter hints are its own.
+		it.each([
+			['too_large', 'This file is too large for FuzzySearch.', 'Add the artist by hand.'],
+			['invalid_image', "FuzzySearch couldn't read this file.", 'Add the artist by hand.'],
+			[
+				'rate_limited',
+				'FuzzySearch is limiting how often your site can search right now.',
+				'Try again in a minute, or add the artist by hand. Your upload is unaffected.'
+			],
+			[
+				'key_refused',
+				"FuzzySearch didn't accept your API key.",
+				'Check the key in Settings, or add the artist by hand. Your upload is unaffected.'
+			]
+		] as const)('gives the failed state for %s its lead and advice', (reason, lead, hint) => {
+			expect(upstreamReasonBody(reason)).toBe(lead);
+			expect(failReasonHint(reason)).toBe(hint);
 		});
 
 		// The failed state's footer reads the same rule, so the two cannot drift.
