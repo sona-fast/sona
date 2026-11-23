@@ -2042,9 +2042,10 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		expect(setupCode).toMatch(/delete readableEnv\.WRANGLER_LOG/);
 	});
 
-	// The source pins above can't see which env object reaches the child; run
-	// setup against stub npx/gh and read the env each call actually got.
-	it('runs both --command reads without the operator\'s WRANGLER_LOG', () => {
+	// Runs setup.ts end to end against stub npx/gh first on PATH, in its own temp
+	// dir (removed afterward). `ghExit` is what every `gh` call returns; `origin`,
+	// when set, makes the work dir a git repo with that origin URL.
+	function runSetupWithStubs(opts: { ghExit: number; origin?: string }) {
 		const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 		const dir = mkdtempSync(join(tmpdir(), 'sona-setup-run-'));
 		const bin = join(dir, 'bin');
@@ -2053,6 +2054,12 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		try {
 			mkdirSync(bin);
 			mkdirSync(join(work, 'drizzle'), { recursive: true });
+			if (opts.origin) {
+				for (const args of [['init', '-q'], ['remote', 'add', 'origin', opts.origin]]) {
+					const git = spawnSync('git', args, { cwd: work, encoding: 'utf8' });
+					expect(git.status, git.stderr).toBe(0);
+				}
+			}
 			writeFileSync(join(work, 'wrangler.toml.example'), readFileSync(join(root, 'wrangler.toml.example')));
 			writeFileSync(join(work, 'drizzle', '0000_init.sql'), 'SELECT 1;');
 			// Answers what setup parses: the whoami banner, a database_id, and an
@@ -2071,7 +2078,11 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 				].join('\n'),
 				{ mode: 0o755 }
 			);
-			writeFileSync(join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+			writeFileSync(
+				join(bin, 'gh'),
+				`#!/bin/sh\necho "gh $*" >> "${log}"\nexit ${opts.ghExit}\n`,
+				{ mode: 0o755 }
+			);
 			// Every prompt takes its default, and the Pages PATCH never leaves the box.
 			const preload = join(dir, 'preload.mjs');
 			writeFileSync(
@@ -2098,16 +2109,37 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 				stdio: ['ignore', 'pipe', 'pipe'],
 				timeout: 30_000
 			});
-			expect(res.status, res.stderr).toBe(0);
-			const calls = readFileSync(log, 'utf8').split('\n');
-			const reads = calls.filter((c) => c.includes('--command'));
-			expect(reads).toHaveLength(2);
-			for (const read of reads) expect(read).toMatch(/WRANGLER_LOG=unset$/);
-			// Non-vacuity: a call setup doesn't read still inherits the operator's value.
-			expect(calls.find((c) => c.includes('d1 create'))).toMatch(/WRANGLER_LOG=warn$/);
+			const calls = existsSync(log) ? readFileSync(log, 'utf8').split('\n') : [];
+			return { res, calls };
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	}
+
+	// The source pins above can't see which env object reaches the child; run
+	// setup against stub npx/gh and read the env each call actually got.
+	it('runs both --command reads without the operator\'s WRANGLER_LOG', () => {
+		const { res, calls } = runSetupWithStubs({ ghExit: 1 });
+		expect(res.status, res.stderr).toBe(0);
+		const reads = calls.filter((c) => c.includes('--command'));
+		expect(reads).toHaveLength(2);
+		for (const read of reads) expect(read).toMatch(/WRANGLER_LOG=unset$/);
+		// Non-vacuity: a call setup doesn't read still inherits the operator's value.
+		expect(calls.find((c) => c.includes('d1 create'))).toMatch(/WRANGLER_LOG=warn$/);
+	}, 30_000);
+
+	// With gh installed and authed and a GitHub origin, the CI-wiring prompt runs;
+	// its default is no. The run must then print the repo-scoped deploy command and
+	// the warning naming both repo secrets to set.
+	it('prints the repo-scoped deploy command and the declined-wiring warning', () => {
+		const { res, calls } = runSetupWithStubs({ ghExit: 0, origin: 'https://github.com/taro/sona.git' });
+		expect(res.status, res.stderr).toBe(0);
+		expect(res.stdout).toContain('gh workflow run deploy.yml --ref main -R taro/sona');
+		expect(res.stderr).toContain('gh secret set SETUP_TOKEN -R taro/sona');
+		expect(res.stderr).toContain('gh secret set CRON_SECRET -R taro/sona');
+		// The stubs answered, and a declined prompt sets no secret.
+		expect(calls).toContain('gh auth status');
+		expect(calls.some((c) => c.startsWith('gh secret set'))).toBe(false);
 	}, 30_000);
 
 	it('passes the migration and seed SQL as files, written through the private helper', () => {
