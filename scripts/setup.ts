@@ -64,7 +64,7 @@ import {
 	telegramSummaryLine,
 	resendSecretWarnLines,
 	deployStepLines,
-	ciWiringDeclinedWarnLines,
+	ciSecretsGuidanceLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -835,7 +835,11 @@ async function main() {
 			false
 		);
 		if (!doIt) {
-			for (const line of ciWiringDeclinedWarnLines(repoSlug)) console.warn(line);
+			console.warn('\n⚠ Skipped the GitHub Actions wiring.');
+			for (const line of ciSecretsGuidanceLines(repoSlug, true)) console.warn(line);
+			console.warn('  A CI deploy also needs the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID');
+			console.warn('  repository secrets and the repository variables. See README, Quick start');
+			console.warn('  step 3.');
 		} else {
 			// -R repoSlug on every call: a fork has two remotes (origin + upstream
 			// sona), so a bare `gh secret set` errors "multiple remotes detected".
@@ -856,10 +860,12 @@ async function main() {
 			ciSecretsSet = ok;
 			if (ok)
 				console.log(`\n✔ CI secrets/variables set (${entries.map((e) => e.name).join(', ')}).`);
-			else
+			else {
 				console.warn(
 					'\n⚠ Some `gh` secret/variable commands failed — check `gh` auth/permissions and set them manually.'
 				);
+				for (const line of ciSecretsGuidanceLines(repoSlug, true)) console.warn(line);
+			}
 		}
 	} else {
 		console.log(`\nℹ Skipping GitHub Actions secret setup: ${gh.reason}.`);
@@ -870,11 +876,9 @@ async function main() {
 			'  secrets and CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL, FURTRACK_MODE variables'
 		);
 		console.log('  (Settings → Secrets and variables → Actions).');
-		const cronCmd = repoSlug
-			? `openssl rand -hex 32 | gh secret set CRON_SECRET -R ${repoSlug}`
-			: 'openssl rand -hex 32';
-		console.log("  Setup doesn't print CRON_SECRET. Generate one and set it as that secret:");
-		console.log(`    ${cronCmd}`);
+		// Not eligible means gh is missing or signed out, or there is no repo slug,
+		// so a gh command can't be given here.
+		for (const line of ciSecretsGuidanceLines(repoSlug, false)) console.log(line);
 	}
 
 	rl.close();
@@ -950,7 +954,7 @@ async function main() {
 		console.log(line);
 	}
 	if (ciSecretsSet) {
-		console.log('\n  CI deploy secrets/variables are set — pushing to main will deploy.');
+		console.log('\n  CI deploy secrets/variables are set. Deploy as described in step 1.');
 	} else {
 		console.log('\n  Before deploying via GitHub, set the CI secrets/variables (see the note above).');
 	}

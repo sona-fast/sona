@@ -46,7 +46,7 @@ import {
 	telegramSummaryLine,
 	resendSecretWarnLines,
 	deployStepLines,
-	ciWiringDeclinedWarnLines,
+	ciSecretsGuidanceLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -1441,19 +1441,49 @@ describe('deployStepLines', () => {
 		expect(deployStepLines(null).join('\n')).toContain(`"${name}"`);
 		expect(workflow).toMatch(/^\s*workflow_dispatch:/m);
 	});
+
+	// The operator has to read the enable-workflows note before the command it applies to.
+	it('says to enable workflows before the manual-run command', () => {
+		for (const slug of ['taro/sona', null]) {
+			const lines = deployStepLines(slug);
+			const enable = lines.findIndex((l) => l.includes('enable workflows'));
+			const run = lines.findIndex((l) => /gh workflow run|Run workflow/.test(l));
+			expect(enable).toBeGreaterThanOrEqual(0);
+			expect(enable).toBeLessThan(run);
+		}
+	});
 });
 
-describe('ciWiringDeclinedWarnLines', () => {
+describe('ciSecretsGuidanceLines', () => {
 	// A first CI deploy doesn't bind the values setup put on Pages, so the repo
 	// secrets are needed on every run, not only when old ones exist.
 	it('tells the operator to set both secrets before a CI deploy, with no condition', () => {
-		const text = ciWiringDeclinedWarnLines('taro/sona').join('\n');
+		const text = ciSecretsGuidanceLines('taro/sona', true).join('\n');
 		expect(text).toMatch(
 			/before you deploy from GitHub Actions, set the\s+SETUP_TOKEN and CRON_SECRET/i
 		);
 		expect(text).not.toMatch(/\bif taro\/sona already has/i);
 		expect(text).toContain('gh secret set SETUP_TOKEN -R taro/sona');
 		expect(text).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
+	});
+
+	// gh missing or not signed in: a gh command would fail, so give the Settings path.
+	it('gives the Settings path and a bare openssl command when gh is not usable', () => {
+		const text = ciSecretsGuidanceLines('taro/sona', false).join('\n');
+		expect(text).toContain('taro/sona');
+		expect(text).not.toContain('gh secret set');
+		expect(text).toContain('Settings → Secrets and variables → Actions');
+		expect(text).toMatch(/openssl rand -hex 32$/m);
+		expect(text).toMatch(/SETUP_TOKEN,\s+use the token\s+printed below/);
+		expect(text).toContain('copied back');
+	});
+
+	// Without a repo, `gh secret set` would pick one from the current directory.
+	it('prints no gh command when the repo could not be derived', () => {
+		const text = ciSecretsGuidanceLines(null, true).join('\n');
+		expect(text).not.toContain('gh secret set');
+		expect(text).toContain('Settings → Secrets and variables → Actions');
+		expect(text).toMatch(/openssl rand -hex 32$/m);
 	});
 });
 
@@ -2039,8 +2069,15 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 
 	// Runs setup.ts end to end against stub npx/gh first on PATH, in its own temp
 	// dir (removed afterward). `ghExit` is what every `gh` call returns; `origin`,
-	// when set, makes the work dir a git repo with that origin URL.
-	function runSetupWithStubs(opts: { ghExit: number; origin?: string }) {
+	// when set, makes the work dir a git repo with that origin URL. `acceptWiring`
+	// answers yes to the CI-wiring prompt, and `ghSetExit`, when set, is what
+	// `gh secret set` / `gh variable set` return instead of `ghExit`.
+	function runSetupWithStubs(opts: {
+		ghExit: number;
+		origin?: string;
+		acceptWiring?: boolean;
+		ghSetExit?: number;
+	}) {
 		const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 		const dir = mkdtempSync(join(tmpdir(), 'sona-setup-run-'));
 		const bin = join(dir, 'bin');
@@ -2075,15 +2112,26 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 			);
 			writeFileSync(
 				join(bin, 'gh'),
-				`#!/bin/sh\necho "gh $*" >> "${log}"\nexit ${opts.ghExit}\n`,
+				[
+					'#!/bin/sh',
+					`echo "gh $*" >> "${log}"`,
+					'case "$1 $2" in',
+					`  "secret set"|"variable set") exit ${opts.ghSetExit ?? opts.ghExit} ;;`,
+					'esac',
+					`exit ${opts.ghExit}`,
+					''
+				].join('\n'),
 				{ mode: 0o755 }
 			);
-			// Every prompt takes its default, and the Pages PATCH never leaves the box.
+			// Every prompt takes its default (the CI-wiring one says yes when
+			// `acceptWiring`), and the Pages PATCH never leaves the box.
 			const preload = join(dir, 'preload.mjs');
+			const wiringAnswer = opts.acceptWiring ? 'y' : '';
 			writeFileSync(
 				preload,
 				"import { Interface } from 'node:readline/promises';\n" +
-					"Interface.prototype.question = async () => '';\n" +
+					'Interface.prototype.question = async (q) =>\n' +
+					`  q.includes('GitHub Actions secrets/vars') ? '${wiringAnswer}' : '';\n` +
 					'globalThis.fetch = async () => new Response(\'{"success":true,"result":{}}\');\n'
 			);
 			const res = spawnSync(join(root, 'node_modules', '.bin', 'tsx'), [
@@ -2123,16 +2171,53 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		expect(calls.find((c) => c.includes('d1 create'))).toMatch(/WRANGLER_LOG=warn$/);
 		// No origin, so the CRON_SECRET hint can't name a repo.
 		expect(res.stdout).toContain('openssl rand -hex 32');
-		expect(res.stdout).not.toContain('gh secret set CRON_SECRET');
+		expect(res.stdout).not.toContain('gh secret set');
+		expect(res.stdout).toContain('Settings → Secrets and variables → Actions');
+		expect(res.stdout).toMatch(/SETUP_TOKEN,\s+use the token\s+printed below/);
 	}, 30_000);
 
-	// gh fails here, so setup skips the CI wiring; setup never prints the
-	// CRON_SECRET it generated, so the skip note says how to make one.
-	it('tells a skipped-wiring run how to set CRON_SECRET for the derived repo', () => {
+	// gh fails here, so setup skips the CI wiring and a gh command would fail too;
+	// setup never prints the CRON_SECRET it generated, so the note says how to make one.
+	it('tells a skipped-wiring run to set both secrets in Settings, with no gh command', () => {
 		const { res } = runSetupWithStubs({ ghExit: 1, origin: 'https://github.com/taro/sona.git' });
 		expect(res.status, res.stderr).toBe(0);
 		expect(res.stdout).toContain('Skipping GitHub Actions secret setup');
-		expect(res.stdout).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
+		expect(res.stdout).not.toContain('gh secret set');
+		expect(res.stdout).toContain('Settings → Secrets and variables → Actions');
+		expect(res.stdout).toMatch(/openssl rand -hex 32$/m);
+		expect(res.stdout).toMatch(/SETUP_TOKEN,\s+use the token\s+printed below/);
+		expect(res.stdout).toContain('copied back');
+	}, 30_000);
+
+	// The operator said yes, but the secret puts failed: the deploy would still copy
+	// stale or missing values to Pages, so the run gives the same guidance.
+	it('gives the CI secrets guidance when the accepted wiring fails', () => {
+		const { res, calls } = runSetupWithStubs({
+			ghExit: 0,
+			origin: 'https://github.com/taro/sona.git',
+			acceptWiring: true,
+			ghSetExit: 1
+		});
+		expect(res.status, res.stderr).toBe(0);
+		expect(calls.some((c) => c.startsWith('gh secret set'))).toBe(true);
+		expect(res.stderr).toContain('commands failed');
+		expect(res.stderr).toMatch(/before you deploy from GitHub Actions, set the\s+SETUP_TOKEN/i);
+		expect(res.stderr).toContain('gh secret set SETUP_TOKEN -R taro/sona');
+		expect(res.stderr).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
+		expect(res.stdout).not.toContain('CI deploy secrets/variables are set');
+	}, 30_000);
+
+	// A new fork has nothing to push, so the closing line points at step 1 instead.
+	it('points a run with the CI wiring done at the deploy step', () => {
+		const { res } = runSetupWithStubs({
+			ghExit: 0,
+			origin: 'https://github.com/taro/sona.git',
+			acceptWiring: true
+		});
+		expect(res.status, res.stderr).toBe(0);
+		expect(res.stdout).toContain('CI secrets/variables set');
+		expect(res.stdout).toContain('Deploy as described in step 1');
+		expect(res.stdout).not.toContain('pushing to main will deploy');
 	}, 30_000);
 
 	// With gh installed and authed and a GitHub origin, the CI-wiring prompt runs;
