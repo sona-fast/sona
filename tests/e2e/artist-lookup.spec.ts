@@ -1909,7 +1909,7 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
 
-		await stubLookup(page, { enabled: true, matches: [] });
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: true });
 		await pill(page).click();
 
 		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
@@ -2065,7 +2065,7 @@ test.describe('with a key saved', () => {
 		// A no-match takes it away again, and says so. Only the URL half of that
 		// sentence is pinned: the clash ending's stubs carry a date, so its
 		// no-match names the date here as well.
-		await stubLookup(page, { enabled: true, matches: [] });
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: true });
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(panel(page)).toContainText('Sona cleared the source post URL');
@@ -2095,7 +2095,7 @@ test.describe('with a key saved', () => {
 	 * about the URL alone. */
 	const goesBackToBeingSonas = {
 		refill: xMatchBody({ postedAt: null }),
-		closing: { enabled: true, matches: [] },
+		closing: { enabled: true, matches: [], blueskySearched: true },
 		says: 'Sona cleared the source post URL the last lookup filled, because this lookup filled nothing in its place.'
 	};
 
@@ -2499,6 +2499,26 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).toContainText('artist.example');
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue(filledDate);
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+	});
+
+	// The same for a no-match where Skyseek never answered: the filled post may
+	// be a Bluesky one, and nobody looked for it this time.
+	test('a no-match with Bluesky unsearched keeps what the last lookup filled', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page);
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+
+		await stubLookup(page, {
+			enabled: true,
+			matches: [],
+			blueskySearched: false,
+			skyseekFailure: 'rate_limited'
+		});
+		await pill(page).click();
+		await expect(panel(page)).toContainText("Skyseek didn't return results");
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
@@ -3663,7 +3683,7 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 
 		// A no-match next, which fills neither field and so empties both.
-		await stubLookup(page, { enabled: true, matches: [] });
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: true });
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(panel(page)).toContainText(
@@ -3904,7 +3924,7 @@ test.describe('with a key saved', () => {
 
 		// A second search on that tile, with nothing to show for it. Both fields
 		// have been empty since the move, so this result emptied neither.
-		await stubLookup(page, { enabled: true, matches: [] });
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: true });
 		await tileLookup(page).nth(1).click();
 		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
 		await expect(panel(page)).not.toContainText('the last lookup filled');
@@ -3927,7 +3947,7 @@ test.describe('with a key saved', () => {
 
 		// The second tile's search is still out when the parent moves onto it, so
 		// the move's record is held for the result on its way.
-		const release = await deferredLookup(page, { enabled: true, matches: [] });
+		const release = await deferredLookup(page, { enabled: true, matches: [], blueskySearched: true });
 		await tileLookup(page).nth(1).click();
 		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
 
@@ -3962,7 +3982,7 @@ test.describe('with a key saved', () => {
 		// A second search on that tile, with nothing to show for it either. Both
 		// fields have been empty since the move, so THIS result emptied neither
 		// and the panel has no clearing left to report.
-		const releaseAgain = await deferredLookup(page, { enabled: true, matches: [] });
+		const releaseAgain = await deferredLookup(page, { enabled: true, matches: [], blueskySearched: true });
 		await tileLookup(page).nth(1).click();
 		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
 		releaseAgain();
@@ -4415,7 +4435,7 @@ test.describe('with a key saved', () => {
 
 		// A no-match is a result with nothing to prefill, so it empties both fields
 		// and the panel says so.
-		await stubLookup(page, { enabled: true, matches: [] });
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: true });
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(panel(page)).toContainText(

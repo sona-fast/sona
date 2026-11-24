@@ -1866,15 +1866,23 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
 		// The real handle lookup, so the header read below is the one it sends.
 		resolveBlueskyHandles.mockImplementation(realResolveBlueskyHandles.fn!);
+		// The AppView is asked through the global fetch, stubbed here so the test
+		// stays off the network. The request's own fetch must not carry that call:
+		// SvelteKit's adds this site's origin to a cross-origin request.
 		const appViewHeaders: Record<string, string>[] = [];
-		const fetchFn = (async (url: string, init?: RequestInit) => {
-			if (String(url).startsWith('https://public.api.bsky.app/')) {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: string, init?: RequestInit) => {
 				appViewHeaders.push(init?.headers as Record<string, string>);
 				return new Response(JSON.stringify({ profiles: [] }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' }
 				});
-			}
+			})
+		);
+		const eventFetched: string[] = [];
+		const fetchFn = (async (url: string) => {
+			eventFetched.push(String(url));
 			return imageFetch().fn(url);
 		}) as unknown as typeof fetch;
 		const form = new FormData();
@@ -1884,12 +1892,17 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			body: form
 		});
 
-		await POST({ request, platform, fetch: fetchFn } as never);
+		try {
+			await POST({ request, platform, fetch: fetchFn } as never);
+		} finally {
+			vi.unstubAllGlobals();
+		}
 
 		expect(searchSkyseek.mock.calls[0][2]).toBe('Sona/1.0 (+https://sona.fast; gallery.example)');
 		// Skyseek's owner asked for the hostname; Bluesky did not.
 		expect(appViewHeaders).toHaveLength(1);
 		expect(appViewHeaders[0]['user-agent']).toBe('Sona/1.0 (+https://sona.fast)');
+		expect(eventFetched.filter((url) => url.startsWith('https://public.api.bsky.app/'))).toEqual([]);
 		// FuzzySearch's call is as it was: the key, and no say in the header.
 		expect(searchImage.mock.calls[0]).toHaveLength(3);
 	});
@@ -2337,6 +2350,9 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		expect(resolveBlueskyHandles.mock.calls[0][0]).toEqual(
 			many.slice(0, 25).map((x) => x.did)
 		);
+		// The DIDs and nothing else: handed the request's own fetch, the call
+		// would carry this site's origin to the AppView.
+		expect(resolveBlueskyHandles.mock.calls[0]).toHaveLength(1);
 	});
 
 	// The site's link names a handle, and the AppView named nobody for this

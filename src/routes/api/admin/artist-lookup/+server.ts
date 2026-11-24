@@ -244,7 +244,9 @@ async function searchBluesky(
 		// known only by handle, took one of the places.
 		// Without the site's hostname: Skyseek's owner asked for it, Bluesky did not.
 		const dids = [...new Set(posts.map((post) => post.did))].slice(0, SKYSEEK_MAX_MATCHES);
-		const handles = await resolveBlueskyHandles(dids, fetchFn);
+		// The global fetch, not the request's: SvelteKit's adds this site's origin
+		// to a cross-origin request, and the AppView is told only the DIDs.
+		const handles = await resolveBlueskyHandles(dids);
 		const matches = posts
 			.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null))
 			.filter((match) => !isOwnBlueskyPost(match, own))

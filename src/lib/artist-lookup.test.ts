@@ -2531,7 +2531,11 @@ describe('stateFromResponse', () => {
 			expect(await keeps({ matches: [bluesky], fuzzysearchFailure: 'rate_limited' })).toBe(false);
 			// Both services answered and nothing is confident: a completed answer.
 			expect(await keeps({ matches: [lead] })).toBe(false);
+			// A completed no-match clears; one where Skyseek never answered does not.
 			expect(resultKeepsLastPrefill({ kind: 'no_match', blueskySearched: true, skyseekFailure: null })).toBe(false);
+			expect(
+				resultKeepsLastPrefill({ kind: 'no_match', blueskySearched: false, skyseekFailure: 'rate_limited' })
+			).toBe(true);
 			expect(resultKeepsLastPrefill({ kind: 'failed', reason: 'rate_limited', sent: true })).toBe(false);
 		});
 

@@ -706,12 +706,16 @@ export function noMatchCanRetry(state: Extract<LookupState, { kind: 'no_match' }
 
 /**
  * Whether a result leaves the form's last prefill where it is, the way a failed
- * lookup does. FuzzySearch did not answer, and nothing that came back is
+ * lookup does: one of the two services did not answer, and what the other gave
+ * is no replacement. Either FuzzySearch did not answer and nothing that came back is
  * confident enough to fill from: the rows are leads to look at, and they say
  * nothing against the post the last lookup filled in. A completed answer with
  * no confident row is different, and replaces what was there.
  */
 export function resultKeepsLastPrefill(state: LookupState): boolean {
+	// A no-match with Bluesky unsearched is half an answer: the post the last
+	// lookup filled in may be a Bluesky one that nobody looked for this time.
+	if (state.kind === 'no_match') return !state.blueskySearched;
 	if (state.kind !== 'results' || !state.data.fuzzysearchFailure) return false;
 	return !state.data.matches.some(isConfident);
 }
