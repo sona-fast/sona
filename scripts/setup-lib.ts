@@ -900,6 +900,56 @@ export function resendSecretWarnLines(failed: string[], project: string): string
 }
 
 /**
+ * The "Deploy" next step. Setup commits nothing, so a fork with nothing to push
+ * gets no deploy from `git push`; the workflow's manual run starts one.
+ */
+export function deployStepLines(repoSlug: string | null): string[] {
+	// No slug: a bare `gh workflow run` picks a repo from the current directory,
+	// which may be the wrong one, so give only the Actions tab path.
+	const manual = repoSlug
+		? [
+				`       gh workflow run deploy.yml --ref main -R ${repoSlug}`,
+				'     (or GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow)'
+			]
+		: ['       GitHub → Actions → "Deploy to Cloudflare Pages" → Run workflow'];
+	return [
+		'  1. Deploy:  push a commit to main. With nothing to push, run the workflow by hand.',
+		'     On a new fork, enable workflows in the Actions tab first. Then run:',
+		...manual
+	];
+}
+
+/**
+ * Printed whenever setup did not set the CI repository secrets: the operator
+ * declined the wiring, a `gh` put failed, or the wiring was skipped. deploy.yml
+ * re-puts SETUP_TOKEN and CRON_SECRET from the repository secrets before every
+ * deploy, and a fork's first CI deploy doesn't bind the values setup put on the
+ * Pages project, so the repository secrets are needed on a first run too.
+ * `gh` commands are given only with a repo to pass as -R and a usable `gh`.
+ */
+export function ciSecretsGuidanceLines(repoSlug: string | null, ghUsable: boolean): string[] {
+	const commands =
+		repoSlug && ghUsable
+			? [
+					`  Set the new token:  gh secret set SETUP_TOKEN -R ${repoSlug}`,
+					`  CRON_SECRET is not printed. Generate and set one:  openssl rand -hex 32 | gh secret set CRON_SECRET -R ${repoSlug}`
+				]
+			: [
+					'  Set both under Settings → Secrets and variables → Actions. For SETUP_TOKEN,',
+					'  use the token printed below. CRON_SECRET is not printed. Generate one with:',
+					'    openssl rand -hex 32'
+				];
+	const on = repoSlug ? ` on ${repoSlug}` : '';
+	return [
+		'  Before you deploy from GitHub Actions, set the SETUP_TOKEN and CRON_SECRET',
+		`  repository secrets${on}. The deploy copies them to the Pages project, and a first`,
+		'  CI deploy does not pick up the values setup stored there. Values left from an',
+		'  earlier run get copied back, and the wizard then rejects the token printed below.',
+		...commands
+	];
+}
+
+/**
  * The end-of-run "Telegram sticker import:" line. `enabled (bot token set)` is a
  * claim about a secret put, so it needs the put's result — a failed put leaves
  * Telegram import hidden, and saying "enabled" would send the operator hunting in

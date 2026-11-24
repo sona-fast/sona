@@ -63,6 +63,8 @@ import {
 	storageSummaryLines,
 	telegramSummaryLine,
 	resendSecretWarnLines,
+	deployStepLines,
+	ciSecretsGuidanceLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -833,15 +835,11 @@ async function main() {
 			false
 		);
 		if (!doIt) {
-			// deploy.yml re-puts SETUP_TOKEN from the repo secret before every deploy,
-			// so a secret left from an earlier run would replace the token set above.
-			console.warn(
-				'\n⚠ The next deploy replaces the Pages SETUP_TOKEN with the SETUP_TOKEN repository secret.'
-			);
-			console.warn(
-				`  Set that secret to the new token printed below (gh secret set SETUP_TOKEN -R ${repoSlug}),`
-			);
-			console.warn('  or the wizard will reject it.');
+			console.warn('\n⚠ Skipped the GitHub Actions wiring.');
+			for (const line of ciSecretsGuidanceLines(repoSlug, true)) console.warn(line);
+			console.warn('  A CI deploy also needs the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID');
+			console.warn('  repository secrets and the repository variables. See README, Quick start');
+			console.warn('  step 3.');
 		} else {
 			// -R repoSlug on every call: a fork has two remotes (origin + upstream
 			// sona), so a bare `gh secret set` errors "multiple remotes detected".
@@ -862,10 +860,12 @@ async function main() {
 			ciSecretsSet = ok;
 			if (ok)
 				console.log(`\n✔ CI secrets/variables set (${entries.map((e) => e.name).join(', ')}).`);
-			else
+			else {
 				console.warn(
 					'\n⚠ Some `gh` secret/variable commands failed — check `gh` auth/permissions and set them manually.'
 				);
+				for (const line of ciSecretsGuidanceLines(repoSlug, true)) console.warn(line);
+			}
 		}
 	} else {
 		console.log(`\nℹ Skipping GitHub Actions secret setup: ${gh.reason}.`);
@@ -876,6 +876,9 @@ async function main() {
 			'  secrets and CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL, FURTRACK_MODE variables'
 		);
 		console.log('  (Settings → Secrets and variables → Actions).');
+		// Not eligible means gh is missing or signed out, or there is no repo slug,
+		// so a gh command can't be given here.
+		for (const line of ciSecretsGuidanceLines(repoSlug, false)) console.log(line);
 	}
 
 	rl.close();
@@ -904,7 +907,7 @@ async function main() {
 	for (const line of resendSecretWarnLines(resendFailed, project)) console.warn(line);
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
-	console.log('  1. Deploy:  git push');
+	for (const line of deployStepLines(repoSlug)) console.log(line);
 	console.log(`  2. Open  https://${project}.pages.dev/admin/setup  and finish in the wizard.`);
 	if (useR2 && r2PublicUrl) {
 		for (const line of cdnAttachmentLines(r2PublicUrl, bucket, domain)) {
@@ -951,7 +954,7 @@ async function main() {
 		console.log(line);
 	}
 	if (ciSecretsSet) {
-		console.log('\n  CI deploy secrets/variables are set — pushing to main will deploy.');
+		console.log('\n  CI deploy secrets/variables are set. Deploy as described in step 1.');
 	} else {
 		console.log('\n  Before deploying via GitHub, set the CI secrets/variables (see the note above).');
 	}

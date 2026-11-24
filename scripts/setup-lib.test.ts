@@ -5,6 +5,9 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import Database from 'better-sqlite3';
 import {
 	buildMigrationSql,
 	parseAppliedMigrations,
@@ -42,6 +45,8 @@ import {
 	storageSummaryLines,
 	telegramSummaryLine,
 	resendSecretWarnLines,
+	deployStepLines,
+	ciSecretsGuidanceLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -146,6 +151,41 @@ describe('buildSeedSql', () => {
 		const sql = buildSeedSql({ provider: 'r2', siteUrl: 'https://taro.surf' });
 		expect(sql).toMatch(/^INSERT OR IGNORE INTO site_settings \(key,value\) VALUES \('storageProvider','r2'\);/);
 		expect(sql.match(/'storageProvider'/g)).toHaveLength(1);
+	});
+
+	// The same statement, run against the real table shape (drizzle/0001), so the
+	// claim holds for what SQLite does with it and not only for how it reads.
+	describe('run against site_settings', () => {
+		const seeded = (existing: string | null, input: Parameters<typeof buildSeedSql>[0]) => {
+			const db = new Database(':memory:');
+			try {
+				db.exec('CREATE TABLE `site_settings` (`key` text PRIMARY KEY NOT NULL, `value` text NOT NULL);');
+				if (existing) {
+					db.prepare('INSERT INTO site_settings (key,value) VALUES (?,?)').run('storageProvider', existing);
+				}
+				db.exec(buildSeedSql(input));
+				const rows = db.prepare('SELECT key, value FROM site_settings').all() as {
+					key: string;
+					value: string;
+				}[];
+				return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+			} finally {
+				db.close();
+			}
+		};
+
+		it('keeps a stored uploadthing provider when the re-run chose r2', () => {
+			expect(seeded('uploadthing', { provider: 'r2' }).storageProvider).toBe('uploadthing');
+		});
+
+		it('still updates the other settings on that re-run', () => {
+			const rows = seeded('uploadthing', { provider: 'r2', siteUrl: 'https://taro.surf' });
+			expect(rows).toEqual({ storageProvider: 'uploadthing', siteUrl: 'https://taro.surf' });
+		});
+
+		it('seeds the chosen provider into an empty table', () => {
+			expect(seeded(null, { provider: 'r2' }).storageProvider).toBe('r2');
+		});
 	});
 
 	it('seeds siteUrl from the domain answer alongside storageProvider', () => {
@@ -1379,6 +1419,74 @@ describe('storageSummaryLines', () => {
 	});
 });
 
+describe('deployStepLines', () => {
+	// Setup commits nothing, so `git push` alone deploys nothing on a fresh fork.
+	it('also gives the Actions tab path, for a deploy without the gh CLI', () => {
+		expect(deployStepLines('taro/sona').join('\n')).toContain('Run workflow');
+	});
+
+	// Without -R, gh picks a repo from the current directory, which may be the wrong one.
+	it('gives only the Actions tab path when the repo could not be derived', () => {
+		const text = deployStepLines(null).join('\n');
+		expect(text).not.toContain('gh workflow run');
+		expect(text).toContain('Run workflow');
+		expect(text).not.toContain('(or');
+	});
+
+	it('names the workflow as deploy.yml calls itself, so the Actions tab entry matches', () => {
+		const here = dirname(fileURLToPath(import.meta.url));
+		const workflow = readFileSync(join(here, '..', '.github', 'workflows', 'deploy.yml'), 'utf8');
+		const name = /^name:\s*(.+)$/m.exec(workflow)?.[1].trim();
+		expect(name).toBeTruthy();
+		expect(deployStepLines(null).join('\n')).toContain(`"${name}"`);
+		expect(workflow).toMatch(/^\s*workflow_dispatch:/m);
+	});
+
+	// The operator has to read the enable-workflows note before the command it applies to.
+	it('says to enable workflows before the manual-run command', () => {
+		for (const slug of ['taro/sona', null]) {
+			const lines = deployStepLines(slug);
+			const enable = lines.findIndex((l) => l.includes('enable workflows'));
+			const run = lines.findIndex((l) => /gh workflow run|Run workflow/.test(l));
+			expect(enable).toBeGreaterThanOrEqual(0);
+			expect(enable).toBeLessThan(run);
+		}
+	});
+});
+
+describe('ciSecretsGuidanceLines', () => {
+	// A first CI deploy doesn't bind the values setup put on Pages, so the repo
+	// secrets are needed on every run, not only when old ones exist.
+	it('tells the operator to set both secrets before a CI deploy, with no condition', () => {
+		const text = ciSecretsGuidanceLines('taro/sona', true).join('\n');
+		expect(text).toMatch(
+			/before you deploy from GitHub Actions, set the\s+SETUP_TOKEN and CRON_SECRET/i
+		);
+		expect(text).not.toMatch(/\bif taro\/sona already has/i);
+		expect(text).toContain('gh secret set SETUP_TOKEN -R taro/sona');
+		expect(text).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
+	});
+
+	// gh missing or not signed in: a gh command would fail, so give the Settings path.
+	it('gives the Settings path and a bare openssl command when gh is not usable', () => {
+		const text = ciSecretsGuidanceLines('taro/sona', false).join('\n');
+		expect(text).toContain('taro/sona');
+		expect(text).not.toContain('gh secret set');
+		expect(text).toContain('Settings → Secrets and variables → Actions');
+		expect(text).toMatch(/openssl rand -hex 32$/m);
+		expect(text).toMatch(/SETUP_TOKEN,\s+use the token\s+printed below/);
+		expect(text).toContain('copied back');
+	});
+
+	// Without a repo, `gh secret set` would pick one from the current directory.
+	it('prints no gh command when the repo could not be derived', () => {
+		const text = ciSecretsGuidanceLines(null, true).join('\n');
+		expect(text).not.toContain('gh secret set');
+		expect(text).toContain('Settings → Secrets and variables → Actions');
+		expect(text).toMatch(/openssl rand -hex 32$/m);
+	});
+});
+
 describe('resendSecretWarnLines', () => {
 	it('stays silent when every supplied Resend secret landed', () => {
 		expect(resendSecretWarnLines([], 'taro-surf')).toEqual([]);
@@ -1959,9 +2067,17 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		expect(setupCode).toMatch(/delete readableEnv\.WRANGLER_LOG/);
 	});
 
-	// The source pins above can't see which env object reaches the child; run
-	// setup against stub npx/gh and read the env each call actually got.
-	it('runs both --command reads without the operator\'s WRANGLER_LOG', () => {
+	// Runs setup.ts end to end against stub npx/gh first on PATH, in its own temp
+	// dir (removed afterward). `ghExit` is what every `gh` call returns; `origin`,
+	// when set, makes the work dir a git repo with that origin URL. `acceptWiring`
+	// answers yes to the CI-wiring prompt, and `ghSetExit`, when set, is what
+	// `gh secret set` / `gh variable set` return instead of `ghExit`.
+	function runSetupWithStubs(opts: {
+		ghExit: number;
+		origin?: string;
+		acceptWiring?: boolean;
+		ghSetExit?: number;
+	}) {
 		const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 		const dir = mkdtempSync(join(tmpdir(), 'sona-setup-run-'));
 		const bin = join(dir, 'bin');
@@ -1970,6 +2086,12 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 		try {
 			mkdirSync(bin);
 			mkdirSync(join(work, 'drizzle'), { recursive: true });
+			if (opts.origin) {
+				for (const args of [['init', '-q'], ['remote', 'add', 'origin', opts.origin]]) {
+					const git = spawnSync('git', args, { cwd: work, encoding: 'utf8' });
+					expect(git.status, git.stderr).toBe(0);
+				}
+			}
 			writeFileSync(join(work, 'wrangler.toml.example'), readFileSync(join(root, 'wrangler.toml.example')));
 			writeFileSync(join(work, 'drizzle', '0000_init.sql'), 'SELECT 1;');
 			// Answers what setup parses: the whoami banner, a database_id, and an
@@ -1988,13 +2110,28 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 				].join('\n'),
 				{ mode: 0o755 }
 			);
-			writeFileSync(join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
-			// Every prompt takes its default, and the Pages PATCH never leaves the box.
+			writeFileSync(
+				join(bin, 'gh'),
+				[
+					'#!/bin/sh',
+					`echo "gh $*" >> "${log}"`,
+					'case "$1 $2" in',
+					`  "secret set"|"variable set") exit ${opts.ghSetExit ?? opts.ghExit} ;;`,
+					'esac',
+					`exit ${opts.ghExit}`,
+					''
+				].join('\n'),
+				{ mode: 0o755 }
+			);
+			// Every prompt takes its default (the CI-wiring one says yes when
+			// `acceptWiring`), and the Pages PATCH never leaves the box.
 			const preload = join(dir, 'preload.mjs');
+			const wiringAnswer = opts.acceptWiring ? 'y' : '';
 			writeFileSync(
 				preload,
 				"import { Interface } from 'node:readline/promises';\n" +
-					"Interface.prototype.question = async () => '';\n" +
+					'Interface.prototype.question = async (q) =>\n' +
+					`  q.includes('GitHub Actions secrets/vars') ? '${wiringAnswer}' : '';\n` +
 					'globalThis.fetch = async () => new Response(\'{"success":true,"result":{}}\');\n'
 			);
 			const res = spawnSync(join(root, 'node_modules', '.bin', 'tsx'), [
@@ -2015,16 +2152,90 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 				stdio: ['ignore', 'pipe', 'pipe'],
 				timeout: 30_000
 			});
-			expect(res.status, res.stderr).toBe(0);
 			const calls = readFileSync(log, 'utf8').split('\n');
-			const reads = calls.filter((c) => c.includes('--command'));
-			expect(reads).toHaveLength(2);
-			for (const read of reads) expect(read).toMatch(/WRANGLER_LOG=unset$/);
-			// Non-vacuity: a call setup doesn't read still inherits the operator's value.
-			expect(calls.find((c) => c.includes('d1 create'))).toMatch(/WRANGLER_LOG=warn$/);
+			return { res, calls };
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	}
+
+	// The source pins above can't see which env object reaches the child; run
+	// setup against stub npx/gh and read the env each call actually got.
+	it('runs both --command reads without the operator\'s WRANGLER_LOG', () => {
+		const { res, calls } = runSetupWithStubs({ ghExit: 1 });
+		expect(res.status, res.stderr).toBe(0);
+		const reads = calls.filter((c) => c.includes('--command'));
+		expect(reads).toHaveLength(2);
+		for (const read of reads) expect(read).toMatch(/WRANGLER_LOG=unset$/);
+		// Non-vacuity: a call setup doesn't read still inherits the operator's value.
+		expect(calls.find((c) => c.includes('d1 create'))).toMatch(/WRANGLER_LOG=warn$/);
+		// No origin, so the CRON_SECRET hint can't name a repo.
+		expect(res.stdout).toContain('openssl rand -hex 32');
+		expect(res.stdout).not.toContain('gh secret set');
+		expect(res.stdout).toContain('Settings → Secrets and variables → Actions');
+		expect(res.stdout).toMatch(/SETUP_TOKEN,\s+use the token\s+printed below/);
+	}, 30_000);
+
+	// gh fails here, so setup skips the CI wiring and a gh command would fail too;
+	// setup never prints the CRON_SECRET it generated, so the note says how to make one.
+	it('tells a skipped-wiring run to set both secrets in Settings, with no gh command', () => {
+		const { res } = runSetupWithStubs({ ghExit: 1, origin: 'https://github.com/taro/sona.git' });
+		expect(res.status, res.stderr).toBe(0);
+		expect(res.stdout).toContain('Skipping GitHub Actions secret setup');
+		expect(res.stdout).not.toContain('gh secret set');
+		expect(res.stdout).toContain('Settings → Secrets and variables → Actions');
+		expect(res.stdout).toMatch(/openssl rand -hex 32$/m);
+		expect(res.stdout).toMatch(/SETUP_TOKEN,\s+use the token\s+printed below/);
+		expect(res.stdout).toContain('copied back');
+	}, 30_000);
+
+	// The operator said yes, but the secret puts failed: the deploy would still copy
+	// stale or missing values to Pages, so the run gives the same guidance.
+	it('gives the CI secrets guidance when the accepted wiring fails', () => {
+		const { res, calls } = runSetupWithStubs({
+			ghExit: 0,
+			origin: 'https://github.com/taro/sona.git',
+			acceptWiring: true,
+			ghSetExit: 1
+		});
+		expect(res.status, res.stderr).toBe(0);
+		expect(calls.some((c) => c.startsWith('gh secret set'))).toBe(true);
+		expect(res.stderr).toContain('commands failed');
+		expect(res.stderr).toMatch(/before you deploy from GitHub Actions, set the\s+SETUP_TOKEN/i);
+		expect(res.stderr).toContain('gh secret set SETUP_TOKEN -R taro/sona');
+		expect(res.stderr).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
+		expect(res.stdout).not.toContain('CI deploy secrets/variables are set');
+	}, 30_000);
+
+	// A new fork has nothing to push, so the closing line points at step 1 instead.
+	it('points a run with the CI wiring done at the deploy step', () => {
+		const { res } = runSetupWithStubs({
+			ghExit: 0,
+			origin: 'https://github.com/taro/sona.git',
+			acceptWiring: true
+		});
+		expect(res.status, res.stderr).toBe(0);
+		expect(res.stdout).toContain('CI secrets/variables set');
+		expect(res.stdout).toContain('Deploy as described in step 1');
+		expect(res.stdout).not.toContain('pushing to main will deploy');
+	}, 30_000);
+
+	// With gh installed and authed and a GitHub origin, the CI-wiring prompt runs;
+	// its default is no. The run must then print the repo-scoped deploy command and
+	// the warning naming both repo secrets to set.
+	it('prints the repo-scoped deploy command and the declined-wiring warning', () => {
+		const { res, calls } = runSetupWithStubs({ ghExit: 0, origin: 'https://github.com/taro/sona.git' });
+		expect(res.status, res.stderr).toBe(0);
+		expect(res.stdout).toContain('gh workflow run deploy.yml --ref main -R taro/sona');
+		// A new fork has workflows off until the owner turns them on.
+		expect(res.stdout).toContain('enable workflows');
+		expect(res.stderr).toContain('gh secret set SETUP_TOKEN -R taro/sona');
+		expect(res.stderr).toContain('openssl rand -hex 32 | gh secret set CRON_SECRET -R taro/sona');
+		// The closing line's "see the note above" also covers the deploy secrets.
+		expect(res.stderr).toContain('CLOUDFLARE_API_TOKEN');
+		// The stubs answered, and a declined prompt sets no secret.
+		expect(calls).toContain('gh auth status');
+		expect(calls.some((c) => c.startsWith('gh secret set'))).toBe(false);
 	}, 30_000);
 
 	it('passes the migration and seed SQL as files, written through the private helper', () => {
