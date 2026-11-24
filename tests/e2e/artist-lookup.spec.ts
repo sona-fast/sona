@@ -4452,6 +4452,40 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
+	// Kept only while the fields are that tile's own. With the tile that filled
+	// them removed in existing mode, the next parent's partial answer must not
+	// inherit another file's URL and date on the way back to a new piece.
+	test('a group-mode round trip does not hand a removed tile\'s prefill to the next parent', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+		// With two tiles each has its own lookup button; the first is the parent.
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+
+		await stubLookup(
+			page,
+			matchedBody({ matches: [BLUESKY_LEAD], localArtists: [], fuzzysearchFailure: 'rate_limited' })
+		);
+		const answered = page.waitForResponse('**/api/admin/artist-lookup');
+		await tileLookup(page).nth(1).click();
+		await answered;
+
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(page.getByRole('combobox', { name: 'Variant of' })).toBeVisible();
+		await page.getByRole('button', { name: 'Remove front.png' }).click();
+		await expect(page.getByRole('button', { name: 'Remove front.png' })).toHaveCount(0);
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'New piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+	});
+
 	// Close puts the lookup back to idle, and the idle arm draws whatever that
 	// lookup emptied. The record left standing, Close left the panel on screen as
 	// a bordered card holding that sentence, with no way to dismiss it (SONA-220).

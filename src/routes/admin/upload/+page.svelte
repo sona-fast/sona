@@ -549,6 +549,10 @@
 	// below instead (SONA-156). The tag is that record — it goes up with the
 	// prefill and comes off on the first keystroke.
 	let sharedFilled = $state<LookupFields>({});
+	// The tile whose lookup last wrote one of the two shared fields. A result
+	// that keeps the last prefill may only keep its own tile's: another tile's
+	// URL and date describe another file.
+	let prefillOwnerKey: number | null = null;
 	// Held-ness of the source post URL at the moment the prefill ran, beside the
 	// record of what it wrote. Read live, the clash sentence flips as the
 	// operator types: clearing a pasted URL afterwards would make the panel say
@@ -942,6 +946,7 @@
 		}
 		sourceTagged = false;
 		dateTagged = false;
+		prefillOwnerKey = null;
 		sharedFilled = {};
 		sharedUrlHeld = false;
 		sharedCleared = {};
@@ -1033,7 +1038,12 @@
 		// what this move did to the fields.
 		// A partial answer with FuzzySearch missing and no confident row is read
 		// the same way: its Bluesky leads are shown, and the fields stay.
-		if ((next.kind !== 'results' && next.kind !== 'no_match') || resultKeepsLastPrefill(next)) {
+		// Only this tile's own prefill is kept: one another tile's lookup wrote
+		// describes another file, and goes the way a completed answer sends it.
+		const parentKey = tiles[parentIndex]?.key ?? null;
+		const keeps =
+			resultKeepsLastPrefill(next) && (prefillOwnerKey === null || prefillOwnerKey === parentKey);
+		if ((next.kind !== 'results' && next.kind !== 'no_match') || keeps) {
 			sharedCleared = { ...emptied };
 			return wrote;
 		}
@@ -1077,6 +1087,8 @@
 			cleared.commissionedAt = true;
 		}
 		sharedCleared = cleared;
+		if (wrote.sourcePostUrl || wrote.commissionedAt) prefillOwnerKey = parentKey;
+		else if (!sourceTagged && !dateTagged) prefillOwnerKey = null;
 		return wrote;
 	}
 
@@ -1097,7 +1109,9 @@
 		// A result that left the last prefill alone has nothing to re-derive: the
 		// reset below would empty fields this result never refills. Left as they
 		// are, the way a failed lookup's are.
-		if (parent && resultKeepsLastPrefill(parent)) return;
+		// Only while the fields are this tile's own: with the tile that filled
+		// them removed, they describe another file and go through the reset.
+		if (parent && resultKeepsLastPrefill(parent) && prefillOwnerKey === tiles[parentIndex]?.key) return;
 		// The site the panel's own sentence names, read the way the panel reads it
 		// so the two say the same post.
 		const site = pickPrefillMatch(data.matches)?.site ?? null;

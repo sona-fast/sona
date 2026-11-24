@@ -530,14 +530,18 @@ export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: Lo
 	return null;
 }
 
+/** The first handle the comparison could read, without its '@'. Not always the
+ * first one listed: an entry that is only punctuation names nobody. */
+function usableHandle(match: LookupMatch): string {
+	const handle = match.handles.find((h) => looseHandle(match.site, h)) ?? '';
+	return handle.trim().replace(/^@+/, '');
+}
+
 /** How the callout names one side of `differingAccounts`: its handle, or the
  * local artist it names when it has none. */
 export function differingAccountName(data: LookupResponse, match: LookupMatch): string {
 	const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(match));
-	// The first handle the comparison could read, which is not always the first
-	// one listed: an entry that is only punctuation names nobody.
-	const handle = match.handles.find((h) => looseHandle(match.site, h)) ?? '';
-	return handle.trim().replace(/^@+/, '') || (hit?.artists[0]?.name ?? '');
+	return usableHandle(match) || (hit?.artists[0]?.name ?? '');
 }
 
 /**
@@ -576,7 +580,7 @@ export function addOtherPosterSeed(
 	if (hit?.artists.length) return null;
 	const mine = artistRows.flatMap(looseHandles);
 	if (looseHandles(other).some((h) => mine.includes(h))) return null;
-	const handle = matchHandle(other);
+	const handle = usableHandle(other);
 	if (!handle) return null;
 	return { handle, site: other.site, linkable: LINKABLE_SITES.includes(other.site) };
 }

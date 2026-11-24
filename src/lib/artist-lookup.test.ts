@@ -1957,6 +1957,14 @@ describe('stateFromResponse', () => {
 			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
 		});
 
+		it('offers the prefill poster by the first handle that reads as one', () => {
+			const data = response({
+				matches: [match({ handles: ['@', 'alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+		});
+
 		it('offers nothing extra when the differing poster is not the one that fills the form', () => {
 			// The prefill row is a FurAffinity post by the local artist; the
 			// differing Twitter account is another row and fills nothing.
@@ -2237,7 +2245,13 @@ describe('stateFromResponse', () => {
 
 		it('compares across sites only: two posters on one site are not a disagreement between sources', () => {
 			const data = response({
-				matches: [sky('alice.example'), sky('bob.example', { siteId: `${DID}/3mwwswjznmk26` })]
+				matches: [
+					sky('alice.example'),
+					sky('bob.example', {
+						siteId: 'did:plc:bbbbbbbbbbbbbbbbbbbbbbbb/3mwwswjznmk26',
+						postUrl: 'https://bsky.app/profile/did:plc:bbbbbbbbbbbbbbbbbbbbbbbb/post/3mwwswjznmk26'
+					})
+				]
 			});
 			expect(differingAccounts(data)).toBeNull();
 		});
