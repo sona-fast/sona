@@ -561,7 +561,16 @@ export function addOtherPosterSeed(
 	// another handle; one whose handle reads like that artist's is the same person.
 	const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(other));
 	if (hit?.artists.length) return null;
-	const mine = looseHandles(own);
+	// Every confident row that names the artist, not only the first: the artist
+	// can be known under one handle on one site and another on the next.
+	const artistId = candidateArtists(data)[0].id;
+	const mine = data.matches
+		.filter((x, index) => {
+			if (!isConfident(x)) return false;
+			const hits = data.localArtists.find((h) => h.matchIndex === index)?.artists ?? [];
+			return hits.some((a) => a.id === artistId);
+		})
+		.flatMap(looseHandles);
 	if (looseHandles(other).some((h) => mine.includes(h))) return null;
 	const handle = matchHandle(other);
 	if (!handle) return null;

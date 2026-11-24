@@ -1910,6 +1910,32 @@ describe('stateFromResponse', () => {
 			expect(addOtherPosterSeed(same)).toBeNull();
 		});
 
+		it('offers nothing when the prefill reads like any of the artist\'s rows, not only the first', () => {
+			// Bob is the artist on Twitter and, as alice.example, on Bluesky. The
+			// FurAffinity "alice" that fills the form is that same person, so the
+			// warning about Carol must not come with an offer to add alice.
+			const data = response({
+				matches: [
+					match({ handles: ['alice'] }),
+					match({ site: 'Twitter', siteId: '99', handles: ['bob'], distance: 1, band: 'strong' }),
+					{ ...bluesky, handles: ['alice.example'] },
+					{
+						...bluesky,
+						siteId: 'did:plc:cccccccccccccccccccccccc/3carol',
+						postUrl: 'https://bsky.app/profile/did:plc:cccccccccccccccccccccccc/post/3carol',
+						handles: ['carol.example']
+					}
+				],
+				localArtists: [
+					{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] },
+					{ matchIndex: 2, artists: [{ id: 7, name: 'Bob' }] }
+				]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
 		it('offers nothing extra when the differing poster is not the one that fills the form', () => {
 			// The prefill row is a FurAffinity post by the local artist; the
 			// differing Twitter account is another row and fills nothing.

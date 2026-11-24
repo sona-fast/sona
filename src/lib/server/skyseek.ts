@@ -90,8 +90,9 @@ export interface SkyseekMatch {
 	did: string;
 	/** The post's record key in that account's repo. */
 	rkey: string;
-	/** How far the post's image is from the one searched for, on the scale
-	 * FuzzySearch uses (a Hamming distance; 0 is the same picture). Null when
+	/** How far the post's image is from the one searched for; 0 is the same
+	 * picture. Read as a Hamming distance on the scale FuzzySearch uses, which
+	 * is inferred from observed answers and not documented by Skyseek. Null when
 	 * the answer carries none. */
 	distance: number | null;
 	/** When the post was made, as an ISO date-time, or null when unknown. */
@@ -363,9 +364,11 @@ export async function resolveBlueskyHandles(
 /**
  * A Skyseek match as a row in the lookup's match list.
  *
- * The distance is Skyseek's own, on FuzzySearch's scale, so it is banded the
- * same way: an exact or strong Bluesky match is a confident one like any other,
- * and can be the match the form is filled from. One with no distance carries no
+ * The distance is Skyseek's own and is banded the way FuzzySearch's is: an
+ * exact or strong Bluesky match is a confident one like any other, and can be
+ * the match the form is filled from. That the two services share a scale is
+ * inferred from observed answers, not documented; 0 is an identical hash on
+ * any scale, and the strong band rests on the inference. One with no distance carries no
  * band and stays a lead. Skyseek reports no rating, so a Bluesky row never
  * raises one.
  *

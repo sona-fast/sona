@@ -2335,7 +2335,7 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 
 		expect(resolveBlueskyHandles).toHaveBeenCalledTimes(1);
 		expect(resolveBlueskyHandles.mock.calls[0][0]).toEqual(
-			many.slice(0, SKYSEEK_MAX_MATCHES).map((x) => x.did)
+			many.slice(0, 25).map((x) => x.did)
 		);
 	});
 
@@ -2413,11 +2413,15 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 
 		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
 
+		// 25 as a literal: it is the AppView's own limit on one request, and a
+		// test that read the constant would follow it past that limit.
+		expect(body.matches).toHaveLength(25);
 		expect(body.matches.map((x) => x.siteId)).toEqual(
-			many.slice(0, SKYSEEK_MAX_MATCHES).map((x) => `${x.did}/${x.rkey}`)
+			many.slice(0, 25).map((x) => `${x.did}/${x.rkey}`)
 		);
-		expect(resolveBlueskyHandles.mock.calls[0][0]).toEqual(
-			many.slice(0, SKYSEEK_MAX_MATCHES).map((x) => x.did)
-		);
+		expect(body.matches.map((x) => x.siteId)).not.toContain(`${many[25].did}/${many[25].rkey}`);
+		const asked = resolveBlueskyHandles.mock.calls[0][0];
+		expect(asked).toEqual(many.slice(0, 25).map((x) => x.did));
+		expect(asked).not.toContain(many[25].did);
 	});
 });
