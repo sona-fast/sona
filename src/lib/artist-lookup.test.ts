@@ -2129,6 +2129,14 @@ describe('stateFromResponse', () => {
 		// AppView resolved no handle, but the row matched Bob by DID: it stands for
 		// Bob, so an exact match for another account elsewhere still differs, and
 		// the callout names that side by the artist.
+		it('names a row by the first handle the comparison could read', () => {
+			const data = response({ matches: [match({ handles: ['@', 'alice'] }), sky('bob.example')] });
+			const found = differingAccounts(data);
+			if (!found) throw new Error('expected a disagreement');
+			expect(differingAccountName(data, found.a)).toBe('alice');
+			expect(differingAccountName(data, found.b)).toBe('bob.example');
+		});
+
 		it('keeps a Bluesky row linked to a local artist by DID in the comparison when no handle resolved', () => {
 			const data = response({
 				matches: [match({ handles: ['alice'] }), sky(null)],

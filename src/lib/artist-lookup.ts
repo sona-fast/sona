@@ -534,7 +534,10 @@ export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: Lo
  * local artist it names when it has none. */
 export function differingAccountName(data: LookupResponse, match: LookupMatch): string {
 	const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(match));
-	return matchHandle(match) || (hit?.artists[0]?.name ?? '');
+	// The first handle the comparison could read, which is not always the first
+	// one listed: an entry that is only punctuation names nobody.
+	const handle = match.handles.find((h) => looseHandle(match.site, h)) ?? '';
+	return handle.trim().replace(/^@+/, '') || (hit?.artists[0]?.name ?? '');
 }
 
 /**
