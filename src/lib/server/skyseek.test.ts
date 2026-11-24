@@ -180,6 +180,20 @@ describe('normalizeSkyseekMatches', () => {
 		expect(borrowed?.[0].postedAt).toBe(new Date(FIRST * 1000).toISOString());
 	});
 
+	it.each(['did:web:artist..example', 'did:web:.artist.example', 'did:web:-artist.example', 'did:web:artist', 'did:web:artist.example.'])(
+		'drops %s, whose hostname is not one',
+		(repo) => {
+			const matches = normalizeSkyseekMatches(
+				answer(
+					{ created_at: FIRST, distance: 0, repo, rkey: 'a' },
+					{ created_at: FIRST, distance: 0, repo: 'did:web:art.artist-site.example', rkey: 'b' }
+				),
+				NOW
+			);
+			expect(matches?.map((x) => x.did)).toEqual(['did:web:art.artist-site.example']);
+		}
+	);
+
 	it('keeps a did:web account', () => {
 		const matches = normalizeSkyseekMatches(
 			answer({ created_at: FIRST, repo: 'did:web:artist.example', rkey: 'a' }),
