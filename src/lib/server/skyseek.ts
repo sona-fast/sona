@@ -427,7 +427,7 @@ export function isOwnBlueskyPost(
 	ownBlueskyUrl: string | null | undefined
 ): boolean {
 	if (match.site !== 'Bluesky') return false;
-	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl));
+	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl)).toLowerCase();
 	if (!own) return false;
 	const did = splitBlueskySiteId(match.siteId).did.toLowerCase();
 	return did === own || match.handles.some((h) => normalizeHandle('bluesky', h) === own);
@@ -444,6 +444,6 @@ export function mayBeOwnBlueskyPost(
 	ownBlueskyUrl: string | null | undefined
 ): boolean {
 	if (match.site !== 'Bluesky' || match.handles.length > 0) return false;
-	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl));
+	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl)).toLowerCase();
 	return own !== '' && !own.startsWith('did:');
 }

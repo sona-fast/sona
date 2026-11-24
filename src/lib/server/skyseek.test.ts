@@ -646,6 +646,11 @@ describe('isOwnBlueskyPost', () => {
 		expect(isOwnBlueskyPost(skyseekLookupMatch(post, null), saved)).toBe(true);
 	});
 
+	// An escape can hide a capital: the fold has to come after the decode.
+	it('recognises it by a handle saved with an encoded capital letter', () => {
+		expect(isOwnBlueskyPost(mine, 'https://bsky.app/profile/%4Fperator.example')).toBe(true);
+	});
+
 	// A copied profile link can carry its DID's colons percent-encoded.
 	it('recognises it by a DID saved with encoded colons', () => {
 		const saved = `https://bsky.app/profile/${ARTIST.replaceAll(':', '%3A')}`;

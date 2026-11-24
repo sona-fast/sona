@@ -2477,6 +2477,31 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(1);
 	});
 
+	// A retry that comes back with FuzzySearch rate limited and only a Bluesky
+	// lead says nothing against the post the first lookup filled in. The lead is
+	// shown under its notice, and the fields stay, as they do on a failed lookup.
+	test('a partial answer with no confident match keeps what the last lookup filled', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page);
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		const filledDate = await dateInput(page).inputValue();
+		expect(filledDate).not.toBe('');
+
+		await stubLookup(
+			page,
+			matchedBody({ matches: [BLUESKY_LEAD], localArtists: [], fuzzysearchFailure: 'rate_limited' })
+		);
+		await pill(page).click();
+		await expect(panel(page)).toContainText("FuzzySearch didn't return results");
+		await expect(panel(page)).toContainText('artist.example');
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue(filledDate);
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+	});
+
 	// The reset only undoes what the LAST lookup wrote. A URL the operator typed
 	// over the filled one carries no tag, so the second lookup has to leave it
 	// alone while still replacing the date it does still own.

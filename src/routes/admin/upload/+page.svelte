@@ -16,6 +16,7 @@
 		matchHandle,
 		pickPrefillMatch,
 		prefillForResult,
+		resultKeepsLastPrefill,
 		profileUrlFor,
 		ratingTag,
 		runLookup,
@@ -1030,7 +1031,9 @@
 		// a panel saying Sona found nothing.
 		// Nothing lands, so whatever the caller's reset took out is the whole of
 		// what this move did to the fields.
-		if (next.kind !== 'results' && next.kind !== 'no_match') {
+		// A partial answer with FuzzySearch missing and no confident row is read
+		// the same way: its Bluesky leads are shown, and the fields stay.
+		if ((next.kind !== 'results' && next.kind !== 'no_match') || resultKeepsLastPrefill(next)) {
 			sharedCleared = { ...emptied };
 			return wrote;
 		}

@@ -31,6 +31,7 @@ import {
 	profileUrlFor,
 	ratingTag,
 	resolveOutcome,
+	resultKeepsLastPrefill,
 	siteLabel,
 	stateFromResponse,
 	statusLineKind,
@@ -2518,6 +2519,20 @@ describe('stateFromResponse', () => {
 			expect(
 				await stateFromResponse(wire({ matches: [], localArtists: [], fuzzysearchFailure: 'rate_limited' }))
 			).toEqual({ kind: 'failed', reason: 'rate_limited', sent: true });
+		});
+
+		it('keeps the last prefill only when FuzzySearch is missing and no row is confident', async () => {
+			const lead = { ...bluesky, distance: null, band: null };
+			const keeps = async (over: Record<string, unknown>) =>
+				resultKeepsLastPrefill(await stateFromResponse(wire({ localArtists: [], ...over })));
+			// A rate limit and a Bluesky lead: nothing speaks against the last post.
+			expect(await keeps({ matches: [lead], fuzzysearchFailure: 'rate_limited' })).toBe(true);
+			// A confident Bluesky row is a replacement, with or without FuzzySearch.
+			expect(await keeps({ matches: [bluesky], fuzzysearchFailure: 'rate_limited' })).toBe(false);
+			// Both services answered and nothing is confident: a completed answer.
+			expect(await keeps({ matches: [lead] })).toBe(false);
+			expect(resultKeepsLastPrefill({ kind: 'no_match', blueskySearched: true, skyseekFailure: null })).toBe(false);
+			expect(resultKeepsLastPrefill({ kind: 'failed', reason: 'rate_limited', sent: true })).toBe(false);
 		});
 
 		it('survives the created-artist fold, so the notice does not vanish after a create', async () => {
