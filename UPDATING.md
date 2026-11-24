@@ -60,6 +60,36 @@ fetch both tags the same way as in step 1 and run
 `git log --oneline <current-tag>..<release-tag>`. `<current-tag>` is the release
 your fork runs now, and `<release-tag>` is the release you're about to merge.
 
+## One-time per fork: remove `keep_vars` from `wrangler.toml`
+
+Older templates put `keep_vars = true` in `wrangler.toml`. Pages projects reject
+that key, so every wrangler command that loads the file fails with
+"Configuration file for Pages projects does not support keep_vars", including
+`wrangler pages secret put` and a re-run of `npm run setup`. Your
+`wrangler.toml` is gitignored, so merging an update doesn't fix it. Delete the
+`keep_vars` line (and its comment) from your own copy.
+
+Deploys aren't affected: the deploy workflow doesn't read `wrangler.toml`.
+
+## Read before re-running setup: it needs an API token, not `wrangler login`
+
+`npm run setup` now stops unless `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` are both set in the environment. A `wrangler login`
+session alone is no longer enough. Without a token, the only way to attach the
+D1/R2 bindings was a local `wrangler pages deploy`, and that replaces the
+project's variables and secrets (`SETUP_TOKEN`, `CRON_SECRET`) with what
+`wrangler.toml` declares.
+
+If you used `wrangler login`, create a token with the scopes in **API token
+scopes** (README, Quick start step 3), then export both before you re-run:
+
+```sh
+export CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>
+npm run setup
+```
+
+Deploy from CI by pushing to `main`, not with a local `wrangler pages deploy`.
+
 ## Nothing to do: two more themes (SONA-227)
 
 Settings, Appearance gains two palettes: **Petal — soft pink** and **Pewter —

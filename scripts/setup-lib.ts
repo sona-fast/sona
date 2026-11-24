@@ -45,6 +45,56 @@ export function buildMigrationSql(migrations: Migration[]): string {
 	return parts.join('\n') + '\n';
 }
 
+/**
+ * Reads the migration names out of `wrangler d1 execute --json` output for a
+ * command whose LAST statement is `SELECT name FROM schema_migrations`. Wrangler
+ * returns one result set per statement, so earlier statements (the CREATE TABLE
+ * IF NOT EXISTS that makes the SELECT safe on a fresh database) are skipped.
+ * Throws on output it can't read: guessing "nothing applied" would re-run every
+ * migration against a populated database and fail on its first CREATE TABLE.
+ * The error carries the raw output so the operator can see what wrangler said.
+ */
+export function parseAppliedMigrations(json: string): string[] {
+	const unreadable = (why: string) =>
+		new Error(
+			`${why} in \`wrangler d1 execute --json\` output for schema_migrations. wrangler printed:\n${json}`
+		);
+	let sets: unknown;
+	try {
+		sets = JSON.parse(json);
+	} catch {
+		throw unreadable('invalid JSON');
+	}
+	const last = Array.isArray(sets)
+		? (sets[sets.length - 1] as { results?: { name?: unknown }[] } | undefined)
+		: undefined;
+	if (!last || !Array.isArray(last.results)) {
+		throw unreadable('no result set');
+	}
+	// A row without a name is unreadable too: dropping it would mark that
+	// migration pending and replay its CREATE TABLE.
+	return last.results.map((r) => {
+		const name = (r as { name?: unknown } | null)?.name;
+		if (typeof name !== 'string') throw unreadable('a row without a name');
+		return name;
+	});
+}
+
+/**
+ * The storageProvider a `wrangler d1 execute --json` read of site_settings
+ * returned, or null when there is no row or the output can't be read. Null only
+ * costs the re-run its warning: the seed itself never replaces an existing row.
+ */
+export function parseStoredProvider(json: string): string | null {
+	try {
+		const sets = JSON.parse(json) as { results?: { value?: unknown }[] }[];
+		const value = sets[sets.length - 1]?.results?.[0]?.value;
+		return typeof value === 'string' && value ? value : null;
+	} catch {
+		return null;
+	}
+}
+
 export interface SeedSettingsInput {
 	/** Active image store: 'r2' | 'uploadthing'. */
 	provider: string;
@@ -57,19 +107,24 @@ export interface SeedSettingsInput {
 }
 
 /**
- * Builds the `INSERT OR REPLACE INTO site_settings` statement the setup CLI runs
- * to seed the values it collected (mirrors the wizard-less defaults). Only
- * non-empty optional values are seeded — an absent row means "unset", which the
- * app reads as its own fallback (e.g. an empty siteUrl falls back to the request
- * origin). storageProvider is always written so the app boots with a backend.
+ * Builds the SQL the setup CLI runs to seed the values it collected (mirrors the
+ * wizard-less defaults). Only non-empty optional values are seeded — an absent
+ * row means "unset", which the app reads as its own fallback (e.g. an empty
+ * siteUrl falls back to the request origin). storageProvider is inserted only
+ * when no row exists yet: on a re-run the database already records the backend
+ * the images live in, and changing it is the Settings → Storage Provider
+ * migration's job, not a prompt default's.
  */
 export function buildSeedSql(input: SeedSettingsInput): string {
-	const rows: [string, string][] = [['storageProvider', input.provider]];
+	const row = (k: string, v: string) => `('${sqlStr(k)}','${sqlStr(v)}')`;
+	const provider = `INSERT OR IGNORE INTO site_settings (key,value) VALUES ${row('storageProvider', input.provider)};`;
+	const rows: [string, string][] = [];
 	if (input.siteUrl) rows.push(['siteUrl', input.siteUrl]);
 	if (input.r2PublicUrl) rows.push(['r2PublicUrl', input.r2PublicUrl]);
 	if (input.primaryCharacter) rows.push(['primaryCharacter', input.primaryCharacter]);
-	const values = rows.map(([k, v]) => `('${sqlStr(k)}','${sqlStr(v)}')`).join(', ');
-	return `INSERT OR REPLACE INTO site_settings (key,value) VALUES ${values};`;
+	if (rows.length === 0) return provider;
+	const values = rows.map(([k, v]) => row(k, v)).join(', ');
+	return `${provider} INSERT OR REPLACE INTO site_settings (key,value) VALUES ${values};`;
 }
 
 /**
@@ -647,30 +702,19 @@ export interface GhEligibilityInput {
 	ghAuthenticated: boolean;
 	/** The repo has a GitHub `origin` remote. */
 	hasGithubOrigin: boolean;
-	/** CLOUDFLARE_API_TOKEN from the environment (unset ⇒ `wrangler login` was used). */
-	apiToken?: string;
-	/** CLOUDFLARE_ACCOUNT_ID from the environment. */
-	accountId?: string;
 }
 
 /**
  * Decides whether setup can offer to wire the fork's GitHub Actions secrets/vars
  * for CI deploys. Returns a skip `reason` (printed as a note) when any
- * precondition is missing, so the operator knows exactly what to fix. The token
- * check is deliberate: if CLOUDFLARE_API_TOKEN isn't in the environment the
- * operator authenticated via `wrangler login`, and we have no value to set.
+ * precondition is missing, so the operator knows exactly what to fix. The
+ * CLOUDFLARE_* values aren't checked here: setup refuses to start without them.
  */
 export function ghSecretEligibility(input: GhEligibilityInput): { eligible: boolean; reason?: string } {
 	if (!input.ghInstalled) return { eligible: false, reason: 'the `gh` CLI is not installed' };
 	if (!input.ghAuthenticated)
 		return { eligible: false, reason: 'the `gh` CLI is not authenticated (run `gh auth login`)' };
 	if (!input.hasGithubOrigin) return { eligible: false, reason: 'this repo has no GitHub `origin` remote' };
-	if (!input.apiToken || !input.accountId)
-		return {
-			eligible: false,
-			reason:
-				'CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not in the environment (you likely used `wrangler login`)'
-		};
 	return { eligible: true };
 }
 
