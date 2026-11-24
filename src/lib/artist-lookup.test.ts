@@ -8,6 +8,7 @@ import {
 	clearedLine,
 	differentArtistMatch,
 	differingAccounts,
+	existingArtistText,
 	failReasonHint,
 	isConfident,
 	isCrossSiteAmbiguity,
@@ -694,6 +695,43 @@ describe('matchForArtist', () => {
 			localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Bob' }] }]
 		});
 		expect(matchForArtist(data, 7)).toBeNull();
+	});
+});
+
+describe('existingArtistText', () => {
+	it('names the handle of the match that named the artist', () => {
+		const data = response({
+			matches: [
+				match({ handles: ['alice'], distance: 0, band: 'exact' }),
+				match({ site: 'Twitter', siteId: '9', handles: ['bobby'], distance: 2, band: 'strong' })
+			],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+		});
+		expect(existingArtistText(data, { id: 7, name: 'Bob' })).toBe(
+			'bobby is already in your artist list as Bob.'
+		);
+	});
+
+	// A Bluesky row matches a local artist by DID with no handle resolved. The
+	// prefill match's handle belongs to another account, so it is never borrowed.
+	it('names only the artist when the matching row has no handle', () => {
+		const data = response({
+			matches: [
+				match({ handles: ['alice'], distance: 0, band: 'exact' }),
+				match({
+					site: 'Bluesky',
+					siteId: 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/3mwwswjznmk25',
+					handles: [],
+					distance: 0,
+					band: 'exact'
+				})
+			],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+		});
+		expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+		const text = existingArtistText(data, { id: 7, name: 'Bob' });
+		expect(text).toBe('This poster is already in your artist list as Bob.');
+		expect(text).not.toContain('alice');
 	});
 });
 

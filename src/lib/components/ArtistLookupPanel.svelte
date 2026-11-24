@@ -17,9 +17,9 @@
 		candidateArtists,
 		clearedLine,
 		differingAccounts,
+		existingArtistText,
 		failReasonHint,
 		isCrossSiteAmbiguity,
-		matchForArtist,
 		matchHandle,
 		matchHandles,
 		matchKey,
@@ -132,9 +132,7 @@
 	// unioned across every confident match, so pairing the prefill handle with a
 	// candidate's name can read "alice is already in your list as Bob".
 	const existing = $derived(candidates.length === 1 ? candidates[0] : null);
-	const existingHandle = $derived(
-		data && existing ? matchHandle(matchForArtist(data, existing.id)) || handle : handle
-	);
+	const existingText = $derived(data && existing ? existingArtistText(data, existing) : '');
 	const crossSite = $derived(data ? isCrossSiteAmbiguity(data) : false);
 	const nameHits = $derived(data ? nameMatchArtists(data) : []);
 	const clash = $derived(data?.sourceClash ?? null);
@@ -235,11 +233,28 @@
 	// top of the page (2.4.3). Every Try again goes through here and lands on
 	// Cancel, the one action the searching arm offers.
 	let cancelButton = $state<HTMLButtonElement | null>(null);
+	// Cancel goes too, once the retried lookup settles, and focus would drop to
+	// <body> again. Close is the one control every settled arm draws, so focus
+	// lands there. Only when focus has actually dropped: an operator who moved it
+	// somewhere else while the search was out keeps it there. Not $state: only
+	// the effect below reads it, and only when the lookup changes.
+	let retryPending = false;
+	let panelEl = $state<HTMLDivElement | null>(null);
 	async function retry() {
+		retryPending = true;
 		onretry();
 		await tick();
 		cancelButton?.focus();
 	}
+	$effect(() => {
+		const kind = lookup.kind;
+		if (kind === 'searching' || !retryPending) return;
+		retryPending = false;
+		if (kind === 'idle') return;
+		const active = document.activeElement;
+		if (active && active !== document.body) return;
+		panelEl?.querySelector<HTMLButtonElement>('[data-lookup-close]')?.focus();
+	});
 
 	/** The metadata line under a result row, with unknown segments dropped
 	 * rather than spelled out as blanks. */
@@ -269,6 +284,7 @@
      they typed does not flip it back (SONA-220). An operator revising a field
      hears the panel once for it, not once per keystroke. -->
 <div
+	bind:this={panelEl}
 	class="lookup-panel"
 	class:idle={lookup.kind === 'idle' && !movedEmptied}
 	role="region"
@@ -520,7 +536,7 @@
 					{#if outcome === 'existing'}
 						<p class="outcome">
 							<Check size={14} aria-hidden="true" />
-							{m.admin_lookup_existing({ handle: existingHandle, name: existing?.name ?? '' })}
+							{existingText}
 						</p>
 					{:else if outcome === 'ambiguous'}
 						{@render ambiguousPick()}
@@ -715,14 +731,14 @@
 				>
 					{m.admin_upload_add_new_artist()}
 				</button>
-				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+				<button type="button" class="btn btn-secondary" data-lookup-close onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'key_refused' || lookup.reason === 'no_key'}
 					{@render openSettings()}
 				{:else if retryCanSucceed(lookup.reason)}
 					<button type="button" class="btn btn-secondary" onclick={retry}>{m.admin_lookup_try_again()}</button>
 				{/if}
-				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+				<button type="button" class="btn btn-secondary" data-lookup-close onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{:else if data}
 				{#if clash}
 					{#if !variantBlocked}
@@ -798,7 +814,7 @@
 						<button type="button" class="btn btn-secondary" onclick={retry}>{m.admin_lookup_try_again()}</button>
 					{/if}
 				{/if}
-				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+				<button type="button" class="btn btn-secondary" data-lookup-close onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{/if}
 		</div>
 		{/if}

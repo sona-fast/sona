@@ -462,6 +462,7 @@
 		const fromLookup = artistSeed !== null;
 		// The tile the seed came from, also captured before the clear below.
 		const seedKey = artistSeed?.tileKey ?? null;
+		const seedResult = artistSeed?.result ?? null;
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
 		// The option values are numbers, and the select binding compares with
 		// Object.is — a stringified id would match no option and select nothing.
@@ -477,14 +478,16 @@
 		// folding into the new parent would credit an unrelated result while
 		// leaving the seed's tile still offering to add the artist.
 		const tile = seedKey === null ? null : (tiles.find((t) => t.key === seedKey) ?? null);
-		if (!fromLookup || !tile || tile.lookup.kind !== 'results') {
+		if (!fromLookup || !tile || tile.lookup.kind !== 'results' || tile.lookup !== seedResult) {
 			// That tile can also be removed while the dialog is open, taking the
 			// button the dialog would have restored focus to with it (2.4.3). The
 			// tile surviving is not enough either: a lookup cancelled back to idle
 			// or retried into searching unmounts the same add-new button, so the
 			// opener is gone there too and focus falls to <body> with the next Tab
-			// restarting at the top of the page. There is nothing to fold in either
-			// case; land on the tile's own lookup button while it exists, else on
+			// restarting at the top of the page. A lookup that restarted and settled
+			// again holds a different result, which may name a different poster, so
+			// the artist is not folded into it either. There is nothing to fold in
+			// any of these cases; land on the tile's own lookup button while it exists, else on
 			// the select holding the new artist.
 			if (fromLookup) {
 				await tick();
@@ -589,6 +592,10 @@
 		site: LookupSite;
 		linkable: boolean;
 		tileKey: number | null;
+		// The result that offered the handle. A lookup restarted on that tile
+		// while the dialog is open replaces it, and the artist belongs to this
+		// one, not to whatever the tile holds when the dialog closes.
+		result: LookupState | null;
 	} | null>(null);
 	// Per-tile aborts. Not $state — nothing renders them.
 	const lookupAborts = new Map<number, AbortController>();
@@ -1214,7 +1221,9 @@
 		// the dialog has no focus trap, so the Parent radio behind it can still be
 		// reached from the keyboard, and the result the created artist belongs to
 		// is the one that offered the handle, not whichever tile is parent later.
-		artistSeed = seed.handle ? { ...seed, tileKey: parentTile?.key ?? null } : null;
+		artistSeed = seed.handle
+			? { ...seed, tileKey: parentTile?.key ?? null, result: parentTile?.lookup ?? null }
+			: null;
 		showNewArtist = true;
 	}
 

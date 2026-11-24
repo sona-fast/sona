@@ -1623,6 +1623,7 @@
 	"admin_lookup_view_post": "投稿を見る",
 	"admin_lookup_view_post_site": "（{site}、新しいタブで開きます）",
 	"admin_lookup_existing": "{handle}は「{name}」としてアーティスト一覧にすでにあります。",
+	"admin_lookup_existing_no_handle": "この投稿者は「{name}」としてアーティスト一覧にすでにあります。",
 	"admin_lookup_use_artist": "{name}を使う",
 	"admin_lookup_using_artist": "{name}を使用中",
 	"admin_lookup_close": "閉じる",

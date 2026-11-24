@@ -2053,6 +2053,7 @@
 	"admin_lookup_view_post": "View post",
 	"admin_lookup_view_post_site": " on {site} (opens in a new tab)",
 	"admin_lookup_existing": "{handle} is already in your artist list as {name}.",
+	"admin_lookup_existing_no_handle": "This poster is already in your artist list as {name}.",
 	"admin_lookup_use_artist": "Use {name}",
 	"admin_lookup_using_artist": "Using {name}",
 	"admin_lookup_close": "Close",

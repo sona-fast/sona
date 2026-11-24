@@ -900,7 +900,8 @@ test.describe('with a key saved', () => {
 
 	// Try again swaps the button it sits in for the searching arm. Focus lands on
 	// that arm's Cancel instead of dropping to <body>, from every state that
-	// offers a retry.
+	// offers a retry. Cancel goes when the lookup settles, so focus moves on to
+	// Close, the one control every settled arm draws.
 	for (const [state, body, status] of [
 		['a partial result', blueskyOnlyBody(BLUESKY_EXACT, { fuzzysearchFailure: 'unavailable' }), 200],
 		['a no-match', { enabled: true, matches: [], blueskySearched: true }, 200],
@@ -919,8 +920,37 @@ test.describe('with a key saved', () => {
 			await expect(cancel).toBeFocused();
 			release();
 			await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
+			await expect(panel(page).getByRole('button', { name: 'Close' })).toBeFocused();
 		});
 	}
+
+	// The edit page mounts the same panel, so a retry there settles onto Close
+	// too. Focus the operator moved elsewhere while the search was out stays put.
+	test('Try again on the edit page lands on Close when the lookup settles', async ({ page }) => {
+		await stubLookup(page, blueskyOnlyBody(BLUESKY_EXACT, { fuzzysearchFailure: 'unavailable' }));
+		await gotoEditHydrated(page);
+		await pill(page).click();
+		const retry = panel(page).getByRole('button', { name: 'Try again' });
+
+		let release = await deferredLookup(page, matchedBody());
+		await retry.click();
+		await expect(panel(page).getByRole('button', { name: 'Cancel lookup' })).toBeFocused();
+		release();
+		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
+		await expect(panel(page).getByRole('button', { name: 'Close' })).toBeFocused();
+
+		await stubLookup(page, blueskyOnlyBody(BLUESKY_EXACT, { fuzzysearchFailure: 'unavailable' }));
+		await pill(page).click();
+		await expect(noticeLead(page)).toHaveText(FUZZY_PARTIAL);
+		release = await deferredLookup(page, matchedBody());
+		await retry.click();
+		await expect(panel(page).getByRole('button', { name: 'Cancel lookup' })).toBeFocused();
+		const source = page.locator('input[name="sourcePostUrl"]');
+		await source.focus();
+		release();
+		await expect(panel(page).locator('.match-row')).toContainText('kuttoya on FurAffinity');
+		await expect(source).toBeFocused();
+	});
 
 	// Below 480px a results footer stacks its actions full width, so Close is not
 	// left alone on a ragged third row. Wider, they stay on one row.
@@ -1161,6 +1191,27 @@ test.describe('with a key saved', () => {
 		await expect(addNew).toHaveCount(0);
 		await expect(panel(page)).toContainText('These matches point to 2 artists in your list.');
 		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
+	});
+
+	// A Bluesky row matches a local artist by DID with no handle resolved. The
+	// line names only the artist, never the FurAffinity poster's handle.
+	test('a local artist matched by DID alone is named with no handle from another row', async ({
+		page
+	}) => {
+		const base = matchedBody();
+		await stubLookup(page, {
+			...base,
+			matches: [...base.matches, { ...BLUESKY_EXACT, handles: [] }],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 1, name: 'Test Artist' }] }]
+		});
+		await oneDoneTile(page);
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText(
+			'This poster is already in your artist list as Test Artist.'
+		);
+		await expect(panel(page)).not.toContainText('kuttoya is already in your artist list');
+		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 	});
 
 	test('editing a tagged field drops its tag', async ({ page }) => {
@@ -3290,6 +3341,42 @@ test.describe('with a key saved', () => {
 		await expect(tileLookup(page).nth(0)).toBeFocused();
 
 		release();
+	});
+
+	// The restarted lookup can also settle before the dialog closes. Its result is
+	// not the one that offered the handle, and here it names a Bluesky poster Sona
+	// does not know, so crediting the new artist to it would offer that poster as
+	// the artist.
+	test('does not credit a result that replaced the seed behind the dialog', async ({ page }) => {
+		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 81, name: 'kuttoya' })
+			});
+		});
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await twoDoneTiles(page);
+		await tileLookup(page).nth(0).click();
+		await panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' }).click();
+		await expect(page.locator('#new-artist-name')).toHaveValue('kuttoya');
+
+		// The keyboard reaches the tile behind the dialog; the backdrop only stops
+		// a pointer.
+		await stubLookup(page, blueskyOnlyBody(BLUESKY_EXACT));
+		await tileLookup(page).nth(0).focus();
+		await page.keyboard.press('Enter');
+		await expect(panel(page).locator('.match-row')).toContainText('artist.example on Bluesky');
+
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('81');
+		await expect(panel(page)).not.toContainText('is already in your artist list');
+		await expect(panel(page)).toContainText(
+			"artist.example posted this on Bluesky and isn't in your artist list."
+		);
+		await expect(panel(page).getByRole('button', { name: /^Use / })).toHaveCount(0);
+		await expect(tileLookup(page).nth(0)).toBeFocused();
 	});
 
 	// The other way the opener disappears while the dialog is open: the tile the

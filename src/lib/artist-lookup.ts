@@ -349,6 +349,23 @@ export function matchForArtist(data: LookupResponse, artistId: number): LookupMa
 }
 
 /**
+ * The "already in your artist list" line for the one local artist a result
+ * names. The handle is the one on the match that named that artist, which is
+ * not always the prefill match. A Bluesky match can name a local artist by DID
+ * with no handle resolved, and then the line names only the artist: any other
+ * row's handle belongs to another account.
+ */
+export function existingArtistText(
+	data: LookupResponse,
+	artist: { id: number; name: string }
+): string {
+	const handle = matchHandle(matchForArtist(data, artist.id));
+	return handle
+		? m.admin_lookup_existing({ handle, name: artist.name })
+		: m.admin_lookup_existing_no_handle({ name: artist.name });
+}
+
+/**
  * The match behind a variant tile's "different artist" warning: its result
  * names a local artist, none of them the shared selection `sharedId`. Returns
  * the match whose hit triggered it, because that is the poster the line names,

@@ -173,7 +173,9 @@ graph TB
   hostname, which Skyseek's owner asked for.
 - The artist lookup never sends FuzzySearch or Skyseek a piece linked to a
   commission ledger entry, or a variant of one: the entry already names the
-  artist.
+  artist. The lookup checks for that link once, before it reads the stored
+  image. A link saved while the image is being read isn't checked again, so
+  that piece still goes to both services.
 - entail.dev needs no key or secret. The app calls it only when an operator
   asks for tag suggestions on an image whose source post is on Bluesky or X,
   and never on a render path or a schedule. Three admin surfaces ask: the
