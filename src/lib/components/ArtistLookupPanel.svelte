@@ -304,6 +304,12 @@
 						? m.admin_lookup_no_match_body_bluesky()
 						: m.admin_lookup_no_match_body()}
 				</p>
+				<!-- Skyseek shares FuzzySearch's switch, so Bluesky going unsearched
+				     means Skyseek did not answer. Said outright: leaving Bluesky off
+				     the list above does not tell the operator it was skipped. -->
+				{#if !lookup.blueskySearched}
+					<p class="lookup-status">{m.admin_lookup_partial_skyseek()}</p>
+				{/if}
 				<!-- A no-match is a result with nothing to prefill, so it empties what
 				     the last lookup filled. Said here, above the hint: the operator
 				     watches the two fields go blank and this arm carries no status

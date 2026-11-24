@@ -640,7 +640,11 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).toContainText(
 			'Nothing matched on FurAffinity, Weasyl, e621, or Twitter.'
 		);
-		await expect(panel(page)).not.toContainText('Bluesky');
+		// Leaving Bluesky off the list is not enough: the panel says it was skipped.
+		await expect(panel(page)).toContainText(
+			"Skyseek didn't return results, so Sona couldn't check Bluesky."
+		);
+		await expect(panel(page)).not.toContainText('or Bluesky');
 	});
 
 	// SONA-243: one service down is not a failed lookup. The rows of the one that
