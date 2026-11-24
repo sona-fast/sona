@@ -1,10 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { FUZZYSEARCH_MAX_DISTANCE } from './fuzzysearch';
 import {
-	BLUESKY_PROFILES_ENDPOINT,
 	BLUESKY_PROFILES_RESPONSE_BYTES,
 	BLUESKY_PROFILES_TIMEOUT_MS,
-	SKYSEEK_ENDPOINT,
 	SKYSEEK_RESPONSE_BYTES,
 	SKYSEEK_TIMEOUT_MS,
 	isOwnBlueskyPost,
@@ -148,6 +146,17 @@ describe('normalizeSkyseekMatches', () => {
 		expect(matches?.map((x) => x.rkey)).toEqual(['good']);
 	});
 
+	it('drops a did:web with a path, which the AT Protocol does not take', () => {
+		const matches = normalizeSkyseekMatches(
+			answer(
+				{ created_at: FIRST, distance: 0, repo: 'did:web:artist.example:profile', rkey: 'a' },
+				{ created_at: FIRST, distance: 0, repo: 'did:web:artist.example', rkey: 'b' }
+			),
+			NOW
+		);
+		expect(matches?.map((x) => x.did)).toEqual(['did:web:artist.example']);
+	});
+
 	it('keeps a did:web account', () => {
 		const matches = normalizeSkyseekMatches(
 			answer({ created_at: FIRST, repo: 'did:web:artist.example', rkey: 'a' }),
@@ -192,7 +201,8 @@ describe('searchSkyseek — request shape', () => {
 		expect(result.ok).toBe(true);
 		expect(result.ok && result.matches.map((x) => x.rkey)).toEqual(['a']);
 		expect(calls).toHaveLength(1);
-		expect(calls[0].url).toBe(SKYSEEK_ENDPOINT);
+		// The literal, not the constant: this is where the image goes.
+		expect(calls[0].url).toBe('https://skyseek.app/search');
 		expect(calls[0].init.method).toBe('POST');
 		const headers = calls[0].init.headers as Record<string, string>;
 		expect(headers.accept).toBe('application/json');
@@ -338,7 +348,9 @@ describe('resolveBlueskyHandles', () => {
 		]);
 		expect(calls).toHaveLength(1);
 		const url = new URL(calls[0].url);
-		expect(url.origin + url.pathname).toBe(BLUESKY_PROFILES_ENDPOINT);
+		// The literal, not the constant: this is who is asked about the accounts.
+		expect(url.origin).toBe('https://public.api.bsky.app');
+		expect(url.pathname).toBe('/xrpc/app.bsky.actor.getProfiles');
 		// Nothing rides along but the accounts being asked about.
 		expect([...url.searchParams.keys()].every((key) => key === 'actors')).toBe(true);
 		expect(url.searchParams.getAll('actors')).toEqual([ARTIST, REPOSTER]);

@@ -107,10 +107,12 @@ export type SkyseekResult =
 	| { ok: true; matches: SkyseekMatch[] }
 	| { ok: false; reason: SkyseekFailure };
 
-/** The two DID methods Bluesky accounts use. Anything else is dropped: the DID
+/** The two DID methods Bluesky accounts use. A did:web is a hostname and
+ * nothing more: the AT Protocol takes no path-based did:web, so one with
+ * further segments is not an account. Anything else is dropped: the DID
  * goes into a URL the operator is shown, and a value that is not one cannot be
  * trusted to stay inside the path segment it is put in. */
-const DID_PATTERN = /^did:(?:plc:[a-z2-7]{24}|web:[A-Za-z0-9.-]+(?::[A-Za-z0-9._%-]+)*)$/;
+const DID_PATTERN = /^did:(?:plc:[a-z2-7]{24}|web:[A-Za-z0-9.-]+)$/;
 /** The record-key grammar from the AT Protocol spec, minus ':': the path
  * separator's neighbour, and never present in the timestamp keys posts use. */
 const RKEY_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/;
