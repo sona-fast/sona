@@ -157,6 +157,29 @@ describe('normalizeSkyseekMatches', () => {
 		expect(matches?.map((x) => x.did)).toEqual(['did:web:artist.example']);
 	});
 
+	it('ranks copies of one post on their own dates, and borrows a date only for an undated winner', () => {
+		const SECOND = FIRST + 86400;
+		const undated = { distance: 0, repo: ARTIST, rkey: 'a' };
+		const farther = { created_at: FIRST, distance: 2, repo: ARTIST, rkey: 'a' };
+		const exact = { created_at: SECOND, distance: 0, repo: ARTIST, rkey: 'a' };
+		// The dated exact copy wins in either order: the farther copy's earlier
+		// date never rides in on the undated one.
+		for (const order of [
+			[undated, farther, exact],
+			[undated, exact, farther],
+			[farther, undated, exact]
+		]) {
+			const matches = normalizeSkyseekMatches(answer(...order), NOW);
+			expect(matches).toHaveLength(1);
+			expect(matches?.[0].distance).toBe(0);
+			expect(matches?.[0].postedAt).toBe(new Date(SECOND * 1000).toISOString());
+		}
+		// With no dated exact copy, the undated winner borrows the only date there is.
+		const borrowed = normalizeSkyseekMatches(answer(undated, farther), NOW);
+		expect(borrowed?.[0].distance).toBe(0);
+		expect(borrowed?.[0].postedAt).toBe(new Date(FIRST * 1000).toISOString());
+	});
+
 	it('keeps a did:web account', () => {
 		const matches = normalizeSkyseekMatches(
 			answer({ created_at: FIRST, repo: 'did:web:artist.example', rkey: 'a' }),
@@ -304,6 +327,9 @@ describe('searchSkyseek — failure mapping', () => {
 		const chunk = new TextEncoder().encode('x'.repeat(64 * 1024));
 		const body = new ReadableStream<Uint8Array>({
 			pull(controller) {
+				// Four times the cap and then it ends, so a reader with no cap
+				// reaches the assertions below and fails them.
+				if (state.pulled * chunk.length >= SKYSEEK_RESPONSE_BYTES * 4) return controller.close();
 				state.pulled++;
 				controller.enqueue(chunk);
 			},
@@ -315,7 +341,7 @@ describe('searchSkyseek — failure mapping', () => {
 
 		expect(await searchSkyseek(new Blob(['x']), fn)).toEqual({ ok: false, reason: 'unavailable' });
 		expect(state.cancelled).toBe(true);
-		// An endless body, so the read stopping near the cap is the whole point.
+		// The body runs to four times the cap, so stopping near the cap is the point.
 		expect(state.pulled * chunk.length).toBeLessThan(SKYSEEK_RESPONSE_BYTES * 2);
 	});
 });
@@ -486,6 +512,8 @@ describe('resolveBlueskyHandles', () => {
 		const chunk = new TextEncoder().encode('x'.repeat(64 * 1024));
 		const body = new ReadableStream<Uint8Array>({
 			pull(controller) {
+				// Four times the cap and then it ends, as in the Skyseek test.
+				if (state.pulled * chunk.length >= BLUESKY_PROFILES_RESPONSE_BYTES * 4) return controller.close();
 				state.pulled++;
 				controller.enqueue(chunk);
 			},

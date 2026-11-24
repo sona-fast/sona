@@ -195,7 +195,10 @@ export function normalizeSkyseekMatches(
 	const first = body.results[0];
 	if (!Array.isArray(first)) return null;
 
-	const kept = new Map<string, SkyseekMatch>();
+	// `best` is the closest copy as it came, so copies are ranked on their own
+	// dates. `fallback` is the earliest date on any copy, used only when the
+	// winning copy has none.
+	const kept = new Map<string, { best: SkyseekMatch; fallback: string | null }>();
 	let readable = false;
 	for (const entry of first) {
 		const match =
@@ -208,17 +211,20 @@ export function normalizeSkyseekMatches(
 		const key = `${match.did}\u0000${match.rkey}`;
 		const already = kept.get(key);
 		if (!already) {
-			kept.set(key, match);
+			kept.set(key, { best: match, fallback: match.postedAt });
 			continue;
 		}
-		const closer = compareSkyseekPosts(match, already) < 0 ? match : already;
-		const other = closer === match ? already : match;
-		kept.set(key, { ...closer, postedAt: closer.postedAt ?? other.postedAt });
+		if (compareSkyseekPosts(match, already.best) < 0) already.best = match;
+		if (match.postedAt !== null && (already.fallback === null || match.postedAt < already.fallback)) {
+			already.fallback = match.postedAt;
+		}
 	}
 	// Hits came back and not one could be read: the fields changed or the answer
 	// is broken, and "no Bluesky post" would be a claim nobody checked.
 	if (first.length > 0 && !readable) return null;
-	return [...kept.values()].sort(compareSkyseekPosts);
+	return [...kept.values()]
+		.map(({ best, fallback }) => ({ ...best, postedAt: best.postedAt ?? fallback }))
+		.sort(compareSkyseekPosts);
 }
 
 /** A bounded body parsed as JSON, or null when it is past the cap or is not
