@@ -141,7 +141,7 @@ function normalizeMatch(raw: RawSkyseekMatch, now: number): SkyseekMatch | null 
 	// stays, unbanded. The cap is applied by the caller, which has to tell a row
 	// it could not read from one it read and found too far.
 	const distance =
-		typeof raw.distance === 'number' && Number.isFinite(raw.distance) && raw.distance >= 0
+		typeof raw.distance === 'number' && Number.isInteger(raw.distance) && raw.distance >= 0
 			? raw.distance
 			: null;
 	return {

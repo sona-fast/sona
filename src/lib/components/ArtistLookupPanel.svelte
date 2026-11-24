@@ -17,6 +17,7 @@
 		candidateArtists,
 		clearedLine,
 		differingAccounts,
+		differingAccountName,
 		existingArtistText,
 		failReasonHint,
 		isCrossSiteAmbiguity,
@@ -493,9 +494,9 @@
 				{#if differing}
 					<p class="callout differing">
 						{m.admin_lookup_sources_differ({
-							a: matchHandle(differing.a),
+							a: differingAccountName(data, differing.a),
 							siteA: siteLabel(differing.a.site),
-							b: matchHandle(differing.b),
+							b: differingAccountName(data, differing.b),
 							siteB: siteLabel(differing.b.site)
 						})}
 					</p>

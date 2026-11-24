@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { FUZZYSEARCH_MAX_DISTANCE } from './fuzzysearch';
 import {
 	BLUESKY_PROFILES_ENDPOINT,
-	BLUESKY_PROFILES_MAX_ACTORS,
 	BLUESKY_PROFILES_RESPONSE_BYTES,
 	BLUESKY_PROFILES_TIMEOUT_MS,
 	SKYSEEK_ENDPOINT,
@@ -366,19 +365,22 @@ describe('resolveBlueskyHandles', () => {
 	});
 
 	it('sends at most one call’s worth of DIDs and leaves the rest unresolved', async () => {
-		const dids = Array.from({ length: BLUESKY_PROFILES_MAX_ACTORS + 5 }, (_, i) => didAt(i));
+		const dids = Array.from({ length: 30 }, (_, i) => didAt(i));
 		const { fn, calls } = fakeFetch(
 			jsonResponse(profiles(...dids.map((did, i) => ({ did, handle: `artist${i}.example` }))))
 		);
 		const handles = await resolveBlueskyHandles(dids, fn);
 
 		expect(calls).toHaveLength(1);
-		expect(new URL(calls[0].url).searchParams.getAll('actors')).toEqual(
-			dids.slice(0, BLUESKY_PROFILES_MAX_ACTORS)
-		);
+		// AppView's getProfiles takes at most 25 actors, pinned here rather than
+		// read back from the client's own constant.
+		const sent = new URL(calls[0].url).searchParams.getAll('actors');
+		expect(sent).toHaveLength(25);
+		expect(sent).toEqual(dids.slice(0, 25));
+		expect(sent).not.toContain(dids[25]);
 		// The answer named all thirty; only the ones asked about are believed.
-		expect(handles.size).toBe(BLUESKY_PROFILES_MAX_ACTORS);
-		expect(handles.has(dids[BLUESKY_PROFILES_MAX_ACTORS])).toBe(false);
+		expect(handles.size).toBe(25);
+		expect(handles.has(dids[25])).toBe(false);
 	});
 
 	it('keeps the accounts that resolved when others did not', async () => {
@@ -655,11 +657,20 @@ describe('normalizeSkyseekMatches — distance', () => {
 		['infinite', { distance: Number.POSITIVE_INFINITY }],
 		['a string', { distance: '0' }],
 		['null', { distance: null }],
-		['a boolean', { distance: true }]
+		['a boolean', { distance: true }],
+		['fractional', { distance: 0.5 }]
 	])('keeps a match whose distance is %s, with no distance to claim', (_name, over) => {
 		const matches = normalizeSkyseekMatches(answer(hit(over)), NOW);
 		expect(matches).toHaveLength(1);
 		expect(matches?.[0].distance).toBeNull();
+	});
+
+	it('keeps whole distances of 0, 1 and 2 as read, so they are banded', () => {
+		const matches = normalizeSkyseekMatches(
+			answer(hit({ rkey: 'b', distance: 2 }), hit({ rkey: 'c', distance: 1 }), hit({ rkey: 'd', distance: 0 })),
+			NOW
+		);
+		expect(matches?.map((x) => x.distance)).toEqual([0, 1, 2]);
 	});
 
 	it('keeps a match at the distance cap and drops the one past it', () => {

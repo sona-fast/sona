@@ -8,6 +8,7 @@ import {
 	clearedLine,
 	differentArtistMatch,
 	differingAccounts,
+	differingAccountName,
 	existingArtistText,
 	failReasonHint,
 	isConfident,
@@ -729,6 +730,18 @@ describe('existingArtistText', () => {
 			localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
 		});
 		expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+		const text = existingArtistText(data, { id: 7, name: 'Bob' });
+		expect(text).toBe('This poster is already in your artist list as Bob.');
+		expect(text).not.toContain('alice');
+	});
+
+	// The hit says only which artist the row matched, not through which of its
+	// handles, so the first one may be somebody else's.
+	it('names only the artist when the matching row carries several handles', () => {
+		const data = response({
+			matches: [match({ handles: ['alice', 'bob'], distance: 0, band: 'exact' })],
+			localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Bob' }] }]
+		});
 		const text = existingArtistText(data, { id: 7, name: 'Bob' });
 		expect(text).toBe('This poster is already in your artist list as Bob.');
 		expect(text).not.toContain('alice');
@@ -1937,7 +1950,13 @@ describe('stateFromResponse', () => {
 		});
 
 		it('is "ambiguous" when two confident Bluesky rows name two local artists', () => {
-			const other = { ...bluesky, siteId: `${DID}/3mwwswjznmk26`, handles: ['other.example'] };
+			const OTHER_DID = 'did:plc:bbbbbbbbbbbbbbbbbbbbbbbb';
+			const other = {
+				...bluesky,
+				siteId: `${OTHER_DID}/3mwwswjznmk26`,
+				postUrl: `https://bsky.app/profile/${OTHER_DID}/post/3mwwswjznmk26`,
+				handles: ['other.example']
+			};
 			const data = response({
 				matches: [bluesky, other],
 				localArtists: [skyArtist, { matchIndex: 1, artists: [{ id: 8, name: 'Other' }] }]
@@ -2059,6 +2078,40 @@ describe('stateFromResponse', () => {
 			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), sky(null)] }))).toBeNull();
 			// A handle with nothing to compare in it is no poster either.
 			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), sky('---')] }))).toBeNull();
+		});
+
+		// AppView resolved no handle, but the row matched Bob by DID: it stands for
+		// Bob, so an exact match for another account elsewhere still differs, and
+		// the callout names that side by the artist.
+		it('keeps a Bluesky row linked to a local artist by DID in the comparison when no handle resolved', () => {
+			const data = response({
+				matches: [match({ handles: ['alice'] }), sky(null)],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			const found = differingAccounts(data);
+			if (!found) throw new Error('expected a disagreement');
+			expect(found.a.site).toBe('Bluesky');
+			expect(found.b.site).toBe('FurAffinity');
+			expect(differingAccountName(data, found.a)).toBe('Bob');
+			expect(differingAccountName(data, found.b)).toBe('alice');
+			const sentence = m.admin_lookup_sources_differ({
+				a: differingAccountName(data, found.a),
+				siteA: siteLabel(found.a.site),
+				b: differingAccountName(data, found.b),
+				siteB: siteLabel(found.b.site)
+			});
+			expect(sentence).toContain('Bob on Bluesky');
+			expect(sentence).toContain('alice on FurAffinity');
+			// The FurAffinity poster fills the form and is not Bob, so it is offered too.
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+			// A second local artist on the FurAffinity row makes it the pick list instead.
+			const picks = response({
+				...data,
+				localArtists: [...data.localArtists, { matchIndex: 0, artists: [{ id: 4, name: 'Alice' }] }]
+			});
+			expect(resolveOutcome(picks)).toBe('ambiguous');
+			expect(differingAccounts(picks)).toBeNull();
 		});
 
 		it('skips a handle-less prefill match and compares the ones that name somebody', () => {

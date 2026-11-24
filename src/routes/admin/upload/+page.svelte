@@ -26,7 +26,6 @@
 		tileResultText,
 		differentArtistMatch,
 		lookupSentFile,
-		unansweredLine,
 		unansweredNotice,
 		sentAfterApplyThrew,
 		withCreatedArtist,
@@ -874,7 +873,7 @@
 			// tile's own paragraph sits outside any live region. A no-match carries
 			// the Skyseek half of the same notice.
 			const partial =
-				result?.partial ?? (tile.lookup.kind === 'no_match' ? unansweredLine(tile.lookup) : null);
+				result?.partial ?? (tile.lookup.kind === 'no_match' ? unansweredTileLine(tile.lookup) : null);
 			if (partial) {
 				line = m.admin_lookup_announce_tile_with_notice({
 					outcome: line,
@@ -1285,6 +1284,14 @@
 		return differentArtistMatch(tile.lookup.data, Number(selectedArtistId));
 	}
 
+	/** The partial notice in one line, lead then reason, to keep a tile short:
+	 * over a result, and over a no-match, where it is the Skyseek half. */
+	function unansweredTileLine(data: Parameters<typeof unansweredNotice>[0]): string | null {
+		const notice = unansweredNotice(data);
+		if (!notice) return null;
+		return notice.rest ? m.admin_lookup_partial_join({ first: notice.lead, second: notice.rest }) : notice.lead;
+	}
+
 	/** Everything a variant tile shows from its own result. One guard and one
 	 * match fallback (the closest confident match, else the first row) rather
 	 * than the same pair re-derived per field. Null when there is nothing to
@@ -1312,7 +1319,6 @@
 		const text = different
 			? { line: differentLine, spoken: differentLine }
 			: tileResultText(handle, match.site, match.band);
-		const notice = unansweredNotice(tile.lookup.data);
 		return {
 			different,
 			line: text.line,
@@ -1323,11 +1329,7 @@
 			// One of the two services did not answer. Still a result: the line above
 			// stands, and this says which sites it does not cover, then why, as the
 			// panel's notice does, in one line to keep the tile short.
-			partial: notice
-				? notice.rest
-					? m.admin_lookup_partial_join({ first: notice.lead, second: notice.rest })
-					: notice.lead
-				: null,
+			partial: unansweredTileLine(tile.lookup.data),
 			// A refused key is fixed in Settings, not by asking again, so the tile
 			// carries the route there that a failed lookup's tile does.
 			settings: tile.lookup.data.fuzzysearchFailure === 'key_refused'
@@ -1612,7 +1614,7 @@
 								<!-- Nothing matched on the sites that were checked, and Bluesky
 								     was not one of them: the tile says so, as it does over a
 								     result. -->
-								<p class="tile-lookup-reason tile-lookup-partial">{unansweredLine(tile.lookup)}</p>
+								<p class="tile-lookup-reason tile-lookup-partial">{unansweredTileLine(tile.lookup)}</p>
 							{/if}
 							<!-- The file went to FuzzySearch while the shared Private box was
 							     checked: say so on the tile the way the panel says it for the

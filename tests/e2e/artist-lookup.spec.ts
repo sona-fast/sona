@@ -687,9 +687,10 @@ test.describe('with a key saved', () => {
 	});
 
 	// A variant tile's no-match has no result line, so it carries the notice on
-	// its own, and the announcement speaks it.
+	// its own, reason included, and the announcement speaks it.
 	test('a variant tile says Bluesky was not checked on a no-match', async ({ page }) => {
-		const skyLine = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
+		const skyLine =
+			"Skyseek didn't return results, so Sona couldn't check Bluesky. Skyseek couldn't read this file.";
 		await stubLookup(page, {
 			enabled: true,
 			matches: [],
@@ -1148,6 +1149,21 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page).locator('.match-row')).toContainText(['kuttoya on FurAffinity', 'Kuttoya.bsky.social on Bluesky']);
 		await expect(callout).toHaveCount(0);
+
+		// The Bluesky row is the local artist by DID, with no handle resolved: the
+		// callout names that side by the artist, and the FurAffinity poster, who
+		// fills the form, is offered beside it.
+		await stubLookup(page, {
+			...base,
+			matches: [...base.matches, { ...BLUESKY_EXACT, handles: [] }],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 1, name: 'Test Artist' }] }]
+		});
+		await pill(page).click();
+		await expect(panel(page)).toContainText('This poster is already in your artist list as Test Artist.');
+		await expect(callout).toHaveText(
+			'These matches come from different accounts: Test Artist on Bluesky and kuttoya on FurAffinity. Check both posts before you credit either one.'
+		);
+		await expect(panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' })).toBeVisible();
 	});
 
 	// The reverse: the Bluesky poster is in the list and the FurAffinity poster,

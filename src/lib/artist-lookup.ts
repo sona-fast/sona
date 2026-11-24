@@ -353,13 +353,15 @@ export function matchForArtist(data: LookupResponse, artistId: number): LookupMa
  * names. The handle is the one on the match that named that artist, which is
  * not always the prefill match. A Bluesky match can name a local artist by DID
  * with no handle resolved, and then the line names only the artist: any other
- * row's handle belongs to another account.
+ * row's handle belongs to another account. A row with several handles names
+ * only the artist too: the hit does not say which handle matched.
  */
 export function existingArtistText(
 	data: LookupResponse,
 	artist: { id: number; name: string }
 ): string {
-	const handle = matchHandle(matchForArtist(data, artist.id));
+	const named = matchForArtist(data, artist.id);
+	const handle = named && named.handles.length > 1 ? '' : matchHandle(named);
 	return handle
 		? m.admin_lookup_existing({ handle, name: artist.name })
 		: m.admin_lookup_existing_no_handle({ name: artist.name });
@@ -501,18 +503,20 @@ function looseHandles(match: LookupMatch): string[] {
  * is one candidate, so both are that person under two handles, and under it the
  * pick list already asks which of them it is. A match that stands for nobody
  * still differs from the picks, because no pick shows its account. A match with
- * no handle names nobody, so it is never either side.
+ * no handle names nobody, so it is never either side, unless it names a local
+ * artist: a Bluesky row matched by DID with no handle resolved stands for that
+ * artist, and `differingAccountName` names it by the artist.
  */
 export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: LookupMatch } | null {
 	const candidates = candidateArtists(data);
-	const named = data.matches.filter((x) => isConfident(x) && looseHandles(x).length > 0);
+	const hasHit = (x: LookupMatch) =>
+		Boolean(data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(x))?.artists.length);
+	const named = data.matches.filter((x) => isConfident(x) && (looseHandles(x).length > 0 || hasHit(x)));
 	const prefill = pickPrefillMatch(data.matches);
 	const offered = candidates.length === 1 ? matchForArtist(data, candidates[0].id) : prefill;
 	const anchor = offered && named.includes(offered) ? offered : named[0];
 	if (!anchor) return null;
 	const shares = (x: LookupMatch, y: LookupMatch) => looseHandles(x).some((h) => looseHandles(y).includes(h));
-	const hasHit = (x: LookupMatch) =>
-		Boolean(data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(x))?.artists.length);
 	const linked = named.filter(hasHit);
 	const standsForArtist = (x: LookupMatch) => hasHit(x) || linked.some((y) => shares(x, y));
 	const differ = (x: LookupMatch, y: LookupMatch) =>
@@ -524,6 +528,13 @@ export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: Lo
 		if (y) return { a: x, b: y };
 	}
 	return null;
+}
+
+/** How the callout names one side of `differingAccounts`: its handle, or the
+ * local artist it names when it has none. */
+export function differingAccountName(data: LookupResponse, match: LookupMatch): string {
+	const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(match));
+	return matchHandle(match) || (hit?.artists[0]?.name ?? '');
 }
 
 /**
