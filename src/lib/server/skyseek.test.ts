@@ -28,6 +28,30 @@ function fakeFetch(response: Response | (() => Promise<Response>)) {
 	return { fn, calls };
 }
 
+// A fetch that never answers and rejects with the signal's reason when it
+// aborts, the way the runtime's fetch does at AbortSignal.timeout. Runs under
+// fake timers, with AbortSignal.timeout stood in for by a timer-driven abort.
+async function withTimeoutFetch(ms: number, run: (fn: typeof fetch) => Promise<void>) {
+	vi.useFakeTimers();
+	const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay: number) => {
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(new DOMException('timed out', 'TimeoutError')), delay);
+		return controller.signal;
+	});
+	const fn = ((_url: string, init?: RequestInit) =>
+		new Promise<Response>((_resolve, reject) => {
+			init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+		})) as unknown as typeof fetch;
+	try {
+		const done = run(fn);
+		await vi.advanceTimersByTimeAsync(ms + 1);
+		await done;
+	} finally {
+		timeout.mockRestore();
+		vi.useRealTimers();
+	}
+}
+
 function jsonResponse(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
 		status,
@@ -235,6 +259,12 @@ describe('searchSkyseek — failure mapping', () => {
 		expect(await searchSkyseek(new Blob(['x']), fn)).toEqual({ ok: false, reason: 'unavailable' });
 	});
 
+	it('answers a request the timeout aborted as unavailable, and does not throw', async () => {
+		await withTimeoutFetch(SKYSEEK_TIMEOUT_MS, async (fn) => {
+			expect(await searchSkyseek(new Blob(['x']), fn)).toEqual({ ok: false, reason: 'unavailable' });
+		});
+	});
+
 	it('answers a 200 with the HTML fragment as unavailable, not as no matches', async () => {
 		const { fn } = fakeFetch(
 			new Response('<article>No results</article>', {
@@ -407,6 +437,12 @@ describe('resolveBlueskyHandles', () => {
 			throw new TypeError('fetch failed');
 		});
 		expect((await resolveBlueskyHandles([ARTIST], fn)).size).toBe(0);
+	});
+
+	it('answers a request the timeout aborted with no handles, and does not throw', async () => {
+		await withTimeoutFetch(BLUESKY_PROFILES_TIMEOUT_MS, async (fn) => {
+			expect((await resolveBlueskyHandles([ARTIST], fn)).size).toBe(0);
+		});
 	});
 
 	it('hands fetch a signal that aborts at its own, shorter timeout', async () => {

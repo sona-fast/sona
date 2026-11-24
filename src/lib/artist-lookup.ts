@@ -484,34 +484,46 @@ function looseHandles(match: LookupMatch): string[] {
  * for the callout that tells the operator to check before picking. Null when
  * the sources agree or there is nothing to compare.
  *
- * `a` is the account the panel's offer is about: the match behind the one
- * local artist when there is one, else the prefill match, else the first
- * confident match that names anybody. `b` is the first confident match on
- * another site whose handles share nothing with `a`'s once both are reduced by
- * `looseHandle`.
+ * Every pair of confident matches on two different sites is compared, not
+ * only pairs with one match: a row naming two accounts can agree with each of
+ * two others that share nothing with each other. Two matches differ when their
+ * handles share nothing once both are reduced by `looseHandle`.
  *
- * Three things keep it quiet. A match that names a local artist is skipped as
- * `b`: outside the 'ambiguous' outcome there is at most one candidate, so that
- * match names the same person under another handle. The 'ambiguous' outcome
- * returns null, because its pick list already puts the disagreement in front of
- * the operator. A match with no handle names nobody, so it is never either side.
+ * `a` is the account the panel's offer is about when it is one of a differing
+ * pair: the match behind the one local artist when there is one, else the
+ * prefill match, else the first confident match that names anybody. `b` is then
+ * the first match that differs from it. When the offer differs from nobody, the
+ * pair is the first two matches, in result order, that differ.
+ *
+ * A match stands for a local artist when it names one, or when it names none
+ * but shares a handle with a match that does. Two matches that both stand for
+ * local artists never count as differing: outside the 'ambiguous' outcome there
+ * is one candidate, so both are that person under two handles, and under it the
+ * pick list already asks which of them it is. A match that stands for nobody
+ * still differs from the picks, because no pick shows its account. A match with
+ * no handle names nobody, so it is never either side.
  */
 export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: LookupMatch } | null {
 	const candidates = candidateArtists(data);
-	if (candidates.length >= 2) return null;
 	const named = data.matches.filter((x) => isConfident(x) && looseHandles(x).length > 0);
 	const prefill = pickPrefillMatch(data.matches);
 	const offered = candidates.length === 1 ? matchForArtist(data, candidates[0].id) : prefill;
-	const a = offered && named.includes(offered) ? offered : named[0];
-	if (!a) return null;
-	const mine = looseHandles(a);
-	const b = named.find((x) => {
-		if (x.site === a.site) return false;
-		const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(x));
-		if (hit?.artists.length) return false;
-		return !looseHandles(x).some((h) => mine.includes(h));
-	});
-	return b ? { a, b } : null;
+	const anchor = offered && named.includes(offered) ? offered : named[0];
+	if (!anchor) return null;
+	const shares = (x: LookupMatch, y: LookupMatch) => looseHandles(x).some((h) => looseHandles(y).includes(h));
+	const hasHit = (x: LookupMatch) =>
+		Boolean(data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(x))?.artists.length);
+	const linked = named.filter(hasHit);
+	const standsForArtist = (x: LookupMatch) => hasHit(x) || linked.some((y) => shares(x, y));
+	const differ = (x: LookupMatch, y: LookupMatch) =>
+		x.site !== y.site && !shares(x, y) && !(standsForArtist(x) && standsForArtist(y));
+	const b = named.find((x) => differ(anchor, x));
+	if (b) return { a: anchor, b };
+	for (const [i, x] of named.entries()) {
+		const y = named.slice(i + 1).find((other) => differ(x, other));
+		if (y) return { a: x, b: y };
+	}
+	return null;
 }
 
 /**
@@ -618,11 +630,13 @@ function partialReasonHint(reason: UpstreamFailReason): string {
 	}
 }
 
-/** Why Skyseek refused the file, where it did. Empty for a rate limit or an
- * outage: the partial notice offers Try again for both, which says enough. */
+/** Why Skyseek refused the file, where it did, or when to try again after a
+ * rate limit, which lifts in about a minute. Empty for an outage: the notice
+ * offers Try again, which says enough. */
 function skyseekReasonBody(reason: SkyseekFailReason): string {
 	if (reason === 'too_large') return m.admin_lookup_skyseek_too_large_body();
 	if (reason === 'invalid_image') return m.admin_lookup_skyseek_invalid_body();
+	if (reason === 'rate_limited') return m.admin_lookup_partial_paused_hint();
 	return '';
 }
 

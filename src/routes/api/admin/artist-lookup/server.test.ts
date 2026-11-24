@@ -2370,10 +2370,19 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		expect(third.matches[0]).toMatchObject({ handles: [], band: 'exact' });
 	});
 
-	it("keeps the matches when the site's Bluesky link cannot be read", async () => {
+	// Unread, the link cannot say which posts are the operator's own, so every
+	// post stays a lead that fills nothing and offers nobody. A site with no link
+	// saved is not that case: there is nobody to mistake a poster for.
+	it("keeps the matches when the site's Bluesky link cannot be read, as leads only", async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		const posts = [post(OPERATOR_DID, 'mine', null, 0), post(ARTIST_DID, 'theirs', null, 1)];
+		const handles = new Map([
+			[OPERATOR_DID, 'operator.example'],
+			[ARTIST_DID, 'artist.example']
+		]);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: posts });
+		resolveBlueskyHandles.mockResolvedValue(handles);
 		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
 		const realPrepare = d1.prepare.bind(d1);
 		d1.prepare = (sql: string) => {
@@ -2385,7 +2394,13 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 		warn.mockRestore();
 
 		expect(res.status).toBe(200);
-		expect(((await res.json()) as Body).matches.map((x) => x.site)).toEqual(['Bluesky']);
+		const body = (await res.json()) as Body;
+		expect(body.matches.map((x) => x.siteId)).toEqual([`${OPERATOR_DID}/mine`, `${ARTIST_DID}/theirs`]);
+		expect(body.matches.map((x) => x.band)).toEqual([null, null]);
+
+		const unset = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const saved = (await (await POST(multipartEvent(unset.platform, pngFile()))).json()) as Body;
+		expect(saved.matches.map((x) => x.band)).toEqual(['exact', 'strong']);
 	});
 
 	it('shows the earliest posts of a picture that went round, and resolves only those', async () => {

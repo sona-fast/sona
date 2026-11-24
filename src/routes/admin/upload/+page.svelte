@@ -27,6 +27,7 @@
 		differentArtistMatch,
 		lookupSentFile,
 		unansweredLine,
+		unansweredNotice,
 		sentAfterApplyThrew,
 		withCreatedArtist,
 		type LookupCleared,
@@ -1311,6 +1312,7 @@
 		const text = different
 			? { line: differentLine, spoken: differentLine }
 			: tileResultText(handle, match.site, match.band);
+		const notice = unansweredNotice(tile.lookup.data);
 		return {
 			different,
 			line: text.line,
@@ -1319,8 +1321,16 @@
 			site: match.site,
 			ratingTag: ratingTag(strictestRating(matches)),
 			// One of the two services did not answer. Still a result: the line above
-			// stands, and this says which sites it does not cover.
-			partial: unansweredLine(tile.lookup.data)
+			// stands, and this says which sites it does not cover, then why, as the
+			// panel's notice does, in one line to keep the tile short.
+			partial: notice
+				? notice.rest
+					? m.admin_lookup_partial_join({ first: notice.lead, second: notice.rest })
+					: notice.lead
+				: null,
+			// A refused key is fixed in Settings, not by asking again, so the tile
+			// carries the route there that a failed lookup's tile does.
+			settings: tile.lookup.data.fuzzysearchFailure === 'key_refused'
 		};
 	}
 </script>
@@ -1581,6 +1591,17 @@
 								<p class="tile-result" class:tile-result-warn={result.different}>{result.line}</p>
 							{#if result.partial}
 								<p class="tile-lookup-reason tile-lookup-partial">{result.partial}</p>
+							{/if}
+							{#if result.settings}
+								<a
+									class="tile-settings-link"
+									href="/admin/settings?tab=connections"
+									target="_blank"
+									rel="noopener noreferrer"
+									>{m.admin_lookup_open_settings()}<span class="sr-only"
+										>{' '}{m.link_opens_new_tab()}</span
+									></a
+								>
 							{/if}
 								<a class="tile-post-link" href={result.postUrl} target="_blank" rel="noopener noreferrer">
 									{m.admin_lookup_view_post()}<span class="sr-only"

@@ -200,6 +200,9 @@ function hasAllowedImageBytes(head: Uint8Array): boolean {
  * accounts' posts off the list. `readOwnBlueskyUrl` is the site's Bluesky link.
  * Best effort: with it unreadable their posts stay, which costs rows they
  * recognise, where failing the lookup would cost every match they asked for.
+ * Every post then loses its band, because any of them may be the operator's
+ * own, and a banded one could fill the form or be offered as the artist. A site
+ * with no link saved keeps its bands: there is nobody to mistake a poster for.
  *
  * Never rejects. The caller starts this beside the FuzzySearch call and awaits
  * it after, outside any guard of its own, so a rejection here would answer 500
@@ -220,9 +223,11 @@ async function searchBluesky(
 		}
 		if (result.matches.length === 0) return { ok: true, matches: [] };
 		let own: string | null = null;
+		let ownUnread = false;
 		try {
 			own = await readOwnBlueskyUrl();
 		} catch (e) {
+			ownUnread = true;
 			console.warn(
 				"artist-lookup: the site's Bluesky link was not read",
 				e instanceof Error ? e.message : 'non-Error value'
@@ -247,8 +252,11 @@ async function searchBluesky(
 			.slice(0, SKYSEEK_MAX_MATCHES)
 			// With the link saved by handle and none resolved for this account, the
 			// post may be the operator's own. Shown, and banded as no claim, the way
-			// a post with no distance is: it fills nothing and offers nobody.
-			.map((match) => (mayBeOwnBlueskyPost(match, own) ? { ...match, band: null } : match));
+			// a post with no distance is: it fills nothing and offers nobody. With the
+			// link unread, every post may be.
+			.map((match) =>
+				ownUnread || mayBeOwnBlueskyPost(match, own) ? { ...match, band: null } : match
+			);
 		return { ok: true, matches };
 	} catch (e) {
 		console.warn(

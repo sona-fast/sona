@@ -1575,7 +1575,7 @@ describe('stateFromResponse', () => {
 	// offer Try again only where a second send can come back different.
 	const SKY_LINE = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
 	it.each([
-		['rate_limited', '', true],
+		['rate_limited', 'Try again in a minute.', true],
 		['unavailable', '', true],
 		['too_large', 'This file is too large for Skyseek.', false],
 		['invalid_image', "Skyseek couldn't read this file.", false]
@@ -2075,24 +2075,56 @@ describe('stateFromResponse', () => {
 		});
 
 		// Two local artists make the outcome ambiguous, and its pick list already
-		// asks the question. A third, unlinked poster on another site would
-		// otherwise pass every other check and raise a second callout over it.
-		it('is quiet under the ambiguous outcome, even with an unlinked poster on a third site', () => {
+		// asks which of them it is. It does not show a third account that no pick
+		// stands for, so that one still gets the callout.
+		it('is quiet under the ambiguous outcome between the picks, and names an unlinked poster on a third site', () => {
 			const twitter = match({
 				site: 'Twitter',
 				siteId: '9',
 				handles: ['carol'],
 				postUrl: 'https://twitter.com/carol/status/9'
 			});
+			const picks = [
+				{ matchIndex: 0, artists: [{ id: 9, name: 'Fur Artist' }] },
+				{ matchIndex: 1, artists: [{ id: 7, name: 'Sky Artist' }] }
+			];
+			const data = response({ matches: [match({ handles: ['kuttoya'] }), sky('artist.example'), twitter], localArtists: picks });
+			expect(resolveOutcome(data)).toBe('ambiguous');
+			expect(pair(data)).toEqual(['kuttoya@FurAffinity', 'carol@Twitter']);
+			// The two picks alone disagree, and the pick list is that question.
+			expect(differingAccounts(response({ matches: [match({ handles: ['kuttoya'] }), sky('artist.example')], localArtists: picks }))).toBeNull();
+			// A third row under one pick's handle is that pick, not a third account.
+			const same = { ...twitter, handles: ['Kuttoya_'] };
+			expect(differingAccounts(response({ matches: [match({ handles: ['kuttoya'] }), sky('artist.example'), same], localArtists: picks }))).toBeNull();
+		});
+
+		// Two local artists on the one FurAffinity row: the pick list holds two
+		// FurAffinity artists and nothing of the Bluesky poster.
+		it('names a Bluesky poster no pick stands for when two picks come from one site', () => {
 			const data = response({
-				matches: [match({ handles: ['kuttoya'] }), sky('artist.example'), twitter],
-				localArtists: [
-					{ matchIndex: 0, artists: [{ id: 9, name: 'Fur Artist' }] },
-					{ matchIndex: 1, artists: [{ id: 7, name: 'Sky Artist' }] }
-				]
+				matches: [match({ handles: ['kuttoya'] }), sky('bob.example')],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 9, name: 'Fur Artist' }, { id: 7, name: 'Other Artist' }] }]
 			});
 			expect(resolveOutcome(data)).toBe('ambiguous');
-			expect(differingAccounts(data)).toBeNull();
+			expect(isCrossSiteAmbiguity(data)).toBe(false);
+			expect(pair(data)).toEqual(['kuttoya@FurAffinity', 'bob.example@Bluesky']);
+			// The same poster under Bluesky's spelling is represented by the row.
+			expect(
+				differingAccounts(response({ ...data, matches: [match({ handles: ['kuttoya'] }), sky('kuttoya.bsky.social')] }))
+			).toBeNull();
+		});
+
+		// The first row names two accounts and agrees with each of the others,
+		// but those two share nothing with each other.
+		it('compares every pair of sites, not only each site with the first', () => {
+			const twitter = match({ site: 'Twitter', siteId: '9', handles: ['alice'], postUrl: 'https://twitter.com/alice/status/9' });
+			const data = response({ matches: [match({ handles: ['alice', 'bob'] }), twitter, sky('bob.bsky.social')] });
+			expect(pair(data)).toEqual(['alice@Twitter', 'bob.bsky.social@Bluesky']);
+			expect(resolveOutcome(data)).toBe('new');
+			// With the two agreeing as well, nothing differs.
+			expect(
+				differingAccounts(response({ matches: [match({ handles: ['alice', 'bob'] }), twitter, sky('alice.bsky.social')] }))
+			).toBeNull();
 		});
 
 		it('compares across sites only: two posters on one site are not a disagreement between sources', () => {
@@ -2288,10 +2320,11 @@ describe('stateFromResponse', () => {
 		// a second send is refused again. The sentence stays the same for every
 		// reason; only the retry follows it.
 		// A refused file names its reason, since nothing else on screen says why the
-		// retry is missing. A rate limit or an outage needs none: Try again is there.
+		// retry is missing. A rate limit says when to try again; an outage needs
+		// nothing: Try again is there.
 		const SKY_LINE = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
 		it.each([
-			['rate_limited', '', true],
+			['rate_limited', 'Try again in a minute.', true],
 			['unavailable', '', true],
 			['too_large', 'This file is too large for Skyseek.', false],
 			['invalid_image', "Skyseek couldn't read this file.", false]

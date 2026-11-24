@@ -148,8 +148,9 @@
 	// Skyseek half, and whether Try again there can come back different.
 	const noMatchNotice = $derived(lookup.kind === 'no_match' ? unansweredNotice(lookup) : null);
 	const noMatchRetry = $derived(lookup.kind === 'no_match' ? noMatchCanRetry(lookup) : false);
-	// Two confident matches on two sites naming different accounts. Not under the
-	// ambiguous outcome, whose pick list already asks the question.
+	// Two confident matches on two sites naming different accounts. Under the
+	// ambiguous outcome, only an account no pick stands for: the pick list already
+	// asks which of the picks it is.
 	const differing = $derived(data ? differingAccounts(data) : null);
 	// When that callout disagrees with the one local artist on offer, the other
 	// account, if it fills the form and may be added, is offered as a new artist

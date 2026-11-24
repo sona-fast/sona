@@ -663,6 +663,8 @@ test.describe('with a key saved', () => {
 		await oneDoneTile(page);
 		await pill(page).click();
 		await expect(panel(page).locator('.lookup-status').first()).toHaveText(skyLine);
+		// A rate limit says when to try again.
+		await expect(panel(page).locator('.lookup-status').nth(1)).toHaveText('Try again in a minute.');
 		await expect(footerButtons(page)).toHaveText(['Try again', 'Add New Artist', 'Close']);
 
 		await stubLookup(page, {
@@ -1004,7 +1006,9 @@ test.describe('with a key saved', () => {
 		await tileLookup(page).nth(1).click();
 
 		await expect(page.locator('.tile-result')).toHaveText('artist.example on Bluesky · Exact match');
-		await expect(page.locator('.tile-lookup-reason')).toHaveText(FUZZY_PARTIAL);
+		// The reason and the advice ride on the same line, as the panel's notice says them.
+		const pausedLine = `${FUZZY_PARTIAL} FuzzySearch is limiting how often your site can search right now. Try again in a minute.`;
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(pausedLine);
 		// More space under the match line than the tile's 8px rhythm, so the notice
 		// does not read as that line's metadata.
 		const resultBox = await page.locator('.tile-result').boundingBox();
@@ -1012,9 +1016,22 @@ test.describe('with a key saved', () => {
 		if (!resultBox || !partialBox) throw new Error('the tile lines have no box');
 		expect(partialBox.y - (resultBox.y + resultBox.height)).toBeGreaterThanOrEqual(11);
 		await expect(page.locator(LIVE_REGION)).toContainText('back.png: artist.example on Bluesky');
-		await expect(page.locator(LIVE_REGION)).toContainText(FUZZY_PARTIAL);
+		await expect(page.locator(LIVE_REGION)).toContainText(pausedLine);
 		// Still a result: the tile's button re-runs the lookup, not a failed retry.
 		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
+		// No key is at fault, so there is no route to Settings.
+		await expect(page.getByRole('link', { name: /Open Settings/ })).toHaveCount(0);
+
+		// A refused key is fixed in Settings, so the tile says so and links there,
+		// the way it does for a failed lookup with the same reason.
+		await stubLookup(page, blueskyOnlyBody(BLUESKY_EXACT, { fuzzysearchFailure: 'key_refused' }));
+		await tileLookup(page).nth(1).click();
+		const refusedLine = `${FUZZY_PARTIAL} FuzzySearch didn't accept your API key. Check the key in Settings.`;
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(refusedLine);
+		await expect(page.locator(LIVE_REGION)).toContainText(refusedLine);
+		const settingsLink = page.getByRole('link', { name: /Open Settings/ });
+		await expect(settingsLink).toHaveAttribute('href', '/admin/settings?tab=connections');
+		await expect(settingsLink).toHaveAttribute('target', '_blank');
 
 		await stubLookup(page, matchedBody());
 		await tileLookup(page).nth(1).click();
