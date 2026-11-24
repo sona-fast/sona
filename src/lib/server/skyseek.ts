@@ -138,13 +138,12 @@ function normalizeMatch(raw: RawSkyseekMatch, now: number): SkyseekMatch | null 
 	const rkey = typeof raw.rkey === 'string' ? raw.rkey : '';
 	if (!DID_PATTERN.test(did) || !RKEY_PATTERN.test(rkey)) return null;
 	// A distance that is not a count of differing bits claims nothing: the match
-	// stays, unbanded. One past the cap FuzzySearch rows are held to is noise
-	// rather than a lead, and is dropped the way those rows are.
+	// stays, unbanded. The cap is applied by the caller, which has to tell a row
+	// it could not read from one it read and found too far.
 	const distance =
 		typeof raw.distance === 'number' && Number.isFinite(raw.distance) && raw.distance >= 0
 			? raw.distance
 			: null;
-	if (distance !== null && distance > FUZZYSEARCH_MAX_DISTANCE) return null;
 	return {
 		did,
 		rkey,
@@ -173,8 +172,10 @@ function compareSkyseekPosts(a: SkyseekMatch, b: SkyseekMatch): number {
 /**
  * The matches for the one image this client sends. Skyseek answers with one
  * inner list per uploaded image, so the first list is the whole answer here.
- * Returns null when the payload is not that shape at all, which the caller
- * reports as a failed lookup instead of an empty one. Exported for tests.
+ * Returns null when the payload is not that shape at all, or holds hits of
+ * which none is readable, which the caller reports as a failed lookup instead
+ * of an empty one. Hits that are all past the distance cap are an empty answer.
+ * Exported for tests.
  *
  * One post can come back more than once (a post carrying two near-identical
  * images), so rows are folded on DID + record key. The closest one stays, and
@@ -192,10 +193,15 @@ export function normalizeSkyseekMatches(
 	if (!Array.isArray(first)) return null;
 
 	const kept = new Map<string, SkyseekMatch>();
+	let readable = false;
 	for (const entry of first) {
 		const match =
 			entry && typeof entry === 'object' ? normalizeMatch(entry as RawSkyseekMatch, now) : null;
 		if (!match) continue;
+		readable = true;
+		// One past the cap FuzzySearch rows are held to is noise rather than a
+		// lead, and is dropped the way those rows are.
+		if (match.distance !== null && match.distance > FUZZYSEARCH_MAX_DISTANCE) continue;
 		const key = `${match.did}\u0000${match.rkey}`;
 		const already = kept.get(key);
 		if (!already) {
@@ -206,6 +212,9 @@ export function normalizeSkyseekMatches(
 		const other = closer === match ? already : match;
 		kept.set(key, { ...closer, postedAt: closer.postedAt ?? other.postedAt });
 	}
+	// Hits came back and not one could be read: the fields changed or the answer
+	// is broken, and "no Bluesky post" would be a claim nobody checked.
+	if (first.length > 0 && !readable) return null;
 	return [...kept.values()].sort(compareSkyseekPosts);
 }
 
@@ -409,4 +418,19 @@ export function isOwnBlueskyPost(
 	if (!own) return false;
 	const did = splitBlueskySiteId(match.siteId).did.toLowerCase();
 	return did === own || match.handles.some((h) => normalizeHandle('bluesky', h) === own);
+}
+
+/**
+ * Whether a Bluesky match could be the operator's own post with nothing here to
+ * say it is not: the site's link names a handle rather than a DID, and no
+ * handle resolved for the match's account, so `isOwnBlueskyPost` had nothing to
+ * compare. A link saved by DID is compared by DID and never needs this.
+ */
+export function mayBeOwnBlueskyPost(
+	match: Pick<LookupMatch, 'site' | 'handles'>,
+	ownBlueskyUrl: string | null | undefined
+): boolean {
+	if (match.site !== 'Bluesky' || match.handles.length > 0) return false;
+	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl));
+	return own !== '' && !own.startsWith('did:');
 }

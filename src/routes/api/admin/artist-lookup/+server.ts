@@ -30,6 +30,7 @@ import {
 	SKYSEEK_MAX_MATCHES,
 	isOwnBlueskyPost,
 	lookupUserAgent,
+	mayBeOwnBlueskyPost,
 	resolveBlueskyHandles,
 	searchSkyseek,
 	skyseekLookupMatch,
@@ -194,6 +195,12 @@ function hasAllowedImageBytes(head: Uint8Array): boolean {
  * was not searched, which the caller reports as that and never as "no Bluesky
  * posts". Anything that throws, the handle lookup included, is `unavailable`.
  *
+ * The operator's own posts of the piece are not leads on who drew it, and are
+ * left out before the cap, so a piece they posted many times cannot push other
+ * accounts' posts off the list. `readOwnBlueskyUrl` is the site's Bluesky link.
+ * Best effort: with it unreadable their posts stay, which costs rows they
+ * recognise, where failing the lookup would cost every match they asked for.
+ *
  * Never rejects. The caller starts this beside the FuzzySearch call and awaits
  * it after, outside any guard of its own, so a rejection here would answer 500
  * for bytes that already left the worker. Only the failure reason is logged, a
@@ -202,7 +209,8 @@ function hasAllowedImageBytes(head: Uint8Array): boolean {
 async function searchBluesky(
 	bytes: Blob,
 	fetchFn: typeof fetch,
-	userAgent: string
+	userAgent: string,
+	readOwnBlueskyUrl: () => Promise<string | null>
 ): Promise<{ ok: true; matches: LookupMatch[] } | { ok: false; reason: SkyseekFailure }> {
 	try {
 		const result = await searchSkyseek(bytes, fetchFn, userAgent);
@@ -210,17 +218,38 @@ async function searchBluesky(
 			console.warn('artist-lookup: Skyseek search failed', result.reason);
 			return result;
 		}
-		// Closest first already, then earliest, so the cap keeps the best leads.
-		const posts = result.matches.slice(0, SKYSEEK_MAX_MATCHES);
-		// Without the site's hostname: Skyseek's owner asked for it, Bluesky did not.
-		const handles = await resolveBlueskyHandles(
-			posts.map((post) => post.did),
-			fetchFn
+		if (result.matches.length === 0) return { ok: true, matches: [] };
+		let own: string | null = null;
+		try {
+			own = await readOwnBlueskyUrl();
+		} catch (e) {
+			console.warn(
+				"artist-lookup: the site's Bluesky link was not read",
+				e instanceof Error ? e.message : 'non-Error value'
+			);
+		}
+		// A link saved by DID names the operator's posts before any handle is
+		// known, so they take none of the handle lookup's places.
+		const posts = result.matches.filter(
+			(post) => !isOwnBlueskyPost(skyseekLookupMatch(post, null), own)
 		);
-		return {
-			ok: true,
-			matches: posts.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null))
-		};
+		// One request, for the first accounts up to the cap, each asked about once
+		// however many posts it made. The posts the cap below keeps are all by
+		// those accounts, except at most the last one when the operator's account,
+		// known only by handle, took one of the places.
+		// Without the site's hostname: Skyseek's owner asked for it, Bluesky did not.
+		const dids = [...new Set(posts.map((post) => post.did))].slice(0, SKYSEEK_MAX_MATCHES);
+		const handles = await resolveBlueskyHandles(dids, fetchFn);
+		const matches = posts
+			.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null))
+			.filter((match) => !isOwnBlueskyPost(match, own))
+			// Closest first already, then earliest, so the cap keeps the best leads.
+			.slice(0, SKYSEEK_MAX_MATCHES)
+			// With the link saved by handle and none resolved for this account, the
+			// post may be the operator's own. Shown, and banded as no claim, the way
+			// a post with no distance is: it fills nothing and offers nobody.
+			.map((match) => (mayBeOwnBlueskyPost(match, own) ? { ...match, band: null } : match));
+		return { ok: true, matches };
 	} catch (e) {
 		console.warn(
 			'artist-lookup: Skyseek search threw',
@@ -430,7 +459,9 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	} catch {
 		hostname = null;
 	}
-	const blueskyPending = searchBluesky(bytes, fetch, lookupUserAgent(hostname));
+	const blueskyPending = searchBluesky(bytes, fetch, lookupUserAgent(hostname), () =>
+		getRawSetting(db, 'blueskyUrl')
+	);
 	let result: Awaited<ReturnType<typeof searchImage>>;
 	try {
 		result = await searchImage(bytes, resolved.key, fetch);
@@ -500,22 +531,8 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// is stable, so rows that compare equal keep the order their own search gave
 	// them, which for Bluesky is earliest post first.
 	const bluesky = await blueskyPending;
-	let blueskyMatches = bluesky.ok ? bluesky.matches : [];
-	if (blueskyMatches.length > 0) {
-		// The operator's own post of the piece is not a lead on who drew it. Best
-		// effort: with the setting unreadable their post stays in the list, which
-		// costs a row they recognise, where failing the lookup would cost them
-		// every match they asked for.
-		try {
-			const ownBlueskyUrl = await getRawSetting(db, 'blueskyUrl');
-			blueskyMatches = blueskyMatches.filter((match) => !isOwnBlueskyPost(match, ownBlueskyUrl));
-		} catch (e) {
-			console.warn(
-				"artist-lookup: the site's Bluesky link was not read",
-				e instanceof Error ? e.message : 'non-Error value'
-			);
-		}
-	}
+	// The operator's own posts are already out (searchBluesky).
+	const blueskyMatches = bluesky.ok ? bluesky.matches : [];
 	// FuzzySearch failed and there is no Bluesky row to show in its place (Skyseek
 	// failed too, found nothing, or found only the operator's own post), so the
 	// failure is the whole answer, with the status it always had. Decided after

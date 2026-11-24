@@ -10,6 +10,7 @@ import {
 	SKYSEEK_TIMEOUT_MS,
 	isOwnBlueskyPost,
 	lookupUserAgent,
+	mayBeOwnBlueskyPost,
 	normalizeSkyseekMatches,
 	resolveBlueskyHandles,
 	searchSkyseek,
@@ -179,7 +180,8 @@ describe('searchSkyseek — request shape', () => {
 		expect(calls[0].init.redirect).toBe('manual');
 		const sent = (calls[0].init.body as FormData).get('image');
 		expect(sent).toBeInstanceOf(File);
-		expect((sent as File).size).toBe(3);
+		// The bytes themselves: the stub answers the same whatever image arrives.
+		expect([...new Uint8Array(await (sent as File).arrayBuffer())]).toEqual([1, 2, 3]);
 	});
 
 	it('hands fetch a signal that aborts at the timeout, not one that never fires', async () => {
@@ -245,6 +247,11 @@ describe('searchSkyseek — failure mapping', () => {
 
 	it('answers a 200 that says it failed as unavailable', async () => {
 		const { fn } = fakeFetch(jsonResponse({ success: false, results: [] }));
+		expect(await searchSkyseek(new Blob(['x']), fn)).toEqual({ ok: false, reason: 'unavailable' });
+	});
+
+	it('answers hits it cannot read as unavailable, not as no matches', async () => {
+		const { fn } = fakeFetch(jsonResponse(answer({})));
 		expect(await searchSkyseek(new Blob(['x']), fn)).toEqual({ ok: false, reason: 'unavailable' });
 	});
 
@@ -577,6 +584,31 @@ describe('isOwnBlueskyPost', () => {
 	});
 });
 
+describe('mayBeOwnBlueskyPost', () => {
+	const post = { did: ARTIST, rkey: 'a', distance: 0, postedAt: null, postUrl: blueskyPostUrl(ARTIST, 'a') };
+
+	it('is true only for an unresolved poster against a link saved by handle', () => {
+		const saved = 'https://bsky.app/profile/operator.example';
+		expect(mayBeOwnBlueskyPost(skyseekLookupMatch(post, null), saved)).toBe(true);
+		// A resolved handle is compared, so there is an answer either way.
+		expect(mayBeOwnBlueskyPost(skyseekLookupMatch(post, 'someone.example'), saved)).toBe(false);
+		// A link saved by DID, plain or with encoded colons, is compared by DID.
+		expect(mayBeOwnBlueskyPost(skyseekLookupMatch(post, null), `https://bsky.app/profile/${REPOSTER}`)).toBe(
+			false
+		);
+		expect(
+			mayBeOwnBlueskyPost(
+				skyseekLookupMatch(post, null),
+				`https://bsky.app/profile/${REPOSTER.replaceAll(':', '%3A')}`
+			)
+		).toBe(false);
+		// No link saved, nobody to mistake the poster for.
+		expect(mayBeOwnBlueskyPost(skyseekLookupMatch(post, null), '')).toBe(false);
+		expect(mayBeOwnBlueskyPost(skyseekLookupMatch(post, null), null)).toBe(false);
+		expect(mayBeOwnBlueskyPost({ site: 'Twitter', handles: [] }, saved)).toBe(false);
+	});
+});
+
 describe('normalizeSkyseekMatches — distance', () => {
 	const hit = (over: Record<string, unknown>) => ({ created_at: FIRST, repo: ARTIST, rkey: 'a', ...over });
 
@@ -604,6 +636,27 @@ describe('normalizeSkyseekMatches — distance', () => {
 			NOW
 		);
 		expect(matches?.map((x) => [x.rkey, x.distance])).toEqual([['at-cap', FUZZYSEARCH_MAX_DISTANCE]]);
+	});
+
+	// Rows Skyseek sent and this file read, all too far to be leads: a search
+	// that found nothing close, so zero hits rather than a failure.
+	it('answers a list cut down to nothing by the distance limit as zero hits', () => {
+		expect(
+			normalizeSkyseekMatches(
+				answer(hit({ rkey: 'past-cap', distance: FUZZYSEARCH_MAX_DISTANCE + 1 }), hit({ rkey: 'far', distance: 40 })),
+				NOW
+			)
+		).toEqual([]);
+	});
+
+	// Rows came back and not one of them could be read: Skyseek changed its
+	// fields, or the answer is broken. Nobody can say Bluesky has no post.
+	it.each([
+		['an empty object', [{}]],
+		['renamed fields', [{ did: ARTIST, record_key: 'a', created_at: FIRST }]],
+		['only rows it refuses', [{ repo: 'evil.example/x', rkey: 'a' }, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa']]
+	])('reports a list of %s as not an answer', (_name, rows) => {
+		expect(normalizeSkyseekMatches(answer(...rows), NOW)).toBeNull();
 	});
 
 	it('puts the closest first, then the earliest, with an unknown distance last', () => {

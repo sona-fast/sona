@@ -115,7 +115,9 @@ export type LookupState =
 	| { kind: 'results'; data: LookupResponse }
 	// `blueskySearched` is the endpoint's field of that name: the sentence lists
 	// the sites that were checked, and Bluesky is on it only when Skyseek answered.
-	| { kind: 'no_match'; blueskySearched: boolean }
+	// `skyseekFailure` is why it did not, null when it did, so the notice and the
+	// retry read it the way they do over a result.
+	| { kind: 'no_match'; blueskySearched: boolean; skyseekFailure: SkyseekFailReason | null }
 	// `sent` records whether the file left the browser, which the reason cannot:
 	// too_large and invalid_image each arise both from a gate that runs before
 	// anything is forwarded and from FuzzySearch answering 413/400 after the file
@@ -497,36 +499,46 @@ export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: Lo
 
 /**
  * The second offer beside "Use {name}" when the sources disagree: the 'existing'
- * outcome holds one local artist, and the differing account that is NOT that
- * artist's is the prefill match, on a site whose poster may be added. The
- * operator gets "Add {handle} as a new artist" for it, so the two answers are
- * both one click away and the operator decides. The seed is the one the 'new'
- * outcome's button sends. Null otherwise, and always for a Bluesky poster (see
- * canAddPosterAsArtist).
+ * outcome holds one local artist, the warning is showing, and the prefill match
+ * names a different account from that artist's match, on another site whose
+ * poster may be added. Compared with the local artist's match directly rather
+ * than through the warning's pair, which names only the first account that
+ * differs. The operator gets "Add {handle} as a new artist" for it, so the two
+ * answers are both one click away and the operator decides. The seed is the
+ * one the 'new' outcome's button sends. Null otherwise, and always for a
+ * Bluesky poster (see canAddPosterAsArtist).
  */
 export function addOtherPosterSeed(
 	data: LookupResponse
 ): { handle: string; site: LookupSite; linkable: boolean } | null {
 	if (resolveOutcome(data) !== 'existing') return null;
-	const differing = differingAccounts(data);
-	if (!differing) return null;
+	if (!differingAccounts(data)) return null;
 	const own = matchForArtist(data, candidateArtists(data)[0].id);
-	const other = differing.a === own ? differing.b : differing.b === own ? differing.a : null;
-	if (!other || other !== pickPrefillMatch(data.matches) || !canAddPosterAsArtist(other.site)) {
-		return null;
-	}
+	const other = pickPrefillMatch(data.matches);
+	if (!own || !other || other === own || other.site === own.site) return null;
+	if (!canAddPosterAsArtist(other.site)) return null;
+	// A prefill row that names a local artist names the one there is, under
+	// another handle; one whose handle reads like that artist's is the same person.
+	const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(other));
+	if (hit?.artists.length) return null;
+	const mine = looseHandles(own);
+	if (looseHandles(other).some((h) => mine.includes(h))) return null;
 	const handle = matchHandle(other);
 	if (!handle) return null;
 	return { handle, site: other.site, linkable: LINKABLE_SITES.includes(other.site) };
 }
 
+/** What the notice reads: a result's response, or a no-match, which carries
+ * the Skyseek half of it. */
+type UnansweredInput = Pick<LookupResponse, 'blueskySearched' | 'fuzzysearchFailure' | 'skyseekFailure'>;
+
 /**
- * Which service did not answer, for the notice over a partial result. Null when
- * both did. They are never both named: with neither answering there are no rows
- * and the lookup is a failure, not a result.
+ * Which service did not answer, for the notice over a partial result or a
+ * no-match. Null when both did. They are never both named: with neither
+ * answering there are no rows and the lookup is a failure, not a result.
  */
 export function unansweredService(
-	data: LookupResponse
+	data: UnansweredInput
 ):
 	| { service: 'fuzzysearch'; reason: UpstreamFailReason }
 	| { service: 'skyseek'; reason: SkyseekFailReason }
@@ -538,7 +550,7 @@ export function unansweredService(
 
 /** The sentence for `unansweredService`, shared by the panel and the upload
  * page's variant tiles. */
-export function unansweredLine(data: LookupResponse): string | null {
+export function unansweredLine(data: UnansweredInput): string | null {
 	const missing = unansweredService(data);
 	if (!missing) return null;
 	return missing.service === 'fuzzysearch'
@@ -609,7 +621,7 @@ export function retryCanSucceed(reason: LookupFailReason): boolean {
  * the partial notice's own advice, rendered beneath it in the body style, or
  * empty when there is none. The parts of `rest` are joined through a message,
  * because Japanese puts no space after "。". */
-export function unansweredNotice(data: LookupResponse): { lead: string; rest: string } | null {
+export function unansweredNotice(data: UnansweredInput): { lead: string; rest: string } | null {
 	const lead = unansweredLine(data);
 	const missing = unansweredService(data);
 	if (!lead || !missing) return null;
@@ -624,10 +636,17 @@ export function unansweredNotice(data: LookupResponse): { lead: string; rest: st
 }
 
 /** Whether a partial result's Try again can fill in what is missing. */
-export function unansweredCanRetry(data: LookupResponse): boolean {
+export function unansweredCanRetry(data: UnansweredInput): boolean {
 	const missing = unansweredService(data);
 	if (!missing) return false;
 	return retryCanSucceed(missing.reason);
+}
+
+/** Whether a no-match offers Try again. With Bluesky searched it does, for a
+ * better copy of the file; with Skyseek down, only where a second send can
+ * reach it: a file Skyseek refused is refused again. */
+export function noMatchCanRetry(state: Extract<LookupState, { kind: 'no_match' }>): boolean {
+	return state.blueskySearched || unansweredCanRetry(state);
 }
 
 /** The two form fields a lookup can fill. Absent means "left alone". */
@@ -1221,7 +1240,7 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 		// A 200 that says both at once is read the same way, and never as "nothing
 		// matched" on sites nobody searched.
 		if (fuzzysearchFailure) return { kind: 'failed', reason: fuzzysearchFailure, sent: forwarded };
-		return { kind: 'no_match', blueskySearched: data.blueskySearched === true };
+		return { kind: 'no_match', blueskySearched: data.blueskySearched === true, skyseekFailure };
 	}
 	return {
 		kind: 'results',

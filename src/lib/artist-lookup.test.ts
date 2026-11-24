@@ -16,6 +16,7 @@ import {
 	matchHandles,
 	matchKey,
 	lookupSentFile,
+	noMatchCanRetry,
 	mergeSamePost,
 	nameMatchArtists,
 	namesNoSite,
@@ -1506,7 +1507,8 @@ describe('stateFromResponse', () => {
 	it('reads an empty match list as no_match', async () => {
 		expect(await stateFromResponse(jsonResponse({ enabled: true, matches: [] }))).toEqual({
 			kind: 'no_match',
-			blueskySearched: false
+			blueskySearched: false,
+			skyseekFailure: 'unavailable'
 		});
 	});
 
@@ -1523,7 +1525,44 @@ describe('stateFromResponse', () => {
 		const state = await stateFromResponse(
 			jsonResponse({ enabled: true, matches: [], blueskySearched: wire })
 		);
-		expect(state).toEqual({ kind: 'no_match', blueskySearched: expected });
+		expect(state).toEqual({
+			kind: 'no_match',
+			blueskySearched: expected,
+			skyseekFailure: expected ? null : 'unavailable'
+		});
+	});
+
+	// SONA-243: FuzzySearch found nothing and Skyseek did not answer. The reason
+	// rides on the no-match, so the panel can say why Bluesky went unchecked and
+	// offer Try again only where a second send can come back different.
+	const SKY_LINE = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
+	it.each([
+		['rate_limited', '', true],
+		['unavailable', '', true],
+		['too_large', 'This file is too large for Skyseek.', false],
+		['invalid_image', "Skyseek couldn't read this file.", false]
+	] as const)('carries Skyseek reason %s on a no_match, with its notice and retry', async (reason, rest, retry) => {
+		const state = await stateFromResponse(
+			jsonResponse({ enabled: true, matches: [], blueskySearched: false, skyseekFailure: reason })
+		);
+		expect(state).toEqual({ kind: 'no_match', blueskySearched: false, skyseekFailure: reason });
+		if (state.kind !== 'no_match') throw new Error(`expected no_match, got ${state.kind}`);
+		expect(unansweredNotice(state)).toEqual({ lead: SKY_LINE, rest });
+		expect(unansweredLine(state)).toBe(SKY_LINE);
+		expect(noMatchCanRetry(state)).toBe(retry);
+	});
+
+	// Bluesky was searched along with the rest and nothing matched: no notice,
+	// and Try again stays, as before Skyseek, for a better copy of the file.
+	it('has no Skyseek notice on a no_match that searched Bluesky, and keeps Try again', async () => {
+		const state = await stateFromResponse(
+			jsonResponse({ enabled: true, matches: [], blueskySearched: true, skyseekFailure: 'too_large' })
+		);
+		expect(state).toEqual({ kind: 'no_match', blueskySearched: true, skyseekFailure: null });
+		if (state.kind !== 'no_match') throw new Error(`expected no_match, got ${state.kind}`);
+		expect(unansweredNotice(state)).toBeNull();
+		expect(unansweredLine(state)).toBeNull();
+		expect(noMatchCanRetry(state)).toBe(true);
 	});
 
 	// SONA-243: a Bluesky post from Skyseek whose answer carried no distance. It
@@ -1793,6 +1832,31 @@ describe('stateFromResponse', () => {
 			expect(
 				addOtherPosterSeed(response({ matches: [match(), { ...bluesky, handles: ['bob.bsky.social'] }] }))
 			).toBeNull();
+		});
+
+		// The warning pairs the local artist with the first account that differs,
+		// here the Bluesky poster. The FurAffinity poster fills the form and differs
+		// from the local artist too, so it is still the one offered.
+		it('offers the prefill poster even when the warning names a different account', () => {
+			const data = response({
+				matches: [
+					{ ...bluesky, handles: ['carol.bsky.social'] },
+					match({ handles: ['alice'], distance: 1, band: 'strong' }),
+					match({ site: 'Twitter', siteId: '99', handles: ['bob'], distance: 1, band: 'strong', postUrl: 'https://twitter.com/bob/status/99' })
+				],
+				localArtists: [{ matchIndex: 2, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)?.b.site).toBe('Bluesky');
+			expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+			// The prefill poster under the local artist's own spelling is the same
+			// person, so there is nothing else to offer.
+			const same = response({
+				...data,
+				matches: [data.matches[0], match({ handles: ['Bob_'], distance: 1, band: 'strong' }), data.matches[2]]
+			});
+			expect(addOtherPosterSeed(same)).toBeNull();
 		});
 
 		it('offers nothing extra when the differing poster is not the one that fills the form', () => {
@@ -2479,7 +2543,7 @@ describe('lookupSentFile', () => {
 	// lookup having worked: it belongs on a failure just as much as on a result.
 	it('is true for every outcome the request actually reached', () => {
 		expect(lookupSentFile({ kind: 'results', data: response() })).toBe(true);
-		expect(lookupSentFile({ kind: 'no_match', blueskySearched: false })).toBe(true);
+		expect(lookupSentFile({ kind: 'no_match', blueskySearched: false, skyseekFailure: 'unavailable' })).toBe(true);
 		for (const reason of ['key_refused', 'rate_limited', 'unavailable'] as const) {
 			expect(lookupSentFile({ kind: 'failed', reason, sent: true })).toBe(true);
 		}
@@ -2517,7 +2581,7 @@ describe('sentAfterApplyThrew', () => {
 		['a failure the browser refused to send', { kind: 'failed', reason: 'too_large', sent: false }, false],
 		['a failure that went out', { kind: 'failed', reason: 'rate_limited', sent: true }, true],
 		['a result', { kind: 'results', data: response() }, true],
-		['a no-match', { kind: 'no_match', blueskySearched: false }, true],
+		['a no-match', { kind: 'no_match', blueskySearched: false, skyseekFailure: 'unavailable' }, true],
 		// Cancelled or re-fired, never a state the request settles on: it reaches
 		// this only if the capture itself is what threw, and by then the request
 		// had gone out.

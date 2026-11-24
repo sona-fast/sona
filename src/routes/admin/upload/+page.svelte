@@ -863,11 +863,14 @@
 				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
 				: m.admin_lookup_announce_tile_no_match({ fileName });
 			// Spoken with the match, for the reason the private notice below is: the
-			// tile's own paragraph sits outside any live region.
-			if (result?.partial) {
+			// tile's own paragraph sits outside any live region. A no-match carries
+			// the Skyseek half of the same notice.
+			const partial =
+				result?.partial ?? (tile.lookup.kind === 'no_match' ? unansweredLine(tile.lookup) : null);
+			if (partial) {
 				line = m.admin_lookup_announce_tile_with_notice({
 					outcome: line,
-					disclosure: result.partial
+					disclosure: partial
 				});
 			}
 		}
@@ -1575,6 +1578,11 @@
 										>{m.admin_lookup_view_post_site({ site: siteLabel(result.site) })}</span
 									>
 								</a>
+							{:else if tile.lookup.kind === 'no_match' && !tile.lookup.blueskySearched}
+								<!-- Nothing matched on the sites that were checked, and Bluesky
+								     was not one of them: the tile says so, as it does over a
+								     result. -->
+								<p class="tile-lookup-reason tile-lookup-partial">{unansweredLine(tile.lookup)}</p>
 							{/if}
 							<!-- The file went to FuzzySearch while the shared Private box was
 							     checked: say so on the tile the way the panel says it for the

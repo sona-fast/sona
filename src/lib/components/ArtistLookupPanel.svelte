@@ -25,6 +25,7 @@
 		matchKey,
 		nameMatchArtists,
 		namesNoSite,
+		noMatchCanRetry,
 		pickPrefillMatch,
 		postDateToInput,
 		ratingLabel,
@@ -145,6 +146,10 @@
 	// same failure and the notice's own advice as `rest`.
 	const unansweredText = $derived(data ? unansweredNotice(data) : null);
 	const unansweredRetry = $derived(data ? unansweredCanRetry(data) : false);
+	// The same notice over a no-match, where Bluesky going unsearched is its whole
+	// Skyseek half, and whether Try again there can come back different.
+	const noMatchNotice = $derived(lookup.kind === 'no_match' ? unansweredNotice(lookup) : null);
+	const noMatchRetry = $derived(lookup.kind === 'no_match' ? noMatchCanRetry(lookup) : false);
 	// Two confident matches on two sites naming different accounts. Not under the
 	// ambiguous outcome, whose pick list already asks the question.
 	const differing = $derived(data ? differingAccounts(data) : null);
@@ -306,9 +311,14 @@
 				</p>
 				<!-- Skyseek shares FuzzySearch's switch, so Bluesky going unsearched
 				     means Skyseek did not answer. Said outright: leaving Bluesky off
-				     the list above does not tell the operator it was skipped. -->
-				{#if !lookup.blueskySearched}
-					<p class="lookup-status">{m.admin_lookup_partial_skyseek()}</p>
+				     the list above does not tell the operator it was skipped. A file
+				     Skyseek refused says so too, since nothing else says why Try
+				     again is missing. -->
+				{#if noMatchNotice}
+					<p class="lookup-status">{noMatchNotice.lead}</p>
+					{#if noMatchNotice.rest}
+						<p class="lookup-status">{noMatchNotice.rest}</p>
+					{/if}
 				{/if}
 				<!-- A no-match is a result with nothing to prefill, so it empties what
 				     the last lookup filled. Said here, above the hint: the operator
@@ -693,7 +703,9 @@
 					{m.admin_lookup_cancel()}
 				</button>
 			{:else if lookup.kind === 'no_match'}
-				<button type="button" class="btn btn-secondary" onclick={retry}>{m.admin_lookup_try_again()}</button>
+				{#if noMatchRetry}
+					<button type="button" class="btn btn-secondary" onclick={retry}>{m.admin_lookup_try_again()}</button>
+				{/if}
 				<!-- The spec's third no_match action: nothing matched, so the way
 				     forward is the artist by hand. An empty handle seeds nothing. -->
 				<button

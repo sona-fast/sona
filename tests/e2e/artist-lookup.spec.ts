@@ -647,6 +647,70 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).not.toContainText('or Bluesky');
 	});
 
+	// Nothing matched on FuzzySearch's sites, and Skyseek refused the file. The
+	// no-match says why Bluesky went unchecked, and drops Try again: Skyseek
+	// refuses the same file again. A rate limit keeps it, since the limit lifts.
+	test('a no-match where Skyseek refused the file says why, and offers no retry', async ({
+		page
+	}, testInfo) => {
+		const skyLine = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
+		await stubLookup(page, {
+			enabled: true,
+			matches: [],
+			blueskySearched: false,
+			skyseekFailure: 'rate_limited'
+		});
+		await oneDoneTile(page);
+		await pill(page).click();
+		await expect(panel(page).locator('.lookup-status').first()).toHaveText(skyLine);
+		await expect(footerButtons(page)).toHaveText(['Try again', 'Add New Artist', 'Close']);
+
+		await stubLookup(page, {
+			enabled: true,
+			matches: [],
+			blueskySearched: false,
+			skyseekFailure: 'too_large'
+		});
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(panel(page).locator('.lookup-status')).toHaveText([
+			skyLine,
+			'This file is too large for Skyseek.',
+			'Add the artist by hand, or try again with the original file.'
+		]);
+		await expect(footerButtons(page)).toHaveText(['Add New Artist', 'Close']);
+		await testInfo.attach('no-match-skyseek-too-large', {
+			body: await panel(page).screenshot(),
+			contentType: 'image/png'
+		});
+	});
+
+	// A variant tile's no-match has no result line, so it carries the notice on
+	// its own, and the announcement speaks it.
+	test('a variant tile says Bluesky was not checked on a no-match', async ({ page }) => {
+		const skyLine = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
+		await stubLookup(page, {
+			enabled: true,
+			matches: [],
+			blueskySearched: false,
+			skyseekFailure: 'invalid_image'
+		});
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(1).click();
+
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(skyLine);
+		await expect(page.locator(LIVE_REGION)).toContainText('back.png: no match.');
+		await expect(page.locator(LIVE_REGION)).toContainText(skyLine);
+
+		// Bluesky searched this time: the notice goes with the reason for it.
+		await stubLookup(page, { enabled: true, matches: [], blueskySearched: true });
+		const answered = page.waitForResponse('**/api/admin/artist-lookup');
+		await tileLookup(page).nth(1).click();
+		await answered;
+		await expect(tileLookup(page).nth(1)).toContainText('Looked up');
+		await expect(page.locator('.tile-lookup-reason')).toHaveCount(0);
+	});
+
 	// SONA-243: one service down is not a failed lookup. The rows of the one that
 	// answered are shown and work, and the panel says which sites they do not
 	// cover. The reason picks the advice and the routes, as it does when the
