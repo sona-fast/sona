@@ -1094,6 +1094,10 @@
 		const parent = tiles[parentIndex]?.lookup;
 		const data = parent?.kind === 'results' ? parent.data : null;
 		if (!data) return;
+		// A result that left the last prefill alone has nothing to re-derive: the
+		// reset below would empty fields this result never refills. Left as they
+		// are, the way a failed lookup's are.
+		if (parent && resultKeepsLastPrefill(parent)) return;
 		// The site the panel's own sentence names, read the way the panel reads it
 		// so the two say the same post.
 		const site = pickPrefillMatch(data.matches)?.site ?? null;

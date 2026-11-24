@@ -4423,6 +4423,35 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
+	// A retry that came back with FuzzySearch missing and only a Bluesky lead
+	// keeps the fields the first lookup filled, and the round trip must not
+	// empty them: that result refills nothing.
+	test('a group-mode round trip keeps fields a partial answer left alone', async ({ page }) => {
+		await stubLookup(page, matchedBody({ blueskySearched: false, skyseekFailure: 'rate_limited' }));
+		await oneDoneTile(page);
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+
+		await stubLookup(
+			page,
+			matchedBody({ matches: [BLUESKY_LEAD], localArtists: [], fuzzysearchFailure: 'rate_limited' })
+		);
+		await panel(page).getByRole('button', { name: 'Try again' }).click();
+		await expect(panel(page)).toContainText("FuzzySearch didn't return results");
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(page.getByRole('combobox', { name: 'Variant of' })).toBeVisible();
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'New piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+	});
+
 	// Close puts the lookup back to idle, and the idle arm draws whatever that
 	// lookup emptied. The record left standing, Close left the panel on screen as
 	// a bordered card holding that sentence, with no way to dismiss it (SONA-220).

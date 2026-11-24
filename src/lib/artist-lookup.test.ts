@@ -2529,6 +2529,11 @@ describe('stateFromResponse', () => {
 			expect(await keeps({ matches: [lead], fuzzysearchFailure: 'rate_limited' })).toBe(true);
 			// A confident Bluesky row is a replacement, with or without FuzzySearch.
 			expect(await keeps({ matches: [bluesky], fuzzysearchFailure: 'rate_limited' })).toBe(false);
+			// Skyseek missing and only a weak FuzzySearch row: the filled post may be
+			// a Bluesky one nobody looked for.
+			const weak = match({ distance: 5, band: 'possible' });
+			expect(await keeps({ matches: [weak], blueskySearched: false, skyseekFailure: 'rate_limited' })).toBe(true);
+			expect(await keeps({ matches: [match()], blueskySearched: false, skyseekFailure: 'rate_limited' })).toBe(false);
 			// Both services answered and nothing is confident: a completed answer.
 			expect(await keeps({ matches: [lead] })).toBe(false);
 			// A completed no-match clears; one where Skyseek never answered does not.

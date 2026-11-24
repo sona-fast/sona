@@ -511,7 +511,9 @@ describe('resolveBlueskyHandles', () => {
 			await resolveBlueskyHandles([ARTIST], fn);
 
 			const signal = calls[0].init.signal as AbortSignal;
-			vi.advanceTimersByTime(BLUESKY_PROFILES_TIMEOUT_MS - 1);
+			// Five seconds as a literal: the handle lookup must give up well inside
+			// the time Skyseek is given, whatever the constant is changed to.
+			vi.advanceTimersByTime(4999);
 			expect(signal.aborted).toBe(false);
 			vi.advanceTimersByTime(2);
 			expect(signal.aborted).toBe(true);
