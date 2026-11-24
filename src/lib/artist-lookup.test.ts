@@ -1936,6 +1936,26 @@ describe('stateFromResponse', () => {
 			expect(addOtherPosterSeed(data)).toBeNull();
 		});
 
+		it('keeps the offer when the artist is named on the prefill\'s site and on another', () => {
+			// FurAffinity alice fills the form. Bob is the artist on FurAffinity and
+			// on Bluesky, and the FurAffinity row comes first. The warning names
+			// alice against Bluesky Bob, and alice is still one click away.
+			const data = response({
+				matches: [
+					match({ handles: ['alice'] }),
+					match({ siteId: '77', handles: ['bob'], distance: 1, band: 'strong', postUrl: 'https://www.furaffinity.net/view/77/' }),
+					{ ...bluesky, handles: ['bob.example'], distance: 1, band: 'strong' }
+				],
+				localArtists: [
+					{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] },
+					{ matchIndex: 2, artists: [{ id: 7, name: 'Bob' }] }
+				]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+		});
+
 		it('offers nothing extra when the differing poster is not the one that fills the form', () => {
 			// The prefill row is a FurAffinity post by the local artist; the
 			// differing Twitter account is another row and fills nothing.

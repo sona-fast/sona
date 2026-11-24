@@ -553,24 +553,25 @@ export function addOtherPosterSeed(
 ): { handle: string; site: LookupSite; linkable: boolean } | null {
 	if (resolveOutcome(data) !== 'existing') return null;
 	if (!differingAccounts(data)) return null;
-	const own = matchForArtist(data, candidateArtists(data)[0].id);
+	const artistId = candidateArtists(data)[0].id;
+	// Every confident row that names the artist, not only the first: the artist
+	// can be known under one handle on one site and another on the next.
+	const artistRows = data.matches.filter((x, index) => {
+		if (!isConfident(x)) return false;
+		const hits = data.localArtists.find((h) => h.matchIndex === index)?.artists ?? [];
+		return hits.some((a) => a.id === artistId);
+	});
 	const other = pickPrefillMatch(data.matches);
-	if (!own || !other || other === own || other.site === own.site) return null;
+	if (!other || artistRows.includes(other)) return null;
+	// The disagreement is between sites: the artist has to be named on a site
+	// other than the prefill's, whichever of the artist's rows comes first.
+	if (!artistRows.some((x) => x.site !== other.site)) return null;
 	if (!canAddPosterAsArtist(other.site)) return null;
 	// A prefill row that names a local artist names the one there is, under
 	// another handle; one whose handle reads like that artist's is the same person.
 	const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(other));
 	if (hit?.artists.length) return null;
-	// Every confident row that names the artist, not only the first: the artist
-	// can be known under one handle on one site and another on the next.
-	const artistId = candidateArtists(data)[0].id;
-	const mine = data.matches
-		.filter((x, index) => {
-			if (!isConfident(x)) return false;
-			const hits = data.localArtists.find((h) => h.matchIndex === index)?.artists ?? [];
-			return hits.some((a) => a.id === artistId);
-		})
-		.flatMap(looseHandles);
+	const mine = artistRows.flatMap(looseHandles);
 	if (looseHandles(other).some((h) => mine.includes(h))) return null;
 	const handle = matchHandle(other);
 	if (!handle) return null;
