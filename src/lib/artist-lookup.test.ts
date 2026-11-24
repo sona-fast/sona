@@ -2384,6 +2384,8 @@ describe('stateFromResponse', () => {
 			const state = await stateFromResponse(wire({ localArtists: [], fuzzysearchFailure: 'key_refused' }));
 			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
 			const after = withCreatedArtist(state.data, { id: 12, name: 'New' });
+			// The fold ran: the new artist is a local hit on one of the matches.
+			expect(after.localArtists.flatMap((hit) => hit.artists.map((a) => a.id))).toContain(12);
 			expect(unansweredService(after)).toEqual({ service: 'fuzzysearch', reason: 'key_refused' });
 		});
 	});
