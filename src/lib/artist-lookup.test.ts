@@ -1848,20 +1848,32 @@ describe('stateFromResponse', () => {
 			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Weasyl', linkable: false });
 		});
 
-		// A Bluesky handle on a subdomain of a custom domain names the same person
-		// as the bare name elsewhere, so the sources agree and nobody is offered.
-		it('reads a subdomain of a custom Bluesky domain as the same account', () => {
+		// A Bluesky handle on a subdomain of a custom domain can name the same
+		// person as the bare name elsewhere. The warning still asks the operator to
+		// check, but the poster is not offered as a second artist.
+		it('does not offer a poster whose name is a label of the local artist\'s custom Bluesky domain', () => {
 			const data = response({
 				matches: [
 					match({ site: 'Twitter', handles: ['kuttoya'] }),
 					{ ...bluesky, handles: ['art.kuttoya.com'] }
 				],
-				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya' }] }],
-				nameMatches: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya Art' }] }]
 			});
 			expect(resolveOutcome(data)).toBe('existing');
-			expect(differingAccounts(data)).toBeNull();
+			expect(differingAccounts(data)).not.toBeNull();
 			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		// A domain label two people share is not a name they share: the warning
+		// has to stay for "github" beside "alice.github.io".
+		it('still warns when the only thing two handles share is a domain label', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['github'] }),
+					{ ...bluesky, handles: ['alice.github.io'] }
+				]
+			});
+			expect(differingAccounts(data)).not.toBeNull();
 		});
 
 		it('still reads a different name under a custom Bluesky domain as a different account', () => {
@@ -1889,6 +1901,20 @@ describe('stateFromResponse', () => {
 			});
 			expect(differingAccounts(data)).not.toBeNull();
 			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		// A name match on some other artist says nothing about the one on offer,
+		// so the second answer stays one click away.
+		it('keeps the offer when the name match is a different local artist', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['alice'] }),
+					{ ...bluesky, handles: ['bob.bsky.social'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 9, name: 'Alice' }] }]
+			});
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Twitter', linkable: true });
 		});
 
 		it('never offers an unknown Bluesky poster as a new artist beside a local artist', () => {
