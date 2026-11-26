@@ -466,19 +466,26 @@ export function isCrossSiteAmbiguity(data: LookupResponse): boolean {
 
 /**
  * A handle reduced to what two sites' spellings of one person tend to share:
- * lowercased, a Bluesky handle cut to its first label (the rest is a domain),
- * and everything but letters and digits dropped. "Kuttoya_Art" on Twitter and
- * "kuttoya-art.bsky.social" on Bluesky both come out as "kuttoyaart". Only for
- * deciding whether to warn, never for linking anybody.
+ * lowercased, with everything but letters and digits dropped. "Kuttoya_Art" on
+ * Twitter and "kuttoya-art.bsky.social" on Bluesky both come out as
+ * "kuttoyaart". A Bluesky handle is a domain, so it gives one form per label
+ * that can carry the name: the first label of a ".bsky.social" handle, and
+ * every label but the last of a custom domain, so "art.kuttoya.com" still
+ * reads as "kuttoya". Only for deciding whether to warn, never for linking
+ * anybody.
  */
-function looseHandle(site: LookupSite, handle: string): string {
-	let clean = handle.trim().replace(/^@+/, '').toLowerCase();
-	if (site === 'Bluesky') clean = clean.split('.')[0];
-	return clean.replace(/[^\p{L}\p{N}]/gu, '');
+function looseHandleForms(site: LookupSite, handle: string): string[] {
+	const clean = handle.trim().replace(/^@+/, '').toLowerCase();
+	let parts = [clean];
+	if (site === 'Bluesky') {
+		const labels = clean.split('.');
+		parts = clean.endsWith('.bsky.social') || labels.length < 2 ? labels.slice(0, 1) : labels.slice(0, -1);
+	}
+	return parts.map((part) => part.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean);
 }
 
 function looseHandles(match: LookupMatch): string[] {
-	return match.handles.map((h) => looseHandle(match.site, h)).filter(Boolean);
+	return match.handles.flatMap((h) => looseHandleForms(match.site, h));
 }
 
 /**
@@ -489,7 +496,7 @@ function looseHandles(match: LookupMatch): string[] {
  * Every pair of confident matches on two different sites is compared, not
  * only pairs with one match: a row naming two accounts can agree with each of
  * two others that share nothing with each other. Two matches differ when their
- * handles share nothing once both are reduced by `looseHandle`.
+ * handles share nothing once both are reduced by `looseHandleForms`.
  *
  * `a` is the account the panel's offer is about when it is one of a differing
  * pair: the match behind the one local artist when there is one, else the
@@ -533,7 +540,7 @@ export function differingAccounts(data: LookupResponse): { a: LookupMatch; b: Lo
 /** The first handle the comparison could read, without its '@'. Not always the
  * first one listed: an entry that is only punctuation names nobody. */
 function usableHandle(match: LookupMatch): string {
-	const handle = match.handles.find((h) => looseHandle(match.site, h)) ?? '';
+	const handle = match.handles.find((h) => looseHandleForms(match.site, h).length > 0) ?? '';
 	return handle.trim().replace(/^@+/, '');
 }
 
@@ -580,6 +587,9 @@ export function addOtherPosterSeed(
 	if (hit?.artists.length) return null;
 	const mine = artistRows.flatMap(looseHandles);
 	if (looseHandles(other).some((h) => mine.includes(h))) return null;
+	// A local artist already carries this poster's handle as a name: adding the
+	// poster would make a second artist of somebody the list may already hold.
+	if (nameMatchArtists(data).length > 0) return null;
 	const handle = usableHandle(other);
 	if (!handle) return null;
 	return { handle, site: other.site, linkable: LINKABLE_SITES.includes(other.site) };

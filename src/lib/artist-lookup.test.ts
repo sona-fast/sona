@@ -1848,6 +1848,49 @@ describe('stateFromResponse', () => {
 			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Weasyl', linkable: false });
 		});
 
+		// A Bluesky handle on a subdomain of a custom domain names the same person
+		// as the bare name elsewhere, so the sources agree and nobody is offered.
+		it('reads a subdomain of a custom Bluesky domain as the same account', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['kuttoya'] }),
+					{ ...bluesky, handles: ['art.kuttoya.com'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya' }] }],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)).toBeNull();
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		it('still reads a different name under a custom Bluesky domain as a different account', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['alice'] }),
+					{ ...bluesky, handles: ['art.kuttoya.com'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Twitter', linkable: true });
+		});
+
+		// The handles share nothing, but the local artist already has the other
+		// poster's handle as its name: a second artist would be a duplicate.
+		it('does not offer a poster whose handle is already a local artist name', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['kuttoya'] }),
+					{ ...bluesky, handles: ['studio.example.com'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya' }] }],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
 		it('never offers an unknown Bluesky poster as a new artist beside a local artist', () => {
 			const data = response({
 				matches: [match(), { ...bluesky, handles: ['bob.bsky.social'] }],
