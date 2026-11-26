@@ -90,6 +90,24 @@ npm run setup
 
 Deploy from CI by pushing to `main`, not with a local `wrangler pages deploy`.
 
+## Read before upgrading: the artist lookup also searches Bluesky (SONA-243)
+
+**Look up artist** now sends the image to two services at once: FuzzySearch, as
+before, and Skyseek, which searches images posted to Bluesky. Skyseek has no key
+and no switch of its own. If your site has a FuzzySearch key saved, lookups start
+going to Skyseek as soon as you take this update. If it has no key, nothing
+changes. Only you can start a lookup, and nothing runs on its own.
+
+With each lookup, Skyseek also receives your site's hostname, and the site asks
+Bluesky for the current handles of the accounts that posted a match.
+
+The built-in privacy policy describes this already. If you pasted your own
+privacy text in Settings, Legal, **it was not updated**, and your policy won't
+mention a service your site now sends images to. In your privacy policy's list
+of feature integrations, replace your FuzzySearch entry with this one:
+
+- `FuzzySearch and Skyseek (finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent to both, including images not published on this site, and Skyseek also receives this site's hostname with each lookup; during a lookup, the site asks Bluesky for the current handles of the accounts that posted a match)`
+
 ## Nothing to do: two more themes (SONA-227)
 
 Settings, Appearance gains two palettes: **Petal — soft pink** and **Pewter —

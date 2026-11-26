@@ -1,15 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import {
 	LOOKUP_MAX_BYTES,
+	addOtherPosterSeed,
 	bandLabel,
+	canAddPosterAsArtist,
 	candidateArtists,
 	clearedLine,
+	differentArtistMatch,
+	differingAccounts,
+	differingAccountName,
+	existingArtistText,
+	failReasonHint,
+	isConfident,
 	isCrossSiteAmbiguity,
 	matchForArtist,
 	matchHandle,
 	matchHandles,
 	matchKey,
 	lookupSentFile,
+	noMatchCanRetry,
 	mergeSamePost,
 	nameMatchArtists,
 	namesNoSite,
@@ -22,6 +31,7 @@ import {
 	profileUrlFor,
 	ratingTag,
 	resolveOutcome,
+	resultKeepsLastPrefill,
 	siteLabel,
 	stateFromResponse,
 	statusLineKind,
@@ -30,6 +40,12 @@ import {
 	tileResultText,
 	runLookup,
 	sentAfterApplyThrew,
+	retryCanSucceed,
+	unansweredCanRetry,
+	unansweredLine,
+	unansweredNotice,
+	unansweredService,
+	upstreamReasonBody,
 	withCreatedArtist,
 	type LookupCleared,
 	type LookupEdited,
@@ -54,6 +70,7 @@ import {
 	type LookupMatch as ServerLookupMatch
 } from './server/fuzzysearch';
 import * as m from './paraglide/messages';
+import { setLocale, baseLocale } from './paraglide/runtime';
 
 function match(over: Partial<LookupMatch> = {}): LookupMatch {
 	return {
@@ -186,6 +203,30 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 		expect(pickPrefillMatch(matches)?.site).toBe('Twitter');
 		expect(pickPrefillMatch([match({ distance: 6, band: 'possible' })])).toBeNull();
 	});
+
+	// A Bluesky row names whoever posted the picture, often a commissioner or a
+	// reposter, so a closer Bluesky row must not displace a confident
+	// FuzzySearch one: that would drop the add-artist offer, fill the URL and
+	// date from a repost, and skip the clash check for the real post (SONA-243).
+	const bluesky = (over: Partial<LookupMatch> = {}) =>
+		match({
+			site: 'Bluesky',
+			siteId: 'did:plc:abc/3kxyz',
+			handles: ['someone.bsky.social'],
+			postUrl: 'https://bsky.app/profile/did:plc:abc/post/3kxyz',
+			...over
+		});
+
+	it('prefills a confident FuzzySearch match over a closer Bluesky one', () => {
+		const matches = [bluesky({ distance: 0 }), match({ distance: 1, band: 'strong' })];
+		expect(pickPrefillMatch(matches)?.site).toBe('FurAffinity');
+	});
+
+	it('prefills a Bluesky match when it is the only confident one', () => {
+		expect(pickPrefillMatch([bluesky()])?.site).toBe('Bluesky');
+		const matches = [bluesky({ distance: 1, band: 'strong' }), match({ distance: 5, band: 'possible' })];
+		expect(pickPrefillMatch(matches)?.site).toBe('Bluesky');
+	});
 });
 
 describe('withCreatedArtist', () => {
@@ -212,6 +253,26 @@ describe('withCreatedArtist', () => {
 	it('records the hit against the prefill match', () => {
 		const data = withCreatedArtist(
 			response({ matches: [match({ band: 'possible', distance: 9 }), match({ siteId: '9' })] }),
+			{ id: 7, name: 'Kuttoya' }
+		);
+		expect(data.localArtists).toEqual([
+			{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya', pieces: 0 }] }
+		]);
+	});
+
+	it('records the hit against a confident FuzzySearch match, not a closer Bluesky one', () => {
+		const data = withCreatedArtist(
+			response({
+				matches: [
+					match({
+						site: 'Bluesky',
+						siteId: 'did:plc:abc/3kxyz',
+						handles: ['someone.bsky.social'],
+						distance: 0
+					}),
+					match({ distance: 1, band: 'strong' })
+				]
+			}),
 			{ id: 7, name: 'Kuttoya' }
 		);
 		expect(data.localArtists).toEqual([
@@ -365,6 +426,7 @@ describe('labels and formatting', () => {
 	it('spells sites as their own names', () => {
 		expect(siteLabel('e621')).toBe('e621');
 		expect(siteLabel('FurAffinity')).toBe('FurAffinity');
+		expect(siteLabel('Bluesky')).toBe('Bluesky');
 	});
 
 	it('builds the rating tag, with the parent spelling for the shared box', () => {
@@ -635,6 +697,55 @@ describe('matchForArtist', () => {
 			localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Bob' }] }]
 		});
 		expect(matchForArtist(data, 7)).toBeNull();
+	});
+});
+
+describe('existingArtistText', () => {
+	it('names the handle of the match that named the artist', () => {
+		const data = response({
+			matches: [
+				match({ handles: ['alice'], distance: 0, band: 'exact' }),
+				match({ site: 'Twitter', siteId: '9', handles: ['bobby'], distance: 2, band: 'strong' })
+			],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+		});
+		expect(existingArtistText(data, { id: 7, name: 'Bob' })).toBe(
+			'bobby is already in your artist list as Bob.'
+		);
+	});
+
+	// A Bluesky row matches a local artist by DID with no handle resolved. The
+	// prefill match's handle belongs to another account, so it is never borrowed.
+	it('names only the artist when the matching row has no handle', () => {
+		const data = response({
+			matches: [
+				match({ handles: ['alice'], distance: 0, band: 'exact' }),
+				match({
+					site: 'Bluesky',
+					siteId: 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/3mwwswjznmk25',
+					handles: [],
+					distance: 0,
+					band: 'exact'
+				})
+			],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+		});
+		expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+		const text = existingArtistText(data, { id: 7, name: 'Bob' });
+		expect(text).toBe('This poster is already in your artist list as Bob.');
+		expect(text).not.toContain('alice');
+	});
+
+	// The hit says only which artist the row matched, not through which of its
+	// handles, so the first one may be somebody else's.
+	it('names only the artist when the matching row carries several handles', () => {
+		const data = response({
+			matches: [match({ handles: ['alice', 'bob'], distance: 0, band: 'exact' })],
+			localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Bob' }] }]
+		});
+		const text = existingArtistText(data, { id: 7, name: 'Bob' });
+		expect(text).toBe('This poster is already in your artist list as Bob.');
+		expect(text).not.toContain('alice');
 	});
 });
 
@@ -1312,6 +1423,23 @@ describe('stateFromResponse', () => {
 		).toEqual({ kind: 'failed', reason: 'unavailable', sent: true });
 	});
 
+	// A partial answer whose only row the client refuses still knows why
+	// FuzzySearch gave none, and that reason names the remedy: a refused key goes
+	// to Settings, where "unavailable" would offer a retry that fails the same way.
+	it("keeps FuzzySearch's reason when a partial answer's only row has an unusable URL", async () => {
+		expect(
+			await stateFromResponse(
+				jsonResponse(
+					response({
+						matches: [match({ site: 'Bluesky', postUrl: 'javascript:alert(1)' })],
+						blueskySearched: true,
+						fuzzysearchFailure: 'key_refused'
+					})
+				)
+			)
+		).toEqual({ kind: 'failed', reason: 'key_refused', sent: true });
+	});
+
 	// The panel keys its rows on site + siteId. The endpoint dedupes too; this is
 	// the second pass, on the side that would throw each_key_duplicate.
 	// The endpoint merges duplicates rather than dropping them; this pass has to
@@ -1430,7 +1558,1082 @@ describe('stateFromResponse', () => {
 
 	it('reads an empty match list as no_match', async () => {
 		expect(await stateFromResponse(jsonResponse({ enabled: true, matches: [] }))).toEqual({
-			kind: 'no_match'
+			kind: 'no_match',
+			blueskySearched: false,
+			skyseekFailure: 'unavailable'
+		});
+	});
+
+	// The no-match sentence lists the sites that were checked. Bluesky is on it
+	// only when the endpoint says Skyseek answered: a body without the field, or
+	// with anything but true in it, must not claim a site nobody looked at.
+	it.each([
+		[true, true],
+		[false, false],
+		[undefined, false],
+		['true', false],
+		[1, false]
+	])('carries blueskySearched %j on a no_match as %j', async (wire, expected) => {
+		const state = await stateFromResponse(
+			jsonResponse({ enabled: true, matches: [], blueskySearched: wire })
+		);
+		expect(state).toEqual({
+			kind: 'no_match',
+			blueskySearched: expected,
+			skyseekFailure: expected ? null : 'unavailable'
+		});
+	});
+
+	// SONA-243: FuzzySearch found nothing and Skyseek did not answer. The reason
+	// rides on the no-match, so the panel can say why Bluesky went unchecked and
+	// offer Try again only where a second send can come back different.
+	const SKY_LINE = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
+	it.each([
+		['rate_limited', 'Try again in a minute.', true],
+		['unavailable', '', true],
+		['too_large', 'This file is too large for Skyseek.', false],
+		['invalid_image', "Skyseek couldn't read this file.", false]
+	] as const)('carries Skyseek reason %s on a no_match, with its notice and retry', async (reason, rest, retry) => {
+		const state = await stateFromResponse(
+			jsonResponse({ enabled: true, matches: [], blueskySearched: false, skyseekFailure: reason })
+		);
+		expect(state).toEqual({ kind: 'no_match', blueskySearched: false, skyseekFailure: reason });
+		if (state.kind !== 'no_match') throw new Error(`expected no_match, got ${state.kind}`);
+		expect(unansweredNotice(state)).toEqual({ lead: SKY_LINE, rest });
+		expect(unansweredLine(state)).toBe(SKY_LINE);
+		expect(noMatchCanRetry(state)).toBe(retry);
+	});
+
+	// Bluesky was searched along with the rest and nothing matched: no notice,
+	// and Try again stays, as before Skyseek, for a better copy of the file.
+	it('has no Skyseek notice on a no_match that searched Bluesky, and keeps Try again', async () => {
+		const state = await stateFromResponse(
+			jsonResponse({ enabled: true, matches: [], blueskySearched: true, skyseekFailure: 'too_large' })
+		);
+		expect(state).toEqual({ kind: 'no_match', blueskySearched: true, skyseekFailure: null });
+		if (state.kind !== 'no_match') throw new Error(`expected no_match, got ${state.kind}`);
+		expect(unansweredNotice(state)).toBeNull();
+		expect(unansweredLine(state)).toBeNull();
+		expect(noMatchCanRetry(state)).toBe(true);
+	});
+
+	// SONA-243: a Bluesky post from Skyseek whose answer carried no distance. It
+	// has no band, so it is shown and never acted on: no prefill, no rating, no
+	// artist offered or applied.
+	describe('a Bluesky match with no distance', () => {
+		const DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		const bluesky = match({
+			site: 'Bluesky',
+			siteId: `${DID}/3mwwswjznmk25`,
+			handles: ['artist.example'],
+			distance: null,
+			band: null,
+			rating: null,
+			postedAt: '2026-10-03T02:15:28.000Z',
+			postUrl: `https://bsky.app/profile/${DID}/post/3mwwswjznmk25`
+		});
+
+		it('is rendered beside the FuzzySearch matches, in the order it was sent', async () => {
+			const state = await stateFromResponse(
+				jsonResponse({
+					enabled: true,
+					matches: [match(), bluesky],
+					localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Sky Artist' }] }],
+					nameMatches: [],
+					sourceClash: null,
+					blueskySearched: true
+				})
+			);
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(state.data.matches).toEqual([match(), bluesky]);
+			expect(matchHandles(state.data.matches[1])).toBe('artist.example');
+			// The prefill and the offer still come from the FurAffinity match.
+			expect(pickPrefillMatch(state.data.matches)).toEqual(match());
+			expect(candidateArtists(state.data)).toEqual([]);
+			expect(resolveOutcome(state.data)).toBe('new');
+		});
+
+		it('on its own fills nothing and offers nothing', async () => {
+			const state = await stateFromResponse(
+				jsonResponse({
+					enabled: true,
+					matches: [bluesky],
+					localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist' }] }],
+					nameMatches: [{ matchIndex: 0, artists: [{ id: 8, name: 'artist.example' }] }],
+					sourceClash: null,
+					blueskySearched: true
+				})
+			);
+			// A result with rows, not a no-match: the operator gets the lead.
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(pickPrefillMatch(state.data.matches)).toBeNull();
+			expect(resolveOutcome(state.data)).toBe('none');
+			expect(candidateArtists(state.data)).toEqual([]);
+			expect(nameMatchArtists(state.data)).toEqual([]);
+			expect(strictestRating(state.data.matches)).toBeNull();
+			expect(prefillForResult(state.data, { sourcePostUrl: '', commissionedAt: '' })).toEqual({});
+		});
+
+		it('names an unresolved poster as unknown rather than by DID', () => {
+			const unresolved = { ...bluesky, handles: [] };
+			expect(matchHandles(unresolved)).toBe('');
+			expect(tileResultText('', 'Bluesky', null).line).toBe('Unknown poster on Bluesky');
+		});
+
+		it('is not offered as a new artist, whatever else is', () => {
+			expect(canAddPosterAsArtist('Bluesky')).toBe(false);
+			for (const site of ['FurAffinity', 'Twitter', 'Weasyl', 'e621'] as LookupSite[]) {
+				expect(canAddPosterAsArtist(site)).toBe(true);
+			}
+		});
+
+		it('links a handle to its bsky.app profile, kept inside its path segment', () => {
+			expect(profileUrlFor('Bluesky', '@artist.example')).toBe(
+				'https://bsky.app/profile/artist.example'
+			);
+			expect(profileUrlFor('Bluesky', 'artist.example/post/x?y')).toBe(
+				'https://bsky.app/profile/artist.example%2Fpost%2Fx%3Fy'
+			);
+		});
+	});
+
+	// Skyseek reports a distance on FuzzySearch's scale, so an exact or strong
+	// Bluesky post is a confident match: it fills the form, and a poster the
+	// operator already holds is offered. A poster they do not hold is NOT offered
+	// as a new artist: whoever posted a picture on Bluesky may have commissioned
+	// or reposted it.
+	describe('a confident Bluesky match', () => {
+		const DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		const POST = `https://bsky.app/profile/${DID}/post/3mwwswjznmk25`;
+		const bluesky = match({
+			site: 'Bluesky',
+			siteId: `${DID}/3mwwswjznmk25`,
+			handles: ['artist.example'],
+			distance: 0,
+			band: 'exact',
+			rating: null,
+			postedAt: '2026-10-03T02:15:28.000Z',
+			postUrl: POST
+		});
+		const skyArtist = { matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist', pieces: 3 }] };
+
+		it('fills the source post URL and date, and the sentence names Bluesky', () => {
+			const data = response({ matches: [bluesky] });
+			const filled = prefillForResult(data, { sourcePostUrl: '', commissionedAt: '' });
+			expect(filled).toEqual({ sourcePostUrl: POST, commissionedAt: '2026-10-03' });
+			expect(statusSentence(statusLineKind(filled), 'Bluesky')).toBe(
+				'Sona filled the source post URL and commissioned date from the Bluesky post. You can change both before you save.'
+			);
+		});
+
+		it('never overwrites what the operator already typed', () => {
+			const data = response({ matches: [bluesky] });
+			expect(
+				prefillForResult(data, { sourcePostUrl: 'https://example.com/mine', commissionedAt: '2026-01-01' })
+			).toEqual({});
+		});
+
+		it('offers the local artist whose Bluesky link matched', () => {
+			const data = response({ matches: [bluesky], localArtists: [skyArtist] });
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(candidateArtists(data)).toEqual([{ id: 7, name: 'Sky Artist', pieces: 3, site: 'Bluesky' }]);
+			expect(matchHandle(matchForArtist(data, 7))).toBe('artist.example');
+		});
+
+		it('is "unlinked" for a poster not in the artist list, with no new-artist offer', () => {
+			const data = response({ matches: [bluesky] });
+			expect(resolveOutcome(data)).toBe('unlinked');
+			expect(canAddPosterAsArtist(bluesky.site)).toBe(false);
+			// A by-name collision is the 'new' outcome's prompt, and stays out of it.
+			const named = response({
+				matches: [bluesky],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 8, name: 'artist.example' }] }]
+			});
+			expect(resolveOutcome(named)).toBe('unlinked');
+			expect(candidateArtists(named)).toEqual([]);
+		});
+
+		it('is "none" when no handle resolved: there is nobody to name', () => {
+			const data = response({ matches: [{ ...bluesky, handles: [] }] });
+			expect(resolveOutcome(data)).toBe('none');
+			// The post is still what the form is filled from.
+			expect(prefillForResult(data, { sourcePostUrl: '', commissionedAt: '' }).sourcePostUrl).toBe(POST);
+		});
+
+		it('yields to a FuzzySearch match the endpoint sorted ahead of it', () => {
+			const data = response({ matches: [match(), bluesky] });
+			expect(pickPrefillMatch(data.matches)).toEqual(match());
+			expect(resolveOutcome(data)).toBe('new');
+		});
+
+		// A confident Bluesky row counts toward the local artists like any other
+		// site's. When it and another site name two different local artists, the
+		// operator picks: nothing chooses FurAffinity's for them.
+		it('is a cross-site pick when another site names a different local artist', () => {
+			const data = response({
+				matches: [match(), bluesky],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 9, name: 'Fur Artist' }] }, { ...skyArtist, matchIndex: 1 }]
+			});
+			expect(resolveOutcome(data)).toBe('ambiguous');
+			expect(isCrossSiteAmbiguity(data)).toBe(true);
+			expect(candidateArtists(data)).toEqual([
+				{ id: 9, name: 'Fur Artist', site: 'FurAffinity' },
+				{ id: 7, name: 'Sky Artist', pieces: 3, site: 'Bluesky' }
+			]);
+			expect(matchForArtist(data, 9)?.site).toBe('FurAffinity');
+			expect(matchForArtist(data, 7)?.site).toBe('Bluesky');
+			// The pick list is the question, so no second callout asks it again.
+			expect(differingAccounts(data)).toBeNull();
+			// The form is still filled from the FurAffinity post.
+			expect(pickPrefillMatch(data.matches)?.site).toBe('FurAffinity');
+		});
+
+		it('is one "existing" answer when both sites name the same local artist', () => {
+			const data = response({
+				matches: [match(), bluesky],
+				localArtists: [
+					{ matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist', pieces: 3 }] },
+					{ ...skyArtist, matchIndex: 1 }
+				]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(candidateArtists(data).map((c) => c.id)).toEqual([7]);
+			// "kuttoya" and "artist.example" share nothing as text, and the local
+			// artist they both map to is what says they are one person.
+			expect(differingAccounts(data)).toBeNull();
+		});
+
+		it('offers the Bluesky poster\'s local artist beside an unknown poster elsewhere, and says they differ', () => {
+			const data = response({
+				matches: [match({ handles: ['alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(candidateArtists(data)).toEqual([{ id: 7, name: 'Bob', site: 'Bluesky' }]);
+			expect(matchHandle(matchForArtist(data, 7))).toBe('bob.bsky.social');
+			// The prefill precedence is untouched: FurAffinity still fills the form.
+			expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+			// `a` is the account the offer is about, `b` the one that disagrees.
+			const differing = differingAccounts(data);
+			expect(differing?.a.site).toBe('Bluesky');
+			expect(matchHandle(differing?.a ?? null)).toBe('bob.bsky.social');
+			expect(differing?.b.site).toBe('FurAffinity');
+			expect(matchHandle(differing?.b ?? null)).toBe('alice');
+		});
+
+		// The operator decides between the two: the local Bluesky poster is the
+		// primary offer, and the unknown FurAffinity poster is the second one.
+		it('also offers the unknown FurAffinity poster as a new artist when the local artist is the Bluesky poster', () => {
+			const data = response({
+				matches: [match({ handles: ['alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+			// Creating that artist records it on the FurAffinity row it was seeded
+			// from, so the result becomes the pick between the two and the offer goes.
+			const created = withCreatedArtist(data, { id: 8, name: 'alice' });
+			expect(resolveOutcome(created)).toBe('ambiguous');
+			expect(addOtherPosterSeed(created)).toBeNull();
+		});
+
+		it('seeds a name only for an unknown poster on a site Sona holds no column for', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Weasyl', handles: ['alice'] }),
+					{ ...bluesky, handles: ['bob.bsky.social'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Weasyl', linkable: false });
+		});
+
+		// A Bluesky handle on a subdomain of a custom domain can name the same
+		// person as the bare name elsewhere. The warning still asks the operator to
+		// check, but the poster is not offered as a second artist.
+		it('does not offer a poster whose name is a label of the local artist\'s custom Bluesky domain', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['kuttoya'] }),
+					{ ...bluesky, handles: ['art.kuttoya.com'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya Art' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		// A domain label two people share is not a name they share: the warning
+		// has to stay for "github" beside "alice.github.io".
+		it('still warns when the only thing two handles share is a domain label', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['github'] }),
+					{ ...bluesky, handles: ['alice.github.io'] }
+				]
+			});
+			expect(differingAccounts(data)).not.toBeNull();
+		});
+
+		it('still reads a different name under a custom Bluesky domain as a different account', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['alice'] }),
+					{ ...bluesky, handles: ['art.kuttoya.com'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Twitter', linkable: true });
+		});
+
+		// The handles share nothing, but the local artist already has the other
+		// poster's handle as its name: a second artist would be a duplicate.
+		it('does not offer a poster whose handle is already a local artist name', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['kuttoya'] }),
+					{ ...bluesky, handles: ['studio.example.com'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya' }] }],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		// A name match on some other artist says nothing about the one on offer,
+		// so the second answer stays one click away.
+		it('keeps the offer when the name match is a different local artist', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Twitter', handles: ['alice'] }),
+					{ ...bluesky, handles: ['bob.bsky.social'] }
+				],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 9, name: 'Alice' }] }]
+			});
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'Twitter', linkable: true });
+		});
+
+		it('never offers an unknown Bluesky poster as a new artist beside a local artist', () => {
+			const data = response({
+				matches: [match(), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)?.b.site).toBe('Bluesky');
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		it('offers nothing extra when the sources agree, or under any other outcome', () => {
+			// Both rows name the same local artist: no disagreement.
+			expect(
+				addOtherPosterSeed(
+					response({
+						matches: [match(), bluesky],
+						localArtists: [
+							{ matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist' }] },
+							{ ...skyArtist, matchIndex: 1 }
+						]
+					})
+				)
+			).toBeNull();
+			// The same person under each site's spelling.
+			expect(
+				addOtherPosterSeed(
+					response({
+						matches: [match(), { ...bluesky, handles: ['kuttoya.bsky.social'] }],
+						localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+					})
+				)
+			).toBeNull();
+			// 'new' already offers the prefill poster as its primary action.
+			expect(
+				addOtherPosterSeed(response({ matches: [match(), { ...bluesky, handles: ['bob.bsky.social'] }] }))
+			).toBeNull();
+		});
+
+		// The warning pairs the local artist with the first account that differs,
+		// here the Bluesky poster. The FurAffinity poster fills the form and differs
+		// from the local artist too, so it is still the one offered.
+		it('offers the prefill poster even when the warning names a different account', () => {
+			const data = response({
+				matches: [
+					{ ...bluesky, handles: ['carol.bsky.social'] },
+					match({ handles: ['alice'], distance: 1, band: 'strong' }),
+					match({ site: 'Twitter', siteId: '99', handles: ['bob'], distance: 1, band: 'strong', postUrl: 'https://twitter.com/bob/status/99' })
+				],
+				localArtists: [{ matchIndex: 2, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)?.b.site).toBe('Bluesky');
+			expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+			// The prefill poster under the local artist's own spelling is the same
+			// person, so there is nothing else to offer.
+			const same = response({
+				...data,
+				matches: [data.matches[0], match({ handles: ['Bob_'], distance: 1, band: 'strong' }), data.matches[2]]
+			});
+			expect(addOtherPosterSeed(same)).toBeNull();
+		});
+
+		it('offers nothing when the prefill reads like any of the artist\'s rows, not only the first', () => {
+			// Bob is the artist on Twitter and, as alice.example, on Bluesky. The
+			// FurAffinity "alice" that fills the form is that same person, so the
+			// warning about Carol must not come with an offer to add alice.
+			const data = response({
+				matches: [
+					match({ handles: ['alice'] }),
+					match({ site: 'Twitter', siteId: '99', handles: ['bob'], distance: 1, band: 'strong' }),
+					{ ...bluesky, handles: ['alice.example'] },
+					{
+						...bluesky,
+						siteId: 'did:plc:cccccccccccccccccccccccc/3carol',
+						postUrl: 'https://bsky.app/profile/did:plc:cccccccccccccccccccccccc/post/3carol',
+						handles: ['carol.example']
+					}
+				],
+				localArtists: [
+					{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] },
+					{ matchIndex: 2, artists: [{ id: 7, name: 'Bob' }] }
+				]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		it('keeps the offer when the artist is named on the prefill\'s site and on another', () => {
+			// FurAffinity alice fills the form. Bob is the artist on FurAffinity and
+			// on Bluesky, and the FurAffinity row comes first. The warning names
+			// alice against Bluesky Bob, and alice is still one click away.
+			const data = response({
+				matches: [
+					match({ handles: ['alice'] }),
+					match({ siteId: '77', handles: ['bob'], distance: 1, band: 'strong', postUrl: 'https://www.furaffinity.net/view/77/' }),
+					{ ...bluesky, handles: ['bob.example'], distance: 1, band: 'strong' }
+				],
+				localArtists: [
+					{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] },
+					{ matchIndex: 2, artists: [{ id: 7, name: 'Bob' }] }
+				]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)).not.toBeNull();
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+		});
+
+		it('offers the prefill poster by the first handle that reads as one', () => {
+			const data = response({
+				matches: [match({ handles: ['@', 'alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+		});
+
+		it('offers nothing extra when the differing poster is not the one that fills the form', () => {
+			// The prefill row is a FurAffinity post by the local artist; the
+			// differing Twitter account is another row and fills nothing.
+			const data = response({
+				matches: [
+					match(),
+					match({ site: 'Twitter', siteId: '99', handles: ['someone_else'], distance: 1 })
+				],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Kuttoya' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(differingAccounts(data)?.b.site).toBe('Twitter');
+			expect(addOtherPosterSeed(data)).toBeNull();
+		});
+
+		// The upload page's variant-tile warning reads the same candidates, so a
+		// Bluesky row's local artist raises it, beside another site or alone.
+		it('raises the different-artist warning from a Bluesky row beside another site', () => {
+			const repro = response({
+				matches: [match({ handles: ['alice'] }), { ...bluesky, handles: ['bob.bsky.social'] }],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(differentArtistMatch(repro, 3)?.site).toBe('Bluesky');
+			expect(differentArtistMatch(repro, 7)).toBeNull();
+			const both = response({
+				matches: [bluesky, match()],
+				localArtists: [skyArtist, { matchIndex: 1, artists: [{ id: 9, name: 'Fur Artist' }] }]
+			});
+			// The first confident match with a hit is the one named.
+			expect(differentArtistMatch(both, 3)?.site).toBe('Bluesky');
+			// Either of the two it names is not "different".
+			expect(differentArtistMatch(both, 9)).toBeNull();
+			expect(differentArtistMatch(both, 7)).toBeNull();
+			expect(differentArtistMatch(both, 0)).toBeNull();
+			expect(differentArtistMatch(response({ matches: [bluesky], localArtists: [skyArtist] }), 3)?.site).toBe(
+				'Bluesky'
+			);
+		});
+
+		it('is "ambiguous" when two confident Bluesky rows name two local artists', () => {
+			const OTHER_DID = 'did:plc:bbbbbbbbbbbbbbbbbbbbbbbb';
+			const other = {
+				...bluesky,
+				siteId: `${OTHER_DID}/3mwwswjznmk26`,
+				postUrl: `https://bsky.app/profile/${OTHER_DID}/post/3mwwswjznmk26`,
+				handles: ['other.example']
+			};
+			const data = response({
+				matches: [bluesky, other],
+				localArtists: [skyArtist, { matchIndex: 1, artists: [{ id: 8, name: 'Other' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('ambiguous');
+			expect(candidateArtists(data).map((c) => c.id)).toEqual([7, 8]);
+		});
+
+		it('still offers its local artist beside a merely possible match from another site', () => {
+			const data = response({
+				matches: [bluesky, match({ distance: 5, band: 'possible' })],
+				localArtists: [skyArtist]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(candidateArtists(data)).toEqual([{ id: 7, name: 'Sky Artist', pieces: 3, site: 'Bluesky' }]);
+			expect(matchHandle(matchForArtist(data, 7))).toBe('artist.example');
+		});
+
+		it('raises no rating itself, and leaves the others their own', () => {
+			expect(strictestRating([bluesky])).toBeNull();
+			expect(ratingTag(strictestRating([bluesky]))).toBeNull();
+			expect(strictestRating([bluesky, match({ rating: 'adult' })])).toEqual({
+				rating: 'adult',
+				sites: ['FurAffinity']
+			});
+		});
+
+		it('names Bluesky in the clash sentence when the post is already a source', () => {
+			const filled = { commissionedAt: '2026-10-03' };
+			expect(statusSentence(statusLineKind(filled, { clash: true }), 'Bluesky', { title: 'Held' })).toBe(
+				'Sona filled the commissioned date from the Bluesky post and left the source post URL empty, because that post is already the source of Held. You can change the date before you save.'
+			);
+		});
+
+		it('reads on a variant tile like any other confident match', () => {
+			expect(tileResultText('artist.example', 'Bluesky', 'exact').line).toBe(
+				'artist.example on Bluesky · Exact match'
+			);
+		});
+	});
+
+	// Two confident matches on two sites that name different accounts get a
+	// callout. The outcome is whatever it was; the callout only tells the operator
+	// to look at both posts before clicking.
+	describe('differingAccounts', () => {
+		const DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		function sky(handle: string | null, over: Partial<LookupMatch> = {}): LookupMatch {
+			return match({
+				site: 'Bluesky',
+				siteId: `${DID}/3mwwswjznmk25`,
+				handles: handle ? [handle] : [],
+				distance: 0,
+				band: 'exact',
+				rating: null,
+				postUrl: `https://bsky.app/profile/${DID}/post/3mwwswjznmk25`,
+				...over
+			});
+		}
+		const pair = (data: LookupResponse) => {
+			const found = differingAccounts(data);
+			return found ? [`${matchHandle(found.a)}@${found.a.site}`, `${matchHandle(found.b)}@${found.b.site}`] : null;
+		};
+
+		it('names two unknown posters on two sites, and leaves the outcome alone', () => {
+			const data = response({ matches: [match({ handles: ['alice'] }), sky('bob.example')] });
+			expect(pair(data)).toEqual(['alice@FurAffinity', 'bob.example@Bluesky']);
+			expect(resolveOutcome(data)).toBe('new');
+			// With Bluesky as the prefill's only rival gone, the same poster alone is quiet.
+			expect(pair(response({ matches: [match({ handles: ['alice'] })] }))).toBeNull();
+		});
+
+		it('names a local artist\'s account against an unknown poster elsewhere', () => {
+			const data = response({
+				matches: [match({ handles: ['alice'] }), sky('bob.example')],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 4, name: 'Alice' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			expect(pair(data)).toEqual(['alice@FurAffinity', 'bob.example@Bluesky']);
+		});
+
+		it('keeps an unlinked outcome and still says so', () => {
+			const data = response({
+				matches: [
+					match({ site: 'Weasyl', siteId: '5', handles: ['alice'], postUrl: 'https://www.weasyl.com/view/5' }),
+					sky('bob.example')
+				]
+			});
+			expect(resolveOutcome(data)).toBe('unlinked');
+			expect(pair(data)).toEqual(['alice@Weasyl', 'bob.example@Bluesky']);
+		});
+
+		// One person, spelled the way each site spells them.
+		it.each([
+			['Kuttoya', 'kuttoya.bsky.social'],
+			['kuttoya_art', 'Kuttoya-Art.example.com'],
+			['@kuttoya', 'kuttoya.example'],
+			['kut.toya', 'kuttoya.bsky.social']
+		])('reads %s and %s as the same account', (fa, bsky) => {
+			expect(differingAccounts(response({ matches: [match({ handles: [fa] }), sky(bsky)] }))).toBeNull();
+		});
+
+		it('compares the first label of a Bluesky handle only, not its domain', () => {
+			// "social" is in the Bluesky handle, and it is the domain, not the name.
+			const data = response({ matches: [match({ handles: ['social'] }), sky('bob.bsky.social')] });
+			expect(pair(data)).toEqual(['social@FurAffinity', 'bob.bsky.social@Bluesky']);
+		});
+
+		it('is quiet when any one of a match\'s handles agrees', () => {
+			const data = response({
+				matches: [match({ handles: ['studio', 'kuttoya'] }), sky('kuttoya.example')]
+			});
+			expect(differingAccounts(data)).toBeNull();
+		});
+
+		it('never fires for a match with no poster', () => {
+			const e621 = match({ site: 'e621', siteId: '7', handles: [], postUrl: 'https://e621.net/posts/7' });
+			expect(differingAccounts(response({ matches: [e621, sky('bob.example')] }))).toBeNull();
+			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), e621] }))).toBeNull();
+			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), sky(null)] }))).toBeNull();
+			// A handle with nothing to compare in it is no poster either.
+			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), sky('---')] }))).toBeNull();
+		});
+
+		// AppView resolved no handle, but the row matched Bob by DID: it stands for
+		// Bob, so an exact match for another account elsewhere still differs, and
+		// the callout names that side by the artist.
+		it('names a row by the first handle the comparison could read', () => {
+			const data = response({ matches: [match({ handles: ['@', 'alice'] }), sky('bob.example')] });
+			const found = differingAccounts(data);
+			if (!found) throw new Error('expected a disagreement');
+			expect(differingAccountName(data, found.a)).toBe('alice');
+			expect(differingAccountName(data, found.b)).toBe('bob.example');
+		});
+
+		it('keeps a Bluesky row linked to a local artist by DID in the comparison when no handle resolved', () => {
+			const data = response({
+				matches: [match({ handles: ['alice'] }), sky(null)],
+				localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('existing');
+			const found = differingAccounts(data);
+			if (!found) throw new Error('expected a disagreement');
+			expect(found.a.site).toBe('Bluesky');
+			expect(found.b.site).toBe('FurAffinity');
+			expect(differingAccountName(data, found.a)).toBe('Bob');
+			expect(differingAccountName(data, found.b)).toBe('alice');
+			const sentence = m.admin_lookup_sources_differ({
+				a: differingAccountName(data, found.a),
+				siteA: siteLabel(found.a.site),
+				b: differingAccountName(data, found.b),
+				siteB: siteLabel(found.b.site)
+			});
+			expect(sentence).toContain('Bob on Bluesky');
+			expect(sentence).toContain('alice on FurAffinity');
+			// The FurAffinity poster fills the form and is not Bob, so it is offered too.
+			expect(addOtherPosterSeed(data)).toEqual({ handle: 'alice', site: 'FurAffinity', linkable: true });
+			// A second local artist on the FurAffinity row makes it the pick list instead.
+			const picks = response({
+				...data,
+				localArtists: [...data.localArtists, { matchIndex: 0, artists: [{ id: 4, name: 'Alice' }] }]
+			});
+			expect(resolveOutcome(picks)).toBe('ambiguous');
+			expect(differingAccounts(picks)).toBeNull();
+		});
+
+		it('skips a handle-less prefill match and compares the ones that name somebody', () => {
+			const twitter = match({ site: 'Twitter', siteId: '9', handles: ['carol'], postUrl: 'https://twitter.com/carol/status/9' });
+			const data = response({ matches: [match({ handles: [] }), twitter, sky('bob.example')] });
+			expect(pair(data)).toEqual(['carol@Twitter', 'bob.example@Bluesky']);
+		});
+
+		it('ignores a match too loose to act on', () => {
+			const loose = sky('bob.example', { distance: 5, band: 'possible' });
+			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), loose] }))).toBeNull();
+			const unbanded = sky('bob.example', { distance: null, band: null });
+			expect(differingAccounts(response({ matches: [match({ handles: ['alice'] }), unbanded] }))).toBeNull();
+		});
+
+		// Two local artists make the outcome ambiguous, and its pick list already
+		// asks which of them it is. It does not show a third account that no pick
+		// stands for, so that one still gets the callout.
+		it('is quiet under the ambiguous outcome between the picks, and names an unlinked poster on a third site', () => {
+			const twitter = match({
+				site: 'Twitter',
+				siteId: '9',
+				handles: ['carol'],
+				postUrl: 'https://twitter.com/carol/status/9'
+			});
+			const picks = [
+				{ matchIndex: 0, artists: [{ id: 9, name: 'Fur Artist' }] },
+				{ matchIndex: 1, artists: [{ id: 7, name: 'Sky Artist' }] }
+			];
+			const data = response({ matches: [match({ handles: ['kuttoya'] }), sky('artist.example'), twitter], localArtists: picks });
+			expect(resolveOutcome(data)).toBe('ambiguous');
+			expect(pair(data)).toEqual(['kuttoya@FurAffinity', 'carol@Twitter']);
+			// The two picks alone disagree, and the pick list is that question.
+			expect(differingAccounts(response({ matches: [match({ handles: ['kuttoya'] }), sky('artist.example')], localArtists: picks }))).toBeNull();
+			// A third row under one pick's handle is that pick, not a third account.
+			const same = { ...twitter, handles: ['Kuttoya_'] };
+			expect(differingAccounts(response({ matches: [match({ handles: ['kuttoya'] }), sky('artist.example'), same], localArtists: picks }))).toBeNull();
+		});
+
+		// Two local artists on the one FurAffinity row: the pick list holds two
+		// FurAffinity artists and nothing of the Bluesky poster.
+		it('names a Bluesky poster no pick stands for when two picks come from one site', () => {
+			const data = response({
+				matches: [match({ handles: ['kuttoya'] }), sky('bob.example')],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 9, name: 'Fur Artist' }, { id: 7, name: 'Other Artist' }] }]
+			});
+			expect(resolveOutcome(data)).toBe('ambiguous');
+			expect(isCrossSiteAmbiguity(data)).toBe(false);
+			expect(pair(data)).toEqual(['kuttoya@FurAffinity', 'bob.example@Bluesky']);
+			// The same poster under Bluesky's spelling is represented by the row.
+			expect(
+				differingAccounts(response({ ...data, matches: [match({ handles: ['kuttoya'] }), sky('kuttoya.bsky.social')] }))
+			).toBeNull();
+		});
+
+		// The first row names two accounts and agrees with each of the others,
+		// but those two share nothing with each other.
+		it('compares every pair of sites, not only each site with the first', () => {
+			const twitter = match({ site: 'Twitter', siteId: '9', handles: ['alice'], postUrl: 'https://twitter.com/alice/status/9' });
+			const data = response({ matches: [match({ handles: ['alice', 'bob'] }), twitter, sky('bob.bsky.social')] });
+			expect(pair(data)).toEqual(['alice@Twitter', 'bob.bsky.social@Bluesky']);
+			expect(resolveOutcome(data)).toBe('new');
+			// With the two agreeing as well, nothing differs.
+			expect(
+				differingAccounts(response({ matches: [match({ handles: ['alice', 'bob'] }), twitter, sky('alice.bsky.social')] }))
+			).toBeNull();
+		});
+
+		it('compares across sites only: two posters on one site are not a disagreement between sources', () => {
+			const data = response({
+				matches: [
+					sky('alice.example'),
+					sky('bob.example', {
+						siteId: 'did:plc:bbbbbbbbbbbbbbbbbbbbbbbb/3mwwswjznmk26',
+						postUrl: 'https://bsky.app/profile/did:plc:bbbbbbbbbbbbbbbbbbbbbbbb/post/3mwwswjznmk26'
+					})
+				]
+			});
+			expect(differingAccounts(data)).toBeNull();
+		});
+
+		it('keeps non-Latin handles apart instead of reducing them to nothing', () => {
+			const data = response({ matches: [match({ handles: ['アリス'] }), sky('bob.example')] });
+			expect(pair(data)).toEqual(['アリス@FurAffinity', 'bob.example@Bluesky']);
+			expect(
+				differingAccounts(response({ matches: [match({ handles: ['アリス'] }), match({ site: 'Twitter', siteId: '9', handles: ['アリス'] })] }))
+			).toBeNull();
+		});
+
+		it('fills its sentence with both accounts and both sites', () => {
+			const found = differingAccounts(response({ matches: [match({ handles: ['alice'] }), sky('bob.example')] }));
+			if (!found) throw new Error('expected a disagreement');
+			const sentence = m.admin_lookup_sources_differ({
+				a: matchHandle(found.a),
+				siteA: siteLabel(found.a.site),
+				b: matchHandle(found.b),
+				siteB: siteLabel(found.b.site)
+			});
+			expect(sentence).toContain('alice on FurAffinity');
+			expect(sentence).toContain('bob.example on Bluesky');
+		});
+	});
+
+	describe('isConfident', () => {
+		it('is true for exact and strong, and for nothing else', () => {
+			expect(isConfident(match({ band: 'exact' }))).toBe(true);
+			expect(isConfident(match({ band: 'strong' }))).toBe(true);
+			expect(isConfident(match({ band: 'possible' }))).toBe(false);
+			expect(isConfident(match({ band: null }))).toBe(false);
+		});
+
+		// The readers that act on a match all go through it: a possible match
+		// fills nothing, rates nothing and names no local artist.
+		it('is the gate on the prefill, the rating and the artist offer alike', () => {
+			const data = response({
+				matches: [match({ distance: 5, band: 'possible', rating: 'adult' })],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 4, name: 'Kuttoya' }] }]
+			});
+			expect(pickPrefillMatch(data.matches)).toBeNull();
+			expect(strictestRating(data.matches)).toBeNull();
+			expect(candidateArtists(data)).toEqual([]);
+			expect(matchForArtist(data, 4)).toBeNull();
+		});
+	});
+
+	// A result one of the two services did not contribute to. It is still a
+	// result: the rows render and every offer works. The state carries which
+	// service is missing so the panel can say what the rows do not cover.
+	describe('a partial answer', () => {
+		const DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+		const bluesky = match({
+			site: 'Bluesky',
+			siteId: `${DID}/3mwwswjznmk25`,
+			handles: ['artist.example'],
+			rating: null,
+			postUrl: `https://bsky.app/profile/${DID}/post/3mwwswjznmk25`
+		});
+		const wire = (over: Record<string, unknown>) =>
+			jsonResponse({
+				enabled: true,
+				matches: [bluesky],
+				localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Sky Artist' }] }],
+				nameMatches: [],
+				sourceClash: null,
+				blueskySearched: true,
+				...over
+			});
+
+		it.each(['key_refused', 'rate_limited', 'too_large', 'invalid_image', 'unavailable'] as const)(
+			'is a result that names FuzzySearch as missing, with the reason %s',
+			async (reason) => {
+				const state = await stateFromResponse(wire({ fuzzysearchFailure: reason }));
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				expect(unansweredService(state.data)).toEqual({ service: 'fuzzysearch', reason });
+				// The Bluesky rows work as they do in a whole answer.
+				expect(resolveOutcome(state.data)).toBe('existing');
+				expect(pickPrefillMatch(state.data.matches)?.site).toBe('Bluesky');
+				expect(lookupSentFile(state)).toBe(true);
+			}
+		);
+
+		it('names Skyseek as missing when Bluesky was not searched', async () => {
+			for (const blueskySearched of [false, undefined, 'true']) {
+				const state = await stateFromResponse(wire({ matches: [match()], localArtists: [], blueskySearched }));
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				// A response that names no reason reads as an outage, the one that a
+				// retry can end.
+				expect(unansweredService(state.data)).toEqual({ service: 'skyseek', reason: 'unavailable' });
+			}
+		});
+
+		it.each(['rate_limited', 'too_large', 'invalid_image', 'unavailable'] as const)(
+			'carries the Skyseek reason %s off the wire',
+			async (reason) => {
+				const state = await stateFromResponse(
+					wire({ matches: [match()], localArtists: [], blueskySearched: false, skyseekFailure: reason })
+				);
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				expect(unansweredService(state.data)).toEqual({ service: 'skyseek', reason });
+			}
+		);
+
+		// Same rule as fuzzysearchFailure: a value this client does not know still
+		// says Skyseek gave nothing, and never reads as a refused file.
+		it('reads an unknown Skyseek reason as unavailable', async () => {
+			for (const junk of ['key_refused', 'nope', true, 1, {}, null]) {
+				const state = await stateFromResponse(
+					wire({ matches: [match()], localArtists: [], blueskySearched: false, skyseekFailure: junk })
+				);
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				expect(unansweredService(state.data)).toEqual({ service: 'skyseek', reason: 'unavailable' });
+			}
+		});
+
+		it('names nobody when Bluesky was searched, whatever the Skyseek field says', async () => {
+			const state = await stateFromResponse(wire({ skyseekFailure: 'too_large' }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredService(state.data)).toBeNull();
+			expect(unansweredCanRetry(state.data)).toBe(false);
+		});
+
+		it('names nobody when both answered', async () => {
+			for (const fuzzysearchFailure of [null, undefined]) {
+				const state = await stateFromResponse(wire({ fuzzysearchFailure }));
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				expect(unansweredService(state.data)).toBeNull();
+				expect(unansweredLine(state.data)).toBeNull();
+			}
+		});
+
+		// A reason this client does not know still means FuzzySearch gave no rows.
+		// Reading it as "answered" would present Bluesky-only rows as the whole search.
+		it('reads an unknown failure value as unavailable, never as an answer', async () => {
+			for (const junk of ['from_commission', 'nope', true, 1, {}]) {
+				const state = await stateFromResponse(wire({ fuzzysearchFailure: junk }));
+				if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+				expect(unansweredService(state.data)).toEqual({ service: 'fuzzysearch', reason: 'unavailable' });
+			}
+		});
+
+		it('says a different sentence for each missing service', async () => {
+			const noFuzzy = await stateFromResponse(wire({ fuzzysearchFailure: 'unavailable' }));
+			const noSky = await stateFromResponse(wire({ matches: [match()], blueskySearched: false }));
+			if (noFuzzy.kind !== 'results' || noSky.kind !== 'results') throw new Error('expected results');
+			expect(unansweredLine(noFuzzy.data)).toBe(m.admin_lookup_partial_fuzzysearch());
+			expect(unansweredLine(noSky.data)).toBe(m.admin_lookup_partial_skyseek());
+			expect(unansweredLine(noFuzzy.data)).not.toBe(unansweredLine(noSky.data));
+		});
+
+		// FuzzySearch often did answer: it refused the key, limited the site, or
+		// refused the file. The notice says the reason the failed state would, and
+		// Try again is offered only where a second send can come back different.
+		// The warning sentence is the lead; the reason and advice are the rest,
+		// which the panel renders beneath it in the body style.
+		const FUZZY_LINE =
+			"FuzzySearch didn't return results, so Sona only has Bluesky posts to show. It couldn't check FurAffinity, Weasyl, e621, or Twitter.";
+		it.each([
+			[
+				'invalid_image',
+				"FuzzySearch couldn't read this file. If none of these is the artist, add the artist by hand.",
+				false
+			],
+			[
+				'too_large',
+				'This file is too large for FuzzySearch. If none of these is the artist, add the artist by hand.',
+				false
+			],
+			['key_refused', "FuzzySearch didn't accept your API key. Check the key in Settings.", false],
+			[
+				'rate_limited',
+				'FuzzySearch is limiting how often your site can search right now. Try again in a minute.',
+				true
+			],
+			['unavailable', '', true]
+		] as const)('with FuzzySearch reason %s, says why and offers a retry only if one can work', async (reason, rest, retry) => {
+			const state = await stateFromResponse(wire({ fuzzysearchFailure: reason }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredNotice(state.data)).toEqual({ lead: FUZZY_LINE, rest });
+			expect(unansweredCanRetry(state.data)).toBe(retry);
+			// The variant tile keeps the one sentence, which is true for every reason.
+			expect(unansweredLine(state.data)).toBe(FUZZY_LINE);
+		});
+
+		// Skyseek refuses a file the way FuzzySearch does (413, or 400/415/422), and
+		// a second send is refused again. The sentence stays the same for every
+		// reason; only the retry follows it.
+		// A refused file names its reason, since nothing else on screen says why the
+		// retry is missing. A rate limit says when to try again; an outage needs
+		// nothing: Try again is there.
+		const SKY_LINE = "Skyseek didn't return results, so Sona couldn't check Bluesky.";
+		it.each([
+			['rate_limited', 'Try again in a minute.', true],
+			['unavailable', '', true],
+			['too_large', 'This file is too large for Skyseek.', false],
+			['invalid_image', "Skyseek couldn't read this file.", false]
+		] as const)('with Skyseek reason %s, says why and offers a retry only if one can work', async (reason, rest, retry) => {
+			const state = await stateFromResponse(
+				wire({ matches: [match()], blueskySearched: false, skyseekFailure: reason })
+			);
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredNotice(state.data)).toEqual({ lead: SKY_LINE, rest });
+			expect(unansweredCanRetry(state.data)).toBe(retry);
+			// The variant tile keeps the one sentence.
+			expect(unansweredLine(state.data)).toBe(SKY_LINE);
+		});
+
+		it('has no notice and no retry when both answered', async () => {
+			const state = await stateFromResponse(wire({}));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			expect(unansweredNotice(state.data)).toBeNull();
+			expect(unansweredCanRetry(state.data)).toBe(false);
+		});
+
+		// Japanese joins sentences with no space after "。".
+		it('joins the Japanese sentences without a space', async () => {
+			const state = await stateFromResponse(wire({ fuzzysearchFailure: 'key_refused' }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			setLocale('ja', { reload: false });
+			try {
+				expect(unansweredNotice(state.data)).toEqual({
+					lead: 'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。',
+					rest: 'FuzzySearchがAPIキーを受け付けませんでした。設定のキーを確認してください。'
+				});
+				const file = await stateFromResponse(wire({ fuzzysearchFailure: 'too_large' }));
+				if (file.kind !== 'results') throw new Error(`expected results, got ${file.kind}`);
+				expect(unansweredNotice(file.data)).toEqual({
+					lead: 'FuzzySearchから結果を取得できなかったため、表示できるのはBlueskyの投稿だけです。FurAffinity・Weasyl・e621・Twitterは確認できていません。',
+					rest: 'このファイルはFuzzySearchには大きすぎます。この中にアーティストがいない場合は、手で入力してください。'
+				});
+			} finally {
+				setLocale(baseLocale, { reload: false });
+			}
+		});
+
+		// The failed state has no rows to choose from, so a refused file still
+		// orders the artist by hand there, and the two advice lines keep their
+		// whole wording: the partial notice's shorter hints are its own.
+		it.each([
+			['too_large', 'This file is too large for FuzzySearch.', 'Add the artist by hand.'],
+			['invalid_image', "FuzzySearch couldn't read this file.", 'Add the artist by hand.'],
+			[
+				'rate_limited',
+				'FuzzySearch is limiting how often your site can search right now.',
+				'Try again in a minute, or add the artist by hand. Your upload is unaffected.'
+			],
+			[
+				'key_refused',
+				"FuzzySearch didn't accept your API key.",
+				'Check the key in Settings, or add the artist by hand. Your upload is unaffected.'
+			]
+		] as const)('gives the failed state for %s its lead and advice', (reason, lead, hint) => {
+			expect(upstreamReasonBody(reason)).toBe(lead);
+			expect(failReasonHint(reason)).toBe(hint);
+		});
+
+		// The failed state's footer reads the same rule, so the two cannot drift.
+		it('lets a failed lookup retry only for a limit or an outage', () => {
+			const reasons: LookupFailReason[] = [
+				'key_refused',
+				'rate_limited',
+				'too_large',
+				'invalid_image',
+				'unavailable',
+				'signed_out',
+				'no_key',
+				'gone',
+				'from_commission'
+			];
+			expect(reasons.filter(retryCanSucceed)).toEqual(['rate_limited', 'unavailable']);
+		});
+
+		// The endpoint answers this case as the failure itself. A 200 that carries
+		// both a failure and no rows must not read as "nothing matched" on sites
+		// nobody searched.
+		it('is a failure, not a no-match, when the failure comes with no rows', async () => {
+			expect(
+				await stateFromResponse(wire({ matches: [], localArtists: [], fuzzysearchFailure: 'rate_limited' }))
+			).toEqual({ kind: 'failed', reason: 'rate_limited', sent: true });
+		});
+
+		it('keeps the last prefill only when FuzzySearch is missing and no row is confident', async () => {
+			const lead = { ...bluesky, distance: null, band: null };
+			const keeps = async (over: Record<string, unknown>) =>
+				resultKeepsLastPrefill(await stateFromResponse(wire({ localArtists: [], ...over })));
+			// A rate limit and a Bluesky lead: nothing speaks against the last post.
+			expect(await keeps({ matches: [lead], fuzzysearchFailure: 'rate_limited' })).toBe(true);
+			// A confident Bluesky row is a replacement, with or without FuzzySearch.
+			expect(await keeps({ matches: [bluesky], fuzzysearchFailure: 'rate_limited' })).toBe(false);
+			// Skyseek missing and only a weak FuzzySearch row: the filled post may be
+			// a Bluesky one nobody looked for.
+			const weak = match({ distance: 5, band: 'possible' });
+			expect(await keeps({ matches: [weak], blueskySearched: false, skyseekFailure: 'rate_limited' })).toBe(true);
+			expect(await keeps({ matches: [match()], blueskySearched: false, skyseekFailure: 'rate_limited' })).toBe(false);
+			// Both services answered and nothing is confident: a completed answer.
+			expect(await keeps({ matches: [lead] })).toBe(false);
+			// A completed no-match clears; one where Skyseek never answered does not.
+			expect(resultKeepsLastPrefill({ kind: 'no_match', blueskySearched: true, skyseekFailure: null })).toBe(false);
+			expect(
+				resultKeepsLastPrefill({ kind: 'no_match', blueskySearched: false, skyseekFailure: 'rate_limited' })
+			).toBe(true);
+			expect(resultKeepsLastPrefill({ kind: 'failed', reason: 'rate_limited', sent: true })).toBe(false);
+		});
+
+		it('survives the created-artist fold, so the notice does not vanish after a create', async () => {
+			const state = await stateFromResponse(wire({ localArtists: [], fuzzysearchFailure: 'key_refused' }));
+			if (state.kind !== 'results') throw new Error(`expected results, got ${state.kind}`);
+			const after = withCreatedArtist(state.data, { id: 12, name: 'New' });
+			// The fold ran: the new artist is a local hit on one of the matches.
+			expect(after.localArtists.flatMap((hit) => hit.artists.map((a) => a.id))).toContain(12);
+			expect(unansweredService(after)).toEqual({ service: 'fuzzysearch', reason: 'key_refused' });
 		});
 	});
 
@@ -1627,7 +2830,7 @@ describe('lookupSentFile', () => {
 	// lookup having worked: it belongs on a failure just as much as on a result.
 	it('is true for every outcome the request actually reached', () => {
 		expect(lookupSentFile({ kind: 'results', data: response() })).toBe(true);
-		expect(lookupSentFile({ kind: 'no_match' })).toBe(true);
+		expect(lookupSentFile({ kind: 'no_match', blueskySearched: false, skyseekFailure: 'unavailable' })).toBe(true);
 		for (const reason of ['key_refused', 'rate_limited', 'unavailable'] as const) {
 			expect(lookupSentFile({ kind: 'failed', reason, sent: true })).toBe(true);
 		}
@@ -1665,7 +2868,7 @@ describe('sentAfterApplyThrew', () => {
 		['a failure the browser refused to send', { kind: 'failed', reason: 'too_large', sent: false }, false],
 		['a failure that went out', { kind: 'failed', reason: 'rate_limited', sent: true }, true],
 		['a result', { kind: 'results', data: response() }, true],
-		['a no-match', { kind: 'no_match' }, true],
+		['a no-match', { kind: 'no_match', blueskySearched: false, skyseekFailure: 'unavailable' }, true],
 		// Cancelled or re-fired, never a state the request settles on: it reaches
 		// this only if the capture itself is what threw, and by then the request
 		// had gone out.

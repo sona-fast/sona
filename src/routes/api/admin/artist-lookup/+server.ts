@@ -12,6 +12,8 @@ import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import {
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
 	FUZZYSEARCH_MAX_BYTES,
+	blueskyPostUrl,
+	compareMatches,
 	findArtistsByName,
 	findLocalArtists,
 	fuzzysearchRefusedMarker,
@@ -20,9 +22,20 @@ import {
 	pickPrefillMatch,
 	resolveFuzzysearchKey,
 	searchImage,
+	splitBlueskySiteId,
 	type LookupFailure,
 	type LookupMatch
 } from '$lib/server/fuzzysearch';
+import {
+	SKYSEEK_MAX_MATCHES,
+	isOwnBlueskyPost,
+	lookupUserAgent,
+	mayBeOwnBlueskyPost,
+	resolveBlueskyHandles,
+	searchSkyseek,
+	skyseekLookupMatch,
+	type SkyseekFailure
+} from '$lib/server/skyseek';
 import type { RequestHandler } from './$types';
 
 // POST /api/admin/artist-lookup  (admin-only via hooks — everything under /api
@@ -45,6 +58,16 @@ import type { RequestHandler } from './$types';
 // render path, and no background call into this endpoint. FuzzySearch's own
 // response body is never logged, stored, or echoed — only the normalized
 // match list below.
+//
+// The same click searches Skyseek for Bluesky posts of the picture (SONA-243),
+// whenever the FuzzySearch lookup is on: there is no second setting. The two
+// searches run side by side once every gate below has passed, and the answer
+// holds the rows of whichever service answered. With Skyseek down it is
+// FuzzySearch's rows, `blueskySearched: false`, and `skyseekFailure`, the
+// reason. With FuzzySearch down it is
+// the Bluesky rows and `fuzzysearchFailure`, the reason. FuzzySearch's failure
+// is the whole answer, with its own status, only when there is no Bluesky row
+// to show beside it.
 
 /** What the UI gets back for a failed lookup, and the status carrying it. */
 const FAILURE_STATUS: Record<LookupFailure, number> = {
@@ -164,6 +187,86 @@ function fromCommissionRefusal() {
  * themselves to the same gate before anything reaches FuzzySearch. */
 function hasAllowedImageBytes(head: Uint8Array): boolean {
 	return isAllowedImageType(sniffImageType(head));
+}
+
+/**
+ * The Bluesky half of the lookup: Skyseek's posts, capped, with each posting
+ * account's handle where the AppView gave one. A failure reason when Bluesky
+ * was not searched, which the caller reports as that and never as "no Bluesky
+ * posts". Anything that throws, the handle lookup included, is `unavailable`.
+ *
+ * The operator's own posts of the piece are not leads on who drew it, and are
+ * left out before the cap, so a piece they posted many times cannot push other
+ * accounts' posts off the list. `readOwnBlueskyUrl` is the site's Bluesky link.
+ * Best effort: with it unreadable their posts stay, which costs rows they
+ * recognise, where failing the lookup would cost every match they asked for.
+ * Every post then loses its band, because any of them may be the operator's
+ * own, and a banded one could fill the form or be offered as the artist. A site
+ * with no link saved keeps its bands: there is nobody to mistake a poster for.
+ *
+ * Never rejects. The caller starts this beside the FuzzySearch call and awaits
+ * it after, outside any guard of its own, so a rejection here would answer 500
+ * for bytes that already left the worker. Only the failure reason is logged, a
+ * word from a fixed list: the response body stays in skyseek.ts.
+ */
+async function searchBluesky(
+	bytes: Blob,
+	fetchFn: typeof fetch,
+	userAgent: string,
+	readOwnBlueskyUrl: () => Promise<string | null>
+): Promise<{ ok: true; matches: LookupMatch[] } | { ok: false; reason: SkyseekFailure }> {
+	try {
+		const result = await searchSkyseek(bytes, fetchFn, userAgent);
+		if (!result.ok) {
+			console.warn('artist-lookup: Skyseek search failed', result.reason);
+			return result;
+		}
+		if (result.matches.length === 0) return { ok: true, matches: [] };
+		let own: string | null = null;
+		let ownUnread = false;
+		try {
+			own = await readOwnBlueskyUrl();
+		} catch (e) {
+			ownUnread = true;
+			console.warn(
+				"artist-lookup: the site's Bluesky link was not read",
+				e instanceof Error ? e.message : 'non-Error value'
+			);
+		}
+		// A link saved by DID names the operator's posts before any handle is
+		// known, so they take none of the handle lookup's places.
+		const posts = result.matches.filter(
+			(post) => !isOwnBlueskyPost(skyseekLookupMatch(post, null), own)
+		);
+		// One request, for the first accounts up to the cap, each asked about once
+		// however many posts it made. The posts the cap below keeps are all by
+		// those accounts, except at most the last one when the operator's account,
+		// known only by handle, took one of the places.
+		// Without the site's hostname: Skyseek's owner asked for it, Bluesky did not.
+		const dids = [...new Set(posts.map((post) => post.did))].slice(0, SKYSEEK_MAX_MATCHES);
+		// The global fetch, not the request's: SvelteKit's adds this site's origin
+		// to a cross-origin request, and the AppView is told only the DIDs.
+		const handles = await resolveBlueskyHandles(dids);
+		const matches = posts
+			.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null))
+			.filter((match) => !isOwnBlueskyPost(match, own))
+			// Closest first already, then earliest, so the cap keeps the best leads.
+			.slice(0, SKYSEEK_MAX_MATCHES)
+			// With the link saved by handle and none resolved for this account, the
+			// post may be the operator's own. Shown, and banded as no claim, the way
+			// a post with no distance is: it fills nothing and offers nobody. With the
+			// link unread, every post may be.
+			.map((match) =>
+				ownUnread || mayBeOwnBlueskyPost(match, own) ? { ...match, band: null } : match
+			);
+		return { ok: true, matches };
+	} catch (e) {
+		console.warn(
+			'artist-lookup: Skyseek search threw',
+			e instanceof Error ? e.message : 'non-Error value'
+		);
+		return { ok: false, reason: 'unavailable' };
+	}
 }
 
 /** Artists whose stored socials or display name point at a match, per match.
@@ -352,6 +455,23 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// throw would answer 500 with no `forwarded` field for bytes that already
 	// left the worker. forwarded is true for that reason: the file went out
 	// whether or not the call came back.
+	//
+	// Skyseek is started first and awaited last, so the two searches overlap. A
+	// FuzzySearch failure waits for Skyseek too, because the Bluesky rows are
+	// shown without it: the wait is bounded by Skyseek's own timeout
+	// (SKYSEEK_TIMEOUT_MS) plus the handle lookup's.
+	//
+	// The User-Agent names this site by the hostname the request came in on, which
+	// Skyseek's owner asked callers to send. An unparseable URL leaves it off.
+	let hostname: string | null = null;
+	try {
+		hostname = new URL(request.url).hostname;
+	} catch {
+		hostname = null;
+	}
+	const blueskyPending = searchBluesky(bytes, fetch, lookupUserAgent(hostname), () =>
+		getRawSetting(db, 'blueskyUrl')
+	);
 	let result: Awaited<ReturnType<typeof searchImage>>;
 	try {
 		result = await searchImage(bytes, resolved.key, fetch);
@@ -363,10 +483,14 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			'artist-lookup: lookup threw after the file was sent',
 			e instanceof Error ? e.message : 'non-Error value'
 		);
-		return failure('unavailable', true);
+		// A FuzzySearch failure like any other below: Skyseek may still have rows.
+		result = { ok: false, reason: 'unavailable' };
 	}
 
+	/** Why FuzzySearch gave no rows, or null when it answered. */
+	let fuzzysearchFailure: LookupFailure | null = null;
 	if (!result.ok) {
+		fuzzysearchFailure = result.reason;
 		// A refused key is the one failure worth remembering: the settings page
 		// tells the operator their key stopped working instead of leaving the
 		// button failing silently. The marker records WHICH key was refused, so a
@@ -374,6 +498,8 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// The marker is a convenience for the settings page, not part of the
 		// answer: a failed write must not turn a typed 424 into a 500 the caller
 		// can't read. Nothing about the write's error names the body or the key.
+		// Written whether or not Bluesky rows turn this into a partial answer: the
+		// key was refused either way.
 		if (result.reason === 'key_refused') {
 			try {
 				await setRawSetting(
@@ -388,30 +514,44 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 				);
 			}
 		}
-		return failure(result.reason, true);
-	}
-
-	// The key works — clear a stale refusal marker, but only the marker for the
-	// key that just succeeded (a marker against the other source stays: a deploy
-	// secret succeeding says nothing about the stored key FuzzySearch refused).
-	// Read first, so the happy path costs one read rather than a write. Best
-	// effort for the same reason as the write above: a settings row that won't
-	// clear must not cost the operator the matches they asked for.
-	try {
-		const refusedMarker = parseFuzzysearchRefusedMarker(
-			await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)
-		);
-		if (refusedMarker && refusedMarker.source === resolved.source) {
-			await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+	} else {
+		// The key works — clear a stale refusal marker, but only the marker for the
+		// key that just succeeded (a marker against the other source stays: a deploy
+		// secret succeeding says nothing about the stored key FuzzySearch refused).
+		// Read first, so the happy path costs one read rather than a write. Best
+		// effort for the same reason as the write above: a settings row that won't
+		// clear must not cost the operator the matches they asked for.
+		try {
+			const refusedMarker = parseFuzzysearchRefusedMarker(
+				await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)
+			);
+			if (refusedMarker && refusedMarker.source === resolved.source) {
+				await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+			}
+		} catch (e) {
+			console.warn(
+				'artist-lookup: refused-key marker not cleared',
+				e instanceof Error ? e.message : 'non-Error value'
+			);
 		}
-	} catch (e) {
-		console.warn(
-			'artist-lookup: refused-key marker not cleared',
-			e instanceof Error ? e.message : 'non-Error value'
-		);
 	}
 
-	const matches = result.matches;
+	// One list, in the order FuzzySearch's rows already had: closest first, then
+	// site order, where Bluesky is last so a FuzzySearch row wins a tie. The sort
+	// is stable, so rows that compare equal keep the order their own search gave
+	// them, which for Bluesky is earliest post first.
+	const bluesky = await blueskyPending;
+	// The operator's own posts are already out (searchBluesky).
+	const blueskyMatches = bluesky.ok ? bluesky.matches : [];
+	// FuzzySearch failed and there is no Bluesky row to show in its place (Skyseek
+	// failed too, found nothing, or found only the operator's own post), so the
+	// failure is the whole answer, with the status it always had. Decided after
+	// the own-post filter: a partial answer made of a row the filter then removed
+	// would be an empty result that reads as "nothing matched".
+	if (fuzzysearchFailure && blueskyMatches.length === 0) return failure(fuzzysearchFailure, true);
+	// Sorted BEFORE anything below reads it: localArtists and nameMatches address
+	// a match by its index in this list, and the client reads the same indexes.
+	const matches = [...(result.ok ? result.matches : []), ...blueskyMatches].sort(compareMatches);
 	// Every read below runs AFTER the bytes reached FuzzySearch, so a D1 fault
 	// here is answered `forwarded: true` — the private-image notice on the edit
 	// page is honest about a lookup that did leave the app. Answered as a typed
@@ -433,6 +573,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		name: string;
 		twitterUrl: string | null;
 		furAffinityUrl: string | null;
+		blueskyUrl: string | null;
 	}[];
 	const pieceCounts = new Map<number, number>();
 	let sourceClash: Awaited<ReturnType<typeof findSourceClash>>;
@@ -447,7 +588,8 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 							id: artists.id,
 							name: artists.name,
 							twitterUrl: artists.twitterUrl,
-							furAffinityUrl: artists.furAffinityUrl
+							furAffinityUrl: artists.furAffinityUrl,
+							blueskyUrl: artists.blueskyUrl
 						})
 						.from(artists)
 				: [];
@@ -470,6 +612,9 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		}
 		sourceClash = await findSourceClash(db, matches, selfImage);
 	} catch {
+		// The fault is the database's, whatever FuzzySearch said: answering its
+		// reason here would send the operator to fix a key or a file for a read
+		// that a retry clears, and keep the local fault out of the 5xx rollup.
 		return failure('unavailable', true);
 	}
 
@@ -500,7 +645,15 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		matches,
 		localArtists,
 		nameMatches,
-		sourceClash
+		sourceClash,
+		// False is "Skyseek did not answer". An empty list is an answer.
+		blueskySearched: bluesky.ok,
+		// Why it did not, so the panel offers Try again only where a second send
+		// can come back different. Null when Skyseek answered.
+		skyseekFailure: bluesky.ok ? null : bluesky.reason,
+		// Set only on a partial answer: the rows above are Bluesky posts alone,
+		// and this is why. Null when FuzzySearch answered.
+		fuzzysearchFailure
 	});
 };
 
@@ -515,6 +668,21 @@ async function findSourceClash(
 	if (!prefill) return null;
 	const target = normalizeSourceUrl(prefill.postUrl);
 	if (!target) return null;
+	// A Bluesky post has two spellings: by DID, which is what this endpoint
+	// builds, and by handle, which is what bsky.app shows and an operator is
+	// likeliest to have pasted. They are the same post, and only the handle
+	// lookup can say so, so a match that resolved one is compared under both.
+	// Without a resolved handle a piece saved under the handle spelling is
+	// missed: nothing here can tell whose handle it is, and guessing would warn
+	// about pieces that are not duplicates.
+	const targets = new Set([target]);
+	if (prefill.site === 'Bluesky') {
+		const { rkey } = splitBlueskySiteId(prefill.siteId);
+		for (const handle of prefill.handles) {
+			const byHandle = normalizeSourceUrl(blueskyPostUrl(handle, rkey));
+			if (byHandle) targets.add(byHandle);
+		}
+	}
 
 	const rows = await db
 		.select({
@@ -530,7 +698,7 @@ async function findSourceClash(
 	// own variants — they legitimately share one source post.
 	const selfRoot = selfImage ? (selfImage.parentImageId ?? selfImage.id) : null;
 	const clashing = rows
-		.filter((r) => normalizeSourceUrl(r.sourcePostUrl) === target)
+		.filter((r) => targets.has(normalizeSourceUrl(r.sourcePostUrl)))
 		.filter((r) => selfRoot === null || (r.parentImageId ?? r.id) !== selfRoot)
 		.sort((a, b) => a.id - b.id);
 	if (clashing.length === 0) return null;

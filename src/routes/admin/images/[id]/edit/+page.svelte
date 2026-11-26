@@ -16,6 +16,7 @@
 		lookupSentFile,
 		newArtistSeed,
 		prefillForResult,
+		resultKeepsLastPrefill,
 		ratingTag,
 		seedStatusKind,
 		runLookup,
@@ -373,7 +374,9 @@
 		// the panel's no-match arm renders. Returning early here instead left the
 		// last lookup's URL and date on the form, still tagged From lookup, under
 		// a panel saying Sona found nothing.
-		if (next.kind !== 'results' && next.kind !== 'no_match') return;
+		// A partial answer with FuzzySearch missing and no confident row is read
+		// the same way: its Bluesky leads are shown, and the fields stay.
+		if ((next.kind !== 'results' && next.kind !== 'no_match') || resultKeepsLastPrefill(next)) return;
 		// A new result describes a new seed, even when that seed is empty.
 		lookupSeeded = {};
 		// A field the LAST prefill wrote and the operator has not typed over since

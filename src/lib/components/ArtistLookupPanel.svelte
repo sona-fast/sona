@@ -7,27 +7,39 @@
 	import { tick } from 'svelte';
 	import { Check, Globe, Info, Loader2 } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
+	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import {
+		addOtherPosterSeed,
 		bandLabel,
+		canAddPosterAsArtist,
 		candidateArtists,
 		clearedLine,
+		differingAccounts,
+		differingAccountName,
+		existingArtistText,
+		failReasonHint,
 		isCrossSiteAmbiguity,
-		matchForArtist,
 		matchHandle,
 		matchHandles,
 		matchKey,
 		nameMatchArtists,
 		namesNoSite,
+		noMatchCanRetry,
 		pickPrefillMatch,
 		postDateToInput,
 		ratingLabel,
 		resolveOutcome,
+		retryCanSucceed,
 		seedStatusKind,
 		siteLabel,
 		statusLineKind,
 		statusSentence,
+		unansweredCanRetry,
+		unansweredNotice,
+		unansweredService,
+		upstreamReasonBody,
 		type ArtistChoice,
 		type LookupCleared,
 		type LookupEdited,
@@ -121,12 +133,30 @@
 	// unioned across every confident match, so pairing the prefill handle with a
 	// candidate's name can read "alice is already in your list as Bob".
 	const existing = $derived(candidates.length === 1 ? candidates[0] : null);
-	const existingHandle = $derived(
-		data && existing ? matchHandle(matchForArtist(data, existing.id)) || handle : handle
-	);
+	const existingText = $derived(data && existing ? existingArtistText(data, existing) : '');
 	const crossSite = $derived(data ? isCrossSiteAmbiguity(data) : false);
 	const nameHits = $derived(data ? nameMatchArtists(data) : []);
 	const clash = $derived(data?.sourceClash ?? null);
+	// A result one of the two services did not contribute to. The rows are real
+	// and everything below works on them; the notice says which sites they do not
+	// cover, so a short list is not read as the whole search.
+	const unanswered = $derived(data ? unansweredService(data) : null);
+	// The warning sentence as `lead`, then the reason the failed arm gives for the
+	// same failure and the notice's own advice as `rest`.
+	const unansweredText = $derived(data ? unansweredNotice(data) : null);
+	const unansweredRetry = $derived(data ? unansweredCanRetry(data) : false);
+	// The same notice over a no-match, where Bluesky going unsearched is its whole
+	// Skyseek half, and whether Try again there can come back different.
+	const noMatchNotice = $derived(lookup.kind === 'no_match' ? unansweredNotice(lookup) : null);
+	const noMatchRetry = $derived(lookup.kind === 'no_match' ? noMatchCanRetry(lookup) : false);
+	// Two confident matches on two sites naming different accounts. Under the
+	// ambiguous outcome, only an account no pick stands for: the pick list already
+	// asks which of the picks it is.
+	const differing = $derived(data ? differingAccounts(data) : null);
+	// When that callout disagrees with the one local artist on offer, the other
+	// account, if it fills the form and may be added, is offered as a new artist
+	// beside "Use {name}", so the operator decides between the two.
+	const otherPoster = $derived(data ? addOtherPosterSeed(data) : null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(
 		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared })
@@ -158,21 +188,12 @@
 			statusKind === 'clash_emptied' ||
 			statusKind === 'clash_date_url_emptied'
 	);
-	// The two failure reasons that carry advice under the lead. Held as text so
-	// the emptied sentence can go ABOVE it: a parent move onto a tile whose
-	// lookup failed empties the fields, and what just happened to the form is
-	// read before what to do about the failure. This list and the failed arm's
-	// own reason branches have to stay in step — a reason that grows a hint in
-	// one and not the other renders nothing.
-	const failedHint = $derived(
-		lookup.kind !== 'failed'
-			? ''
-			: lookup.reason === 'rate_limited'
-				? m.admin_lookup_paused_hint()
-				: lookup.reason === 'key_refused'
-					? m.admin_lookup_refused_hint()
-					: ''
-	);
+	// The advice under the failed arm's lead, from `failReasonHint`, which the
+	// partial notice's reasons share a mapping with. Held as text so the emptied
+	// sentence can go ABOVE it: a parent move onto a tile whose lookup failed
+	// empties the fields, and what just happened to the form is read before what
+	// to do about the failure.
+	const failedHint = $derived(lookup.kind !== 'failed' ? '' : failReasonHint(lookup.reason));
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// The "Sets the artist to {name}." sentence and the button it
 	// names render on the same condition, so the button can describe itself with
@@ -209,6 +230,34 @@
 		if (pickedArtist) onuseartist({ id: pickedArtist.id, name: pickedArtist.name });
 	}
 
+	// Try again swaps the button the operator is standing on for the searching
+	// arm, so without this focus drops to <body> and the next Tab restarts at the
+	// top of the page (2.4.3). Every Try again goes through here and lands on
+	// Cancel, the one action the searching arm offers.
+	let cancelButton = $state<HTMLButtonElement | null>(null);
+	// Cancel goes too, once the retried lookup settles, and focus would drop to
+	// <body> again. Close is the one control every settled arm draws, so focus
+	// lands there. Only when focus has actually dropped: an operator who moved it
+	// somewhere else while the search was out keeps it there. Not $state: only
+	// the effect below reads it, and only when the lookup changes.
+	let retryPending = false;
+	let panelEl = $state<HTMLDivElement | null>(null);
+	async function retry() {
+		retryPending = true;
+		onretry();
+		await tick();
+		cancelButton?.focus();
+	}
+	$effect(() => {
+		const kind = lookup.kind;
+		if (kind === 'searching' || !retryPending) return;
+		retryPending = false;
+		if (kind === 'idle') return;
+		const active = document.activeElement;
+		if (active && active !== document.body) return;
+		panelEl?.querySelector<HTMLButtonElement>('[data-lookup-close]')?.focus();
+	});
+
 	/** The metadata line under a result row, with unknown segments dropped
 	 * rather than spelled out as blanks. */
 	function metaFor(match: Pick<LookupMatch, 'band' | 'postedAt' | 'rating'>) {
@@ -225,7 +274,8 @@
 <!-- The panel and its live region are ALWAYS in the DOM, collapsed to nothing
      while idle. A role="status" inserted together with its first content is
      commonly missed by screen readers, and that first content is "Sending the
-     image to FuzzySearch." — the one message that says the lookup started.
+     image to FuzzySearch and Skyseek." — the one message that says the lookup
+     started.
 
      The region is atomic, so every change to the status line re-speaks the whole
      panel. What the lookup filled is a fixed record and only the edited-since
@@ -236,6 +286,7 @@
      they typed does not flip it back (SONA-220). An operator revising a field
      hears the panel once for it, not once per keystroke. -->
 <div
+	bind:this={panelEl}
 	class="lookup-panel"
 	class:idle={lookup.kind === 'idle' && !movedEmptied}
 	role="region"
@@ -269,7 +320,24 @@
 				{/if}
 			{:else if lookup.kind === 'no_match'}
 				<div class="lookup-eyebrow">{m.admin_lookup_no_match_eyebrow()}</div>
-				<p class="lookup-lead">{m.admin_lookup_no_match_body()}</p>
+				<!-- Bluesky is on the list of sites only when Skyseek answered: the
+				     sentence must not say a site was checked when nobody looked. -->
+				<p class="lookup-lead">
+					{lookup.blueskySearched
+						? m.admin_lookup_no_match_body_bluesky()
+						: m.admin_lookup_no_match_body()}
+				</p>
+				<!-- Skyseek shares FuzzySearch's switch, so Bluesky going unsearched
+				     means Skyseek did not answer. Said outright: leaving Bluesky off
+				     the list above does not tell the operator it was skipped. A file
+				     Skyseek refused says so too, since nothing else says why Try
+				     again is missing. -->
+				{#if noMatchNotice}
+					<p class="lookup-status">{noMatchNotice.lead}</p>
+					{#if noMatchNotice.rest}
+						<p class="lookup-status">{noMatchNotice.rest}</p>
+					{/if}
+				{/if}
 				<!-- A no-match is a result with nothing to prefill, so it empties what
 				     the last lookup filled. Said here, above the hint: the operator
 				     watches the two fields go blank and this arm carries no status
@@ -281,16 +349,16 @@
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'rate_limited'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_paused_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_paused_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'key_refused'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_refused_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_refused_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'too_large'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_too_large_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_too_large_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'invalid_image'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_failed_eyebrow()}</div>
-					<p class="lookup-lead">{m.admin_lookup_invalid_body()}</p>
+					<p class="lookup-lead">{upstreamReasonBody(lookup.reason)}</p>
 				{:else if lookup.reason === 'no_key'}
 					<!-- The key went away after the page loaded, so the button is still
 					     here. Nothing was sent, and the remedy is Settings, not a retry. -->
@@ -370,6 +438,20 @@
 					</div>
 				{/if}
 
+				<!-- Above the rows it qualifies: "these are Bluesky posts only" is read
+				     before the list it is about. -->
+				<!-- Only the first sentence is the warning. The reason and the advice
+				     under it read in the body style, and both stay inside the status
+				     region with it. -->
+				{#if unansweredText}
+					<div class="lookup-partial">
+						<p class="lookup-partial-lead">{unansweredText.lead}</p>
+						{#if unansweredText.rest}
+							<p class="lookup-partial-rest">{unansweredText.rest}</p>
+						{/if}
+					</div>
+				{/if}
+
 				<ul class="match-list">
 					{#each data.matches as match (matchKey(match))}
 						{@const handles = matchHandles(match)}
@@ -382,6 +464,8 @@
 									<FurAffinityIcon size={14} />
 								{:else if match.site === 'Twitter'}
 									<TwitterIcon size={14} />
+								{:else if match.site === 'Bluesky'}
+									<BlueskyIcon size={14} />
 								{:else}
 									<Globe size={14} />
 								{/if}
@@ -402,6 +486,21 @@
 						</li>
 					{/each}
 				</ul>
+
+				<!-- Directly under the rows it is about and above the offer, clash or
+				     not: the outcome is unchanged and nothing is applied until the
+				     operator clicks, so this only says the click deserves a look at
+				     both posts first. -->
+				{#if differing}
+					<p class="callout differing">
+						{m.admin_lookup_sources_differ({
+							a: differingAccountName(data, differing.a),
+							siteA: siteLabel(differing.a.site),
+							b: differingAccountName(data, differing.b),
+							siteB: siteLabel(differing.b.site)
+						})}
+					</p>
+				{/if}
 
 				<!-- The clash panel asks the same question about the artist as any
 				     other ambiguous result: a duplicate source URL says nothing about
@@ -439,7 +538,7 @@
 					{#if outcome === 'existing'}
 						<p class="outcome">
 							<Check size={14} aria-hidden="true" />
-							{m.admin_lookup_existing({ handle: existingHandle, name: existing?.name ?? '' })}
+							{existingText}
 						</p>
 					{:else if outcome === 'ambiguous'}
 						{@render ambiguousPick()}
@@ -454,7 +553,12 @@
 					{:else if outcome === 'unlinked'}
 						<p class="outcome">
 							<Info size={14} aria-hidden="true" />
-							{m.admin_lookup_unlinked()}
+							<!-- A Bluesky poster gets its own sentence: the other one names two
+							     sites it is not, and the reason differs: Sona can link the
+							     handle, it just cannot tell whether the poster drew the piece. -->
+							{prefill?.site === 'Bluesky'
+								? m.admin_lookup_unlinked_bluesky({ handle })
+								: m.admin_lookup_unlinked()}
 						</p>
 					{/if}
 				{/if}
@@ -512,7 +616,7 @@
 		</div>
 
 		{#if lookup.kind !== 'idle' || movedEmptied}
-		<div class="lookup-actions">
+		<div class="lookup-actions" class:results={!!data}>
 			<!-- One Use button for both action rows. Under a clash it used to render
 			     unapplied whatever the state, so clicking it moved the select and the
 			     live region while the button itself never changed — a sighted
@@ -585,6 +689,22 @@
 					</button>
 				{/if}
 			{/snippet}
+			<!-- The route to a refused or missing key, for the failed arm and the
+			     partial answer alike. A new tab, like the match links above: both
+			     pages that mount this panel hold unsaved work (an upload batch, an
+			     edit in progress), and navigating them away to fix the key would
+			     discard it. -->
+			{#snippet openSettings()}
+				<a
+					class="btn btn-secondary"
+					href="/admin/settings?tab=connections"
+					target="_blank"
+					rel="noopener noreferrer"
+					>{m.admin_lookup_open_settings()}<span class="sr-only"
+						>{' '}{m.link_opens_new_tab()}</span
+					></a
+				>
+			{/snippet}
 			{#if lookup.kind === 'idle'}
 				<!-- The idle arm's only action. No lookup is running and none has
 				     settled, so the row holds Close alone: nothing here can be
@@ -597,11 +717,13 @@
 				     returns wherever the page's Close returns it. -->
 				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{:else if lookup.kind === 'searching'}
-				<button type="button" class="btn btn-secondary" onclick={oncancel}>
+				<button type="button" class="btn btn-secondary" bind:this={cancelButton} onclick={oncancel}>
 					{m.admin_lookup_cancel()}
 				</button>
 			{:else if lookup.kind === 'no_match'}
-				<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
+				{#if noMatchRetry}
+					<button type="button" class="btn btn-secondary" onclick={retry}>{m.admin_lookup_try_again()}</button>
+				{/if}
 				<!-- The spec's third no_match action: nothing matched, so the way
 				     forward is the artist by hand. An empty handle seeds nothing. -->
 				<button
@@ -611,25 +733,14 @@
 				>
 					{m.admin_upload_add_new_artist()}
 				</button>
-				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+				<button type="button" class="btn btn-secondary" data-lookup-close onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'key_refused' || lookup.reason === 'no_key'}
-					<!-- A new tab, like the match links above: both pages that mount this
-					     panel hold unsaved work — an upload batch, an edit in progress —
-					     and navigating them away to fix the key would discard it. -->
-					<a
-						class="btn btn-secondary"
-						href="/admin/settings?tab=connections"
-						target="_blank"
-						rel="noopener noreferrer"
-						>{m.admin_lookup_open_settings()}<span class="sr-only"
-							>{' '}{m.link_opens_new_tab()}</span
-						></a
-					>
-				{:else if lookup.reason === 'rate_limited' || lookup.reason === 'unavailable'}
-					<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
+					{@render openSettings()}
+				{:else if retryCanSucceed(lookup.reason)}
+					<button type="button" class="btn btn-secondary" onclick={retry}>{m.admin_lookup_try_again()}</button>
 				{/if}
-				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+				<button type="button" class="btn btn-secondary" data-lookup-close onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{:else if data}
 				{#if clash}
 					{#if !variantBlocked}
@@ -652,6 +763,13 @@
 					</a>
 				{:else if outcome === 'existing' && candidates[0]}
 					{@render useArtistAction(candidates[0], true)}
+					{#if otherPoster}
+						<!-- Names the handle: with two accounts in the callout, "instead"
+						     would not say which one is added. -->
+						<button type="button" class="btn btn-secondary" onclick={() => onaddnew(otherPoster)}>
+							{m.admin_lookup_add_new({ handle: otherPoster.handle })}
+						</button>
+					{/if}
 				{:else if outcome === 'ambiguous'}
 					{@render useSelectedAction(true)}
 				{:else if outcome === 'new' && prefill}
@@ -677,7 +795,7 @@
 							{m.admin_lookup_add_new({ handle })}
 						</button>
 					{/if}
-				{:else if outcome === 'unlinked' && prefill}
+				{:else if outcome === 'unlinked' && prefill && canAddPosterAsArtist(prefill.site)}
 					<button
 						type="button"
 						class="btn btn-primary"
@@ -686,7 +804,19 @@
 						{m.admin_lookup_add_new({ handle })}
 					</button>
 				{/if}
-				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+				<!-- A partial answer can be asked for again where a second send can
+				     come back different, and a refused key is fixed in Settings
+				     first: the same routes the failed arm offers, beside whatever the
+				     rows that did come back allow. -->
+				{#if unanswered}
+					{#if unanswered.service === 'fuzzysearch' && unanswered.reason === 'key_refused'}
+						{@render openSettings()}
+					{/if}
+					{#if unansweredRetry}
+						<button type="button" class="btn btn-secondary" onclick={retry}>{m.admin_lookup_try_again()}</button>
+					{/if}
+				{/if}
+				<button type="button" class="btn btn-secondary" data-lookup-close onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{/if}
 		</div>
 		{/if}
@@ -855,9 +985,14 @@
 		flex: 1;
 		min-width: 0;
 	}
+	/* A handle is third-party text with no space in it, and a Bluesky one is a
+	   hostname of up to 253 characters: unwrapped it runs under "View post" and
+	   widens the page. .match-id already has min-width: 0, so the line may
+	   shrink; this lets a single long word break to fit it. */
 	.match-who {
 		font-size: 14px;
 		color: var(--foreground);
+		overflow-wrap: anywhere;
 	}
 	.match-who.muted {
 		color: var(--muted-foreground);
@@ -873,12 +1008,21 @@
 	}
 	.outcome {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 6px;
 		font-size: 14px;
 		color: var(--foreground);
 		margin: 0;
 		line-height: 1.5;
+		/* The sentence repeats the handle, so it wraps the way the row does. */
+		overflow-wrap: anywhere;
+	}
+	/* The icon keeps its size and sits on the first line: offset by half the
+	   gap between the line box and the icon, which centres it on a one-line
+	   sentence exactly as align-items: center did. */
+	.outcome :global(svg) {
+		flex: none;
+		margin-top: calc((1.5em - 14px) / 2);
 	}
 	.callout {
 		font-size: 13px;
@@ -886,6 +1030,32 @@
 		border-left: 2px solid var(--border);
 		padding-left: 10px;
 		margin: 10px 0 0;
+	}
+	/* A partial answer, over the rows it qualifies. The private notice's warning
+	   line, with its space below instead of above because it leads the list.
+	   Only the lead is in the warning colour; the reason and advice beneath it
+	   are the muted status lines' style. */
+	.lookup-partial {
+		font-size: 13px;
+		line-height: 1.55;
+		margin: 0 0 12px;
+		max-width: 62ch;
+	}
+	.lookup-partial-lead {
+		color: var(--status-warn);
+		margin: 0;
+	}
+	.lookup-partial-rest {
+		color: var(--muted-foreground);
+		margin: 4px 0 0;
+	}
+	/* Two handles in one sentence, and a Bluesky one is a hostname with no space
+	   in it: the same wrap rule as .match-who. The space below keeps the offer
+	   that follows from reading as part of it. */
+	.callout.differing {
+		overflow-wrap: anywhere;
+		margin-bottom: 10px;
+		max-width: 62ch;
 	}
 	.pick-list {
 		border: 0;
@@ -910,6 +1080,20 @@
 		flex-wrap: wrap;
 		gap: 8px;
 		align-items: center;
+	}
+
+	/* A results footer can hold four actions, and below 480px wrapping left
+	   Close alone on a ragged third row. Stacked full width, each action reads
+	   as one choice. The other states' footers hold two or three short buttons
+	   and keep their row. */
+	@media (max-width: 479px) {
+		.lookup-actions.results {
+			flex-direction: column;
+			align-items: stretch;
+		}
+		.lookup-actions.results .text-action {
+			align-self: center;
+		}
 	}
 
 	/* "Use selected artist" is disabled until a radio is picked, and a

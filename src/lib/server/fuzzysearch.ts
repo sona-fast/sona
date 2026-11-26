@@ -14,7 +14,7 @@
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
 import { findLocalArtistsByHandle, type Platform } from './handle-normalize';
-import { matchKey, mergeSamePost, RATING_ORDER } from '$lib/artist-lookup';
+import { matchKey, mergeSamePost, RATING_ORDER, type UpstreamFailReason } from '$lib/artist-lookup';
 import type { Database } from './db';
 
 // Four rules the browser needs as much as this file does: which match the form
@@ -54,7 +54,9 @@ export const FUZZYSEARCH_TIMEOUT_MS = 8000;
 /** Hamming distance past which a match is noise rather than a lead. */
 export const FUZZYSEARCH_MAX_DISTANCE = 7;
 
-export type LookupSite = 'FurAffinity' | 'Weasyl' | 'e621' | 'Twitter';
+/** 'Bluesky' is the one site FuzzySearch does not answer for: those matches
+ * come from Skyseek (skyseek.ts) and join the list in the endpoint. */
+export type LookupSite = 'FurAffinity' | 'Weasyl' | 'e621' | 'Twitter' | 'Bluesky';
 export type LookupRating = 'general' | 'mature' | 'adult';
 /** 0 → exact, 1-2 → strong, 3-7 → possible, unknown distance → null. */
 export type MatchBand = 'exact' | 'strong' | 'possible' | null;
@@ -71,17 +73,15 @@ export interface LookupMatch {
 	postUrl: string;
 }
 
-export type LookupFailure =
-	| 'key_refused'
-	| 'rate_limited'
-	| 'too_large'
-	| 'invalid_image'
-	| 'unavailable';
+/** The client's list of FuzzySearch failures, so the two cannot drift. */
+export type LookupFailure = UpstreamFailReason;
 
 export type LookupResult =
 	| { ok: true; matches: LookupMatch[] }
 	| { ok: false; reason: LookupFailure };
 
+/** The sites a FuzzySearch row may name. 'Bluesky' is deliberately absent: a
+ * FuzzySearch row claiming it has no id this file knows how to link. */
 const SITES: readonly LookupSite[] = ['FurAffinity', 'Weasyl', 'e621', 'Twitter'];
 
 /** Display order when distances tie: the sites whose matches are most likely to
@@ -90,7 +90,8 @@ const SITE_ORDER: Record<LookupSite, number> = {
 	FurAffinity: 0,
 	Twitter: 1,
 	Weasyl: 2,
-	e621: 3
+	e621: 3,
+	Bluesky: 4
 };
 
 /** Where the key in use came from: the deploy secret, or the admin settings. */
@@ -184,7 +185,32 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 				? `https://twitter.com/${encodeURIComponent(handle)}/status/${id}`
 				: `https://twitter.com/i/status/${id}`;
 		}
+		case 'Bluesky': {
+			// bsky.app resolves a DID in the profile segment, so the handles are
+			// not needed here.
+			const { did, rkey } = splitBlueskySiteId(siteId);
+			return blueskyPostUrl(did, rkey);
+		}
 	}
+}
+
+/** A Bluesky row's id is `<did>/<rkey>` (skyseek.ts builds it). The one place
+ * it is taken apart; an id with no slash is all DID and no record key. */
+export function splitBlueskySiteId(siteId: string): { did: string; rkey: string } {
+	const slash = siteId.indexOf('/');
+	return slash === -1
+		? { did: siteId, rkey: '' }
+		: { did: siteId.slice(0, slash), rkey: siteId.slice(slash + 1) };
+}
+
+/** Public Bluesky post URL. `actor` is a DID or a handle: bsky.app resolves
+ * either in the profile segment. The DID's colons stay literal, the way
+ * bsky.app writes its own links; a colon cannot end a path segment, and
+ * everything else is percent-encoded so a hostile value stays in its segment.
+ * The one builder: Skyseek rows, `postUrlFor`, and the clash check use it. */
+export function blueskyPostUrl(actor: string, rkey: string): string {
+	const profile = encodeURIComponent(actor).replace(/%3A/gi, ':');
+	return `https://bsky.app/profile/${profile}/post/${encodeURIComponent(rkey)}`;
 }
 
 /** Hosts that are the same site under two names. Without folding these, an
@@ -202,6 +228,9 @@ const HOST_ALIASES = new Map<string, string>([
  * `/~user/` are the same artist, and what the fold below leaves is numeric. Left
  * alone elsewhere — most sites' paths are case-sensitive. */
 const CASE_INSENSITIVE_PATH_HOSTS = new Set(['twitter.com', 'furaffinity.net', 'weasyl.com']);
+
+/** A bsky.app post: the account (a handle or a DID) and the record key. */
+const BLUESKY_POST_PATH = /^\/profile\/([^/]+)\/post\/([^/]+)(?:\/.*)?$/;
 
 /**
  * Normalize a source-post URL for equality checks: lowercase host, no scheme,
@@ -237,6 +266,20 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	// own permalink names the artist as well (`/~kuttoya/submissions/5150/title`),
 	// and that is the submission this client builds as `/submission/5150`; a
 	// `/submissions/5150` with no user segment is another page, so it stays put.
+	// A Bluesky post is its account and its record key. The account folds: a
+	// handle is a hostname, a DID's method and plc id are lowercase already, and a
+	// link copied from elsewhere may carry the DID's colons percent-encoded. The
+	// record key is case-sensitive and stays as written. Anything after it
+	// (`/liked-by`, `/quotes`) is a view of the same post. The handle spelling and
+	// the DID spelling of one post stay two different strings here. Only a
+	// caller that knows both names can equate them (see findSourceClash).
+	if (host === 'bsky.app') {
+		path = path.replace(
+			BLUESKY_POST_PATH,
+			(_all, actor: string, rkey: string) =>
+				`/profile/${actor.replace(/%3a/gi, ':').toLowerCase()}/post/${rkey}`
+		);
+	}
 	if (host === 'furaffinity.net') path = path.replace(/^\/full\/(\d+)$/, '/view/$1');
 	if (host === 'e621.net') path = path.replace(/^\/post\/show\/(\d+)(?:\/.*)?$/, '/posts/$1');
 	if (host === 'weasyl.com')
@@ -286,8 +329,10 @@ function normalizeMatch(raw: RawMatch): LookupMatch | null {
 	};
 }
 
-/** Closest first; an unknown distance sorts last; ties break on site order. */
-function compareMatches(a: LookupMatch, b: LookupMatch): number {
+/** Closest first; an unknown distance sorts last; ties break on site order.
+ * Exported for the endpoint, which orders Skyseek's Bluesky rows in among these
+ * with it: Bluesky is last in the site order, so a FuzzySearch row wins a tie. */
+export function compareMatches(a: LookupMatch, b: LookupMatch): number {
 	const ad = a.distance ?? Number.POSITIVE_INFINITY;
 	const bd = b.distance ?? Number.POSITIVE_INFINITY;
 	if (ad !== bd) return ad - bd;
@@ -320,7 +365,7 @@ export function normalizeMatches(payload: unknown): LookupMatch[] {
  * is nothing in the body worth keeping. Cancelling one that a `text()` already
  * drained throws, which is as harmless as the cancel itself.
  */
-async function discardBody(res: Response): Promise<void> {
+export async function discardBody(res: Response): Promise<void> {
 	try {
 		await res.body?.cancel();
 	} catch {
@@ -336,7 +381,7 @@ async function discardBody(res: Response): Promise<void> {
  * body reads as null the same way. `res.body` is null on some responses (and
  * some test doubles), where `text()` is the only way in.
  */
-async function readBounded(res: Response, max: number): Promise<string | null> {
+export async function readBounded(res: Response, max: number): Promise<string | null> {
 	if (!res.body) return await res.text().catch(() => null);
 	try {
 		return new TextDecoder().decode(await bufferStream(res.body, max));
@@ -428,7 +473,8 @@ export async function searchImage(
 /** The platform a site's handles live on, for the sites we hold a column for. */
 const SITE_PLATFORM: Partial<Record<LookupSite, Platform>> = {
 	FurAffinity: 'furaffinity',
-	Twitter: 'twitter'
+	Twitter: 'twitter',
+	Bluesky: 'bluesky'
 };
 
 /**
@@ -436,13 +482,22 @@ const SITE_PLATFORM: Partial<Record<LookupSite, Platform>> = {
  * site's platform, then findLocalArtistsByHandle, which the ledger's paste-a-
  * link lookup shares, so both agree with the registry import and the artists
  * API on what a match is.
+ *
+ * A Bluesky match also offers its poster's DID, so an artist whose link was
+ * saved as bsky.app/profile/did:plc:... is found with or without a resolved
+ * handle.
  */
 export function findLocalArtists<T extends Record<string, unknown>>(
 	rows: T[],
-	match: Pick<LookupMatch, 'site' | 'handles'>
+	match: Pick<LookupMatch, 'site' | 'handles'> & { siteId?: string }
 ): T[] {
 	const platform = SITE_PLATFORM[match.site];
-	return platform ? findLocalArtistsByHandle(rows, platform, match.handles) : [];
+	if (!platform) return [];
+	const handles =
+		match.site === 'Bluesky' && match.siteId
+			? [...match.handles, splitBlueskySiteId(match.siteId).did]
+			: match.handles;
+	return findLocalArtistsByHandle(rows, platform, handles);
 }
 
 /**

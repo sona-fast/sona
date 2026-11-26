@@ -10,8 +10,14 @@ import {
 	FUZZYSEARCH_API_KEY_SETTING,
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
 	FUZZYSEARCH_MAX_BYTES,
+	blueskyPostUrl,
 	type LookupResult
 } from '$lib/server/fuzzysearch';
+import {
+	SKYSEEK_MAX_MATCHES,
+	type SkyseekMatch,
+	type SkyseekResult
+} from '$lib/server/skyseek';
 import { makeD1 } from '$lib/server/test/d1';
 import { POST } from './+server';
 
@@ -30,6 +36,34 @@ const searchImage = vi.hoisted(() =>
 vi.mock('$lib/server/fuzzysearch', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/server/fuzzysearch')>();
 	return { ...original, searchImage };
+});
+
+// The Bluesky half's two outbound calls, stubbed the same way and for the same
+// reason: the mapping, the cap, the own-post filter and the local-artist match
+// stay real. By default Skyseek answers with no posts and no handle resolves.
+const searchSkyseek = vi.hoisted(() =>
+	vi.fn(
+		async (
+			_bytes: Blob,
+			_fetchFn?: typeof fetch,
+			_userAgent?: string
+		): Promise<SkyseekResult> => ({
+			ok: true,
+			matches: []
+		})
+	)
+);
+const resolveBlueskyHandles = vi.hoisted(() =>
+	vi.fn(async (_dids: string[], _fetchFn?: typeof fetch) => new Map<string, string>())
+);
+// The real handle lookup, for the test that reads the request it makes.
+const realResolveBlueskyHandles = vi.hoisted(() => ({
+	fn: null as null | ((dids: string[], fetchFn?: typeof fetch) => Promise<Map<string, string>>)
+}));
+vi.mock('$lib/server/skyseek', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/skyseek')>();
+	realResolveBlueskyHandles.fn = original.resolveBlueskyHandles;
+	return { ...original, searchSkyseek, resolveBlueskyHandles };
 });
 
 // The real proxy by default. It swallows its own fetch, parse and cancel
@@ -181,6 +215,10 @@ const FA_EXACT = {
 beforeEach(() => {
 	searchImage.mockReset();
 	searchImage.mockResolvedValue({ ok: true, matches: [] });
+	searchSkyseek.mockReset();
+	searchSkyseek.mockResolvedValue({ ok: true, matches: [] });
+	resolveBlueskyHandles.mockReset();
+	resolveBlueskyHandles.mockResolvedValue(new Map());
 	setRawSettingSpy.mockReset();
 	if (realSetRawSetting.fn) setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
 	proxyStoredImageSpy.mockReset();
@@ -1477,5 +1515,929 @@ describe('artist-lookup — source-post clash', () => {
 		});
 		const none = await POST(multipartEvent(platform, pngFile()));
 		expect(((await none.json()) as { sourceClash: unknown }).sourceClash).toBeNull();
+	});
+});
+
+// SONA-243: the same click searches Skyseek for Bluesky posts of the picture.
+// FuzzySearch keeps deciding the answer's status; Skyseek only ever adds rows.
+describe('artist-lookup — Bluesky posts from Skyseek', () => {
+	// Made-up accounts in the real DID shape.
+	const ARTIST_DID = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+	const REPOSTER_DID = 'did:plc:bbbbbbbbbbbbbbbbbbbbbbbb';
+	const OPERATOR_DID = 'did:plc:cccccccccccccccccccccccc';
+
+	/** A Skyseek match with no distance unless one is given: the unbanded lead. */
+	function post(
+		did: string,
+		rkey: string,
+		postedAt: string | null = null,
+		distance: number | null = null
+	): SkyseekMatch {
+		return { did, rkey, distance, postedAt, postUrl: blueskyPostUrl(did, rkey) };
+	}
+
+	type Body = {
+		enabled: boolean;
+		matches: Array<{
+			site: string;
+			siteId: string;
+			handles: string[];
+			band: string | null;
+			distance: number | null;
+			rating: string | null;
+			postUrl: string;
+		}>;
+		localArtists: Array<{ matchIndex: number; artists: Array<{ id: number; name: string }> }>;
+		nameMatches: Array<{ matchIndex: number; artists: Array<{ id: number; name: string }> }>;
+		sourceClash: { imageId: number; title: string } | null;
+		blueskySearched: boolean;
+	};
+
+	it('puts Bluesky posts with no distance after every FuzzySearch match', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (name, bluesky_url, created_at)
+			 VALUES ('Sky Artist', 'https://bsky.app/profile/Artist.Example', '2026-01-01');`
+		);
+		// A FuzzySearch row with no distance sorts last among its own; the Bluesky
+		// rows still come after it.
+		const twitterUnknown = {
+			...FA_EXACT,
+			site: 'Twitter' as const,
+			siteId: '99',
+			distance: null,
+			band: null,
+			postUrl: 'https://twitter.com/kuttoya/status/99'
+		};
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT, twitterUnknown] });
+		searchSkyseek.mockResolvedValue({
+			ok: true,
+			matches: [
+				post(ARTIST_DID, 'first', '2026-10-03T02:15:28.000Z'),
+				post(REPOSTER_DID, 'later', '2026-10-04T02:15:28.000Z')
+			]
+		});
+		resolveBlueskyHandles.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+		const file = pngFile();
+
+		const res = await POST(multipartEvent(platform, file));
+		const body = (await res.json()) as Body;
+
+		expect(res.status).toBe(200);
+		expect(body.blueskySearched).toBe(true);
+		expect(body.matches.map((x) => `${x.site}:${x.siteId}`)).toEqual([
+			'FurAffinity:12345',
+			'Twitter:99',
+			`Bluesky:${ARTIST_DID}/first`,
+			`Bluesky:${REPOSTER_DID}/later`
+		]);
+		expect(body.matches[2]).toMatchObject({
+			handles: ['artist.example'],
+			distance: null,
+			band: null,
+			rating: null,
+			postUrl: blueskyPostUrl(ARTIST_DID, 'first')
+		});
+		// The account the AppView named nobody for stays, linked by its DID.
+		expect(body.matches[3]).toMatchObject({
+			handles: [],
+			postUrl: blueskyPostUrl(REPOSTER_DID, 'later')
+		});
+		// The artist's stored Bluesky link is what ties the row to them.
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 2, artists: [{ id: 1, name: 'Sky Artist', pieces: 0 }] }
+		]);
+		// Both services got the same file, and the AppView only the DIDs.
+		expect(searchSkyseek.mock.calls[0][0]).toBe(searchImage.mock.calls[0][0]);
+		expect(resolveBlueskyHandles.mock.calls[0][0]).toEqual([ARTIST_DID, REPOSTER_DID]);
+	});
+
+	it('starts the two searches side by side, not one after the other', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		let releaseFuzzy: (value: LookupResult) => void = () => {};
+		let releaseSkyseek: (value: SkyseekResult) => void = () => {};
+		searchImage.mockReturnValue(new Promise<LookupResult>((resolve) => (releaseFuzzy = resolve)));
+		searchSkyseek.mockReturnValue(
+			new Promise<SkyseekResult>((resolve) => (releaseSkyseek = resolve))
+		);
+
+		const pending = POST(multipartEvent(platform, pngFile()));
+		// Neither has answered, and both have been asked: an endpoint that waited
+		// on either one before asking the other would stall here.
+		await vi.waitFor(() => {
+			expect(searchImage).toHaveBeenCalledTimes(1);
+			expect(searchSkyseek).toHaveBeenCalledTimes(1);
+		});
+
+		releaseSkyseek({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+		releaseFuzzy({ ok: true, matches: [FA_EXACT] });
+		const body = (await (await pending).json()) as Body;
+		expect(body.blueskySearched).toBe(true);
+		expect(body.matches.map((x) => x.site)).toEqual(['FurAffinity', 'Bluesky']);
+	});
+
+	it('leaves a Bluesky post with no distance as a lead: no prefill, so no source clash', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		// A piece already credited to that very post. Only a confident match is
+		// the prefill, and only the prefill is checked for a clash.
+		sqlite.exec(
+			`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+			 VALUES ('Held', 'held', 'https://cdn.example.com/held.png',
+			         '${blueskyPostUrl(ARTIST_DID, 'first')}', '2026-01-01');`
+		);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.matches.map((x) => x.site)).toEqual(['Bluesky']);
+		expect(body.matches[0].band).toBeNull();
+		expect(body.sourceClash).toBeNull();
+	});
+
+	// Round 2: Skyseek reports a distance on FuzzySearch's scale, so an exact or
+	// strong Bluesky post is a confident match like any other.
+	it('bands a Bluesky post by its distance and ties it to a local artist', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (name, bluesky_url, created_at)
+			 VALUES ('Sky Artist', 'https://bsky.app/profile/Artist.Example', '2026-01-01'),
+			        ('artist.example', NULL, '2026-01-01');`
+		);
+		searchSkyseek.mockResolvedValue({
+			ok: true,
+			matches: [post(ARTIST_DID, 'first', '2026-10-03T02:15:28.000Z', 0)]
+		});
+		resolveBlueskyHandles.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.matches).toEqual([
+			{
+				site: 'Bluesky',
+				siteId: `${ARTIST_DID}/first`,
+				handles: ['artist.example'],
+				distance: 0,
+				band: 'exact',
+				postedAt: '2026-10-03T02:15:28.000Z',
+				rating: null,
+				postUrl: blueskyPostUrl(ARTIST_DID, 'first')
+			}
+		]);
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 0, artists: [{ id: 1, name: 'Sky Artist', pieces: 0 }] }
+		]);
+		// The weaker, by-name hit is reported the way it is for any other site.
+		expect(body.nameMatches).toEqual([
+			{ matchIndex: 0, artists: [{ id: 2, name: 'artist.example', pieces: 0 }] }
+		]);
+	});
+
+	it('orders the combined list by distance, and lets FuzzySearch win a tie', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		// One local artist per site, so the index each hit carries can be checked
+		// against the row it must point at AFTER the two lists are merged.
+		sqlite.exec(
+			`INSERT INTO artists (name, bluesky_url, furaffinity_url, twitter_url, created_at)
+			 VALUES ('Sky Artist', 'https://bsky.app/profile/artist.example', NULL, NULL, '2026-01-01'),
+			        ('Fur Artist', NULL, 'https://www.furaffinity.net/user/kuttoya/', NULL, '2026-01-01'),
+			        ('Bird Artist', NULL, NULL, 'https://twitter.com/birdartist', '2026-01-01');`
+		);
+		const faStrong = { ...FA_EXACT, distance: 2, band: 'strong' as const };
+		const twitterPossible = {
+			...FA_EXACT,
+			site: 'Twitter' as const,
+			siteId: '99',
+			handles: ['birdartist'],
+			distance: 5,
+			band: 'possible' as const,
+			postUrl: 'https://twitter.com/birdartist/status/99'
+		};
+		const e621Unknown = {
+			...FA_EXACT,
+			site: 'e621' as const,
+			siteId: '7',
+			handles: [],
+			distance: null,
+			band: null,
+			postUrl: 'https://e621.net/posts/7'
+		};
+		searchImage.mockResolvedValue({ ok: true, matches: [faStrong, twitterPossible, e621Unknown] });
+		searchSkyseek.mockResolvedValue({
+			ok: true,
+			matches: [
+				post(ARTIST_DID, 'exact', '2026-10-03T02:15:28.000Z', 0),
+				post(REPOSTER_DID, 'tied-earlier', '2026-10-04T02:15:28.000Z', 2),
+				post(OPERATOR_DID, 'tied-later', '2026-10-05T02:15:28.000Z', 2),
+				post(REPOSTER_DID, 'loose', null, 5),
+				post(REPOSTER_DID, 'unknown')
+			]
+		});
+		resolveBlueskyHandles.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.matches.map((x) => `${x.site}:${x.siteId.split('/').pop()}:${x.distance}`)).toEqual([
+			// Closer than anything FuzzySearch found, so it leads.
+			'Bluesky:exact:0',
+			// A tie at 2: the FuzzySearch row first, then Bluesky earliest first.
+			'FurAffinity:12345:2',
+			'Bluesky:tied-earlier:2',
+			'Bluesky:tied-later:2',
+			'Twitter:99:5',
+			'Bluesky:loose:5',
+			'e621:7:null',
+			'Bluesky:unknown:null'
+		]);
+		// Each hit addresses its row in the merged order, not in either search's own.
+		const named = body.localArtists.map((hit) => [
+			body.matches[hit.matchIndex].site,
+			hit.artists.map((a) => a.name)
+		]);
+		expect(named).toEqual([
+			['Bluesky', ['Sky Artist']],
+			['FurAffinity', ['Fur Artist']],
+			['Twitter', ['Bird Artist']]
+		]);
+		expect(body.localArtists.map((hit) => hit.matchIndex)).toEqual([0, 1, 4]);
+	});
+
+	it('fills from the FuzzySearch match when a Bluesky post is exactly as close', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		// The Bluesky post is already a piece's source; the FurAffinity one is not.
+		// The clash follows the prefill match, so there is none.
+		sqlite.exec(
+			`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+			 VALUES ('Held', 'held', 'https://cdn.example.com/held.png',
+			         '${blueskyPostUrl(ARTIST_DID, 'first')}', '2026-01-01');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.matches.map((x) => x.site)).toEqual(['FurAffinity', 'Bluesky']);
+		expect(body.sourceClash).toBeNull();
+	});
+
+	// A closer Bluesky row is often a repost, so the confident FuzzySearch row
+	// stays the prefill, and the clash check follows it, not the Bluesky post.
+	it('checks the clash on a confident FuzzySearch match over a closer Bluesky post', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+			 VALUES ('Reposted', 'reposted', 'https://cdn.example.com/reposted.png',
+			         '${blueskyPostUrl(REPOSTER_DID, 'closer')}', '2026-01-01'),
+			        ('Held', 'held', 'https://cdn.example.com/held.png',
+			         '${FA_EXACT.postUrl}', '2026-01-02');`
+		);
+		searchImage.mockResolvedValue({
+			ok: true,
+			matches: [{ ...FA_EXACT, distance: 1, band: 'strong' as const }]
+		});
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(REPOSTER_DID, 'closer', null, 0)] });
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.matches.map((x) => x.site)).toEqual(['Bluesky', 'FurAffinity']);
+		expect(body.sourceClash).toMatchObject({ title: 'Held' });
+	});
+
+	describe('a source clash on a Bluesky post', () => {
+		const HANDLE_URL = 'https://bsky.app/profile/artist.example/post/3mwwswjznmk25';
+		const DID_URL = blueskyPostUrl(ARTIST_DID, '3mwwswjznmk25');
+
+		async function lookupWith(storedUrl: string, handle: string | null, distance: number | null = 0) {
+			const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			sqlite
+				.prepare(
+					`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+					 VALUES ('Held', 'held', 'https://cdn.example.com/held.png', ?, '2026-01-01')`
+				)
+				.run(storedUrl);
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(ARTIST_DID, '3mwwswjznmk25', null, distance)]
+			});
+			resolveBlueskyHandles.mockResolvedValue(
+				new Map(handle ? [[ARTIST_DID, handle]] : [])
+			);
+			return (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+		}
+
+		it.each([
+			['the DID link this endpoint builds', DID_URL],
+			['the same link with a trailing slash and a query', `${DID_URL}/?ref=share`],
+			['the DID link with its colons percent-encoded', DID_URL.replace(/did:plc:/, 'did%3Aplc%3A')],
+			['a view under the post', `${DID_URL}/liked-by`],
+			['the host in another letter case', DID_URL.replace('bsky.app', 'BSKY.App')],
+			['the handle link bsky.app shows', HANDLE_URL],
+			['the handle link in another letter case', HANDLE_URL.replace('artist.example', 'Artist.Example')],
+			['the handle link with a view under it', `${HANDLE_URL}/quotes`]
+		])('reports a piece saved under %s', async (_name, stored) => {
+			const body = await lookupWith(stored, 'artist.example');
+			expect(body.sourceClash).toMatchObject({ imageId: 1, title: 'Held' });
+		});
+
+		it.each([
+			['another post by the same account', HANDLE_URL.replace('3mwwswjznmk25', '3mwwswjznmk26')],
+			['the same record key under another account', HANDLE_URL.replace('artist.example', 'other.example')],
+			// Record keys are case-sensitive: this is a different post.
+			['a record key in another letter case', DID_URL.replace('3mwwswjznmk25', '3MWWSWJZNMK25')],
+			['the account profile, with no post', 'https://bsky.app/profile/artist.example']
+		])('does not report a piece saved under %s', async (_name, stored) => {
+			const body = await lookupWith(stored, 'artist.example');
+			expect(body.sourceClash).toBeNull();
+		});
+
+		// The accepted miss: with no handle resolved nothing says whose handle the
+		// stored link names. The DID spelling is still caught.
+		it('misses the handle spelling when no handle resolved, and still catches the DID one', async () => {
+			expect((await lookupWith(HANDLE_URL, null)).sourceClash).toBeNull();
+			expect((await lookupWith(DID_URL, null)).sourceClash).toMatchObject({ imageId: 1 });
+		});
+
+		it('reports nothing for a Bluesky post too loose to fill from', async () => {
+			expect((await lookupWith(DID_URL, 'artist.example', 4)).sourceClash).toBeNull();
+		});
+	});
+
+	it('identifies this site to Skyseek by its hostname and to the AppView without it', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		// The real handle lookup, so the header read below is the one it sends.
+		resolveBlueskyHandles.mockImplementation(realResolveBlueskyHandles.fn!);
+		// The AppView is asked through the global fetch, stubbed here so the test
+		// stays off the network. The request's own fetch must not carry that call:
+		// SvelteKit's adds this site's origin to a cross-origin request.
+		const appViewHeaders: Record<string, string>[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: string, init?: RequestInit) => {
+				appViewHeaders.push(init?.headers as Record<string, string>);
+				return new Response(JSON.stringify({ profiles: [] }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				});
+			})
+		);
+		const eventFetched: string[] = [];
+		const fetchFn = (async (url: string) => {
+			eventFetched.push(String(url));
+			return imageFetch().fn(url);
+		}) as unknown as typeof fetch;
+		const form = new FormData();
+		form.append('file', pngFile());
+		const request = new Request('https://Gallery.Example/api/admin/artist-lookup', {
+			method: 'POST',
+			body: form
+		});
+
+		try {
+			await POST({ request, platform, fetch: fetchFn } as never);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+
+		expect(searchSkyseek.mock.calls[0][2]).toBe('Sona/1.0 (+https://sona.fast; gallery.example)');
+		// Skyseek's owner asked for the hostname; Bluesky did not.
+		expect(appViewHeaders).toHaveLength(1);
+		expect(appViewHeaders[0]['user-agent']).toBe('Sona/1.0 (+https://sona.fast)');
+		expect(eventFetched.filter((url) => url.startsWith('https://public.api.bsky.app/'))).toEqual([]);
+		// FuzzySearch's call is as it was: the key, and no say in the header.
+		expect(searchImage.mock.calls[0]).toHaveLength(3);
+	});
+
+	it.each([
+		['is rate limited', { ok: false, reason: 'rate_limited' }],
+		['finds the file too large', { ok: false, reason: 'too_large' }],
+		['cannot read the file', { ok: false, reason: 'invalid_image' }],
+		['does not answer', { ok: false, reason: 'unavailable' }]
+	] as Array<[string, SkyseekResult]>)(
+		'still answers the FuzzySearch matches when Skyseek %s',
+		async (_name, failed) => {
+			const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+			searchSkyseek.mockResolvedValue(failed);
+
+			const res = await POST(multipartEvent(platform, pngFile()));
+			const body = (await res.json()) as Body & { error?: string; forwarded?: boolean };
+			warn.mockRestore();
+
+			expect(res.status).toBe(200);
+			expect(body.matches).toEqual([FA_EXACT]);
+			// Not "no Bluesky posts": nobody looked, and the panel must not say so.
+			expect(body.blueskySearched).toBe(false);
+			// And why, so the panel offers Try again only where a second send can
+			// come back different: a refused file is refused again.
+			expect((body as Body & { skyseekFailure?: unknown }).skyseekFailure).toBe(
+				failed.ok ? null : failed.reason
+			);
+			expect(body.error).toBeUndefined();
+			expect(resolveBlueskyHandles).not.toHaveBeenCalled();
+		}
+	);
+
+	it('still answers when the Skyseek call or the handle lookup throws', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+		searchSkyseek.mockRejectedValue(new Error('connection reset'));
+
+		const thrown = await POST(multipartEvent(platform, pngFile()));
+		expect(thrown.status).toBe(200);
+		const thrownBody = (await thrown.json()) as Body & { skyseekFailure?: unknown };
+		expect(thrownBody.blueskySearched).toBe(false);
+		expect(thrownBody.skyseekFailure).toBe('unavailable');
+
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		resolveBlueskyHandles.mockRejectedValue(new Error('connection reset'));
+		const unresolved = await POST(multipartEvent(platform, pngFile()));
+		warn.mockRestore();
+
+		expect(unresolved.status).toBe(200);
+		const unresolvedBody = (await unresolved.json()) as Body & { skyseekFailure?: unknown };
+		expect(unresolvedBody.matches).toEqual([FA_EXACT]);
+		// A handle lookup that threw is answered as it always was: Bluesky not
+		// searched, and nothing that says Skyseek refused the file.
+		expect(unresolvedBody.blueskySearched).toBe(false);
+		expect(unresolvedBody.skyseekFailure).toBe('unavailable');
+	});
+
+	it('says Bluesky was searched when it was and nothing matched anywhere', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.matches).toEqual([]);
+		expect(body.blueskySearched).toBe(true);
+		// Nobody to ask the AppView about.
+		expect(resolveBlueskyHandles.mock.calls.every(([dids]) => dids.length === 0)).toBe(true);
+	});
+
+	const FUZZY_FAILURES = [
+		['key_refused', 424],
+		['rate_limited', 429],
+		['too_large', 413],
+		['invalid_image', 422],
+		['unavailable', 502]
+	] as const;
+
+	// One service down is not a failed lookup. The rows of the one that answered
+	// are the answer, and `fuzzysearchFailure` says why the others are missing.
+	it.each(FUZZY_FAILURES)(
+		'answers the Bluesky posts with the reason when FuzzySearch fails with %s',
+		async (reason) => {
+			const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			searchImage.mockResolvedValue({ ok: false, reason });
+			searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+			resolveBlueskyHandles.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+
+			const res = await POST(multipartEvent(platform, pngFile()));
+
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as Body & { fuzzysearchFailure: string | null; error?: string };
+			expect(body.fuzzysearchFailure).toBe(reason);
+			expect(body.error).toBeUndefined();
+			expect(body.blueskySearched).toBe(true);
+			expect(body.matches.map((x) => [x.site, x.handles, x.band])).toEqual([
+				['Bluesky', ['artist.example'], 'exact']
+			]);
+		}
+	);
+
+	it('says FuzzySearch answered on an ordinary result, with or without Bluesky posts', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const alone = (await (await POST(multipartEvent(platform, pngFile()))).json()) as {
+			fuzzysearchFailure: unknown;
+			skyseekFailure: unknown;
+		};
+		expect(alone.fuzzysearchFailure).toBeNull();
+		expect(alone.skyseekFailure).toBeNull();
+
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+		const both = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body & {
+			fuzzysearchFailure: unknown;
+			skyseekFailure: unknown;
+		};
+		expect(both.fuzzysearchFailure).toBeNull();
+		expect(both.skyseekFailure).toBeNull();
+		expect(both.matches.map((x) => x.site)).toEqual(['FurAffinity', 'Bluesky']);
+	});
+
+	// The rows of a partial answer get every read a whole one gets: the local
+	// artist behind the poster, the by-name prompt, and the duplicate-source
+	// check, which here runs on the Bluesky post because it is the prefill.
+	it('still matches local artists, names and the source clash on a partial answer', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, bluesky_url, created_at)
+			 VALUES (1, 'Sky Artist', 'https://bsky.app/profile/artist.example', '2026-01-01'),
+			        (2, 'artist.example', NULL, '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, source_post_url, created_at)
+			 VALUES (5, 'Held', 'held', 'https://cdn.example.com/held.png',
+			         '${blueskyPostUrl('artist.example', 'first')}', '2026-01-01');`
+		);
+		searchImage.mockResolvedValue({ ok: false, reason: 'unavailable' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+		resolveBlueskyHandles.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 0, artists: [{ id: 1, name: 'Sky Artist', pieces: 0 }] }
+		]);
+		expect(body.nameMatches).toEqual([
+			{ matchIndex: 0, artists: [{ id: 2, name: 'artist.example', pieces: 0 }] }
+		]);
+		expect(body.sourceClash).toMatchObject({ imageId: 5, title: 'Held' });
+	});
+
+	// An artist whose Bluesky link was saved by DID is the poster of a Skyseek
+	// row from that DID, whether or not the AppView gave the row a handle.
+	it.each([
+		['with a resolved handle', new Map([[ARTIST_DID, 'artist.example']])],
+		['with no handle resolved', new Map<string, string>()]
+	])('matches a local artist saved by DID to the post %s', async (_name, handles) => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, bluesky_url, created_at)
+			 VALUES (1, 'Sky Artist', 'https://bsky.app/profile/${ARTIST_DID}', '2026-01-01'),
+			        (2, 'Someone Else', 'https://bsky.app/profile/${REPOSTER_DID}', '2026-01-01');`
+		);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first', null, 0)] });
+		resolveBlueskyHandles.mockResolvedValue(handles);
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 0, artists: [{ id: 1, name: 'Sky Artist', pieces: 0 }] }
+		]);
+	});
+
+	// The settings page's "your key stopped working" does not depend on whether
+	// Bluesky happened to have the picture.
+	it('records a refused key on a partial answer too, and does not clear it', async () => {
+		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(
+			/^\d{4}-\d{2}-\d{2}T.*\|env$/
+		);
+	});
+
+	it('leaves a standing refusal marker alone when FuzzySearch fails another way', async () => {
+		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z|env');
+		searchImage.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+
+		expect((await POST(multipartEvent(platform, pngFile()))).status).toBe(200);
+		// Only a FuzzySearch success clears it, and this was not one.
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe(
+			'2026-09-01T00:00:00.000Z|env'
+		);
+	});
+
+	// A throw out of searchImage is a FuzzySearch failure like a typed one: the
+	// Bluesky rows are not thrown away with it.
+	it('answers the Bluesky posts when the FuzzySearch call throws', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		searchImage.mockRejectedValue(new Error('connection reset'));
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+		warn.mockRestore();
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Body & { fuzzysearchFailure: string | null };
+		expect(body.fuzzysearchFailure).toBe('unavailable');
+		expect(body.matches.map((x) => x.site)).toEqual(['Bluesky']);
+	});
+
+	// With no Bluesky row to show, the failure is the whole answer, exactly as
+	// it was before the two were aggregated: same status, same body.
+	describe.each(FUZZY_FAILURES)('a FuzzySearch %s with nothing from Bluesky', (reason, status) => {
+		const expectFailure = async (res: Response) => {
+			expect(res.status).toBe(status);
+			expect(await res.json()).toEqual({ enabled: true, error: reason, forwarded: true });
+		};
+
+		it('keeps its answer when Skyseek fails too', async () => {
+			const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			searchImage.mockResolvedValue({ ok: false, reason });
+			searchSkyseek.mockResolvedValue({ ok: false, reason: 'unavailable' });
+
+			const res = await POST(multipartEvent(platform, pngFile()));
+			warn.mockRestore();
+
+			await expectFailure(res);
+		});
+
+		it('keeps its answer when Skyseek finds no post', async () => {
+			const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			searchImage.mockResolvedValue({ ok: false, reason });
+
+			await expectFailure(await POST(multipartEvent(platform, pngFile())));
+		});
+
+		// Decided after the own-post filter. Before it, this would be a 200 with
+		// an empty list, which the panel reads as "nothing matched".
+		it("keeps its answer when the only post is the operator's own", async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/me.example');
+			searchImage.mockResolvedValue({ ok: false, reason });
+			searchSkyseek.mockResolvedValue({ ok: true, matches: [post(OPERATOR_DID, 'mine', null, 0)] });
+			resolveBlueskyHandles.mockResolvedValue(new Map([[OPERATOR_DID, 'me.example']]));
+
+			await expectFailure(await POST(multipartEvent(platform, pngFile())));
+		});
+	});
+
+	// The cost of aggregating, stated in the handler: a FuzzySearch failure is
+	// no longer answered the moment it arrives, because the Bluesky rows that
+	// may replace it are not in yet.
+	it('waits for Skyseek before answering a FuzzySearch failure', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		let answerSkyseek: (result: SkyseekResult) => void = () => {};
+		searchSkyseek.mockReturnValue(
+			new Promise<SkyseekResult>((resolve) => {
+				answerSkyseek = resolve;
+			})
+		);
+
+		let settled = false;
+		const pending = Promise.resolve(POST(multipartEvent(platform, pngFile()))).then((res) => {
+			settled = true;
+			return res;
+		});
+		// Long enough for the FuzzySearch failure and every await behind it.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(settled).toBe(false);
+
+		answerSkyseek({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		const res = await pending;
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { fuzzysearchFailure: string }).fuzzysearchFailure).toBe(
+			'rate_limited'
+		);
+	});
+
+	// The reads behind a partial answer can fail like the ones behind a whole
+	// one. The answer is then the database's failure, not FuzzySearch's: a
+	// retry clears it, and rate-limit or key advice would point the wrong way.
+	it('answers unavailable, not the FuzzySearch reason, when a read behind a partial answer throws', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "artists"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
+	});
+
+	it('asks neither service with no key, a commission piece, or a file it refuses', async () => {
+		const noKey = makeEnv();
+		expect(await (await POST(multipartEvent(noKey.platform, pngFile()))).json()).toEqual({
+			enabled: false,
+			forwarded: false
+		});
+
+		const fromEntry = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		fromEntry.sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');
+			 INSERT INTO commissions (image_id) VALUES (1);`
+		);
+		const refused = await POST(jsonEvent(fromEntry.platform, { imageId: 1 }));
+		expect(await refused.json()).toEqual({
+			enabled: true,
+			error: 'from_commission',
+			forwarded: false
+		});
+
+		const notAnImage = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const svg = new File(['<svg xmlns="http://www.w3.org/2000/svg"/>'], 'a.svg', {
+			type: 'image/svg+xml'
+		});
+		expect(await (await POST(multipartEvent(notAnImage.platform, svg))).json()).toEqual({
+			enabled: true,
+			error: 'invalid_image',
+			forwarded: false
+		});
+
+		expect(searchSkyseek).not.toHaveBeenCalled();
+		expect(resolveBlueskyHandles).not.toHaveBeenCalled();
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('searches Bluesky for a stored image too, with the bytes FuzzySearch gets', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
+
+		const body = (await (await POST(jsonEvent(platform, { imageId: 1 }))).json()) as Body;
+
+		expect(body.matches.map((x) => x.site)).toEqual(['Bluesky']);
+		const sent = searchSkyseek.mock.calls[0][0];
+		expect(sent).toBe(searchImage.mock.calls[0][0]);
+		expect(new Uint8Array(await sent.arrayBuffer())).toEqual(IMAGE_BYTES);
+	});
+
+	it("leaves out the operator's own post of the piece, by handle or by DID", async () => {
+		const posts = [
+			post(OPERATOR_DID, 'mine', '2026-10-03T02:15:28.000Z'),
+			post(ARTIST_DID, 'theirs', '2026-10-04T02:15:28.000Z')
+		];
+		const handles = new Map([
+			[OPERATOR_DID, 'operator.example'],
+			[ARTIST_DID, 'artist.example']
+		]);
+
+		const byHandle = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(byHandle.db, 'blueskyUrl', 'https://bsky.app/profile/Operator.Example');
+		searchSkyseek.mockResolvedValue({ ok: true, matches: posts });
+		resolveBlueskyHandles.mockResolvedValue(handles);
+		const first = (await (await POST(multipartEvent(byHandle.platform, pngFile()))).json()) as Body;
+		expect(first.matches.map((x) => x.siteId)).toEqual([`${ARTIST_DID}/theirs`]);
+		// Searched, and the only post found was the operator's own: still searched.
+		expect(first.blueskySearched).toBe(true);
+
+		// No handle resolved, and the link was saved in its DID form.
+		const byDid = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(byDid.db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+		resolveBlueskyHandles.mockResolvedValue(new Map());
+		const second = (await (await POST(multipartEvent(byDid.platform, pngFile()))).json()) as Body;
+		expect(second.matches.map((x) => x.siteId)).toEqual([`${ARTIST_DID}/theirs`]);
+
+		// No Bluesky link saved: nothing to recognise, so nothing is left out.
+		const unset = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		resolveBlueskyHandles.mockResolvedValue(handles);
+		const third = (await (await POST(multipartEvent(unset.platform, pngFile()))).json()) as Body;
+		expect(third.matches.map((x) => x.siteId)).toEqual([
+			`${OPERATOR_DID}/mine`,
+			`${ARTIST_DID}/theirs`
+		]);
+	});
+
+	// The operator posting their own piece over and over must not push other
+	// accounts' posts past the cap: their posts go before the cap is applied.
+	it("leaves out the operator's own posts before the cap, by DID or by handle", async () => {
+		const mine = Array.from({ length: SKYSEEK_MAX_MATCHES + 5 }, (_, i) =>
+			post(OPERATOR_DID, `mine${i}`, null, 0)
+		);
+		const theirs = post(ARTIST_DID, 'theirs', null, 1);
+
+		const byDid = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(byDid.db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [...mine, theirs] });
+		const first = (await (await POST(multipartEvent(byDid.platform, pngFile()))).json()) as Body;
+		expect(first.matches.map((x) => x.siteId)).toEqual([`${ARTIST_DID}/theirs`]);
+		// Known by DID, so the operator's account is not even asked about.
+		expect(resolveBlueskyHandles.mock.calls[0][0]).toEqual([ARTIST_DID]);
+
+		resolveBlueskyHandles.mockClear();
+		const byHandle = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(byHandle.db, 'blueskyUrl', 'https://bsky.app/profile/operator.example');
+		resolveBlueskyHandles.mockResolvedValue(
+			new Map([
+				[OPERATOR_DID, 'operator.example'],
+				[ARTIST_DID, 'artist.example']
+			])
+		);
+		const second = (await (await POST(multipartEvent(byHandle.platform, pngFile()))).json()) as Body;
+		expect(second.matches.map((x) => x.siteId)).toEqual([`${ARTIST_DID}/theirs`]);
+		// One handle request, one entry per account however many posts it made.
+		expect(resolveBlueskyHandles).toHaveBeenCalledTimes(1);
+		expect(resolveBlueskyHandles.mock.calls[0][0]).toEqual([OPERATOR_DID, ARTIST_DID]);
+	});
+
+	it('asks the AppView about no more accounts than the cap, however many posted', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+		const many = Array.from({ length: SKYSEEK_MAX_MATCHES + 15 }, (_, i) =>
+			post(`did:plc:${alphabet[i % 32].repeat(23)}${alphabet[Math.floor(i / 32)]}`, `post${i}`)
+		);
+		// Each account posted twice, so the distinct accounts run past the cap
+		// long after the posts do.
+		searchSkyseek.mockResolvedValue({
+			ok: true,
+			matches: many.flatMap((p) => [p, { ...p, rkey: `${p.rkey}b` }])
+		});
+
+		await POST(multipartEvent(platform, pngFile()));
+
+		expect(resolveBlueskyHandles).toHaveBeenCalledTimes(1);
+		expect(resolveBlueskyHandles.mock.calls[0][0]).toEqual(
+			many.slice(0, 25).map((x) => x.did)
+		);
+		// The DIDs and nothing else: handed the request's own fetch, the call
+		// would carry this site's origin to the AppView.
+		expect(resolveBlueskyHandles.mock.calls[0]).toHaveLength(1);
+	});
+
+	// The site's link names a handle, and the AppView named nobody for this
+	// account: it may be the operator's own post. It stays in the list, as a lead
+	// that fills nothing and offers nobody, the way a post with no distance does.
+	it("keeps an unresolved poster as a lead when the site's link names a handle", async () => {
+		const held = `INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+			 VALUES ('Held', 'held', 'https://cdn.example.com/held.png',
+			         '${blueskyPostUrl(OPERATOR_DID, 'mine')}', '2026-01-01');`;
+		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(OPERATOR_DID, 'mine', null, 0)] });
+
+		const byHandle = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		byHandle.sqlite.exec(held);
+		await setRawSetting(byHandle.db, 'blueskyUrl', 'https://bsky.app/profile/operator.example');
+		const first = (await (await POST(multipartEvent(byHandle.platform, pngFile()))).json()) as Body;
+		expect(first.matches.map((x) => x.siteId)).toEqual([`${OPERATOR_DID}/mine`]);
+		expect(first.matches[0]).toMatchObject({ handles: [], distance: 0, band: null });
+		// Not the prefill, so nothing is checked against it.
+		expect(first.sourceClash).toBeNull();
+
+		// Saved by DID, the account is known without a handle, and every other
+		// unresolved poster keeps its band.
+		const byDid = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(byDid.db, 'blueskyUrl', `https://bsky.app/profile/${ARTIST_DID}`);
+		const second = (await (await POST(multipartEvent(byDid.platform, pngFile()))).json()) as Body;
+		expect(second.matches[0]).toMatchObject({ handles: [], band: 'exact' });
+
+		// No link saved: there is nobody to mistake the poster for.
+		const unset = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const third = (await (await POST(multipartEvent(unset.platform, pngFile()))).json()) as Body;
+		expect(third.matches[0]).toMatchObject({ handles: [], band: 'exact' });
+	});
+
+	// Unread, the link cannot say which posts are the operator's own, so every
+	// post stays a lead that fills nothing and offers nobody. A site with no link
+	// saved is not that case: there is nobody to mistake a poster for.
+	it("keeps the matches when the site's Bluesky link cannot be read, as leads only", async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const posts = [post(OPERATOR_DID, 'mine', null, 0), post(ARTIST_DID, 'theirs', null, 1)];
+		const handles = new Map([
+			[OPERATOR_DID, 'operator.example'],
+			[ARTIST_DID, 'artist.example']
+		]);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: posts });
+		resolveBlueskyHandles.mockResolvedValue(handles);
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "site_settings"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+		warn.mockRestore();
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Body;
+		expect(body.matches.map((x) => x.siteId)).toEqual([`${OPERATOR_DID}/mine`, `${ARTIST_DID}/theirs`]);
+		expect(body.matches.map((x) => x.band)).toEqual([null, null]);
+
+		const unset = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const saved = (await (await POST(multipartEvent(unset.platform, pngFile()))).json()) as Body;
+		expect(saved.matches.map((x) => x.band)).toEqual(['exact', 'strong']);
+	});
+
+	it('shows the earliest posts of a picture that went round, and resolves only those', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+		const many = Array.from({ length: SKYSEEK_MAX_MATCHES + 15 }, (_, i) =>
+			post(`did:plc:${alphabet[i % 32].repeat(23)}${alphabet[Math.floor(i / 32)]}`, `post${i}`)
+		);
+		searchSkyseek.mockResolvedValue({ ok: true, matches: many });
+
+		const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+
+		// 25 as a literal: it is the AppView's own limit on one request, and a
+		// test that read the constant would follow it past that limit.
+		expect(body.matches).toHaveLength(25);
+		expect(body.matches.map((x) => x.siteId)).toEqual(
+			many.slice(0, 25).map((x) => `${x.did}/${x.rkey}`)
+		);
+		expect(body.matches.map((x) => x.siteId)).not.toContain(`${many[25].did}/${many[25].rkey}`);
+		const asked = resolveBlueskyHandles.mock.calls[0][0];
+		expect(asked).toEqual(many.slice(0, 25).map((x) => x.did));
+		expect(asked).not.toContain(many[25].did);
 	});
 });

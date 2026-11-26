@@ -16,6 +16,7 @@
 		matchHandle,
 		pickPrefillMatch,
 		prefillForResult,
+		resultKeepsLastPrefill,
 		profileUrlFor,
 		ratingTag,
 		runLookup,
@@ -24,8 +25,9 @@
 		statusSentence,
 		strictestRating,
 		tileResultText,
-		candidateArtists,
+		differentArtistMatch,
 		lookupSentFile,
+		unansweredNotice,
 		sentAfterApplyThrew,
 		withCreatedArtist,
 		type LookupCleared,
@@ -461,6 +463,7 @@
 		const fromLookup = artistSeed !== null;
 		// The tile the seed came from, also captured before the clear below.
 		const seedKey = artistSeed?.tileKey ?? null;
+		const seedResult = artistSeed?.result ?? null;
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
 		// The option values are numbers, and the select binding compares with
 		// Object.is — a stringified id would match no option and select nothing.
@@ -476,14 +479,16 @@
 		// folding into the new parent would credit an unrelated result while
 		// leaving the seed's tile still offering to add the artist.
 		const tile = seedKey === null ? null : (tiles.find((t) => t.key === seedKey) ?? null);
-		if (!fromLookup || !tile || tile.lookup.kind !== 'results') {
+		if (!fromLookup || !tile || tile.lookup.kind !== 'results' || tile.lookup !== seedResult) {
 			// That tile can also be removed while the dialog is open, taking the
 			// button the dialog would have restored focus to with it (2.4.3). The
 			// tile surviving is not enough either: a lookup cancelled back to idle
 			// or retried into searching unmounts the same add-new button, so the
 			// opener is gone there too and focus falls to <body> with the next Tab
-			// restarting at the top of the page. There is nothing to fold in either
-			// case; land on the tile's own lookup button while it exists, else on
+			// restarting at the top of the page. A lookup that restarted and settled
+			// again holds a different result, which may name a different poster, so
+			// the artist is not folded into it either. There is nothing to fold in
+			// any of these cases; land on the tile's own lookup button while it exists, else on
 			// the select holding the new artist.
 			if (fromLookup) {
 				await tick();
@@ -544,6 +549,10 @@
 	// below instead (SONA-156). The tag is that record — it goes up with the
 	// prefill and comes off on the first keystroke.
 	let sharedFilled = $state<LookupFields>({});
+	// The tile whose lookup last wrote one of the two shared fields. A result
+	// that keeps the last prefill may only keep its own tile's: another tile's
+	// URL and date describe another file.
+	let prefillOwnerKey: number | null = null;
 	// Held-ness of the source post URL at the moment the prefill ran, beside the
 	// record of what it wrote. Read live, the clash sentence flips as the
 	// operator types: clearing a pasted URL afterwards would make the panel say
@@ -588,6 +597,10 @@
 		site: LookupSite;
 		linkable: boolean;
 		tileKey: number | null;
+		// The result that offered the handle. A lookup restarted on that tile
+		// while the dialog is open replaces it, and the artist belongs to this
+		// one, not to whatever the tile holds when the dialog closes.
+		result: LookupState | null;
 	} | null>(null);
 	// Per-tile aborts. Not $state — nothing renders them.
 	const lookupAborts = new Map<number, AbortController>();
@@ -861,6 +874,17 @@
 			line = result
 				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
 				: m.admin_lookup_announce_tile_no_match({ fileName });
+			// Spoken with the match, for the reason the private notice below is: the
+			// tile's own paragraph sits outside any live region. A no-match carries
+			// the Skyseek half of the same notice.
+			const partial =
+				result?.partial ?? (tile.lookup.kind === 'no_match' ? unansweredTileLine(tile.lookup) : null);
+			if (partial) {
+				line = m.admin_lookup_announce_tile_with_notice({
+					outcome: line,
+					disclosure: partial
+				});
+			}
 		}
 		// The tile's private notice is a plain paragraph outside any live region,
 		// so this is the only way the disclosure reaches a screen-reader operator.
@@ -922,6 +946,7 @@
 		}
 		sourceTagged = false;
 		dateTagged = false;
+		prefillOwnerKey = null;
 		sharedFilled = {};
 		sharedUrlHeld = false;
 		sharedCleared = {};
@@ -1011,7 +1036,14 @@
 		// a panel saying Sona found nothing.
 		// Nothing lands, so whatever the caller's reset took out is the whole of
 		// what this move did to the fields.
-		if (next.kind !== 'results' && next.kind !== 'no_match') {
+		// A partial answer with FuzzySearch missing and no confident row is read
+		// the same way: its Bluesky leads are shown, and the fields stay.
+		// Only this tile's own prefill is kept: one another tile's lookup wrote
+		// describes another file, and goes the way a completed answer sends it.
+		const parentKey = tiles[parentIndex]?.key ?? null;
+		const keeps =
+			resultKeepsLastPrefill(next) && (prefillOwnerKey === null || prefillOwnerKey === parentKey);
+		if ((next.kind !== 'results' && next.kind !== 'no_match') || keeps) {
 			sharedCleared = { ...emptied };
 			return wrote;
 		}
@@ -1055,6 +1087,8 @@
 			cleared.commissionedAt = true;
 		}
 		sharedCleared = cleared;
+		if (wrote.sourcePostUrl || wrote.commissionedAt) prefillOwnerKey = parentKey;
+		else if (!sourceTagged && !dateTagged) prefillOwnerKey = null;
 		return wrote;
 	}
 
@@ -1072,6 +1106,12 @@
 		const parent = tiles[parentIndex]?.lookup;
 		const data = parent?.kind === 'results' ? parent.data : null;
 		if (!data) return;
+		// A result that left the last prefill alone has nothing to re-derive: the
+		// reset below would empty fields this result never refills. Left as they
+		// are, the way a failed lookup's are.
+		// Only while the fields are this tile's own: with the tile that filled
+		// them removed, they describe another file and go through the reset.
+		if (parent && resultKeepsLastPrefill(parent) && prefillOwnerKey === tiles[parentIndex]?.key) return;
 		// The site the panel's own sentence names, read the way the panel reads it
 		// so the two say the same post.
 		const site = pickPrefillMatch(data.matches)?.site ?? null;
@@ -1202,7 +1242,9 @@
 		// the dialog has no focus trap, so the Parent radio behind it can still be
 		// reached from the keyboard, and the result the created artist belongs to
 		// is the one that offered the handle, not whichever tile is parent later.
-		artistSeed = seed.handle ? { ...seed, tileKey: parentTile?.key ?? null } : null;
+		artistSeed = seed.handle
+			? { ...seed, tileKey: parentTile?.key ?? null, result: parentTile?.lookup ?? null }
+			: null;
 		showNewArtist = true;
 	}
 
@@ -1250,29 +1292,25 @@
 		if (options.focus !== false) focusLookupOrigin();
 	}
 
-	/** A variant tile whose confident match names a different local artist than
-	 * the shared one — worth flagging rather than silently rating. Returns the
-	 * match whose local-artist hit triggered it, because that is the poster the
-	 * line names: the candidates are unioned across every confident match, so
-	 * the trigger is not necessarily the prefill match. */
-	function differentArtistMatch(tile: Tile): LookupMatch | null {
+	/** The match behind a variant tile's "Different artist" line, or null when
+	 * the tile raises none. A thin wrapper: the rule, including which matches
+	 * count (any confident one, Bluesky included) and which poster the line
+	 * names, is `differentArtistMatch`. This only supplies the shared selection. */
+	function tileDifferentArtistMatch(tile: Tile): LookupMatch | null {
 		if (tile.lookup.kind !== 'results') return null;
 		// The shared SELECTION, not just a panel-applied one: appliedArtist is set
 		// by the panel's Use button and by a created artist, so keying off it meant
 		// an artist the operator picked from the select by hand never warned.
 		// Number('') is 0, which is the unselected case.
-		const sharedId = Number(selectedArtistId);
-		if (!sharedId) return null;
-		const data = tile.lookup.data;
-		const own = candidateArtists(data);
-		if (own.length === 0 || own.some((a) => a.id === sharedId)) return null;
-		return (
-			data.matches.find(
-				(match, index) =>
-					(match.band === 'exact' || match.band === 'strong') &&
-					data.localArtists.some((hit) => hit.matchIndex === index && hit.artists.length > 0)
-			) ?? null
-		);
+		return differentArtistMatch(tile.lookup.data, Number(selectedArtistId));
+	}
+
+	/** The partial notice in one line, lead then reason, to keep a tile short:
+	 * over a result, and over a no-match, where it is the Skyseek half. */
+	function unansweredTileLine(data: Parameters<typeof unansweredNotice>[0]): string | null {
+		const notice = unansweredNotice(data);
+		if (!notice) return null;
+		return notice.rest ? m.admin_lookup_partial_join({ first: notice.lead, second: notice.rest }) : notice.lead;
 	}
 
 	/** Everything a variant tile shows from its own result. One guard and one
@@ -1289,7 +1327,7 @@
 		const handle = matchHandle(match);
 		// The different-artist line names the poster whose local artist triggered
 		// it, which is not always the match the rest of the tile reads from.
-		const differentMatch = differentArtistMatch(tile);
+		const differentMatch = tileDifferentArtistMatch(tile);
 		const different = differentMatch !== null;
 		// The visible line and the spoken one come from the same parts, so the
 		// middle dot never reaches the live region and never dangles. The
@@ -1308,7 +1346,14 @@
 			spoken: text.spoken,
 			postUrl: match.postUrl,
 			site: match.site,
-			ratingTag: ratingTag(strictestRating(matches))
+			ratingTag: ratingTag(strictestRating(matches)),
+			// One of the two services did not answer. Still a result: the line above
+			// stands, and this says which sites it does not cover, then why, as the
+			// panel's notice does, in one line to keep the tile short.
+			partial: unansweredTileLine(tile.lookup.data),
+			// A refused key is fixed in Settings, not by asking again, so the tile
+			// carries the route there that a failed lookup's tile does.
+			settings: tile.lookup.data.fuzzysearchFailure === 'key_refused'
 		};
 	}
 </script>
@@ -1567,11 +1612,30 @@
 							{@const result = tileResult(tile)}
 							{#if result}
 								<p class="tile-result" class:tile-result-warn={result.different}>{result.line}</p>
+							{#if result.partial}
+								<p class="tile-lookup-reason tile-lookup-partial">{result.partial}</p>
+							{/if}
+							{#if result.settings}
+								<a
+									class="tile-settings-link"
+									href="/admin/settings?tab=connections"
+									target="_blank"
+									rel="noopener noreferrer"
+									>{m.admin_lookup_open_settings()}<span class="sr-only"
+										>{' '}{m.link_opens_new_tab()}</span
+									></a
+								>
+							{/if}
 								<a class="tile-post-link" href={result.postUrl} target="_blank" rel="noopener noreferrer">
 									{m.admin_lookup_view_post()}<span class="sr-only"
 										>{m.admin_lookup_view_post_site({ site: siteLabel(result.site) })}</span
 									>
 								</a>
+							{:else if tile.lookup.kind === 'no_match' && !tile.lookup.blueskySearched}
+								<!-- Nothing matched on the sites that were checked, and Bluesky
+								     was not one of them: the tile says so, as it does over a
+								     result. -->
+								<p class="tile-lookup-reason tile-lookup-partial">{unansweredTileLine(tile.lookup)}</p>
 							{/if}
 							<!-- The file went to FuzzySearch while the shared Private box was
 							     checked: say so on the tile the way the panel says it for the
@@ -2458,6 +2522,12 @@
 	.tile-result-warn,
 	.tile-lookup-failed {
 		color: var(--status-warn);
+	}
+
+	/* What was not searched, under what was found: a small gap so it does not
+	   read as the match line's metadata. */
+	.tile-lookup-partial {
+		margin-top: 4px;
 	}
 
 	.tile-post-link,

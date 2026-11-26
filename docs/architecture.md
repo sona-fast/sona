@@ -43,6 +43,7 @@ graph TB
         TG[🤖 Telegram Bot API]
         FurTrack[📸 FurTrack]
         FuzzySearch[🔍 FuzzySearch — reverse image search]
+        Skyseek[🦋 Skyseek — reverse image search over Bluesky posts]
         Resend[✉️ Resend]
         Turnstile[🧩 Cloudflare Turnstile]
         ConsFYI[📅 cons.fyi]
@@ -101,6 +102,8 @@ graph TB
     Importers -->|sticker sets| TG
     Importers -->|photo import| FurTrack
     Admin -->|artist lookup| FuzzySearch
+    Admin -->|artist lookup| Skyseek
+    Admin -->|handles for the artist lookup's Bluesky matches| Avatars
     Auth -->|reset email| Resend
     RateLimit --> Turnstile
     Public -->|convention dates| ConsFYI
@@ -157,8 +160,22 @@ graph TB
   zone rather than the reader's or UTC.
 - Telegram, FurTrack, FuzzySearch, Resend, and Turnstile are optional
   integrations, keyed off secrets or settings (see `wrangler.toml.example` for the full list).
-- The artist lookup never sends FuzzySearch a piece linked to a commission
-  ledger entry, or a variant of one: the entry already names the artist.
+- Skyseek needs no key or secret of its own. The artist lookup searches it
+  whenever the FuzzySearch lookup is on, in the same click. The lookup answers
+  with the matches of whichever service answered and names the one that did
+  not: if Skyseek fails, there are no Bluesky posts in the result, and if
+  FuzzySearch fails, the result holds the Bluesky posts alone. The lookup
+  reports a FuzzySearch failure as a failure only when Skyseek has no post to
+  show, so it waits for Skyseek's answer, up to Skyseek's timeout. The lookup
+  then asks Bluesky's public API for the handles of the accounts that posted
+  the matches. That request carries only their DIDs. Both requests send a
+  User-Agent that names the software. The one to Skyseek also names the site's
+  hostname, which Skyseek's owner asked for.
+- The artist lookup never sends FuzzySearch or Skyseek a piece linked to a
+  commission ledger entry, or a variant of one: the entry already names the
+  artist. The lookup checks for that link once, before it reads the stored
+  image. A link saved while the image is being read isn't checked again, so
+  that piece still goes to both services.
 - entail.dev needs no key or secret. The app calls it only when an operator
   asks for tag suggestions on an image whose source post is on Bluesky or X,
   and never on a render path or a schedule. Three admin surfaces ask: the
