@@ -612,9 +612,10 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		}
 		sourceClash = await findSourceClash(db, matches, selfImage);
 	} catch {
-		// With FuzzySearch already failed, its reason is the one that names a
-		// remedy (a refused key, a rate limit), so it is the one answered.
-		return failure(fuzzysearchFailure ?? 'unavailable', true);
+		// The fault is the database's, whatever FuzzySearch said: answering its
+		// reason here would send the operator to fix a key or a file for a read
+		// that a retry clears, and keep the local fault out of the 5xx rollup.
+		return failure('unavailable', true);
 	}
 
 	const withPieces = (a: { id: number; name: string }) => ({

@@ -2193,9 +2193,9 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 	});
 
 	// The reads behind a partial answer can fail like the ones behind a whole
-	// one. The answer is then FuzzySearch's own failure: it is the one with a
-	// remedy the operator can act on.
-	it('answers the FuzzySearch failure when a read behind a partial answer throws', async () => {
+	// one. The answer is then the database's failure, not FuzzySearch's: a
+	// retry clears it, and rate-limit or key advice would point the wrong way.
+	it('answers unavailable, not the FuzzySearch reason, when a read behind a partial answer throws', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		searchImage.mockResolvedValue({ ok: false, reason: 'rate_limited' });
 		searchSkyseek.mockResolvedValue({ ok: true, matches: [post(ARTIST_DID, 'first')] });
@@ -2208,8 +2208,8 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 
 		const res = await POST(multipartEvent(platform, pngFile()));
 
-		expect(res.status).toBe(429);
-		expect(await res.json()).toEqual({ enabled: true, error: 'rate_limited', forwarded: true });
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
 	});
 
 	it('asks neither service with no key, a commission piece, or a file it refuses', async () => {
