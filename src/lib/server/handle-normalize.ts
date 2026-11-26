@@ -54,6 +54,17 @@ export function handlesOverlap(a: Record<string, unknown>, b: Record<string, unk
 }
 
 /**
+ * A Bluesky handle as the profile link it stands for. A bare handle and a
+ * profile link are not read alike: the shared reader drops a leading "www."
+ * from a bare value as part of a web address, and on Bluesky that label is part
+ * of the handle. In link form "www.artist.example" and "artist.example" stay
+ * two accounts, on this side and in the stored link it is compared with.
+ */
+export function blueskyHandleLink(handle: string): string {
+	return `https://bsky.app/profile/${handle.trim().replace(/^@+/, '')}`;
+}
+
+/**
  * Rows whose stored socials hold one of `handles` on `platform`. Compares the
  * normalized forms `handlesOverlap` uses, so a pasted x.com link finds an
  * artist stored as twitter.com in any letter case, and the same name on another
@@ -87,7 +98,8 @@ function storedProfileHandles(row: Record<string, unknown>, platform: Platform):
 	for (const [key, p] of Object.entries(SOCIAL_KEY_TO_PLATFORM)) {
 		const stored = row[key];
 		if (p !== platform || typeof stored !== 'string') continue;
-		const handle = normalizeHandle(platform, socialHandle(platform, stored) ?? '');
+		const read = socialHandle(platform, stored) ?? '';
+		const handle = normalizeHandle(platform, platform === 'bluesky' && read ? blueskyHandleLink(read) : read);
 		if (handle) out.push(handle);
 	}
 	return out;

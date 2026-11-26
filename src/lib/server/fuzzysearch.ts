@@ -13,7 +13,7 @@
 
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
-import { findLocalArtistsByHandle, type Platform } from './handle-normalize';
+import { blueskyHandleLink, findLocalArtistsByHandle, type Platform } from './handle-normalize';
 import { matchKey, mergeSamePost, RATING_ORDER, type UpstreamFailReason } from '$lib/artist-lookup';
 import type { Database } from './db';
 
@@ -494,8 +494,11 @@ export function findLocalArtists<T extends Record<string, unknown>>(
 	const platform = SITE_PLATFORM[match.site];
 	if (!platform) return [];
 	const handles =
-		match.site === 'Bluesky' && match.siteId
-			? [...match.handles, splitBlueskySiteId(match.siteId).did]
+		match.site === 'Bluesky'
+			? [
+					...match.handles.map(blueskyHandleLink),
+					...(match.siteId ? [splitBlueskySiteId(match.siteId).did] : [])
+				]
 			: match.handles;
 	return findLocalArtistsByHandle(rows, platform, handles);
 }

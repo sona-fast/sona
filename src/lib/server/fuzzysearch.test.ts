@@ -752,6 +752,20 @@ describe('findLocalArtists', () => {
 	});
 
 	// A copied profile link can carry its DID's colons percent-encoded.
+	// On Bluesky "www." is a label of the handle, not a web prefix: two accounts
+	// whose handles differ only by it are two people.
+	it('keeps a leading www. when it matches a Bluesky handle', () => {
+		const stored = [
+			{ id: 1, name: 'Bare', blueskyUrl: 'https://bsky.app/profile/artist.example' },
+			{ id: 2, name: 'With www', blueskyUrl: 'https://bsky.app/profile/www.artist.example' }
+		];
+		const find = (handle: string) =>
+			findLocalArtists(stored, { site: 'Bluesky', handles: [handle] }).map((r) => r.id);
+		expect(find('www.artist.example')).toEqual([2]);
+		expect(find('artist.example')).toEqual([1]);
+		expect(find('@Artist.Example')).toEqual([1]);
+	});
+
 	it('matches a Bluesky DID stored with encoded colons, and survives a malformed escape', () => {
 		const did = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
 		const stored = [

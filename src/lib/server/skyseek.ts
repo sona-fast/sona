@@ -33,7 +33,7 @@ import {
 	splitBlueskySiteId,
 	type LookupMatch
 } from './fuzzysearch';
-import { normalizeHandle } from './handle-normalize';
+import { blueskyHandleLink, normalizeHandle } from './handle-normalize';
 import type { SkyseekFailReason } from '$lib/artist-lookup';
 
 export const SKYSEEK_ENDPOINT = 'https://skyseek.app/search';
@@ -430,7 +430,7 @@ export function isOwnBlueskyPost(
 	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl)).toLowerCase();
 	if (!own) return false;
 	const did = splitBlueskySiteId(match.siteId).did.toLowerCase();
-	return did === own || match.handles.some((h) => normalizeHandle('bluesky', h) === own);
+	return did === own || match.handles.some((h) => normalizeHandle('bluesky', blueskyHandleLink(h)) === own);
 }
 
 /**
