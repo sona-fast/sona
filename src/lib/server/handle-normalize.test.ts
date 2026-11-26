@@ -267,6 +267,21 @@ describe('normalizeHandle (site segments on other platforms)', () => {
 });
 
 describe('findLocalArtistsByHandle (SONA-236 paste a link)', () => {
+	// A pasted Bluesky link reaches here as its bare handle. "www." is a label
+	// of that handle, so it has to survive on the pasted side as it does on the
+	// stored one, or the artist is missed and added a second time.
+	it('finds a Bluesky artist whose handle starts with www., and only that one', () => {
+		const stored = [
+			{ id: 1, name: 'Bare', blueskyUrl: 'https://bsky.app/profile/artist.example' },
+			{ id: 2, name: 'With www', blueskyUrl: 'https://bsky.app/profile/www.artist.example' }
+		];
+		const find = (handle: string) => findLocalArtistsByHandle(stored, 'bluesky', [handle]).map((r) => r.id);
+		expect(find('www.artist.example')).toEqual([2]);
+		expect(find('https://bsky.app/profile/www.artist.example')).toEqual([2]);
+		expect(find('artist.example')).toEqual([1]);
+		expect(find('did:plc:aaaaaaaaaaaaaaaaaaaaaaaa')).toEqual([]);
+	});
+
 	const rows = [
 		{ id: 1, name: 'Artist B', twitterUrl: 'https://twitter.com/Artist_B', instagramUrl: null },
 		{ id: 2, name: 'Insta twin', twitterUrl: null, instagramUrl: 'https://www.instagram.com/artist_b' },

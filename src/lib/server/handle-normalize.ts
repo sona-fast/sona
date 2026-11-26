@@ -76,7 +76,10 @@ export function findLocalArtistsByHandle<T extends Record<string, unknown>>(
 	platform: Platform,
 	handles: string[]
 ): T[] {
-	const wanted = new Set(handles.map((h) => normalizeHandle(platform, h)).filter((h) => h !== ''));
+	// A bare Bluesky handle is read as its profile link, the form the stored side
+	// is in, so a leading "www." survives on both sides or on neither.
+	const read = (h: string) => (platform === 'bluesky' && !h.includes('/') ? blueskyHandleLink(h) : h);
+	const wanted = new Set(handles.map((h) => normalizeHandle(platform, read(h))).filter((h) => h !== ''));
 	if (wanted.size === 0) return [];
 	return rows.filter(
 		(row) =>
