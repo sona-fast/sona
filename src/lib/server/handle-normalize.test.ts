@@ -282,6 +282,19 @@ describe('findLocalArtistsByHandle (SONA-236 paste a link)', () => {
 		expect(find('did:plc:aaaaaaaaaaaaaaaaaaaaaaaa')).toEqual([]);
 	});
 
+	// A row saved before links were normalised can hold the bare handle.
+	it('keeps www. on a Bluesky handle stored bare', () => {
+		const stored = [
+			{ id: 1, name: 'Bare', blueskyUrl: 'artist.example' },
+			{ id: 2, name: 'With www', blueskyUrl: 'www.artist.example' },
+			{ id: 3, name: 'At sign', blueskyUrl: '@Other.Example' }
+		];
+		const find = (handle: string) => findLocalArtistsByHandle(stored, 'bluesky', [handle]).map((r) => r.id);
+		expect(find('artist.example')).toEqual([1]);
+		expect(find('www.artist.example')).toEqual([2]);
+		expect(find('other.example')).toEqual([3]);
+	});
+
 	const rows = [
 		{ id: 1, name: 'Artist B', twitterUrl: 'https://twitter.com/Artist_B', instagramUrl: null },
 		{ id: 2, name: 'Insta twin', twitterUrl: null, instagramUrl: 'https://www.instagram.com/artist_b' },

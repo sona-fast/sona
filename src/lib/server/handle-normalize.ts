@@ -76,14 +76,21 @@ export function findLocalArtistsByHandle<T extends Record<string, unknown>>(
 	platform: Platform,
 	handles: string[]
 ): T[] {
-	// A bare Bluesky handle is read as its profile link, the form the stored side
-	// is in, so a leading "www." survives on both sides or on neither.
-	const read = (h: string) => (platform === 'bluesky' && !h.includes('/') ? blueskyHandleLink(h) : h);
-	const wanted = new Set(handles.map((h) => normalizeHandle(platform, read(h))).filter((h) => h !== ''));
+	// A bare Bluesky handle is read as its profile link, on the wanted side and
+	// on the stored one (a legacy row can hold a bare handle), so a leading
+	// "www." survives on both sides or on neither. Every other value is read as
+	// socialsToHandles reads it.
+	const read = (h: string) =>
+		normalizeHandle(platform, platform === 'bluesky' && !h.includes('/') ? blueskyHandleLink(h) : h);
+	const wanted = new Set(handles.map(read).filter((h) => h !== ''));
 	if (wanted.size === 0) return [];
+	const stored = (row: T) =>
+		Object.entries(SOCIAL_KEY_TO_PLATFORM)
+			.filter(([key, p]) => p === platform && typeof row[key] === 'string')
+			.map(([key]) => read(row[key] as string));
 	return rows.filter(
 		(row) =>
-			socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm)) ||
+			stored(row).some((h) => wanted.has(h)) ||
 			storedProfileHandles(row, platform).some((h) => wanted.has(h)) ||
 			(platform === 'deviantart' && wanted.has(legacyDeviantArtHandle(row.deviantArtUrl) ?? ''))
 	);
