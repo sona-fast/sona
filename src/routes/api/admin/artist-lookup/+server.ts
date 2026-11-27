@@ -318,15 +318,22 @@ async function creditedMatches(
 	const credits = await Promise.all(read.map((post) => readBlueskyCredits(post, isOwnAuthor)));
 	const credited = [...new Set(credits.flat())];
 	if (credited.length === 0) return { rows: [], posterHandles };
-	const posters = read.map((post) => post.did).filter((did) => !resolved.has(did));
-	const handles = await resolveBlueskyHandles([...new Set([...credited, ...posters])]);
+	// Only the accounts the first request did not answer for, and what it did
+	// answer stays known if this one fails.
+	const unresolved = [...credited, ...read.map((post) => post.did)].filter(
+		(did) => !resolved.has(did)
+	);
+	const handles = new Map([
+		...resolved,
+		...(unresolved.length > 0 ? await resolveBlueskyHandles([...new Set(unresolved)]) : [])
+	]);
 	const rows = read.flatMap((post, index) => {
 		const creditedDids = credits[index].filter(
 			(did) => !isOwnBlueskyAccount(did, handles.get(did) ?? null, own)
 		);
 		if (creditedDids.length === 0) return [];
 		const match = skyseekLookupMatch(post, null);
-		const poster = resolved.get(post.did) ?? handles.get(post.did);
+		const poster = handles.get(post.did);
 		if (poster) posterHandles.set(match.siteId, poster);
 		const mayBeOwn =
 			creditedDids.some((did) => !handles.has(did)) &&

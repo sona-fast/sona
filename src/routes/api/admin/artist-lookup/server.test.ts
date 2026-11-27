@@ -2432,6 +2432,29 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			expect(other.sourceClash).toBeNull();
 		});
 
+		// The credited account also posted the piece, so its handle is known from
+		// the first request. The second request failing must not lose it.
+		it('keeps a handle the first request resolved when the second fails', async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/main.example');
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(OPERATOR_DID, 'mine', null, 0), post(ARTIST_DID, 'theirs', null, 1)]
+			});
+			readBlueskyCredits.mockResolvedValue([ARTIST_DID]);
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map(RESOLVED))
+				.mockResolvedValue(new Map());
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(body.matches.find((x) => x.siteId === `${OPERATOR_DID}/mine`)).toMatchObject({
+				handles: ['artist.example'],
+				band: 'exact'
+			});
+			// Both accounts were answered for already: nothing is asked twice.
+			expect(resolveBlueskyHandles).toHaveBeenCalledTimes(1);
+		});
+
 		it('shows a post that credits several accounts as a lead that fills nothing', async () => {
 			const body = await lookup(
 				SECOND_ACCOUNT,

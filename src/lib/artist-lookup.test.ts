@@ -1713,6 +1713,16 @@ describe('stateFromResponse', () => {
 				expect(seedColumn('FurAffinity')).toBe('furaffinity');
 			});
 
+			it('fills from the credited account ahead of a closer post by somebody else', () => {
+				const stranger: LookupMatch = { ...bluesky, siteId: `${DID}/other`, distance: 0, band: 'exact' };
+				const further: LookupMatch = { ...credited, distance: 1, band: 'strong' };
+				expect(pickPrefillMatch([stranger, further])).toBe(further);
+				// A FuzzySearch row still comes first, and a credit with no band fills nothing.
+				const fa = match({ distance: 2, band: 'strong' });
+				expect(pickPrefillMatch([stranger, further, fa])).toBe(fa);
+				expect(pickPrefillMatch([stranger, { ...further, band: null }])).toBe(stranger);
+			});
+
 			it('is the existing artist when the credited account is in the artist list', () => {
 				const data = response({
 					matches: [credited],

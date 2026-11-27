@@ -290,6 +290,7 @@
 		nameTagged = false;
 		twitterTagged = false;
 		furaffinityTagged = false;
+		blueskyTagged = false;
 		lookupFilled = {};
 		lookupSeeded = {};
 		lookupUrlHeld = false;

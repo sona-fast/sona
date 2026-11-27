@@ -259,7 +259,14 @@ export function strictestRating(
  * Re-exported by `$lib/server/fuzzysearch`; this is the only copy. */
 export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
 	const confident = matches.filter(isConfident);
-	return confident.find((x) => x.site !== 'Bluesky') ?? confident[0] ?? null;
+	return (
+		confident.find((x) => x.site !== 'Bluesky') ??
+		// Among Bluesky rows, the account the operator credited in their own post
+		// comes before anyone who posted the piece, however close their copy.
+		confident.find(isCredited) ??
+		confident[0] ??
+		null
+	);
 }
 
 /** `<input type="date">` wants a bare calendar day. A timestamp that isn't one
