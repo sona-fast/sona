@@ -225,14 +225,17 @@ async function searchBluesky(
 	fetchFn: typeof fetch,
 	userAgent: string,
 	readOwnAccounts: () => Promise<Array<string | null>>
-): Promise<{ ok: true; matches: LookupMatch[] } | { ok: false; reason: SkyseekFailure }> {
+): Promise<
+	| { ok: true; matches: LookupMatch[]; posterHandles: Map<string, string> }
+	| { ok: false; reason: SkyseekFailure }
+> {
 	try {
 		const result = await searchSkyseek(bytes, fetchFn, userAgent);
 		if (!result.ok) {
 			console.warn('artist-lookup: Skyseek search failed', result.reason);
 			return result;
 		}
-		if (result.matches.length === 0) return { ok: true, matches: [] };
+		if (result.matches.length === 0) return { ok: true, matches: [], posterHandles: new Map() };
 		let own: Array<string | null> = [];
 		let ownUnread = false;
 		try {
@@ -259,12 +262,12 @@ async function searchBluesky(
 		const handles = await resolveBlueskyHandles(dids);
 		const isOwn = (post: SkyseekMatch) =>
 			isOwnBlueskyPost(skyseekLookupMatch(post, handles.get(post.did) ?? null), own);
-		const credited = await creditedMatches(result.matches.filter(isOwn), own);
+		const credited = await creditedMatches(result.matches.filter(isOwn), own, handles);
 		const matches = posts
 			.filter((post) => !isOwn(post))
 			.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null))
 			// Closest first already, then earliest, so the cap keeps the best leads.
-			.slice(0, SKYSEEK_MAX_MATCHES - credited.length)
+			.slice(0, SKYSEEK_MAX_MATCHES - credited.rows.length)
 			// With an account saved by handle and none resolved for this one, the
 			// post may be the operator's own. Shown, and banded as no claim, the way
 			// a post with no distance is: it fills nothing and offers nobody. With the
@@ -272,7 +275,7 @@ async function searchBluesky(
 			.map((match) =>
 				ownUnread || mayBeOwnBlueskyPost(match, own) ? { ...match, band: null } : match
 			);
-		return { ok: true, matches: [...credited, ...matches] };
+		return { ok: true, matches: [...credited.rows, ...matches], posterHandles: credited.posterHandles };
 	} catch (e) {
 		console.warn(
 			'artist-lookup: Skyseek search threw',
@@ -290,6 +293,12 @@ async function searchBluesky(
  * request resolves the credited accounts' handles. The operator's own accounts
  * are not a credit, by DID or by the handle that request returns.
  *
+ * `posterHandles` is the posting account's handle for each row, by the row's
+ * `siteId`, where one is known: the row's own `handles` are the credited
+ * accounts', and the source-clash check needs the post's handle spelling. An
+ * account known only by DID is asked about in the same request. `resolved` is
+ * the handles the lookup already has.
+ *
  * A post that credits one account keeps its band, so it can fill the form like
  * any other confident match. One that credits several loses it: nothing says
  * which of them drew the piece, and a banded row would fill the form from the
@@ -298,22 +307,27 @@ async function searchBluesky(
  */
 async function creditedMatches(
 	ownPosts: SkyseekMatch[],
-	own: Array<string | null>
-): Promise<LookupMatch[]> {
+	own: Array<string | null>,
+	resolved: Map<string, string>
+): Promise<{ rows: LookupMatch[]; posterHandles: Map<string, string> }> {
+	const posterHandles = new Map<string, string>();
 	const read = ownPosts.slice(0, BLUESKY_CREDIT_MAX_POSTS);
-	if (read.length === 0) return [];
+	if (read.length === 0) return { rows: [], posterHandles };
 	const isOwnAuthor = (did: string, handle: string | null) => isOwnBlueskyAccount(did, handle, own);
 	// The global fetch, for the reason the handle lookup uses it.
 	const credits = await Promise.all(read.map((post) => readBlueskyCredits(post, isOwnAuthor)));
 	const credited = [...new Set(credits.flat())];
-	if (credited.length === 0) return [];
-	const handles = await resolveBlueskyHandles(credited);
-	return read.flatMap((post, index) => {
+	if (credited.length === 0) return { rows: [], posterHandles };
+	const posters = read.map((post) => post.did).filter((did) => !resolved.has(did));
+	const handles = await resolveBlueskyHandles([...new Set([...credited, ...posters])]);
+	const rows = read.flatMap((post, index) => {
 		const creditedDids = credits[index].filter(
 			(did) => !isOwnBlueskyAccount(did, handles.get(did) ?? null, own)
 		);
 		if (creditedDids.length === 0) return [];
 		const match = skyseekLookupMatch(post, null);
+		const poster = resolved.get(post.did) ?? handles.get(post.did);
+		if (poster) posterHandles.set(match.siteId, poster);
 		const mayBeOwn =
 			creditedDids.some((did) => !handles.has(did)) &&
 			mayBeOwnBlueskyPost({ site: 'Bluesky', handles: [] }, own);
@@ -326,6 +340,7 @@ async function creditedMatches(
 			}
 		];
 	});
+	return { rows, posterHandles };
 }
 
 /** Artists whose stored socials or display name point at a match, per match.
@@ -671,7 +686,12 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			for (const row of counted)
 				if (row.artistId !== null) pieceCounts.set(row.artistId, row.pieces);
 		}
-		sourceClash = await findSourceClash(db, matches, selfImage);
+		sourceClash = await findSourceClash(
+			db,
+			matches,
+			selfImage,
+			bluesky.ok ? bluesky.posterHandles : new Map()
+		);
 	} catch {
 		// The fault is the database's, whatever FuzzySearch said: answering its
 		// reason here would send the operator to fix a key or a file for a read
@@ -723,7 +743,8 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 async function findSourceClash(
 	db: ReturnType<typeof getDb>,
 	matches: LookupMatch[],
-	selfImage: { id: number; parentImageId: number | null } | null
+	selfImage: { id: number; parentImageId: number | null } | null,
+	posterHandles: Map<string, string>
 ) {
 	const prefill = pickPrefillMatch(matches);
 	if (!prefill) return null;
@@ -737,11 +758,13 @@ async function findSourceClash(
 	// missed: nothing here can tell whose handle it is, and guessing would warn
 	// about pieces that are not duplicates.
 	const targets = new Set([target]);
-	// Not for a row that names credited accounts: its handles are theirs, and the
-	// post is the operator's.
-	if (prefill.site === 'Bluesky' && !prefill.creditedDids) {
+	// A row that names credited accounts carries their handles, not the poster's,
+	// so the operator's handle for it comes from `posterHandles`.
+	if (prefill.site === 'Bluesky') {
 		const { rkey } = splitBlueskySiteId(prefill.siteId);
-		for (const handle of prefill.handles) {
+		const poster = posterHandles.get(prefill.siteId);
+		const handles = prefill.creditedDids ? (poster ? [poster] : []) : prefill.handles;
+		for (const handle of handles) {
 			const byHandle = normalizeSourceUrl(blueskyPostUrl(handle, rkey));
 			if (byHandle) targets.add(byHandle);
 		}

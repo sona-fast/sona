@@ -769,9 +769,11 @@ describe('readBlueskyCredits', () => {
 		features: [{ $type: 'app.bsky.richtext.facet#mention', did }],
 		index: { byteStart: 6, byteEnd: 30 }
 	});
-	const view = (did: string, handle: string, facets?: unknown) => ({
+	const URI = `at://${OPERATOR}/app.bsky.feed.post/3mwwswjznmk25`;
+	// Every view carries the requested post's URI: only the root's is read.
+	const view = (did: string, handle: string, facets?: unknown, uri = URI) => ({
 		$type: 'app.bsky.feed.defs#threadViewPost',
-		post: { author: { did, handle }, record: { text: 'x', facets } }
+		post: { uri, author: { did, handle }, record: { text: 'x', facets } }
 	});
 	const thread = (root: unknown, ...replies: unknown[]) =>
 		jsonResponse({ thread: { ...(root as object), replies } });
@@ -786,7 +788,7 @@ describe('readBlueskyCredits', () => {
 		const url = new URL(calls[0].url);
 		expect(url.origin + url.pathname).toBe('https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread');
 		expect(Object.fromEntries(url.searchParams)).toEqual({
-			uri: `at://${OPERATOR}/app.bsky.feed.post/3mwwswjznmk25`,
+			uri: URI,
 			depth: '1',
 			parentHeight: '0'
 		});
@@ -821,16 +823,28 @@ describe('readBlueskyCredits', () => {
 		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([ARTIST]);
 	});
 
-	it('credits nobody for an answer about another post', async () => {
-		const { fn } = fakeFetch(thread(view(STRANGER, 'stranger.example', [mention(ARTIST)])));
-		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([]);
+	it('credits nobody for an answer about another post, by another account or the same one', async () => {
+		const stranger = fakeFetch(thread(view(STRANGER, 'stranger.example', [mention(ARTIST)])));
+		expect(await readBlueskyCredits(post, isOwnAuthor, stranger.fn)).toEqual([]);
+		const other = fakeFetch(
+			thread(view(OPERATOR, 'second.example', [mention(ARTIST)], URI.replace('3mwwswjznmk25', '3mwwswjznmk26')))
+		);
+		expect(await readBlueskyCredits(post, isOwnAuthor, other.fn)).toEqual([]);
 	});
 
 	it.each([
 		['a refusal', () => jsonResponse({ error: 'NotFound' }, 400)],
 		['a body that is not JSON', () => new Response('<html>', { status: 200 })],
 		['a thread that was not found', () => jsonResponse({ thread: { $type: 'app.bsky.feed.defs#notFoundPost' } })],
-		['a body past the cap', () => new Response('x'.repeat(BLUESKY_THREAD_RESPONSE_BYTES + 1), { status: 200 })]
+		// A valid thread with a credit in it: without the cap it would be read.
+		[
+			'a body past the cap',
+			() =>
+				jsonResponse({
+					thread: view(OPERATOR, 'second.example', [mention(ARTIST)]),
+					padding: 'x'.repeat(BLUESKY_THREAD_RESPONSE_BYTES)
+				})
+		]
 	])('credits nobody on %s', async (_name, response) => {
 		const { fn } = fakeFetch(response());
 		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([]);

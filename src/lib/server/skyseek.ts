@@ -454,9 +454,12 @@ export async function readBlueskyCredits(
 		| { post?: unknown; replies?: unknown }
 		| null
 		| undefined;
-	const root = thread?.post as { author?: { did?: unknown }; record?: unknown } | null | undefined;
+	const root = thread?.post as
+		| { uri?: unknown; author?: { did?: unknown }; record?: unknown }
+		| null
+		| undefined;
 	// An answer about some other post is not an answer to this question.
-	if (!root || root.author?.did !== post.did) return [];
+	if (!root || root.uri !== uri || root.author?.did !== post.did) return [];
 
 	const credited = mentionedDids(root.record);
 	if (Array.isArray(thread?.replies)) {

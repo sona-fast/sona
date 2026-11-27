@@ -290,6 +290,13 @@ export function matchHandles(match: LookupMatch): string {
 		.join(', ');
 }
 
+/** The artist column a new-artist seed's profile link goes in. FurAffinity is
+ * the fallback the forms always had: the sites with no column carry no link. */
+export function seedColumn(site: LookupSite): 'twitter' | 'bluesky' | 'furaffinity' {
+	if (site === 'Twitter') return 'twitter';
+	return site === 'Bluesky' ? 'bluesky' : 'furaffinity';
+}
+
 /** Canonical profile URL for a handle, for the sites Sona holds a column for.
  * `$lib/server/fuzzysearch` re-exports this as `handleProfileUrl`, so the
  * new-artist prefill offers the same link the endpoint matched on. The handle

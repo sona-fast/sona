@@ -2401,6 +2401,37 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			expect(self.matches).toEqual([]);
 		});
 
+		// The owner saved the piece earlier under the link bsky.app shows, which
+		// spells the post by their handle.
+		it("warns about a piece saved under the operator's own post, by handle or by DID", async () => {
+			const seedWith = (url: string) =>
+				`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+				 VALUES ('Held', 'held', 'https://cdn.example.com/held.png', '${url}', '2026-01-01');`;
+			const byHandle = await lookup(
+				SECOND_ACCOUNT,
+				[ARTIST_DID],
+				RESOLVED,
+				seedWith('https://bsky.app/profile/second.example/post/mine')
+			);
+			expect(byHandle.sourceClash).toMatchObject({ title: 'Held' });
+			// An account saved by DID has its handle asked for with the credits'.
+			const byDid = await lookup(
+				{ blueskyUrl: `https://bsky.app/profile/${OPERATOR_DID}` },
+				[ARTIST_DID],
+				RESOLVED,
+				seedWith('https://bsky.app/profile/second.example/post/mine')
+			);
+			expect(byDid.sourceClash).toMatchObject({ title: 'Held' });
+			// The credited account's handle with this record key is another post.
+			const other = await lookup(
+				SECOND_ACCOUNT,
+				[ARTIST_DID],
+				RESOLVED,
+				seedWith('https://bsky.app/profile/artist.example/post/mine')
+			);
+			expect(other.sourceClash).toBeNull();
+		});
+
 		it('shows a post that credits several accounts as a lead that fills nothing', async () => {
 			const body = await lookup(
 				SECOND_ACCOUNT,

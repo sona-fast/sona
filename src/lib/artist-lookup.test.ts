@@ -41,6 +41,7 @@ import {
 	runLookup,
 	sentAfterApplyThrew,
 	retryCanSucceed,
+	seedColumn,
 	unansweredCanRetry,
 	unansweredLine,
 	unansweredNotice,
@@ -1704,6 +1705,12 @@ describe('stateFromResponse', () => {
 				expect(profileUrlFor('Bluesky', matchHandle(credited))).toBe(
 					'https://bsky.app/profile/drawer.example'
 				);
+			});
+
+			it('puts the new artist\'s profile link in the Bluesky column', () => {
+				expect(seedColumn('Bluesky')).toBe('bluesky');
+				expect(seedColumn('Twitter')).toBe('twitter');
+				expect(seedColumn('FurAffinity')).toBe('furaffinity');
 			});
 
 			it('is the existing artist when the credited account is in the artist list', () => {
