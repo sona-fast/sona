@@ -819,8 +819,17 @@ export const actions = {
 	saveBlueskyOtherAccounts: async ({ request, platform }) => {
 		const db = getDb(platform!.env.DB);
 		const raw = (await request.formData()).get('blueskyOtherAccounts');
-		const accounts = parseOtherBlueskyAccounts(typeof raw === 'string' ? raw : '');
-		if (!accounts) return fail(400, { blueskyOtherAccountsError: 'invalid' });
+		const typed = typeof raw === 'string' ? raw : '';
+		const accounts = parseOtherBlueskyAccounts(typed);
+		// What was typed goes back with the refusal, so a page submitted without
+		// JavaScript keeps the draft. Bounded: it is echoed into the page.
+		if (!accounts) {
+			return fail(400, {
+				blueskyOtherAccountsError: 'invalid',
+				// A form posts its line breaks as CRLF.
+				blueskyOtherAccountsDraft: typed.replace(/\r\n/g, '\n').slice(0, 4000)
+			});
+		}
 		await setRawSetting(db, BLUESKY_OTHER_ACCOUNTS_SETTING, accounts.join('\n'));
 		return { blueskyOtherAccountsSaved: true };
 	},

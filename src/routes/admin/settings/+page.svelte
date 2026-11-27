@@ -1666,7 +1666,7 @@
 					aria-describedby={form?.blueskyOtherAccountsError
 						? 'bluesky-other-accounts-error bluesky-other-accounts-hint'
 						: 'bluesky-other-accounts-hint'}
-				>{data.blueskyOtherAccounts}</textarea>
+				>{form?.blueskyOtherAccountsDraft ?? data.blueskyOtherAccounts}</textarea>
 			</label>
 			{#if form?.blueskyOtherAccountsError}
 				<p class="field-error" id="bluesky-other-accounts-error" role="alert">{m.admin_settings_lookup_accounts_error()}</p>

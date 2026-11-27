@@ -2275,10 +2275,12 @@ describe('settings — FuzzySearch key', () => {
 			for (const bad of ['nodots', 'second.example\nnot a handle!', 'did:plc:short', tooMany]) {
 				const result = (await save(platform, bad)) as unknown as {
 					status: number;
-					data: { blueskyOtherAccountsError: string };
+					data: { blueskyOtherAccountsError: string; blueskyOtherAccountsDraft: string };
 				};
 				expect(result.status, bad).toBe(400);
 				expect(result.data.blueskyOtherAccountsError).toBe('invalid');
+				// The draft comes back for the field, valid entries included.
+				expect(result.data.blueskyOtherAccountsDraft).toBe(bad);
 			}
 			expect(await getRawSetting(db, 'blueskyOtherAccounts')).toBe('second.example');
 		});
