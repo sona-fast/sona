@@ -2238,6 +2238,52 @@ describe('settings — FuzzySearch key', () => {
 		expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBeNull();
 	});
 
+	describe("the operator's other Bluesky accounts", () => {
+		const save = (platform: App.Platform, value: string) =>
+			actions.saveBlueskyOtherAccounts(keyEvent(platform, { blueskyOtherAccounts: value }));
+
+		it('stores each account once, as the handle or DID it names, and load returns the list', async () => {
+			const { db, platform } = makeLoadDb();
+			expect(
+				await save(
+					platform,
+					' @Second.Example\nhttps://bsky.app/profile/third.example/, second.example\ndid:plc:aaaaaaaaaaaaaaaaaaaaaaaa '
+				)
+			).toEqual({ blueskyOtherAccountsSaved: true });
+			const stored = 'second.example\nthird.example\ndid:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+			expect(await getRawSetting(db, 'blueskyOtherAccounts')).toBe(stored);
+			const data = (await load(loadEvent(platform))) as unknown as {
+				blueskyOtherAccounts: string;
+				settings: Record<string, unknown>;
+			};
+			expect(data.blueskyOtherAccounts).toBe(stored);
+			// A raw setting: it is not one of the settings the public pages receive.
+			expect(JSON.stringify(data.settings)).not.toContain('second.example');
+		});
+
+		it('clears the list on an empty field', async () => {
+			const { db, platform } = makeLoadDb();
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			expect(await save(platform, '  \n ')).toEqual({ blueskyOtherAccountsSaved: true });
+			expect(await getRawSetting(db, 'blueskyOtherAccounts')).toBe('');
+		});
+
+		it('refuses a value that is not an account, or more accounts than the cap, and keeps the list', async () => {
+			const { db, platform } = makeLoadDb();
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			const tooMany = Array.from({ length: 11 }, (_, i) => `account${i}.example`).join('\n');
+			for (const bad of ['nodots', 'second.example\nnot a handle!', 'did:plc:short', tooMany]) {
+				const result = (await save(platform, bad)) as unknown as {
+					status: number;
+					data: { blueskyOtherAccountsError: string };
+				};
+				expect(result.status, bad).toBe(400);
+				expect(result.data.blueskyOtherAccountsError).toBe('invalid');
+			}
+			expect(await getRawSetting(db, 'blueskyOtherAccounts')).toBe('second.example');
+		});
+	});
+
 	it('removes the key and the refusal marker together', async () => {
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');

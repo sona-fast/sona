@@ -5,10 +5,14 @@ import {
 	BLUESKY_PROFILES_TIMEOUT_MS,
 	SKYSEEK_RESPONSE_BYTES,
 	SKYSEEK_TIMEOUT_MS,
+	BLUESKY_THREAD_RESPONSE_BYTES,
+	isOwnBlueskyAccount,
 	isOwnBlueskyPost,
 	lookupUserAgent,
 	mayBeOwnBlueskyPost,
 	normalizeSkyseekMatches,
+	parseOtherBlueskyAccounts,
+	readBlueskyCredits,
 	resolveBlueskyHandles,
 	searchSkyseek,
 	skyseekLookupMatch
@@ -690,6 +694,176 @@ describe('isOwnBlueskyPost', () => {
 	it('never drops a match from another site, whatever its handle', () => {
 		const twitter = { site: 'Twitter' as const, siteId: '1', handles: ['operator.example'] };
 		expect(isOwnBlueskyPost(twitter, 'operator.example')).toBe(false);
+	});
+});
+
+describe("the operator's other Bluesky accounts", () => {
+	const post = { did: ARTIST, rkey: 'a', distance: 0, postedAt: null, postUrl: blueskyPostUrl(ARTIST, 'a') };
+	const fromSecond = skyseekLookupMatch(post, 'second.example');
+	const site = 'https://bsky.app/profile/operator.example';
+
+	it('recognises a post from any account in the list, however it was typed', () => {
+		expect(isOwnBlueskyPost(fromSecond, site)).toBe(false);
+		for (const saved of ['second.example', '@Second.Example', 'https://bsky.app/profile/second.example']) {
+			expect(isOwnBlueskyPost(fromSecond, [site, saved]), saved).toBe(true);
+		}
+		expect(isOwnBlueskyPost(skyseekLookupMatch(post, null), [site, ARTIST])).toBe(true);
+		expect(isOwnBlueskyPost(fromSecond, [site, '', null, 'third.example'])).toBe(false);
+	});
+
+	// A listed handle keeps a leading www., the way local artists are matched.
+	it('does not take www.second.example for second.example', () => {
+		expect(isOwnBlueskyPost(fromSecond, [site, 'www.second.example'])).toBe(false);
+		expect(isOwnBlueskyPost(skyseekLookupMatch(post, 'www.second.example'), ['www.second.example'])).toBe(
+			true
+		);
+	});
+
+	it('may be the operator when any listed account is saved by handle and none resolved', () => {
+		const unresolved = skyseekLookupMatch(post, null);
+		expect(mayBeOwnBlueskyPost(unresolved, [`https://bsky.app/profile/${REPOSTER}`, 'second.example'])).toBe(
+			true
+		);
+		expect(mayBeOwnBlueskyPost(unresolved, [`https://bsky.app/profile/${REPOSTER}`, REPOSTER])).toBe(false);
+	});
+
+	it('knows an account by DID or by handle', () => {
+		expect(isOwnBlueskyAccount(REPOSTER, 'second.example', ['second.example'])).toBe(true);
+		expect(isOwnBlueskyAccount(REPOSTER, null, ['second.example'])).toBe(false);
+		expect(isOwnBlueskyAccount(REPOSTER, null, [REPOSTER])).toBe(true);
+		expect(isOwnBlueskyAccount(REPOSTER, 'second.example', [])).toBe(false);
+	});
+
+	describe('parseOtherBlueskyAccounts', () => {
+		it('reads handles, links and DIDs, one per line or separated by commas', () => {
+			expect(
+				parseOtherBlueskyAccounts(`@Second.Example, https://bsky.app/profile/third.example\n${ARTIST}\n`)
+			).toEqual(['second.example', 'third.example', ARTIST]);
+			expect(parseOtherBlueskyAccounts('second.example second.example')).toEqual(['second.example']);
+			expect(parseOtherBlueskyAccounts('')).toEqual([]);
+			expect(parseOtherBlueskyAccounts(null)).toEqual([]);
+		});
+
+		it('refuses the whole field over one bad entry or too many', () => {
+			expect(parseOtherBlueskyAccounts('second.example\nnodots')).toBeNull();
+			expect(parseOtherBlueskyAccounts('did:plc:short')).toBeNull();
+			expect(parseOtherBlueskyAccounts('https://example.com/x/y')).toBeNull();
+			expect(
+				parseOtherBlueskyAccounts(Array.from({ length: 11 }, (_, i) => `a${i}.example`).join('\n'))
+			).toBeNull();
+		});
+	});
+});
+
+// The response shape is the one the live AppView returned for a post with one
+// reply on 2026-11-27, with made-up accounts.
+describe('readBlueskyCredits', () => {
+	const OPERATOR = 'did:plc:cccccccccccccccccccccccc';
+	const SECOND = 'did:plc:dddddddddddddddddddddddd';
+	const STRANGER = 'did:plc:eeeeeeeeeeeeeeeeeeeeeeee';
+	const post = { did: OPERATOR, rkey: '3mwwswjznmk25' };
+	const isOwnAuthor = (did: string, handle: string | null) => did === SECOND || handle === 'main.example';
+
+	const mention = (did: unknown) => ({
+		$type: 'app.bsky.richtext.facet',
+		features: [{ $type: 'app.bsky.richtext.facet#mention', did }],
+		index: { byteStart: 6, byteEnd: 30 }
+	});
+	const view = (did: string, handle: string, facets?: unknown) => ({
+		$type: 'app.bsky.feed.defs#threadViewPost',
+		post: { author: { did, handle }, record: { text: 'x', facets } }
+	});
+	const thread = (root: unknown, ...replies: unknown[]) =>
+		jsonResponse({ thread: { ...(root as object), replies } });
+
+	it('reads a credit from a reply the operator wrote under their own post', async () => {
+		const { fn, calls } = fakeFetch(
+			thread(view(OPERATOR, 'second.example'), view(SECOND, 'main.example', [mention(ARTIST)]))
+		);
+		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([ARTIST]);
+		// One request, for this post and one level of replies, and nothing else.
+		expect(calls).toHaveLength(1);
+		const url = new URL(calls[0].url);
+		expect(url.origin + url.pathname).toBe('https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread');
+		expect(Object.fromEntries(url.searchParams)).toEqual({
+			uri: `at://${OPERATOR}/app.bsky.feed.post/3mwwswjznmk25`,
+			depth: '1',
+			parentHeight: '0'
+		});
+		expect((calls[0].init.headers as Record<string, string>)['user-agent']).toBe(lookupUserAgent());
+	});
+
+	it('reads the post itself and the poster\'s own replies, each account once, in order', async () => {
+		const link = { $type: 'app.bsky.richtext.facet', features: [{ $type: 'app.bsky.richtext.facet#link', uri: 'https://example.com' }] };
+		const { fn } = fakeFetch(
+			thread(
+				view(OPERATOR, 'second.example', [link, mention(REPOSTER)]),
+				view(OPERATOR, 'second.example', [mention(ARTIST), mention(REPOSTER)])
+			)
+		);
+		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([REPOSTER, ARTIST]);
+	});
+
+	it('ignores a mention in a reply somebody else wrote, and a mention of the poster', async () => {
+		const { fn } = fakeFetch(
+			thread(
+				view(OPERATOR, 'second.example', [mention(OPERATOR)]),
+				view(STRANGER, 'stranger.example', [mention(ARTIST)])
+			)
+		);
+		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([]);
+	});
+
+	it('drops a mention whose DID is not one', async () => {
+		const { fn } = fakeFetch(
+			thread(view(OPERATOR, 'second.example', [mention('did:plc:nope'), mention(7), mention(ARTIST)]))
+		);
+		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([ARTIST]);
+	});
+
+	it('credits nobody for an answer about another post', async () => {
+		const { fn } = fakeFetch(thread(view(STRANGER, 'stranger.example', [mention(ARTIST)])));
+		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([]);
+	});
+
+	it.each([
+		['a refusal', () => jsonResponse({ error: 'NotFound' }, 400)],
+		['a body that is not JSON', () => new Response('<html>', { status: 200 })],
+		['a thread that was not found', () => jsonResponse({ thread: { $type: 'app.bsky.feed.defs#notFoundPost' } })],
+		['a body past the cap', () => new Response('x'.repeat(BLUESKY_THREAD_RESPONSE_BYTES + 1), { status: 200 })]
+	])('credits nobody on %s', async (_name, response) => {
+		const { fn } = fakeFetch(response());
+		expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([]);
+	});
+
+	it('credits nobody when the request fails, and asks nothing for a post it would not link to', async () => {
+		const failing = (async () => {
+			throw new Error('network');
+		}) as unknown as typeof fetch;
+		expect(await readBlueskyCredits(post, isOwnAuthor, failing)).toEqual([]);
+		const { fn, calls } = fakeFetch(thread(view(OPERATOR, 'second.example')));
+		expect(await readBlueskyCredits({ did: 'did:plc:nope', rkey: 'a' }, isOwnAuthor, fn)).toEqual([]);
+		expect(await readBlueskyCredits({ did: OPERATOR, rkey: 'a/b' }, isOwnAuthor, fn)).toEqual([]);
+		expect(calls).toHaveLength(0);
+	});
+
+	it('gives up at the timeout', async () => {
+		await withTimeoutFetch(BLUESKY_PROFILES_TIMEOUT_MS, async (fn) => {
+			expect(await readBlueskyCredits(post, isOwnAuthor, fn)).toEqual([]);
+		});
+	});
+});
+
+describe('findLocalArtists — a row naming credited accounts', () => {
+	const rows = [
+		{ id: 1, name: 'Poster', blueskyUrl: `https://bsky.app/profile/${REPOSTER}` },
+		{ id: 2, name: 'Drawer', blueskyUrl: `https://bsky.app/profile/${ARTIST}` }
+	];
+
+	it('matches the credited DID and not the poster\'s', () => {
+		const row = { site: 'Bluesky' as const, siteId: `${REPOSTER}/a`, handles: [] };
+		expect(findLocalArtists(rows, row).map((a) => a.id)).toEqual([1]);
+		expect(findLocalArtists(rows, { ...row, creditedDids: [ARTIST] }).map((a) => a.id)).toEqual([2]);
 	});
 });
 

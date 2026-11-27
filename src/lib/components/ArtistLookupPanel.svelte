@@ -20,6 +20,7 @@
 		differingAccountName,
 		existingArtistText,
 		failReasonHint,
+		isCredited,
 		isCrossSiteAmbiguity,
 		matchHandle,
 		matchHandles,
@@ -472,7 +473,9 @@
 							</span>
 							<span class="match-id">
 								{#if handles}
-									<span class="match-who">{m.admin_lookup_match_line({ handles, site: siteLabel(match.site) })}</span>
+									<span class="match-who">{isCredited(match)
+										? m.admin_lookup_match_credited({ handles })
+										: m.admin_lookup_match_line({ handles, site: siteLabel(match.site) })}</span>
 								{:else}
 									<span class="match-who muted">{m.admin_lookup_match_unknown({ site: siteLabel(match.site) })}</span>
 								{/if}
@@ -795,7 +798,7 @@
 							{m.admin_lookup_add_new({ handle })}
 						</button>
 					{/if}
-				{:else if outcome === 'unlinked' && prefill && canAddPosterAsArtist(prefill.site)}
+				{:else if outcome === 'unlinked' && prefill && canAddPosterAsArtist(prefill)}
 					<button
 						type="button"
 						class="btn btn-primary"

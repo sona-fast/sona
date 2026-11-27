@@ -23,6 +23,9 @@ export interface LookupMatch {
 	postedAt: string | null;
 	rating: LookupRating | null;
 	postUrl: string;
+	/** Set on a Bluesky row built from one of the operator's own posts: the
+	 * accounts that post credits. `handles` are then theirs, not the poster's. */
+	creditedDids?: string[];
 }
 
 /** Local artists a single match points at, by its index in `matches`. `pieces`
@@ -401,10 +404,18 @@ export function nameMatchArtists(data: LookupResponse): Array<{ id: number; name
  * A Bluesky poster already in the artist list is still offered, as the
  * 'existing' outcome or as one of the 'ambiguous' picks when another site names
  * a different local artist. The operator vouched for that account when they
- * saved it.
+ * saved it. An account the operator credited in their own post of the piece is
+ * offered too: the credit is theirs, and names the artist the way a Weasyl
+ * match does.
  */
-export function canAddPosterAsArtist(site: LookupSite): boolean {
-	return site !== 'Bluesky';
+export function canAddPosterAsArtist(match: Pick<LookupMatch, 'site' | 'creditedDids'>): boolean {
+	return match.site !== 'Bluesky' || isCredited(match);
+}
+
+/** Whether a row names the accounts the operator credited in their own post of
+ * the piece, where every other Bluesky row names whoever posted it. */
+export function isCredited(match: Pick<LookupMatch, 'creditedDids'>): boolean {
+	return (match.creditedDids?.length ?? 0) > 0;
 }
 
 export type LookupOutcome = 'existing' | 'ambiguous' | 'new' | 'unlinked' | 'none';
@@ -423,7 +434,9 @@ export function resolveOutcome(data: LookupResponse): LookupOutcome {
 	// every confident match — a handle-less prefill match can sit above one that
 	// does name a local artist, and that offer is still good.
 	if (!matchHandle(match)) return 'none';
-	return LINKABLE_SITES.includes(match.site) ? 'new' : 'unlinked';
+	// A credited account is offered with its Bluesky profile link: the operator
+	// named it as the artist themselves, and Sona holds a column for the link.
+	return LINKABLE_SITES.includes(match.site) || isCredited(match) ? 'new' : 'unlinked';
 }
 
 /**
@@ -592,7 +605,7 @@ export function addOtherPosterSeed(
 	// The disagreement is between sites: the artist has to be named on a site
 	// other than the prefill's, whichever of the artist's rows comes first.
 	if (!artistRows.some((x) => x.site !== other.site)) return null;
-	if (!canAddPosterAsArtist(other.site)) return null;
+	if (!canAddPosterAsArtist(other)) return null;
 	// A prefill row that names a local artist names the one there is, under
 	// another handle; one whose handle reads like that artist's is the same person.
 	const hit = data.localArtists.find((h) => h.matchIndex === data.matches.indexOf(other));
@@ -604,7 +617,11 @@ export function addOtherPosterSeed(
 	if (nameMatchArtists(data).some((a) => a.id === artistId)) return null;
 	const handle = usableHandle(other);
 	if (!handle) return null;
-	return { handle, site: other.site, linkable: LINKABLE_SITES.includes(other.site) };
+	return {
+		handle,
+		site: other.site,
+		linkable: LINKABLE_SITES.includes(other.site) || isCredited(other)
+	};
 }
 
 /** What the notice reads: a result's response, or a no-match, which carries

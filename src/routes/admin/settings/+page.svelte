@@ -190,6 +190,7 @@
 	let savingSupporterKey = $state(false);
 	let removingSupporterKey = $state(false);
 	let savingFuzzysearchKey = $state(false);
+	let savingBlueskyAccounts = $state(false);
 	let removingFuzzysearchKey = $state(false);
 	// Purely client state: the Remove key button swaps the action row for a
 	// confirmation block rather than opening a dialog over the section.
@@ -1636,6 +1637,47 @@
 				</button>
 			</div>
 		{/if}
+	{/if}
+
+	<!-- The operator's other Bluesky accounts (SONA-243). Only with the lookup
+	     on: the list does nothing without it. Uncontrolled, so a failed save keeps
+	     what was typed and a successful one shows what was stored. -->
+	{#if data.fuzzysearchKeySet}
+		<form class="save-form" method="POST" action="?/saveBlueskyOtherAccounts" use:enhance={({ cancel }) => {
+			if (savingBlueskyAccounts) return cancel();
+			savingBlueskyAccounts = true;
+			return async ({ result, update }) => {
+				await update({ reset: false });
+				savingBlueskyAccounts = false;
+				if (result.type === 'success') toast.success(m.admin_settings_lookup_accounts_saved());
+			};
+		}}>
+			<label>
+				<span>{m.admin_settings_lookup_accounts_label()}</span>
+				<textarea
+					class="input"
+					rows="3"
+					id="bluesky-other-accounts"
+					name="blueskyOtherAccounts"
+					autocomplete="off"
+					autocapitalize="off"
+					spellcheck="false"
+					aria-invalid={form?.blueskyOtherAccountsError ? 'true' : undefined}
+					aria-describedby={form?.blueskyOtherAccountsError
+						? 'bluesky-other-accounts-error bluesky-other-accounts-hint'
+						: 'bluesky-other-accounts-hint'}
+				>{data.blueskyOtherAccounts}</textarea>
+			</label>
+			{#if form?.blueskyOtherAccountsError}
+				<p class="field-error" id="bluesky-other-accounts-error" role="alert">{m.admin_settings_lookup_accounts_error()}</p>
+			{/if}
+			<p class="hint" id="bluesky-other-accounts-hint">{m.admin_settings_lookup_accounts_hint()}</p>
+			<div class="save-row">
+				<button type="submit" class="btn btn-primary" aria-busy={savingBlueskyAccounts}>
+					{savingBlueskyAccounts ? m.admin_saving() : m.admin_settings_lookup_accounts_save()}
+				</button>
+			</div>
+		</form>
 	{/if}
 </section>
 
