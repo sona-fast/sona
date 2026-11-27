@@ -191,6 +191,11 @@
 	let removingSupporterKey = $state(false);
 	let savingFuzzysearchKey = $state(false);
 	let savingBlueskyAccounts = $state(false);
+	// Read once: a refusal on a page submitted without JavaScript carries the
+	// draft back, and after that the field is the operator's typing.
+	let blueskyOtherAccounts = $state(
+		untrack(() => form?.blueskyOtherAccountsDraft ?? data.blueskyOtherAccounts)
+	);
 	let removingFuzzysearchKey = $state(false);
 	// Purely client state: the Remove key button swaps the action row for a
 	// confirmation block rather than opening a dialog over the section.
@@ -1640,16 +1645,22 @@
 	{/if}
 
 	<!-- The operator's other Bluesky accounts (SONA-243). Only with the lookup
-	     on: the list does nothing without it. Uncontrolled, so a failed save keeps
-	     what was typed and a successful one shows what was stored. -->
+	     on: the list does nothing without it. The field holds the operator's
+	     typing; a refused save leaves it alone. -->
 	{#if data.fuzzysearchKeySet}
 		<form class="save-form" method="POST" action="?tab=connections&/saveBlueskyOtherAccounts" use:enhance={({ cancel }) => {
 			if (savingBlueskyAccounts) return cancel();
 			savingBlueskyAccounts = true;
+			const submitted = blueskyOtherAccounts;
 			return async ({ result, update }) => {
 				await update({ reset: false });
 				savingBlueskyAccounts = false;
-				if (result.type === 'success') toast.success(m.admin_settings_lookup_accounts_saved());
+				if (result.type === 'success') {
+					// Show the list as it was stored, unless the field was edited while
+					// the save was in flight: that typing is the operator's and stays.
+					if (blueskyOtherAccounts === submitted) blueskyOtherAccounts = data.blueskyOtherAccounts;
+					toast.success(m.admin_settings_lookup_accounts_saved());
+				}
 			};
 		}}>
 			<label>
@@ -1666,7 +1677,8 @@
 					aria-describedby={form?.blueskyOtherAccountsError
 						? 'bluesky-other-accounts-error bluesky-other-accounts-hint'
 						: 'bluesky-other-accounts-hint'}
-				>{form?.blueskyOtherAccountsDraft ?? data.blueskyOtherAccounts}</textarea>
+					bind:value={blueskyOtherAccounts}
+				></textarea>
 			</label>
 			{#if form?.blueskyOtherAccountsError}
 				<p class="field-error" id="bluesky-other-accounts-error" role="alert">{m.admin_settings_lookup_accounts_error()}</p>
