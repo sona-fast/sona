@@ -1643,7 +1643,7 @@
 	     on: the list does nothing without it. Uncontrolled, so a failed save keeps
 	     what was typed and a successful one shows what was stored. -->
 	{#if data.fuzzysearchKeySet}
-		<form class="save-form" method="POST" action="?/saveBlueskyOtherAccounts" use:enhance={({ cancel }) => {
+		<form class="save-form" method="POST" action="?tab=connections&/saveBlueskyOtherAccounts" use:enhance={({ cancel }) => {
 			if (savingBlueskyAccounts) return cancel();
 			savingBlueskyAccounts = true;
 			return async ({ result, update }) => {

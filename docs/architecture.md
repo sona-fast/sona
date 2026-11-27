@@ -172,7 +172,7 @@ graph TB
   operator's own post (the site's Bluesky link, or one of the other accounts
   listed in the settings), the lookup also asks that API for the post and its
   replies, for up to three posts, and reads them for the accounts the operator
-  credited. Every request sends a User-Agent that names the software. The one
+  credited, whose handles it asks for the same way. Every request sends a User-Agent that names the software. The one
   to Skyseek also names the site's hostname, which Skyseek's owner asked for.
 - The artist lookup never sends FuzzySearch or Skyseek a piece linked to a
   commission ledger entry, or a variant of one: the entry already names the
