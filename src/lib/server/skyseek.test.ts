@@ -662,6 +662,16 @@ describe('isOwnBlueskyPost', () => {
 		expect(isOwnBlueskyPost(skyseekLookupMatch(post, null), 'https://bsky.app/profile/did%3Aplc%ZZ')).toBe(false);
 	});
 
+	// "www." is a label of a Bluesky handle. The saved link and the poster's
+	// handle are read the same way, so it neither hides the operator's own
+	// account nor takes a neighbour's for it.
+	it('keeps a leading www. on both sides of the handle comparison', () => {
+		const www = skyseekLookupMatch(post, 'www.operator.example');
+		expect(isOwnBlueskyPost(www, 'https://bsky.app/profile/www.operator.example')).toBe(true);
+		expect(isOwnBlueskyPost(www, 'https://bsky.app/profile/operator.example')).toBe(false);
+		expect(isOwnBlueskyPost(mine, 'https://bsky.app/profile/www.operator.example')).toBe(false);
+	});
+
 	it('leaves everyone else’s posts alone', () => {
 		expect(isOwnBlueskyPost(mine, 'https://bsky.app/profile/someone.example')).toBe(false);
 		expect(isOwnBlueskyPost(mine, `https://bsky.app/profile/${REPOSTER}`)).toBe(false);

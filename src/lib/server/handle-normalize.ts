@@ -54,6 +54,17 @@ export function handlesOverlap(a: Record<string, unknown>, b: Record<string, unk
 }
 
 /**
+ * A Bluesky handle as the profile link it stands for. A bare handle and a
+ * profile link are not read alike: the shared reader drops a leading "www."
+ * from a bare value as part of a web address, and on Bluesky that label is part
+ * of the handle. In link form "www.artist.example" and "artist.example" stay
+ * two accounts, on this side and in the stored link it is compared with.
+ */
+export function blueskyHandleLink(handle: string): string {
+	return `https://bsky.app/profile/${handle.trim().replace(/^@+/, '')}`;
+}
+
+/**
  * Rows whose stored socials hold one of `handles` on `platform`. Compares the
  * normalized forms `handlesOverlap` uses, so a pasted x.com link finds an
  * artist stored as twitter.com in any letter case, and the same name on another
@@ -65,11 +76,21 @@ export function findLocalArtistsByHandle<T extends Record<string, unknown>>(
 	platform: Platform,
 	handles: string[]
 ): T[] {
-	const wanted = new Set(handles.map((h) => normalizeHandle(platform, h)).filter((h) => h !== ''));
+	// A bare Bluesky handle is read as its profile link, on the wanted side and
+	// on the stored one (a legacy row can hold a bare handle), so a leading
+	// "www." survives on both sides or on neither. Every other value is read as
+	// socialsToHandles reads it.
+	const read = (h: string) =>
+		normalizeHandle(platform, platform === 'bluesky' && !h.includes('/') ? blueskyHandleLink(h) : h);
+	const wanted = new Set(handles.map(read).filter((h) => h !== ''));
 	if (wanted.size === 0) return [];
+	const stored = (row: T) =>
+		Object.entries(SOCIAL_KEY_TO_PLATFORM)
+			.filter(([key, p]) => p === platform && typeof row[key] === 'string')
+			.map(([key]) => read(row[key] as string));
 	return rows.filter(
 		(row) =>
-			socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm)) ||
+			stored(row).some((h) => wanted.has(h)) ||
 			storedProfileHandles(row, platform).some((h) => wanted.has(h)) ||
 			(platform === 'deviantart' && wanted.has(legacyDeviantArtHandle(row.deviantArtUrl) ?? ''))
 	);
@@ -87,7 +108,8 @@ function storedProfileHandles(row: Record<string, unknown>, platform: Platform):
 	for (const [key, p] of Object.entries(SOCIAL_KEY_TO_PLATFORM)) {
 		const stored = row[key];
 		if (p !== platform || typeof stored !== 'string') continue;
-		const handle = normalizeHandle(platform, socialHandle(platform, stored) ?? '');
+		const read = socialHandle(platform, stored) ?? '';
+		const handle = normalizeHandle(platform, platform === 'bluesky' && read ? blueskyHandleLink(read) : read);
 		if (handle) out.push(handle);
 	}
 	return out;
