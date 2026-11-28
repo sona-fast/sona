@@ -17,6 +17,7 @@ import {
 	matchHandle,
 	matchHandles,
 	matchKey,
+	matchWhoKind,
 	lookupSentFile,
 	noMatchCanRetry,
 	mergeSamePost,
@@ -1735,6 +1736,13 @@ describe('stateFromResponse', () => {
 				expect(
 					prefillForResult(response({ matches: [credited] }), { sourcePostUrl: '', commissionedAt: '' })
 				).toEqual({ commissionedAt: '2026-10-03' });
+			});
+
+			it('is named as a mention, and never as an unknown poster when its handle did not resolve', () => {
+				expect(matchWhoKind(credited)).toBe('mentioned');
+				expect(matchWhoKind({ ...credited, handles: [] })).toBe('mentioned_unnamed');
+				expect(matchWhoKind(bluesky)).toBe('poster');
+				expect(matchWhoKind({ ...bluesky, handles: [] })).toBe('unknown');
 			});
 
 			it('is the existing artist when the credited account is in the artist list', () => {

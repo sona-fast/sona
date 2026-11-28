@@ -1618,6 +1618,7 @@
 	"admin_lookup_eyebrow_file": " · {fileName}",
 	"admin_lookup_match_line": "{site}の{handles}",
 	"admin_lookup_match_credited": "{handles}（あなたのBluesky投稿でメンション）",
+	"admin_lookup_match_credited_unknown": "あなたのBluesky投稿でメンションしたアカウント",
 	"admin_lookup_match_unknown": "{site}（投稿者不明）",
 	"admin_lookup_band_exact": "完全に一致",
 	"admin_lookup_band_strong": "ほぼ一致",

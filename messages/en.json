@@ -2048,6 +2048,7 @@
 	"admin_lookup_eyebrow_file": " · {fileName}",
 	"admin_lookup_match_line": "{handles} on {site}",
 	"admin_lookup_match_credited": "{handles}, mentioned in your Bluesky post",
+	"admin_lookup_match_credited_unknown": "An account you mentioned in your Bluesky post",
 	"admin_lookup_match_unknown": "Unknown poster on {site}",
 	"admin_lookup_band_exact": "Exact match",
 	"admin_lookup_band_strong": "Strong match",

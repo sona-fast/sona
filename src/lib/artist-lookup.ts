@@ -426,6 +426,16 @@ export function canAddPosterAsArtist(match: Pick<LookupMatch, 'site' | 'credited
 	return match.site !== 'Bluesky' || isCredited(match);
 }
 
+/** Which sentence names a row: the accounts the operator mentioned in their own
+ * post, with or without a handle to show, the poster, or nobody. */
+export function matchWhoKind(
+	match: LookupMatch
+): 'mentioned' | 'mentioned_unnamed' | 'poster' | 'unknown' {
+	const named = matchHandles(match) !== '';
+	if (isCredited(match)) return named ? 'mentioned' : 'mentioned_unnamed';
+	return named ? 'poster' : 'unknown';
+}
+
 /** Whether a row names the accounts the operator credited in their own post of
  * the piece, where every other Bluesky row names whoever posted it. */
 export function isCredited(match: Pick<LookupMatch, 'creditedDids'>): boolean {
