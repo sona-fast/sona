@@ -263,9 +263,13 @@ async function searchBluesky(
 		const isOwn = (post: SkyseekMatch) =>
 			isOwnBlueskyPost(skyseekLookupMatch(post, handles.get(post.did) ?? null), own);
 		const credited = await creditedMatches(result.matches.filter(isOwn), own, handles);
+		// With whatever the credit read resolved as well: a second account of the
+		// operator's that the first request left out can be named there, and its
+		// post is then theirs too.
+		const known = credited.handles;
 		const matches = posts
-			.filter((post) => !isOwn(post))
-			.map((post) => skyseekLookupMatch(post, handles.get(post.did) ?? null))
+			.map((post) => skyseekLookupMatch(post, known.get(post.did) ?? null))
+			.filter((match) => !isOwnBlueskyPost(match, own))
 			// Closest first already, then earliest, so the cap keeps the best leads.
 			.slice(0, SKYSEEK_MAX_MATCHES - credited.rows.length)
 			// With an account saved by handle and none resolved for this one, the
@@ -309,15 +313,20 @@ async function creditedMatches(
 	ownPosts: SkyseekMatch[],
 	own: Array<string | null>,
 	resolved: Map<string, string>
-): Promise<{ rows: LookupMatch[]; posterHandles: Map<string, string> }> {
+): Promise<{
+	rows: LookupMatch[];
+	posterHandles: Map<string, string>;
+	/** `resolved`, with the handles the credit read added. */
+	handles: Map<string, string>;
+}> {
 	const posterHandles = new Map<string, string>();
 	const read = ownPosts.slice(0, BLUESKY_CREDIT_MAX_POSTS);
-	if (read.length === 0) return { rows: [], posterHandles };
+	if (read.length === 0) return { rows: [], posterHandles, handles: resolved };
 	const isOwnAuthor = (did: string, handle: string | null) => isOwnBlueskyAccount(did, handle, own);
 	// The global fetch, for the reason the handle lookup uses it.
 	const credits = await Promise.all(read.map((post) => readBlueskyCredits(post, isOwnAuthor)));
 	const credited = [...new Set(credits.flat())];
-	if (credited.length === 0) return { rows: [], posterHandles };
+	if (credited.length === 0) return { rows: [], posterHandles, handles: resolved };
 	// Only the accounts the first request did not answer for, and what it did
 	// answer stays known if this one fails.
 	const unresolved = [...credited, ...read.map((post) => post.did)].filter(
@@ -347,7 +356,7 @@ async function creditedMatches(
 			}
 		];
 	});
-	return { rows, posterHandles };
+	return { rows, posterHandles, handles };
 }
 
 /** Artists whose stored socials or display name point at a match, per match.

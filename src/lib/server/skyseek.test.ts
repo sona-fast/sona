@@ -833,7 +833,12 @@ describe('readBlueskyCredits', () => {
 	});
 
 	it.each([
-		['a refusal', () => jsonResponse({ error: 'NotFound' }, 400)],
+		// A valid thread with a credit under a refusing status: only the status
+		// check stands between it and being read.
+		[
+			'a refusal',
+			() => jsonResponse({ thread: view(OPERATOR, 'second.example', [mention(ARTIST)]) }, 400)
+		],
 		['a body that is not JSON', () => new Response('<html>', { status: 200 })],
 		['a thread that was not found', () => jsonResponse({ thread: { $type: 'app.bsky.feed.defs#notFoundPost' } })],
 		// A valid thread with a credit in it: without the cap it would be read.

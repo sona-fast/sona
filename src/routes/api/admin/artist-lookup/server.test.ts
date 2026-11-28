@@ -2455,6 +2455,31 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			expect(resolveBlueskyHandles).toHaveBeenCalledTimes(1);
 		});
 
+		// The first handle request left the second account out, so its post read
+		// as a stranger's. The main account's post mentions it, and the request
+		// for that mention names it.
+		it("leaves out a second account's post once the credit read resolves its handle", async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(OPERATOR_DID, 'mine', null, 0), post(SECOND_DID, 'also-mine', null, 1)]
+			});
+			readBlueskyCredits.mockResolvedValue([SECOND_DID, ARTIST_DID]);
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map())
+				.mockResolvedValue(
+					new Map([
+						[SECOND_DID, 'second.example'],
+						[ARTIST_DID, 'artist.example']
+					])
+				);
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(body.matches.map((x) => x.siteId)).toEqual([`${OPERATOR_DID}/mine`]);
+			expect(body.matches[0]).toMatchObject({ handles: ['artist.example'], band: 'exact' });
+		});
+
 		it('shows a post that credits several accounts as a lead that fills nothing', async () => {
 			const body = await lookup(
 				SECOND_ACCOUNT,
