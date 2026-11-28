@@ -1723,6 +1723,20 @@ describe('stateFromResponse', () => {
 				expect(pickPrefillMatch([stranger, { ...further, band: null }])).toBe(stranger);
 			});
 
+			// The post is the operator's own, possibly from an account they keep off
+			// their site, and the source link is public on the piece.
+			it('fills the date but never the source link from the operator\'s own post', () => {
+				const empty = { sourcePostUrl: true, commissionedAt: true };
+				expect(prefillFields(credited, empty)).toEqual({ commissionedAt: '2026-10-03' });
+				expect(prefillFields({ ...credited, creditedDids: undefined }, empty)).toEqual({
+					sourcePostUrl: credited.postUrl,
+					commissionedAt: '2026-10-03'
+				});
+				expect(
+					prefillForResult(response({ matches: [credited] }), { sourcePostUrl: '', commissionedAt: '' })
+				).toEqual({ commissionedAt: '2026-10-03' });
+			});
+
 			it('is the existing artist when the credited account is in the artist list', () => {
 				const data = response({
 					matches: [credited],

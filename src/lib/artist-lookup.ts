@@ -788,6 +788,11 @@ export interface LookupFields {
  * filled: a lookup is a suggestion, and overwriting something the operator
  * typed would be the one thing they cannot undo with a click. `skipSourceUrl`
  * is the clash case, where the post URL already belongs to another piece.
+ *
+ * A row that names the accounts the operator mentioned never fills the source
+ * link: its post is the operator's own, not the artist's, and it can be from an
+ * account the operator does not link from their site. The source link is
+ * public on the piece. The date is still filled.
  */
 export function prefillFields(
 	match: LookupMatch | null,
@@ -796,7 +801,7 @@ export function prefillFields(
 ): LookupFields {
 	if (!match) return {};
 	const fields: LookupFields = {};
-	if (empty.sourcePostUrl && !options.skipSourceUrl && match.postUrl) {
+	if (empty.sourcePostUrl && !options.skipSourceUrl && !isCredited(match) && match.postUrl) {
 		fields.sourcePostUrl = match.postUrl;
 	}
 	if (empty.commissionedAt) {
