@@ -2466,7 +2466,10 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 				ok: true,
 				matches: [post(OPERATOR_DID, 'mine', null, 0), post(SECOND_DID, 'also-mine', null, 1)]
 			});
-			readBlueskyCredits.mockResolvedValue([SECOND_DID, ARTIST_DID]);
+			// The second account's post is read as well, and credits nobody.
+			readBlueskyCredits.mockImplementation(async (p: { rkey: string }) =>
+				p.rkey === 'mine' ? [SECOND_DID, ARTIST_DID] : []
+			);
 			resolveBlueskyHandles
 				.mockResolvedValueOnce(new Map())
 				.mockResolvedValue(
@@ -2478,6 +2481,32 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
 			expect(body.matches.map((x) => x.siteId)).toEqual([`${OPERATOR_DID}/mine`]);
 			expect(body.matches[0]).toMatchObject({ handles: ['artist.example'], band: 'exact' });
+		});
+
+		// The main post mentions only the second account, which the first handle
+		// request left out. Once named, its own post is read, and that post has
+		// the artist.
+		it("reads a second account's post once the first read names the account", async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(OPERATOR_DID, 'mine', null, 0), post(SECOND_DID, 'also-mine', null, 1)]
+			});
+			readBlueskyCredits.mockImplementation(async (p: { rkey: string }) =>
+				p.rkey === 'mine' ? [SECOND_DID] : [ARTIST_DID]
+			);
+			resolveBlueskyHandles.mockReset();
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map())
+				.mockResolvedValueOnce(new Map([[SECOND_DID, 'second.example']]))
+				.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(body.matches.map((x) => x.siteId)).toEqual([`${SECOND_DID}/also-mine`]);
+			expect(body.matches[0]).toMatchObject({ handles: ['artist.example'], band: 'strong' });
+			// Two posts read, out of a budget of three.
+			expect(readBlueskyCredits.mock.calls.map(([p]) => p.rkey)).toEqual(['mine', 'also-mine']);
 		});
 
 		it('shows a post that credits several accounts as a lead that fills nothing', async () => {

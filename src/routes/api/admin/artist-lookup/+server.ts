@@ -262,7 +262,7 @@ async function searchBluesky(
 		const handles = await resolveBlueskyHandles(dids);
 		const isOwn = (post: SkyseekMatch) =>
 			isOwnBlueskyPost(skyseekLookupMatch(post, handles.get(post.did) ?? null), own);
-		const credited = await creditedMatches(result.matches.filter(isOwn), own, handles);
+		const credited = await creditedMatches(result.matches, own, handles);
 		// With whatever the credit read resolved as well: a second account of the
 		// operator's that the first request left out can be named there, and its
 		// post is then theirs too.
@@ -293,8 +293,11 @@ async function searchBluesky(
  * The operator's own posts of the piece, as rows naming the accounts each one
  * credits. A post that credits nobody gives no row, as before.
  *
- * The closest few posts are read, side by side, and then ONE more getProfiles
- * request resolves the credited accounts' handles. The operator's own accounts
+ * `posts` is every post Skyseek found. The closest few of the operator's are
+ * read, side by side, and then ONE more getProfiles request resolves the
+ * credited accounts' handles. Where that names another of the operator's
+ * accounts, its posts are read too, out of the same budget of
+ * `BLUESKY_CREDIT_MAX_POSTS`. The operator's own accounts
  * are not a credit, by DID or by the handle that request returns.
  *
  * `posterHandles` is the posting account's handle for each row, by the row's
@@ -310,7 +313,7 @@ async function searchBluesky(
  * operator's accounts is saved by handle: the mention may be of the operator.
  */
 async function creditedMatches(
-	ownPosts: SkyseekMatch[],
+	posts: SkyseekMatch[],
 	own: Array<string | null>,
 	resolved: Map<string, string>
 ): Promise<{
@@ -320,22 +323,36 @@ async function creditedMatches(
 	handles: Map<string, string>;
 }> {
 	const posterHandles = new Map<string, string>();
-	const read = ownPosts.slice(0, BLUESKY_CREDIT_MAX_POSTS);
-	if (read.length === 0) return { rows: [], posterHandles, handles: resolved };
 	const isOwnAuthor = (did: string, handle: string | null) => isOwnBlueskyAccount(did, handle, own);
-	// The global fetch, for the reason the handle lookup uses it.
-	const credits = await Promise.all(read.map((post) => readBlueskyCredits(post, isOwnAuthor)));
-	const credited = [...new Set(credits.flat())];
-	if (credited.length === 0) return { rows: [], posterHandles, handles: resolved };
-	// Only the accounts the first request did not answer for, and what it did
-	// answer stays known if this one fails.
-	const unresolved = [...credited, ...read.map((post) => post.did)].filter(
-		(did) => !resolved.has(did)
-	);
-	const handles = new Map([
-		...resolved,
-		...(unresolved.length > 0 ? await resolveBlueskyHandles([...new Set(unresolved)]) : [])
-	]);
+	let handles = resolved;
+	const read: SkyseekMatch[] = [];
+	const credits: string[][] = [];
+	// Two passes over one budget. The second is for a post that only reads as
+	// the operator's once the first pass has named one of their accounts.
+	for (let pass = 0; pass < 2 && read.length < BLUESKY_CREDIT_MAX_POSTS; pass++) {
+		const known = handles;
+		const next = posts
+			.filter((post) => !read.includes(post))
+			.filter((post) =>
+				isOwnBlueskyPost(skyseekLookupMatch(post, known.get(post.did) ?? null), own)
+			)
+			.slice(0, BLUESKY_CREDIT_MAX_POSTS - read.length);
+		if (next.length === 0) break;
+		// The global fetch, for the reason the handle lookup uses it.
+		const found = await Promise.all(next.map((post) => readBlueskyCredits(post, isOwnAuthor)));
+		read.push(...next);
+		credits.push(...found);
+		if (found.flat().length === 0) continue;
+		// Only the accounts no earlier request answered for, and what those did
+		// answer stays known if this one fails.
+		const unresolved = [...found.flat(), ...next.map((post) => post.did)].filter(
+			(did) => !known.has(did)
+		);
+		if (unresolved.length > 0) {
+			handles = new Map([...known, ...(await resolveBlueskyHandles([...new Set(unresolved)]))]);
+		}
+	}
+	if (credits.flat().length === 0) return { rows: [], posterHandles, handles };
 	const rows = read.flatMap((post, index) => {
 		const creditedDids = credits[index].filter(
 			(did) => !isOwnBlueskyAccount(did, handles.get(did) ?? null, own)
