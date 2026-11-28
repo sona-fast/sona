@@ -17,6 +17,7 @@ import {
 	matchHandle,
 	matchHandles,
 	matchKey,
+	matchWhoKind,
 	lookupSentFile,
 	noMatchCanRetry,
 	mergeSamePost,
@@ -41,6 +42,7 @@ import {
 	runLookup,
 	sentAfterApplyThrew,
 	retryCanSucceed,
+	seedColumn,
 	unansweredCanRetry,
 	unansweredLine,
 	unansweredNotice,
@@ -1681,10 +1683,95 @@ describe('stateFromResponse', () => {
 		});
 
 		it('is not offered as a new artist, whatever else is', () => {
-			expect(canAddPosterAsArtist('Bluesky')).toBe(false);
+			expect(canAddPosterAsArtist({ site: 'Bluesky' })).toBe(false);
 			for (const site of ['FurAffinity', 'Twitter', 'Weasyl', 'e621'] as LookupSite[]) {
-				expect(canAddPosterAsArtist(site)).toBe(true);
+				expect(canAddPosterAsArtist({ site })).toBe(true);
 			}
+		});
+
+		describe('a row naming the account the operator credited in their own post', () => {
+			const CREDITED = 'did:plc:cccccccccccccccccccccccc';
+			const credited: LookupMatch = {
+				...bluesky,
+				distance: 0,
+				band: 'exact',
+				handles: ['drawer.example'],
+				creditedDids: [CREDITED]
+			};
+
+			it('is offered as a new artist, with its Bluesky profile link', () => {
+				const data = response({ matches: [credited] });
+				expect(canAddPosterAsArtist(credited)).toBe(true);
+				expect(resolveOutcome(data)).toBe('new');
+				expect(profileUrlFor('Bluesky', matchHandle(credited))).toBe(
+					'https://bsky.app/profile/drawer.example'
+				);
+			});
+
+			it('puts the new artist\'s profile link in the Bluesky column', () => {
+				expect(seedColumn('Bluesky')).toBe('bluesky');
+				expect(seedColumn('Twitter')).toBe('twitter');
+				expect(seedColumn('FurAffinity')).toBe('furaffinity');
+			});
+
+			it('fills from the credited account ahead of a closer post by somebody else', () => {
+				const stranger: LookupMatch = { ...bluesky, siteId: `${DID}/other`, distance: 0, band: 'exact' };
+				const further: LookupMatch = { ...credited, distance: 1, band: 'strong' };
+				expect(pickPrefillMatch([stranger, further])).toBe(further);
+				// A FuzzySearch row still comes first, and a credit with no band fills nothing.
+				const fa = match({ distance: 2, band: 'strong' });
+				expect(pickPrefillMatch([stranger, further, fa])).toBe(fa);
+				expect(pickPrefillMatch([stranger, { ...further, band: null }])).toBe(stranger);
+			});
+
+			// The post is the operator's own, possibly from an account they keep off
+			// their site, and the source link is public on the piece.
+			it('fills the date but never the source link from the operator\'s own post', () => {
+				const empty = { sourcePostUrl: true, commissionedAt: true };
+				expect(prefillFields(credited, empty)).toEqual({ commissionedAt: '2026-10-03' });
+				expect(prefillFields({ ...credited, creditedDids: undefined }, empty)).toEqual({
+					sourcePostUrl: credited.postUrl,
+					commissionedAt: '2026-10-03'
+				});
+				expect(
+					prefillForResult(response({ matches: [credited] }), { sourcePostUrl: '', commissionedAt: '' })
+				).toEqual({ commissionedAt: '2026-10-03' });
+			});
+
+			it('is named as a mention, and never as an unknown poster when its handle did not resolve', () => {
+				expect(matchWhoKind(credited)).toBe('mentioned');
+				expect(matchWhoKind({ ...credited, handles: [] })).toBe('mentioned_unnamed');
+				expect(matchWhoKind(bluesky)).toBe('poster');
+				expect(matchWhoKind({ ...bluesky, handles: [] })).toBe('unknown');
+			});
+
+			it('is the existing artist when the credited account is in the artist list', () => {
+				const data = response({
+					matches: [credited],
+					localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Drawer' }] }]
+				});
+				expect(resolveOutcome(data)).toBe('existing');
+			});
+
+			it('offers nobody when the credited account has no handle to name', () => {
+				const data = response({ matches: [{ ...credited, handles: [] }] });
+				expect(resolveOutcome(data)).toBe('none');
+			});
+
+			it('offers nobody when the post credits several accounts', () => {
+				// The endpoint sends such a row with no band.
+				const several = {
+					...credited,
+					handles: ['drawer.example', 'friend.example'],
+					creditedDids: [CREDITED, 'did:plc:dddddddddddddddddddddddd'],
+					band: null
+				};
+				expect(resolveOutcome(response({ matches: [several] }))).toBe('none');
+			});
+
+			it('still leaves an ordinary poster without the offer', () => {
+				expect(canAddPosterAsArtist({ ...bluesky, creditedDids: [] })).toBe(false);
+			});
 		});
 
 		it('links a handle to its bsky.app profile, kept inside its path segment', () => {
@@ -1743,7 +1830,7 @@ describe('stateFromResponse', () => {
 		it('is "unlinked" for a poster not in the artist list, with no new-artist offer', () => {
 			const data = response({ matches: [bluesky] });
 			expect(resolveOutcome(data)).toBe('unlinked');
-			expect(canAddPosterAsArtist(bluesky.site)).toBe(false);
+			expect(canAddPosterAsArtist(bluesky)).toBe(false);
 			// A by-name collision is the 'new' outcome's prompt, and stays out of it.
 			const named = response({
 				matches: [bluesky],

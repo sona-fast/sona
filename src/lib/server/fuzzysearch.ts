@@ -71,6 +71,10 @@ export interface LookupMatch {
 	postedAt: string | null;
 	rating: LookupRating | null;
 	postUrl: string;
+	/** Set on a Bluesky row built from one of the operator's own posts: the DIDs
+	 * of the accounts that post credits. `handles` are then theirs, where they
+	 * resolved, and not the poster's. */
+	creditedDids?: string[];
 }
 
 /** The client's list of FuzzySearch failures, so the two cannot drift. */
@@ -485,18 +489,19 @@ const SITE_PLATFORM: Partial<Record<LookupSite, Platform>> = {
  *
  * A Bluesky match also offers its poster's DID, so an artist whose link was
  * saved as bsky.app/profile/did:plc:... is found with or without a resolved
- * handle.
+ * handle. A row with `creditedDids` offers those in the poster's place.
  */
 export function findLocalArtists<T extends Record<string, unknown>>(
 	rows: T[],
-	match: Pick<LookupMatch, 'site' | 'handles'> & { siteId?: string }
+	match: Pick<LookupMatch, 'site' | 'handles' | 'creditedDids'> & { siteId?: string }
 ): T[] {
 	const platform = SITE_PLATFORM[match.site];
 	if (!platform) return [];
-	const handles =
-		match.site === 'Bluesky' && match.siteId
-			? [...match.handles, splitBlueskySiteId(match.siteId).did]
-			: match.handles;
+	// On a row that names the accounts a post credits, the DIDs are theirs: the
+	// poster is the operator, and is nobody's lead.
+	const dids =
+		match.creditedDids ?? (match.siteId ? [splitBlueskySiteId(match.siteId).did] : []);
+	const handles = match.site === 'Bluesky' ? [...match.handles, ...dids] : match.handles;
 	return findLocalArtistsByHandle(rows, platform, handles);
 }
 

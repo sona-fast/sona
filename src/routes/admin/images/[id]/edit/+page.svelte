@@ -127,6 +127,7 @@
 	let artistName = $state('');
 	let newTwitter = $state('');
 	let newFuraffinity = $state('');
+	let newBluesky = $state('');
 	// What the last seed wrote into the inline new-artist form, for the panel's
 	// status line, plus the tag on each field it filled. Handed to the panel only
 	// while that form is what saves, the same way appliedArtist is: the sentence
@@ -136,6 +137,7 @@
 	let nameTagged = $state(false);
 	let twitterTagged = $state(false);
 	let furaffinityTagged = $state(false);
+	let blueskyTagged = $state(false);
 	// Both records above are written once per lookup and never edited: they say
 	// what the lookup did. Whether a filled field is still attributable to it is
 	// the tag's job, and these read the two together so the status lines name
@@ -153,7 +155,8 @@
 	});
 	const lookupSeedEdited = $derived({
 		artistName: lookupSeeded.artistName !== undefined && !nameTagged,
-		profileUrl: lookupSeeded.profileUrl !== undefined && !twitterTagged && !furaffinityTagged
+		profileUrl:
+			lookupSeeded.profileUrl !== undefined && !twitterTagged && !furaffinityTagged && !blueskyTagged
 	});
 	let lookupAbort: AbortController | null = null;
 	// The artist select sits above the panel and the panel's own status region
@@ -207,11 +210,13 @@
 		artistName = '';
 		newTwitter = '';
 		newFuraffinity = '';
+		newBluesky = '';
 		sourceTagged = false;
 		dateTagged = false;
 		nameTagged = false;
 		twitterTagged = false;
 		furaffinityTagged = false;
+		blueskyTagged = false;
 		lookupUrlHeld = false;
 		lookupCleared = {};
 		sourceTypedIn = false;
@@ -276,14 +281,16 @@
 		if (nameTagged) artistName = '';
 		if (twitterTagged) newTwitter = '';
 		if (furaffinityTagged) newFuraffinity = '';
+		if (blueskyTagged) newBluesky = '';
 		// The mode is left alone. Flipping back to the artist select unmounts the
-		// inline form, and five of its inputs (Bluesky, Telegram, DeviantArt,
-		// Patreon, Instagram) are uncontrolled — anything typed there goes with
+		// inline form, and four of its inputs (Telegram, DeviantArt, Patreon,
+		// Instagram) are uncontrolled — anything typed there goes with
 		// the form. An empty required form is a smaller cost than lost typing,
 		// and the clearing announcement in startLookup says what happened.
 		nameTagged = false;
 		twitterTagged = false;
 		furaffinityTagged = false;
+		blueskyTagged = false;
 		lookupFilled = {};
 		lookupSeeded = {};
 		lookupUrlHeld = false;
@@ -304,7 +311,7 @@
 		// the form stays on screen, so a sighted operator watches them empty and a
 		// screen-reader one gets nothing. Say it with the searching announcement.
 		const clearedInline =
-			artistMode === 'new' && (nameTagged || twitterTagged || furaffinityTagged);
+			artistMode === 'new' && (nameTagged || twitterTagged || furaffinityTagged || blueskyTagged);
 		resetLookupPrefill();
 		lookupAbort?.abort();
 		const controller = new AbortController();
@@ -424,7 +431,7 @@
 	 * a lookup is a suggestion, so it fills only what is empty, tags what it
 	 * filled, and the tag clears the moment the operator edits that field. */
 	function seedNewArtist(handle: string, site: LookupSite, linkable: boolean): NewArtistSeed {
-		const url = site === 'Twitter' ? newTwitter : newFuraffinity;
+		const url = site === 'Twitter' ? newTwitter : site === 'Bluesky' ? newBluesky : newFuraffinity;
 		const seed = newArtistSeed(handle, site, linkable, {
 			artistName: artistName.trim() === '',
 			profileUrl: url.trim() === ''
@@ -447,6 +454,9 @@
 			if (site === 'Twitter') {
 				newTwitter = seed.profileUrl;
 				twitterTagged = true;
+			} else if (site === 'Bluesky') {
+				newBluesky = seed.profileUrl;
+				blueskyTagged = true;
 			} else {
 				newFuraffinity = seed.profileUrl;
 				furaffinityTagged = true;
@@ -757,10 +767,24 @@
 								aria-describedby={twitterTagged ? 'twitter-lookup-tag' : undefined}
 							/>
 						</div>
-						<label>
-							<span>Bluesky</span>
-							<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
-						</label>
+						<div class="field">
+							<div class="label-row">
+								<label class="field-label" for="new-artist-bluesky">Bluesky</label>
+								{#if blueskyTagged}
+									<span class="lookup-tag" id="bluesky-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+								{/if}
+							</div>
+							<input
+								id="new-artist-bluesky"
+								type="text"
+								class="input"
+								placeholder="bsky.app/profile/..."
+								name="bluesky"
+								bind:value={newBluesky}
+								oninput={() => (blueskyTagged = false)}
+								aria-describedby={blueskyTagged ? 'bluesky-lookup-tag' : undefined}
+							/>
+						</div>
 						<label>
 							<span>Telegram</span>
 							<input type="text" class="input" placeholder="t.me/..." name="telegram" />

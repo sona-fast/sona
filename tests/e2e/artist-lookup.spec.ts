@@ -292,7 +292,9 @@ async function saveLookupKey(page: Page) {
 		await section(page)
 			.locator('input[name="fuzzysearchApiKey"]')
 			.fill(FAKE_KEY, { timeout: 2_500 });
-		await section(page).locator('button[type="submit"]').click({ timeout: 2_500 });
+		await section(page)
+			.locator('form[action="?/saveFuzzysearchKey"] button[type="submit"]')
+			.click({ timeout: 2_500 });
 		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible({ timeout: 5_000 });
 	}).toPass({ timeout: SAVE_KEY_BUDGET });
 }

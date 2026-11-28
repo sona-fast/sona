@@ -190,6 +190,12 @@
 	let savingSupporterKey = $state(false);
 	let removingSupporterKey = $state(false);
 	let savingFuzzysearchKey = $state(false);
+	let savingBlueskyAccounts = $state(false);
+	// Read once: a refusal on a page submitted without JavaScript carries the
+	// draft back, and after that the field is the operator's typing.
+	let blueskyOtherAccounts = $state(
+		untrack(() => form?.blueskyOtherAccountsDraft ?? data.blueskyOtherAccounts)
+	);
 	let removingFuzzysearchKey = $state(false);
 	// Purely client state: the Remove key button swaps the action row for a
 	// confirmation block rather than opening a dialog over the section.
@@ -1636,6 +1642,59 @@
 				</button>
 			</div>
 		{/if}
+	{/if}
+
+	<!-- The operator's other Bluesky accounts (SONA-243). Only with the lookup
+	     on: the list does nothing without it. The field holds the operator's
+	     typing; a refused save leaves it alone. -->
+	{#if data.fuzzysearchKeySet}
+		<form class="save-form" method="POST" action="?tab=connections&/saveBlueskyOtherAccounts" use:enhance={({ cancel }) => {
+			if (savingBlueskyAccounts) return cancel();
+			savingBlueskyAccounts = true;
+			const submitted = blueskyOtherAccounts;
+			return async ({ result, update }) => {
+				// No reload of the page's data: that resets every other field on this
+				// page to its stored value, unsaved edits on another tab included.
+				await update({ reset: false, invalidateAll: false });
+				savingBlueskyAccounts = false;
+				if (result.type === 'success') {
+					// Show the list as it was stored, unless the field was edited while
+					// the save was in flight: that typing is the operator's and stays.
+					const stored = result.data?.blueskyOtherAccounts;
+					if (typeof stored === 'string' && blueskyOtherAccounts === submitted) {
+						blueskyOtherAccounts = stored;
+					}
+					toast.success(m.admin_settings_lookup_accounts_saved());
+				}
+			};
+		}}>
+			<label>
+				<span>{m.admin_settings_lookup_accounts_label()}</span>
+				<textarea
+					class="input"
+					rows="3"
+					id="bluesky-other-accounts"
+					name="blueskyOtherAccounts"
+					autocomplete="off"
+					autocapitalize="off"
+					spellcheck="false"
+					aria-invalid={form?.blueskyOtherAccountsError ? 'true' : undefined}
+					aria-describedby={form?.blueskyOtherAccountsError
+						? 'bluesky-other-accounts-error bluesky-other-accounts-hint'
+						: 'bluesky-other-accounts-hint'}
+					bind:value={blueskyOtherAccounts}
+				></textarea>
+			</label>
+			{#if form?.blueskyOtherAccountsError}
+				<p class="field-error" id="bluesky-other-accounts-error" role="alert">{m.admin_settings_lookup_accounts_error()}</p>
+			{/if}
+			<p class="hint" id="bluesky-other-accounts-hint">{m.admin_settings_lookup_accounts_hint()}</p>
+			<div class="save-row">
+				<button type="submit" class="btn btn-primary" aria-busy={savingBlueskyAccounts}>
+					{savingBlueskyAccounts ? m.admin_saving() : m.admin_settings_lookup_accounts_save()}
+				</button>
+			</div>
+		</form>
 	{/if}
 </section>
 

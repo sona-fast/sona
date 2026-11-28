@@ -18,6 +18,7 @@
 		prefillForResult,
 		resultKeepsLastPrefill,
 		profileUrlFor,
+		seedColumn,
 		ratingTag,
 		runLookup,
 		siteLabel,
@@ -2034,8 +2035,7 @@
 		initialName={artistSeed?.handle ?? ''}
 		initialSocials={artistSeed && artistSeed.linkable
 			? {
-					[artistSeed.site === 'Twitter' ? 'twitter' : 'furaffinity']:
-						profileUrlFor(artistSeed.site, artistSeed.handle) ?? ''
+					[seedColumn(artistSeed.site)]: profileUrlFor(artistSeed.site, artistSeed.handle) ?? ''
 				}
 			: undefined}
 		prefillSource={artistSeed ? 'lookup' : undefined}

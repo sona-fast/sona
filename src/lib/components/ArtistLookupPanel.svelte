@@ -24,6 +24,7 @@
 		matchHandle,
 		matchHandles,
 		matchKey,
+		matchWhoKind,
 		nameMatchArtists,
 		namesNoSite,
 		noMatchCanRetry,
@@ -471,7 +472,13 @@
 								{/if}
 							</span>
 							<span class="match-id">
-								{#if handles}
+								{#if matchWhoKind(match) === 'mentioned'}
+									<span class="match-who">{m.admin_lookup_match_credited({ handles })}</span>
+								{:else if matchWhoKind(match) === 'mentioned_unnamed'}
+									<!-- Not "Unknown poster": the poster is the operator, and the row
+									     stands for an account they mentioned whose handle did not resolve. -->
+									<span class="match-who muted">{m.admin_lookup_match_credited_unknown()}</span>
+								{:else if handles}
 									<span class="match-who">{m.admin_lookup_match_line({ handles, site: siteLabel(match.site) })}</span>
 								{:else}
 									<span class="match-who muted">{m.admin_lookup_match_unknown({ site: siteLabel(match.site) })}</span>
@@ -795,7 +802,7 @@
 							{m.admin_lookup_add_new({ handle })}
 						</button>
 					{/if}
-				{:else if outcome === 'unlinked' && prefill && canAddPosterAsArtist(prefill.site)}
+				{:else if outcome === 'unlinked' && prefill && canAddPosterAsArtist(prefill)}
 					<button
 						type="button"
 						class="btn btn-primary"

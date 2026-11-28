@@ -61,6 +61,25 @@ export const BLUESKY_PROFILES_RESPONSE_BYTES = 512 * 1024;
  * operator already has, and are not worth holding the answer for. */
 export const BLUESKY_PROFILES_TIMEOUT_MS = 5000;
 
+/** Bluesky's public AppView again: one post with its direct replies. */
+export const BLUESKY_THREAD_ENDPOINT =
+	'https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread';
+/** How many of the operator's own posts a lookup reads for a credit. One
+ * request each, so the closest few: a piece they posted more often than this
+ * names the same artist in the first of them or in none. */
+export const BLUESKY_CREDIT_MAX_POSTS = 3;
+/** A post and one level of replies. A busy thread can pass this, and is then
+ * read as crediting nobody. */
+export const BLUESKY_THREAD_RESPONSE_BYTES = 1024 * 1024;
+
+/** The raw setting holding the operator's other Bluesky accounts, one handle,
+ * profile link or DID per line. A raw setting, outside SiteSettings, so the
+ * list never reaches the public client: a second account is not always one its
+ * owner links from their site. */
+export const BLUESKY_OTHER_ACCOUNTS_SETTING = 'blueskyOtherAccounts';
+/** More accounts than one person runs. */
+export const BLUESKY_OTHER_ACCOUNTS_MAX = 10;
+
 /** A hostname as it may appear in a User-Agent: letters, digits, dots and
  * hyphens, starting and ending on a letter or digit. Anything else is left out
  * of the header altogether, so a hostile Host cannot add a line break, a
@@ -371,6 +390,94 @@ export async function resolveBlueskyHandles(
 	return handles;
 }
 
+/** The DIDs a record's text mentions, in the order it mentions them. */
+function mentionedDids(record: unknown): string[] {
+	const facets = (record as { facets?: unknown } | null)?.facets;
+	if (!Array.isArray(facets)) return [];
+	const dids: string[] = [];
+	for (const facet of facets) {
+		const features = (facet as { features?: unknown } | null)?.features;
+		if (!Array.isArray(features)) continue;
+		for (const feature of features) {
+			const { $type, did } = (feature ?? {}) as { $type?: unknown; did?: unknown };
+			if ($type !== 'app.bsky.richtext.facet#mention') continue;
+			if (typeof did === 'string' && DID_PATTERN.test(did)) dids.push(did);
+		}
+	}
+	return dids;
+}
+
+/**
+ * The accounts one of the operator's own posts credits: every account
+ * mentioned in the post, and in a direct reply to it that one of the
+ * operator's accounts wrote, which is where a credit often goes ("art by
+ * @artist" under the picture). DIDs, in the order they are mentioned, each
+ * once, without the post's own account.
+ *
+ * Only for a post the operator made. On anyone else's post a mention is as
+ * often the person the piece was drawn for as the person who drew it.
+ *
+ * ONE getPostThread request, which is told the post and nothing else. Every
+ * failure is an empty list and never a throw: a credit that was not read
+ * leaves the lookup where it was without this.
+ *
+ * `isOwnAuthor` says whether a reply's author is one of the operator's
+ * accounts, by DID and by the handle the AppView gives for it.
+ */
+export async function readBlueskyCredits(
+	post: Pick<SkyseekMatch, 'did' | 'rkey'>,
+	isOwnAuthor: (did: string, handle: string | null) => boolean,
+	fetchFn: typeof fetch = fetch
+): Promise<string[]> {
+	if (!DID_PATTERN.test(post.did) || !RKEY_PATTERN.test(post.rkey)) return [];
+	const uri = `at://${post.did}/app.bsky.feed.post/${post.rkey}`;
+	let res: Response;
+	try {
+		res = await fetchFn(
+			`${BLUESKY_THREAD_ENDPOINT}?uri=${encodeURIComponent(uri)}&depth=1&parentHeight=0`,
+			{
+				headers: { accept: 'application/json', 'user-agent': lookupUserAgent() },
+				redirect: 'manual',
+				signal: AbortSignal.timeout(BLUESKY_PROFILES_TIMEOUT_MS)
+			}
+		);
+	} catch {
+		return [];
+	}
+	if (!res.ok) {
+		await discardBody(res);
+		return [];
+	}
+
+	const payload = await readBoundedJson(res, BLUESKY_THREAD_RESPONSE_BYTES);
+	const thread = (payload as { thread?: unknown } | null)?.thread as
+		| { post?: unknown; replies?: unknown }
+		| null
+		| undefined;
+	const root = thread?.post as
+		| { uri?: unknown; author?: { did?: unknown }; record?: unknown }
+		| null
+		| undefined;
+	// An answer about some other post is not an answer to this question.
+	if (!root || root.uri !== uri || root.author?.did !== post.did) return [];
+
+	const credited = mentionedDids(root.record);
+	if (Array.isArray(thread?.replies)) {
+		for (const reply of thread.replies) {
+			const view = (reply as { post?: unknown } | null)?.post as
+				| { author?: { did?: unknown; handle?: unknown }; record?: unknown }
+				| null
+				| undefined;
+			const did = view?.author?.did;
+			if (typeof did !== 'string') continue;
+			const handle = typeof view?.author?.handle === 'string' ? view.author.handle : null;
+			if (did !== post.did && !isOwnAuthor(did, handle)) continue;
+			credited.push(...mentionedDids(view?.record));
+		}
+	}
+	return [...new Set(credited)].filter((did) => did !== post.did);
+}
+
 /**
  * A Skyseek match as a row in the lookup's match list.
  *
@@ -409,41 +516,103 @@ function decodeEscapes(value: string): string {
 	}
 }
 
+/** The operator's Bluesky accounts as they are saved: the site's Bluesky link,
+ * and with it the accounts listed under Artist lookup in the settings. */
+export type OwnBlueskyAccounts =
+	| string
+	| null
+	| undefined
+	| ReadonlyArray<string | null | undefined>;
+
+/** Each saved account as the handle or DID it names, lowercased. Read the way
+ * local artists are matched: a bare handle stands for its profile link, and a
+ * DID copied with its colons percent-encoded (did%3Aplc%3A…) is decoded. A
+ * malformed escape is compared as it stands, and an empty value names nobody. */
+function ownAccounts(own: OwnBlueskyAccounts): string[] {
+	const saved = typeof own === 'string' || own == null ? [own] : own;
+	return saved
+		.map((value) => (value ?? '').trim())
+		.filter((value) => value !== '')
+		.map((value) => (value.includes('/') ? value : blueskyHandleLink(value)))
+		.map((value) => decodeEscapes(normalizeHandle('bluesky', value)).toLowerCase())
+		.filter((value) => value !== '');
+}
+
+const BLUESKY_PROFILE_LINK = /^(?:https?:\/\/)?(?:www\.)?bsky\.app\/profile\/[^/?#]+/i;
+
 /**
- * Whether a Bluesky match was posted by the site operator's own account, given
- * the Bluesky link saved in the site's settings. The operator posting their own
- * commission is the commonest Bluesky match there is, and it says nothing about
- * who drew the piece.
+ * The accounts in the settings field for the operator's other Bluesky accounts,
+ * one per line (commas and spaces separate them too). Null when a value is not
+ * a handle, a profile link or a DID, or when there are more than
+ * `BLUESKY_OTHER_ACCOUNTS_MAX`: the settings page refuses the save. Each is
+ * returned as the handle or DID it names, once.
+ */
+export function parseOtherBlueskyAccounts(raw: string | null | undefined): string[] | null {
+	const entries = (raw ?? '').split(/[\s,]+/).filter((entry) => entry !== '');
+	const accounts: string[] = [];
+	for (const entry of entries) {
+		// A link has to be a Bluesky profile: any other URL would be read as the
+		// handle its hostname spells.
+		if (entry.includes('/') && !BLUESKY_PROFILE_LINK.test(entry)) return null;
+		const [account] = ownAccounts(entry);
+		if (!account) return null;
+		const valid = account.startsWith('did:')
+			? DID_PATTERN.test(account)
+			: account.length <= HANDLE_MAX_LENGTH && HANDLE_PATTERN.test(account);
+		if (!valid) return null;
+		if (!accounts.includes(account)) accounts.push(account);
+	}
+	return accounts.length > BLUESKY_OTHER_ACCOUNTS_MAX ? null : accounts;
+}
+
+/**
+ * Whether a Bluesky account is one of the operator's own, by its DID and by a
+ * handle where one is known.
+ */
+export function isOwnBlueskyAccount(
+	did: string,
+	handle: string | null,
+	own: OwnBlueskyAccounts
+): boolean {
+	const accounts = ownAccounts(own);
+	if (accounts.length === 0) return false;
+	if (accounts.includes(did.toLowerCase())) return true;
+	return handle !== null && ownAccounts(handle).some((h) => accounts.includes(h));
+}
+
+/**
+ * Whether a Bluesky match was posted by one of the site operator's own
+ * accounts: the Bluesky link saved in the site's settings, or one of the other
+ * accounts listed there. The operator posting their own commission is the
+ * commonest Bluesky match there is, and it says nothing about who drew the
+ * piece.
  *
- * Compared the way local artists are matched (`normalizeHandle`), against the
- * resolved handle and against the DID, so a link saved as
- * bsky.app/profile/did:plc:… is recognised too, and so is one copied with its
- * colons percent-encoded (did%3Aplc%3A…), which the local-artist match also
- * decodes. A malformed escape is compared as it stands. An empty setting
- * matches nothing, and so does any match that is not a Bluesky one.
+ * Compared against the resolved handle and against the DID, so a link saved as
+ * bsky.app/profile/did:plc:… is recognised too. With no account saved nothing
+ * matches, and neither does any match that is not a Bluesky one.
  */
 export function isOwnBlueskyPost(
 	match: Pick<LookupMatch, 'site' | 'siteId' | 'handles'>,
-	ownBlueskyUrl: string | null | undefined
+	own: OwnBlueskyAccounts
 ): boolean {
 	if (match.site !== 'Bluesky') return false;
-	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl)).toLowerCase();
-	if (!own) return false;
-	const did = splitBlueskySiteId(match.siteId).did.toLowerCase();
-	return did === own || match.handles.some((h) => normalizeHandle('bluesky', blueskyHandleLink(h)) === own);
+	const did = splitBlueskySiteId(match.siteId).did;
+	return match.handles.length > 0
+		? match.handles.some((handle) => isOwnBlueskyAccount(did, handle, own))
+		: isOwnBlueskyAccount(did, null, own);
 }
 
 /**
  * Whether a Bluesky match could be the operator's own post with nothing here to
- * say it is not: the site's link names a handle rather than a DID, and no
- * handle resolved for the match's account, so `isOwnBlueskyPost` had nothing to
- * compare. A link saved by DID is compared by DID and never needs this.
+ * say it is not: one of their accounts is saved by handle rather than by DID,
+ * and no handle resolved for the match's account, so `isOwnBlueskyPost` had
+ * nothing to compare. Accounts saved by DID are compared by DID and never need
+ * this.
  */
 export function mayBeOwnBlueskyPost(
 	match: Pick<LookupMatch, 'site' | 'handles'>,
-	ownBlueskyUrl: string | null | undefined
+	own: OwnBlueskyAccounts
 ): boolean {
 	if (match.site !== 'Bluesky' || match.handles.length > 0) return false;
-	const own = decodeEscapes(normalizeHandle('bluesky', ownBlueskyUrl)).toLowerCase();
-	return own !== '' && !own.startsWith('did:');
+	return ownAccounts(own).some((account) => !account.startsWith('did:'));
 }

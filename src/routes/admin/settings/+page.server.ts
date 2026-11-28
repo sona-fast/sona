@@ -66,6 +66,10 @@ import {
 	fuzzysearchKeyDisplayRecord,
 	parseFuzzysearchRefusedMarker
 } from '$lib/server/fuzzysearch';
+import {
+	BLUESKY_OTHER_ACCOUNTS_SETTING,
+	parseOtherBlueskyAccounts
+} from '$lib/server/skyseek';
 import { syncArtists } from '$lib/server/artist-sync';
 import {
 	resolveRefImage,
@@ -289,7 +293,8 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	// D1 reads above, and these two keys are always read together.
 	const fuzzysearchRaw = await getRawSettings(db, [
 		FUZZYSEARCH_API_KEY_SETTING,
-		FUZZYSEARCH_KEY_REFUSED_SETTING
+		FUZZYSEARCH_KEY_REFUSED_SETTING,
+		BLUESKY_OTHER_ACCOUNTS_SETTING
 	]);
 	const fuzzysearchStoredKey = fuzzysearchRaw[FUZZYSEARCH_API_KEY_SETTING]?.trim() ?? '';
 	const fuzzysearchRefused = parseFuzzysearchRefusedMarker(
@@ -340,6 +345,9 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		registryEnabled: isRegistryEnabled(renv),
 		registryHasSecret: !!platform?.env?.REGISTRY_API_KEY,
 		fuzzysearchKeySet: fuzzysearchKeyFromEnv || !!fuzzysearchStoredKey,
+		// The operator's other Bluesky accounts, one per line, for the lookup's
+		// field. A raw setting: it reaches this admin page and nowhere public.
+		blueskyOtherAccounts: fuzzysearchRaw[BLUESKY_OTHER_ACCOUNTS_SETTING] ?? '',
 		fuzzysearchKeyFromEnv,
 		// The deploy secret wins, and while it does the card shows the secret's own
 		// line instead of a mask — so the stored key's last four have no reader and
@@ -803,6 +811,30 @@ export const actions = {
 		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, '');
 		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
 		return { fuzzysearchKeyRemoved: true };
+	},
+
+	// The operator's other Bluesky accounts, for the lookup's own-post check
+	// (SONA-243). Stored as the handles and DIDs the entries name, one per line.
+	// An empty field clears the list.
+	saveBlueskyOtherAccounts: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const raw = (await request.formData()).get('blueskyOtherAccounts');
+		const typed = typeof raw === 'string' ? raw : '';
+		const accounts = parseOtherBlueskyAccounts(typed);
+		// What was typed goes back with the refusal, so a page submitted without
+		// JavaScript keeps the draft. Bounded: it is echoed into the page.
+		if (!accounts) {
+			return fail(400, {
+				blueskyOtherAccountsError: 'invalid',
+				// A form posts its line breaks as CRLF.
+				blueskyOtherAccountsDraft: typed.replace(/\r\n/g, '\n').slice(0, 4000)
+			});
+		}
+		const stored = accounts.join('\n');
+		await setRawSetting(db, BLUESKY_OTHER_ACCOUNTS_SETTING, stored);
+		// The list as stored goes back, so the page can show it without reloading
+		// its data and resetting whatever else is being edited.
+		return { blueskyOtherAccountsSaved: true, blueskyOtherAccounts: stored };
 	},
 
 	saveSecurityEmail: async ({ request, platform }) => {

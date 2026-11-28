@@ -56,6 +56,17 @@ const searchSkyseek = vi.hoisted(() =>
 const resolveBlueskyHandles = vi.hoisted(() =>
 	vi.fn(async (_dids: string[], _fetchFn?: typeof fetch) => new Map<string, string>())
 );
+// The credit read is a third outbound call, to the AppView. By default the
+// operator's own posts credit nobody.
+const readBlueskyCredits = vi.hoisted(() =>
+	vi.fn(
+		async (
+			_post: { did: string; rkey: string },
+			_isOwnAuthor: (did: string, handle: string | null) => boolean,
+			_fetchFn?: typeof fetch
+		): Promise<string[]> => []
+	)
+);
 // The real handle lookup, for the test that reads the request it makes.
 const realResolveBlueskyHandles = vi.hoisted(() => ({
 	fn: null as null | ((dids: string[], fetchFn?: typeof fetch) => Promise<Map<string, string>>)
@@ -63,7 +74,7 @@ const realResolveBlueskyHandles = vi.hoisted(() => ({
 vi.mock('$lib/server/skyseek', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/server/skyseek')>();
 	realResolveBlueskyHandles.fn = original.resolveBlueskyHandles;
-	return { ...original, searchSkyseek, resolveBlueskyHandles };
+	return { ...original, searchSkyseek, resolveBlueskyHandles, readBlueskyCredits };
 });
 
 // The real proxy by default. It swallows its own fetch, parse and cancel
@@ -219,6 +230,8 @@ beforeEach(() => {
 	searchSkyseek.mockResolvedValue({ ok: true, matches: [] });
 	resolveBlueskyHandles.mockReset();
 	resolveBlueskyHandles.mockResolvedValue(new Map());
+	readBlueskyCredits.mockReset();
+	readBlueskyCredits.mockResolvedValue([]);
 	setRawSettingSpy.mockReset();
 	if (realSetRawSetting.fn) setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
 	proxyStoredImageSpy.mockReset();
@@ -2297,6 +2310,296 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			`${OPERATOR_DID}/mine`,
 			`${ARTIST_DID}/theirs`
 		]);
+	});
+
+	describe("a credit in the operator's own post", () => {
+		const SECOND_DID = 'did:plc:dddddddddddddddddddddddd';
+
+		async function lookup(
+			settings: Record<string, string>,
+			credits: string[],
+			resolved: Array<[string, string]>,
+			seed = ''
+		) {
+			const { sqlite, db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			if (seed) sqlite.exec(seed);
+			for (const [key, value] of Object.entries(settings)) await setRawSetting(db, key, value);
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(OPERATOR_DID, 'mine', '2026-10-03T02:15:28.000Z', 0)]
+			});
+			readBlueskyCredits.mockResolvedValue(credits);
+			resolveBlueskyHandles.mockImplementation(
+				async (dids: string[]) => new Map(resolved.filter(([did]) => dids.includes(did)))
+			);
+			return (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body & {
+				matches: Array<{ creditedDids?: string[] }>;
+			};
+		}
+		const SECOND_ACCOUNT = { blueskyUrl: 'https://bsky.app/profile/main.example', blueskyOtherAccounts: 'second.example' };
+		const RESOLVED: Array<[string, string]> = [
+			[OPERATOR_DID, 'second.example'],
+			[ARTIST_DID, 'artist.example']
+		];
+
+		// The reported case: the piece went up from the operator's second account,
+		// and the artist is named in a reply to it.
+		it('names the credited account, not the operator, for a post from a second account', async () => {
+			const body = await lookup(SECOND_ACCOUNT, [ARTIST_DID], RESOLVED);
+			expect(body.matches).toHaveLength(1);
+			expect(body.matches[0]).toMatchObject({
+				site: 'Bluesky',
+				siteId: `${OPERATOR_DID}/mine`,
+				handles: ['artist.example'],
+				band: 'exact',
+				creditedDids: [ARTIST_DID]
+			});
+			expect(body.localArtists).toEqual([]);
+			// The post that was read is the operator's, and its replies count when
+			// either of the operator's accounts wrote them.
+			const [read, isOwnAuthor] = readBlueskyCredits.mock.calls.at(-1)!;
+			expect(read).toMatchObject({ did: OPERATOR_DID, rkey: 'mine' });
+			expect(isOwnAuthor('did:plc:eeeeeeeeeeeeeeeeeeeeeeee', 'main.example')).toBe(true);
+			expect(isOwnAuthor('did:plc:eeeeeeeeeeeeeeeeeeeeeeee', 'stranger.example')).toBe(false);
+		});
+
+		it('still treats the second account as a stranger when it is not listed', async () => {
+			const body = await lookup({ blueskyUrl: SECOND_ACCOUNT.blueskyUrl }, [ARTIST_DID], RESOLVED);
+			expect(body.matches[0]).toMatchObject({ handles: ['second.example'] });
+			expect(body.matches[0].creditedDids).toBeUndefined();
+		});
+
+		it('links the credited account to the local artist saved under it, by handle or by DID', async () => {
+			for (const saved of ['https://bsky.app/profile/artist.example', `https://bsky.app/profile/${ARTIST_DID}`]) {
+				const body = await lookup(
+					SECOND_ACCOUNT,
+					[ARTIST_DID],
+					saved.includes('did:') ? [[OPERATOR_DID, 'second.example']] : RESOLVED,
+					`INSERT INTO artists (name, bluesky_url, created_at) VALUES ('Artist', '${saved}', '2026-01-01');`
+				);
+				expect(body.localArtists).toEqual([
+					{ matchIndex: 0, artists: [{ id: 1, name: 'Artist', pieces: 0 }] }
+				]);
+			}
+		});
+
+		it("does not link the operator's own artist row through their post", async () => {
+			const body = await lookup(
+				SECOND_ACCOUNT,
+				[ARTIST_DID],
+				RESOLVED,
+				`INSERT INTO artists (name, bluesky_url, created_at) VALUES ('Me', 'https://bsky.app/profile/${OPERATOR_DID}', '2026-01-01');`
+			);
+			expect(body.localArtists).toEqual([]);
+		});
+
+		it('leaves the post out, as before, when it credits nobody or only the operator', async () => {
+			const none = await lookup(SECOND_ACCOUNT, [], RESOLVED);
+			expect(none.matches).toEqual([]);
+			// A mention of the operator's main account is not a credit.
+			const self = await lookup(SECOND_ACCOUNT, [SECOND_DID], [...RESOLVED, [SECOND_DID, 'main.example']]);
+			expect(self.matches).toEqual([]);
+		});
+
+		// The owner saved the piece earlier under the link bsky.app shows, which
+		// spells the post by their handle.
+		it("warns about a piece saved under the operator's own post, by handle or by DID", async () => {
+			const seedWith = (url: string) =>
+				`INSERT INTO images (title, slug, image_url, source_post_url, created_at)
+				 VALUES ('Held', 'held', 'https://cdn.example.com/held.png', '${url}', '2026-01-01');`;
+			const byHandle = await lookup(
+				SECOND_ACCOUNT,
+				[ARTIST_DID],
+				RESOLVED,
+				seedWith('https://bsky.app/profile/second.example/post/mine')
+			);
+			expect(byHandle.sourceClash).toMatchObject({ title: 'Held' });
+			// An account saved by DID has its handle asked for with the credits'.
+			const byDid = await lookup(
+				{ blueskyUrl: `https://bsky.app/profile/${OPERATOR_DID}` },
+				[ARTIST_DID],
+				RESOLVED,
+				seedWith('https://bsky.app/profile/second.example/post/mine')
+			);
+			expect(byDid.sourceClash).toMatchObject({ title: 'Held' });
+			// The credited account's handle with this record key is another post.
+			const other = await lookup(
+				SECOND_ACCOUNT,
+				[ARTIST_DID],
+				RESOLVED,
+				seedWith('https://bsky.app/profile/artist.example/post/mine')
+			);
+			expect(other.sourceClash).toBeNull();
+		});
+
+		// The credited account also posted the piece, so its handle is known from
+		// the first request. The second request failing must not lose it.
+		it('keeps a handle the first request resolved when the second fails', async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/main.example');
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(OPERATOR_DID, 'mine', null, 0), post(ARTIST_DID, 'theirs', null, 1)]
+			});
+			readBlueskyCredits.mockResolvedValue([ARTIST_DID]);
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map(RESOLVED))
+				.mockResolvedValue(new Map());
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(body.matches.find((x) => x.siteId === `${OPERATOR_DID}/mine`)).toMatchObject({
+				handles: ['artist.example'],
+				band: 'exact'
+			});
+			// Both accounts were answered for already: nothing is asked twice.
+			expect(resolveBlueskyHandles).toHaveBeenCalledTimes(1);
+		});
+
+		// The first handle request left the second account out, so its post read
+		// as a stranger's. The main account's post mentions it, and the request
+		// for that mention names it.
+		it("leaves out a second account's post once the credit read resolves its handle", async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(OPERATOR_DID, 'mine', null, 0), post(SECOND_DID, 'also-mine', null, 1)]
+			});
+			// The second account's post is read as well, and credits nobody.
+			readBlueskyCredits.mockImplementation(async (p: { rkey: string }) =>
+				p.rkey === 'mine' ? [SECOND_DID, ARTIST_DID] : []
+			);
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map())
+				.mockResolvedValue(
+					new Map([
+						[SECOND_DID, 'second.example'],
+						[ARTIST_DID, 'artist.example']
+					])
+				);
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(body.matches.map((x) => x.siteId)).toEqual([`${OPERATOR_DID}/mine`]);
+			expect(body.matches[0]).toMatchObject({ handles: ['artist.example'], band: 'exact' });
+		});
+
+		// The main post mentions only the second account, which the first handle
+		// request left out. Once named, its own post is read, and that post has
+		// the artist.
+		it("reads a second account's post once the first read names the account", async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [post(OPERATOR_DID, 'mine', null, 0), post(SECOND_DID, 'also-mine', null, 1)]
+			});
+			readBlueskyCredits.mockImplementation(async (p: { rkey: string }) =>
+				p.rkey === 'mine' ? [SECOND_DID] : [ARTIST_DID]
+			);
+			resolveBlueskyHandles.mockReset();
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map())
+				.mockResolvedValueOnce(new Map([[SECOND_DID, 'second.example']]))
+				.mockResolvedValue(new Map([[ARTIST_DID, 'artist.example']]));
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(body.matches.map((x) => x.siteId)).toEqual([`${SECOND_DID}/also-mine`]);
+			expect(body.matches[0]).toMatchObject({ handles: ['artist.example'], band: 'strong' });
+			// Two posts read, out of a budget of three.
+			expect(readBlueskyCredits.mock.calls.map(([p]) => p.rkey)).toEqual(['mine', 'also-mine']);
+		});
+
+		// A chain: the main post names the second account, whose post names a
+		// third, whose post has the artist. Three posts, the whole budget.
+		it('follows a chain of the operator\'s accounts while the budget lasts', async () => {
+			const THIRD_DID = 'did:plc:eeeeeeeeeeeeeeeeeeeeeeee';
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example\nthird.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [
+					post(OPERATOR_DID, 'one', null, 0),
+					post(SECOND_DID, 'two', null, 1),
+					post(THIRD_DID, 'three', null, 2)
+				]
+			});
+			const mentions: Record<string, string[]> = { one: [SECOND_DID], two: [THIRD_DID], three: [ARTIST_DID] };
+			readBlueskyCredits.mockImplementation(async (p: { rkey: string }) => mentions[p.rkey]);
+			const names = new Map([
+				[SECOND_DID, 'second.example'],
+				[THIRD_DID, 'third.example'],
+				[ARTIST_DID, 'artist.example']
+			]);
+			resolveBlueskyHandles.mockReset();
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map())
+				.mockImplementation(async (dids: string[]) => new Map([...names].filter(([did]) => dids.includes(did))));
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(readBlueskyCredits.mock.calls.map(([p]) => p.rkey)).toEqual(['one', 'two', 'three']);
+			expect(body.matches.map((x) => x.siteId)).toEqual([`${THIRD_DID}/three`]);
+			expect(body.matches[0]).toMatchObject({ handles: ['artist.example'] });
+		});
+
+		it('shows a post that credits several accounts as a lead that fills nothing', async () => {
+			const body = await lookup(
+				SECOND_ACCOUNT,
+				[ARTIST_DID, SECOND_DID],
+				[...RESOLVED, [SECOND_DID, 'friend.example']]
+			);
+			expect(body.matches[0]).toMatchObject({
+				handles: ['artist.example', 'friend.example'],
+				band: null,
+				creditedDids: [ARTIST_DID, SECOND_DID]
+			});
+		});
+
+		// The handle lookup for the credited account failed, and the operator's main
+		// account is known only by handle: the mention may be of the operator.
+		it('drops the band when the credited account resolved no handle and an own account is saved by handle', async () => {
+			const unresolved = await lookup(SECOND_ACCOUNT, [ARTIST_DID], [[OPERATOR_DID, 'second.example']]);
+			expect(unresolved.matches[0]).toMatchObject({ handles: [], band: null, creditedDids: [ARTIST_DID] });
+			// With every own account saved by DID there is nobody to mistake it for.
+			const byDid = await lookup(
+				{ blueskyUrl: `https://bsky.app/profile/${OPERATOR_DID}` },
+				[ARTIST_DID],
+				[]
+			);
+			expect(byDid.matches[0]).toMatchObject({ handles: [], band: 'exact' });
+		});
+
+		it('counts a credited row toward the cap on Bluesky rows', async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [
+					post(OPERATOR_DID, 'mine', null, 0),
+					...Array.from({ length: SKYSEEK_MAX_MATCHES }, (_, i) =>
+						post(ARTIST_DID, `theirs${String(i).padStart(2, '0')}`, null, 1)
+					)
+				]
+			});
+			readBlueskyCredits.mockResolvedValue([REPOSTER_DID]);
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			const ids = body.matches.map((x) => x.siteId);
+			expect(ids).toHaveLength(SKYSEEK_MAX_MATCHES);
+			expect(ids).toContain(`${OPERATOR_DID}/mine`);
+			expect(ids).not.toContain(`${ARTIST_DID}/theirs${SKYSEEK_MAX_MATCHES - 1}`);
+		});
+
+		it('reads only the closest few of the operator\'s posts', async () => {
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: Array.from({ length: 6 }, (_, i) => post(OPERATOR_DID, `mine${i}`, null, 0))
+			});
+			readBlueskyCredits.mockClear();
+			readBlueskyCredits.mockResolvedValue([]);
+			await POST(multipartEvent(platform, pngFile()));
+			expect(readBlueskyCredits.mock.calls.map(([p]) => p.rkey)).toEqual(['mine0', 'mine1', 'mine2']);
+		});
 	});
 
 	// The operator posting their own piece over and over must not push other
