@@ -2249,7 +2249,10 @@ describe('settings — FuzzySearch key', () => {
 					platform,
 					' @Second.Example\nhttps://bsky.app/profile/third.example/, second.example\ndid:plc:aaaaaaaaaaaaaaaaaaaaaaaa '
 				)
-			).toEqual({ blueskyOtherAccountsSaved: true });
+			).toEqual({
+				blueskyOtherAccountsSaved: true,
+				blueskyOtherAccounts: 'second.example\nthird.example\ndid:plc:aaaaaaaaaaaaaaaaaaaaaaaa'
+			});
 			const stored = 'second.example\nthird.example\ndid:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
 			expect(await getRawSetting(db, 'blueskyOtherAccounts')).toBe(stored);
 			const data = (await load(loadEvent(platform))) as unknown as {
@@ -2264,7 +2267,10 @@ describe('settings — FuzzySearch key', () => {
 		it('clears the list on an empty field', async () => {
 			const { db, platform } = makeLoadDb();
 			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example');
-			expect(await save(platform, '  \n ')).toEqual({ blueskyOtherAccountsSaved: true });
+			expect(await save(platform, '  \n ')).toEqual({
+				blueskyOtherAccountsSaved: true,
+				blueskyOtherAccounts: ''
+			});
 			expect(await getRawSetting(db, 'blueskyOtherAccounts')).toBe('');
 		});
 

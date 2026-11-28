@@ -1653,12 +1653,17 @@
 			savingBlueskyAccounts = true;
 			const submitted = blueskyOtherAccounts;
 			return async ({ result, update }) => {
-				await update({ reset: false });
+				// No reload of the page's data: that resets every other field on this
+				// page to its stored value, unsaved edits on another tab included.
+				await update({ reset: false, invalidateAll: false });
 				savingBlueskyAccounts = false;
 				if (result.type === 'success') {
 					// Show the list as it was stored, unless the field was edited while
 					// the save was in flight: that typing is the operator's and stays.
-					if (blueskyOtherAccounts === submitted) blueskyOtherAccounts = data.blueskyOtherAccounts;
+					const stored = result.data?.blueskyOtherAccounts;
+					if (typeof stored === 'string' && blueskyOtherAccounts === submitted) {
+						blueskyOtherAccounts = stored;
+					}
 					toast.success(m.admin_settings_lookup_accounts_saved());
 				}
 			};

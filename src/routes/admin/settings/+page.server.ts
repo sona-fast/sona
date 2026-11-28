@@ -830,8 +830,11 @@ export const actions = {
 				blueskyOtherAccountsDraft: typed.replace(/\r\n/g, '\n').slice(0, 4000)
 			});
 		}
-		await setRawSetting(db, BLUESKY_OTHER_ACCOUNTS_SETTING, accounts.join('\n'));
-		return { blueskyOtherAccountsSaved: true };
+		const stored = accounts.join('\n');
+		await setRawSetting(db, BLUESKY_OTHER_ACCOUNTS_SETTING, stored);
+		// The list as stored goes back, so the page can show it without reloading
+		// its data and resetting whatever else is being edited.
+		return { blueskyOtherAccountsSaved: true, blueskyOtherAccounts: stored };
 	},
 
 	saveSecurityEmail: async ({ request, platform }) => {
