@@ -327,9 +327,10 @@ async function creditedMatches(
 	let handles = resolved;
 	const read: SkyseekMatch[] = [];
 	const credits: string[][] = [];
-	// Two passes over one budget. The second is for a post that only reads as
-	// the operator's once the first pass has named one of their accounts.
-	for (let pass = 0; pass < 2 && read.length < BLUESKY_CREDIT_MAX_POSTS; pass++) {
+	// Passes over one budget. A later pass is for a post that only reads as the
+	// operator's once an earlier one has named one of their accounts. Each pass
+	// reads at least one post, so the budget bounds the passes too.
+	while (read.length < BLUESKY_CREDIT_MAX_POSTS) {
 		const known = handles;
 		const next = posts
 			.filter((post) => !read.includes(post))

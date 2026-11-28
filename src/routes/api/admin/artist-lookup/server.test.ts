@@ -2509,6 +2509,38 @@ describe('artist-lookup — Bluesky posts from Skyseek', () => {
 			expect(readBlueskyCredits.mock.calls.map(([p]) => p.rkey)).toEqual(['mine', 'also-mine']);
 		});
 
+		// A chain: the main post names the second account, whose post names a
+		// third, whose post has the artist. Three posts, the whole budget.
+		it('follows a chain of the operator\'s accounts while the budget lasts', async () => {
+			const THIRD_DID = 'did:plc:eeeeeeeeeeeeeeeeeeeeeeee';
+			const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			await setRawSetting(db, 'blueskyUrl', `https://bsky.app/profile/${OPERATOR_DID}`);
+			await setRawSetting(db, 'blueskyOtherAccounts', 'second.example\nthird.example');
+			searchSkyseek.mockResolvedValue({
+				ok: true,
+				matches: [
+					post(OPERATOR_DID, 'one', null, 0),
+					post(SECOND_DID, 'two', null, 1),
+					post(THIRD_DID, 'three', null, 2)
+				]
+			});
+			const mentions: Record<string, string[]> = { one: [SECOND_DID], two: [THIRD_DID], three: [ARTIST_DID] };
+			readBlueskyCredits.mockImplementation(async (p: { rkey: string }) => mentions[p.rkey]);
+			const names = new Map([
+				[SECOND_DID, 'second.example'],
+				[THIRD_DID, 'third.example'],
+				[ARTIST_DID, 'artist.example']
+			]);
+			resolveBlueskyHandles.mockReset();
+			resolveBlueskyHandles
+				.mockResolvedValueOnce(new Map())
+				.mockImplementation(async (dids: string[]) => new Map([...names].filter(([did]) => dids.includes(did))));
+			const body = (await (await POST(multipartEvent(platform, pngFile()))).json()) as Body;
+			expect(readBlueskyCredits.mock.calls.map(([p]) => p.rkey)).toEqual(['one', 'two', 'three']);
+			expect(body.matches.map((x) => x.siteId)).toEqual([`${THIRD_DID}/three`]);
+			expect(body.matches[0]).toMatchObject({ handles: ['artist.example'] });
+		});
+
 		it('shows a post that credits several accounts as a lead that fills nothing', async () => {
 			const body = await lookup(
 				SECOND_ACCOUNT,
